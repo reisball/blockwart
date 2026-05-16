@@ -35,11 +35,54 @@ def list_objects(session: Session) -> list[CatalogObjectOut]:
     return [_to_schema(row) for row in rows]
 
 
+def search_objects(
+    session: Session,
+    *,
+    query: str | None = None,
+    kind: str | None = None,
+) -> list[CatalogObjectOut]:
+    statement = select(CatalogObject)
+    if kind:
+        statement = statement.where(CatalogObject.kind == kind)
+    if query:
+        term = f"%{query.lower()}%"
+        statement = statement.where(
+            CatalogObject.id.ilike(term)
+            | CatalogObject.label.ilike(term)
+            | CatalogObject.summary.ilike(term)
+            | CatalogObject.data_json.ilike(term)
+        )
+    statement = statement.order_by(CatalogObject.kind, CatalogObject.label)
+    rows = session.scalars(statement).all()
+    return [_to_schema(row) for row in rows]
+
+
 def get_object(session: Session, object_id: str) -> CatalogObjectOut | None:
     row = session.get(CatalogObject, object_id)
     if row is None:
         return None
     return _to_schema(row)
+
+
+def list_relationships_for_object(
+    session: Session,
+    catalog_object: CatalogObjectOut,
+) -> list[dict[str, str]]:
+    object_ref = f"{catalog_object.kind}:{catalog_object.id}"
+    statement = (
+        select(Relationship)
+        .where((Relationship.from_ref == object_ref) | (Relationship.to_ref == object_ref))
+        .order_by(Relationship.relation_type, Relationship.from_ref, Relationship.to_ref)
+    )
+    rows = session.scalars(statement).all()
+    return [
+        {
+            "from_ref": row.from_ref,
+            "relation_type": row.relation_type,
+            "to_ref": row.to_ref,
+        }
+        for row in rows
+    ]
 
 
 def upsert_object(session: Session, payload: CatalogObjectIn) -> CatalogObjectOut:

@@ -1,0 +1,167 @@
+<!doctype html>
+<html lang="de">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>{{ title }}</title>
+    <style>
+      :root {
+        color-scheme: light;
+        font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        background: #f5f6f8;
+        color: #171a1f;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+      }
+      a {
+        color: #1f6feb;
+      }
+      header,
+      main {
+        max-width: 1180px;
+        margin: 0 auto;
+        padding: 22px 24px;
+      }
+      header {
+        border-bottom: 1px solid #d9dde3;
+      }
+      h1 {
+        margin: 8px 0 4px;
+        font-size: 28px;
+        line-height: 1.15;
+      }
+      .meta {
+        color: #5a6472;
+      }
+      main {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) 380px;
+        gap: 20px;
+      }
+      .panel {
+        border: 1px solid #d9dde3;
+        background: #ffffff;
+        border-radius: 8px;
+        padding: 16px;
+      }
+      .section-title {
+        margin: 0 0 10px;
+        font-size: 16px;
+      }
+      .rel {
+        display: grid;
+        gap: 6px;
+        margin: 0;
+        padding: 0;
+        list-style: none;
+      }
+      .rel li {
+        border: 1px solid #e1e5eb;
+        border-radius: 6px;
+        padding: 8px;
+        font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+        font-size: 13px;
+        overflow-wrap: anywhere;
+      }
+      input,
+      select,
+      textarea,
+      button {
+        width: 100%;
+        border: 1px solid #cbd2dc;
+        border-radius: 6px;
+        background: #ffffff;
+        color: #171a1f;
+        font: inherit;
+        padding: 10px 12px;
+      }
+      textarea {
+        min-height: 150px;
+        resize: vertical;
+      }
+      textarea.code {
+        min-height: 420px;
+        font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+        font-size: 13px;
+      }
+      button {
+        width: auto;
+        min-width: 96px;
+        cursor: pointer;
+        background: #1f6feb;
+        color: #fff;
+        border-color: #1f6feb;
+        font-weight: 650;
+      }
+      .form-grid {
+        display: grid;
+        gap: 10px;
+      }
+      .error {
+        border: 1px solid #d92d20;
+        background: #fff1f0;
+        color: #b42318;
+        border-radius: 6px;
+        padding: 10px 12px;
+        margin-bottom: 12px;
+        font-size: 14px;
+      }
+      pre {
+        margin: 0;
+        overflow: auto;
+        white-space: pre-wrap;
+        font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+        font-size: 13px;
+      }
+      @media (max-width: 860px) {
+        main {
+          grid-template-columns: 1fr;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <header>
+      <a href="/">Zur Suche</a>
+      <h1>{{ object.label }}</h1>
+      <div class="meta">{{ object.kind }}:{{ object.id }} · {{ object.status }}</div>
+      {% if object.summary %}
+        <p>{{ object.summary }}</p>
+      {% endif %}
+    </header>
+    <main>
+      <section class="panel">
+        <h2 class="section-title">Daten</h2>
+        <pre>{{ data_json }}</pre>
+        <h2 class="section-title" style="margin-top: 20px">Relationships</h2>
+        {% if relationships %}
+          <ul class="rel">
+            {% for relationship in relationships %}
+              <li>{{ relationship.from_ref }} {{ relationship.relation_type }} {{ relationship.to_ref }}</li>
+            {% endfor %}
+          </ul>
+        {% else %}
+          <div class="meta">Keine Relationships.</div>
+        {% endif %}
+      </section>
+      <aside class="panel">
+        <h2 class="section-title">Bearbeiten</h2>
+        {% if error %}
+          <div class="error">{{ error }}</div>
+        {% endif %}
+        <form class="form-grid" method="post" action="/objects/{{ object.id }}">
+          <input value="{{ object.kind }}" disabled />
+          <input name="label" value="{{ object.label }}" required />
+          <input name="status" value="{{ object.status }}" />
+          <textarea name="summary" placeholder="Kurzbeschreibung">{{ object.summary or "" }}</textarea>
+          <textarea class="code" name="data_json" spellcheck="false">{{ data_json }}</textarea>
+          <button type="submit">Speichern</button>
+        </form>
+      </aside>
+    </main>
+  </body>
+</html>
