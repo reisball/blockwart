@@ -139,6 +139,47 @@ def test_import_tools_markdown_creates_hosted_service_relationship(tmp_path: Pat
     ]
 
 
+def test_import_tools_markdown_updates_previous_workspace_import_shape(tmp_path: Path) -> None:
+    tools_path = tmp_path / "TOOLS.md"
+    tools_path.write_text(
+        "\n".join(
+            [
+                "| System | Typ | IP:Port | Status | Access | Auth | Nutzung | Ref | Skill |",
+                "|--------|-----|---------|--------|--------|------|---------|-----|-------|",
+                (
+                    "| Agent Zero | CT 121 | 192.168.50.78:80 | ✅ | "
+                    "SSH(key): zoe · Web | zoe key-only | Agent Zero service | "
+                    "[Details](references/agent-zero.md) | - |"
+                ),
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    with _session() as session:
+        upsert_object(
+            session,
+            CatalogObjectIn(
+                id="agent-zero",
+                kind="service",
+                label="Agent Zero",
+                status="active",
+                summary="Old import.",
+                data={
+                    "schema_version": 1,
+                    "source": "workspace_markdown_import",
+                    "system_id": "system:agent-zero-lxc",
+                },
+            ),
+        )
+        import_tools_markdown(session, tools_path, references_root=tmp_path)
+        row = session.get(CatalogObject, "agent-zero")
+
+    assert row is not None
+    assert "system:ct-121" in row.data_json
+    assert "system:agent-zero-lxc" not in row.data_json
+
+
 def test_import_tools_markdown_merges_canonical_existing_objects(tmp_path: Path) -> None:
     tools_path = tmp_path / "TOOLS.md"
     tools_path.write_text(

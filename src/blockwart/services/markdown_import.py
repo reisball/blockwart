@@ -252,6 +252,8 @@ def import_tools_markdown(
 
 def _merge_existing_object(existing: CatalogObject, imported: CatalogObjectIn) -> CatalogObjectIn:
     existing_data = json.loads(existing.data_json)
+    if existing_data.get("source") == "workspace_markdown_import":
+        return imported
     merged_data = {
         **existing_data,
         "workspace_markdown_import": imported.data,
