@@ -6,7 +6,9 @@ from fastapi.staticfiles import StaticFiles
 from blockwart.api.routes import agent, catalog, health
 from blockwart.ui.routes import router as ui_router
 
-STATIC_DIR = Path(__file__).resolve().parent / "ui" / "static"
+PACKAGE_STATIC_DIR = Path(__file__).resolve().parent / "ui" / "static"
+SOURCE_STATIC_DIR = Path.cwd() / "src" / "blockwart" / "ui" / "static"
+STATIC_DIR = PACKAGE_STATIC_DIR if PACKAGE_STATIC_DIR.exists() else SOURCE_STATIC_DIR
 
 
 def create_app() -> FastAPI:
