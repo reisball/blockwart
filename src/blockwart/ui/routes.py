@@ -2,6 +2,7 @@ import json
 from collections import Counter
 from collections.abc import Mapping
 from typing import Annotated, Any
+from urllib.parse import urlparse
 
 from fastapi import APIRouter, Depends, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
@@ -616,12 +617,26 @@ def _group_relationships(
 
 def _relationship_system_ports(catalog_object: CatalogObjectOut) -> list[dict[str, str]]:
     ports: list[dict[str, str]] = []
+    seen: set[str] = set()
     for port_data in _list_of_mappings(catalog_object.data.get("ports")):
         port = port_data.get("port")
         if port is None:
             continue
         protocol = str(port_data.get("protocol") or "tcp")
-        ports.append({"label": "system", "value": f"{port}/{protocol}"})
+        value = f"{port}/{protocol}"
+        ports.append({"label": "system", "value": value})
+        seen.add(value)
+    for access_method in _list_of_mappings(catalog_object.data.get("access_methods")):
+        endpoint = str(access_method.get("endpoint") or "")
+        parsed = urlparse(endpoint)
+        if parsed.port is None:
+            continue
+        protocol = "tcp"
+        value = f"{parsed.port}/{protocol}"
+        if value in seen:
+            continue
+        ports.append({"label": "system", "value": value})
+        seen.add(value)
     return ports
 
 
