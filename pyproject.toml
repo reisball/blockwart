@@ -27,6 +27,9 @@ dev = [
   "ruff>=0.6",
 ]
 
+[project.scripts]
+blockwart-mcp = "blockwart.mcp.server:main"
+
 [tool.setuptools.packages.find]
 where = ["src"]
 

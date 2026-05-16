@@ -54,6 +54,8 @@ The first agent-facing surface is read-only and lives under /api/agent:
 It returns sanitized object context, relationships, and credential-reference IDs only. It never
 resolves credential values. See docs/agent-api.md.
 
+A local MCP-compatible stdio wrapper is available as blockwart-mcp. See docs/mcp.md.
+
 ## Secret Policy
 
 Blockwart stores credential references, never credential values.
