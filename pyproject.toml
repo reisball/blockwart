@@ -29,6 +29,7 @@ dev = [
 
 [project.scripts]
 blockwart-mcp = "blockwart.mcp.server:main"
+blockwart-import-markdown = "blockwart.cli.import_markdown:main"
 blockwart-seed = "blockwart.cli.seed:main"
 
 [tool.setuptools.packages.find]

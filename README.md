@@ -62,6 +62,13 @@ resolves credential values. See docs/agent-api.md.
 
 A local MCP-compatible stdio wrapper is available as blockwart-mcp. See docs/mcp.md.
 
+## Markdown Import
+
+Blockwart can import the current workspace operations index from TOOLS.md with a dry-run-first CLI.
+Database writes require the explicit apply flag. The importer creates system objects and
+credential-reference pointers only; it does not resolve or store secret values. See
+docs/markdown-import.md.
+
 ## Deployment Readiness
 
 Blockwart includes a Dockerfile, a localhost-only compose example, and deployment notes. They are
