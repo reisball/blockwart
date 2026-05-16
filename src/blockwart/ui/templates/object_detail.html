@@ -59,6 +59,10 @@
               <div class="fact-label">ID</div>
               <div class="fact-value">{{ object.id }}</div>
             </div>
+            <div class="fact">
+              <div class="fact-label">Hostname</div>
+              <div class="fact-value">{{ network.hostnames|first or "-" }}</div>
+            </div>
             {% if container %}
               <div class="fact">
                 <div class="fact-label">Container</div>

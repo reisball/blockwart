@@ -80,6 +80,8 @@ def test_object_detail_shows_data_and_relationships(client: TestClient) -> None:
     assert "Relationships" in response.text
     assert "Created at" in response.text
     assert "Last changed" in response.text
+    assert "Hostname" in response.text
+    assert "n8n" in response.text
     assert "Ausgehend" in response.text
     assert "Zugriff" in response.text
     assert "Credential-Referenzen" not in response.text
