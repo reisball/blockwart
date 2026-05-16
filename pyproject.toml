@@ -36,7 +36,7 @@ blockwart-seed = "blockwart.cli.seed:main"
 where = ["src"]
 
 [tool.setuptools.package-data]
-blockwart = ["ui/templates/*.html", "ui/static/*.css"]
+blockwart = ["ui/templates/*.html", "ui/static/*.css", "ui/static/*.js"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

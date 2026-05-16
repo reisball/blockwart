@@ -4,7 +4,13 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>{{ title }}</title>
+    <script>
+      if (localStorage.getItem("blockwart-theme") === "light") {
+        document.documentElement.dataset.theme = "light";
+      }
+    </script>
     <link rel="stylesheet" href="/static/app.css" />
+    <script src="/static/theme.js" defer></script>
   </head>
   <body>
     <header class="topbar">
@@ -13,6 +19,12 @@
           <div>
             <h1>Blockwart</h1>
             <div class="subtle">Search-first Infrastruktur-Katalog, Credential-Referenzen und Runbooks.</div>
+          </div>
+          <div class="top-actions">
+            <div class="theme-toggle" role="group" aria-label="Farbschema">
+              <button class="theme-option" type="button" data-theme-value="dark">Dark</button>
+              <button class="theme-option" type="button" data-theme-value="light">Light</button>
+            </div>
           </div>
         </div>
         <form class="toolbar" method="get" action="/">

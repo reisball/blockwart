@@ -59,6 +59,9 @@ def test_index_shows_kind_counts(client: TestClient) -> None:
     assert "<strong>28</strong> alle" in response.text
     assert "system" in response.text
     assert "credential_reference" not in response.text
+    assert 'data-theme-value="dark"' in response.text
+    assert 'data-theme-value="light"' in response.text
+    assert "/static/theme.js" in response.text
 
 
 def test_object_detail_shows_data_and_relationships(client: TestClient) -> None:
@@ -75,6 +78,9 @@ def test_object_detail_shows_data_and_relationships(client: TestClient) -> None:
     assert "references/n8n.md" in response.text
     assert "Daten JSON" not in response.text
     assert "Relationship anlegen" not in response.text
+    assert 'data-theme-value="dark"' in response.text
+    assert 'data-theme-value="light"' in response.text
+    assert "/static/theme.js" in response.text
 
 
 def test_relationship_add_form_is_hidden_behind_add_button(client: TestClient) -> None:

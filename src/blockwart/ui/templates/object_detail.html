@@ -4,7 +4,13 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>{{ title }}</title>
+    <script>
+      if (localStorage.getItem("blockwart-theme") === "light") {
+        document.documentElement.dataset.theme = "light";
+      }
+    </script>
     <link rel="stylesheet" href="/static/app.css" />
+    <script src="/static/theme.js" defer></script>
   </head>
   <body>
     <header class="topbar">
@@ -15,7 +21,13 @@
             <h1>{{ object.label }}</h1>
             <div class="meta">{{ object.kind }}:{{ object.id }} · {{ object.status }}</div>
           </div>
-          <span class="pill">{{ object.status }}</span>
+          <div class="top-actions">
+            <div class="theme-toggle" role="group" aria-label="Farbschema">
+              <button class="theme-option" type="button" data-theme-value="dark">Dark</button>
+              <button class="theme-option" type="button" data-theme-value="light">Light</button>
+            </div>
+            <span class="pill">{{ object.status }}</span>
+          </div>
         </div>
         {% if object.summary %}
           <p class="summary">{{ object.summary }}</p>
