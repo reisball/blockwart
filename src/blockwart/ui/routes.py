@@ -608,6 +608,7 @@ def _group_relationships(
                 **relationship,
                 "other_ref": other_ref,
                 "other_id": _object_id_from_ref(other_ref),
+                "other_kind": other_object.kind if other_object else other_ref.split(":", 1)[0],
                 "other_label": other_object.label if other_object else other_ref,
                 "service_ports": _relationship_service_ports(catalog_object, other_object),
             }
