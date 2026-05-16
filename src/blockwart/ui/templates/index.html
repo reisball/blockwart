@@ -88,6 +88,14 @@
               {% endfor %}
             </select>
           </label>
+          <label>Läuft auf System
+            <select name="hosted_on_system_id">
+              <option value="">Keine Relationship setzen</option>
+              {% for system in systems %}
+                <option value="{{ system.id }}" {% if system.id == form.hosted_on_system_id %}selected{% endif %}>{{ system.label }} · {{ system.id }}</option>
+              {% endfor %}
+            </select>
+          </label>
           <label>Label<input name="label" value="{{ form.label }}" placeholder="n8n Web UI" autocomplete="off" required /></label>
           <label>Status<input name="status" value="{{ form.status }}" placeholder="active" autocomplete="off" /></label>
           <label>Kurzbeschreibung<textarea class="summary-input" name="summary" placeholder="Wofür ist das Objekt da?">{{ form.summary }}</textarea></label>

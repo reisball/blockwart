@@ -402,6 +402,12 @@ button:hover,
   gap: 11px;
 }
 
+.relation-form {
+  margin-top: 16px;
+  padding-top: 14px;
+  border-top: 1px solid var(--border);
+}
+
 .error {
   border: 1px solid #f1a29a;
   background: var(--danger-bg);

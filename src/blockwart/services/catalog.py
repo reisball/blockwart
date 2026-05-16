@@ -85,6 +85,38 @@ def list_relationships_for_object(
     ]
 
 
+def create_relationship(
+    session: Session,
+    *,
+    from_ref: str,
+    relation_type: str,
+    to_ref: str,
+) -> dict[str, str]:
+    existing = session.scalar(
+        select(Relationship).where(
+            Relationship.from_ref == from_ref,
+            Relationship.relation_type == relation_type,
+            Relationship.to_ref == to_ref,
+        )
+    )
+    if existing is None:
+        session.add(
+            Relationship(
+                from_ref=from_ref,
+                relation_type=relation_type,
+                to_ref=to_ref,
+            )
+        )
+        _write_audit(
+            session,
+            None,
+            "relationship_create",
+            f"Create relationship {from_ref} {relation_type} {to_ref}",
+        )
+        session.commit()
+    return {"from_ref": from_ref, "relation_type": relation_type, "to_ref": to_ref}
+
+
 def upsert_object(session: Session, payload: CatalogObjectIn) -> CatalogObjectOut:
     row = session.get(CatalogObject, payload.id)
     data_json = json.dumps(payload.data, sort_keys=True)

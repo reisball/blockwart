@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from blockwart.api.deps import get_session
 from blockwart.db.base import Base
 from blockwart.main import create_app
+from blockwart.models import Relationship
 from blockwart.services.seeds import import_seed_file
 
 SEED_PATH = Path(__file__).resolve().parents[1] / "seeds" / "pilot_objects.yaml"
@@ -91,6 +92,36 @@ def test_create_object_form_redirects_to_detail(client: TestClient) -> None:
     assert "Test System" in detail.text
 
 
+def test_create_service_form_can_set_host_system(
+    client: TestClient,
+    session_factory,
+) -> None:
+    response = client.post(
+        "/objects",
+        data={
+            "object_id": "test-service",
+            "kind": "service",
+            "hosted_on_system_id": "fabrik",
+            "label": "Test Service",
+            "status": "active",
+            "summary": "Created from UI test.",
+            "data_json": '{"schema_version": 1}',
+        },
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 303
+    detail = client.get("/objects/test-service")
+    assert "system:fabrik" in detail.text
+    with session_factory() as session:
+        relationship = session.query(Relationship).filter_by(
+            from_ref="system:fabrik",
+            relation_type="hosts",
+            to_ref="service:test-service",
+        ).one_or_none()
+    assert relationship is not None
+
+
 def test_create_object_form_rejects_secret_values(client: TestClient) -> None:
     response = client.post(
         "/objects",
@@ -125,6 +156,27 @@ def test_update_object_form_updates_detail(client: TestClient) -> None:
     detail = client.get("/objects/n8n")
     assert "n8n Workflows" in detail.text
     assert "Updated through UI." in detail.text
+
+
+def test_detail_form_can_create_relationship(client: TestClient, session_factory) -> None:
+    response = client.post(
+        "/objects/n8n-web-ui/relationships",
+        data={
+            "direction": "inbound",
+            "relation_type": "hosts",
+            "target_ref": "system:fabrik",
+        },
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 303
+    with session_factory() as session:
+        relationship = session.query(Relationship).filter_by(
+            from_ref="system:fabrik",
+            relation_type="hosts",
+            to_ref="service:n8n-web-ui",
+        ).one_or_none()
+    assert relationship is not None
 
 
 def test_update_object_form_does_not_echo_rejected_secret_values(client: TestClient) -> None:

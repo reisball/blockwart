@@ -164,6 +164,30 @@
           {% else %}
             <div class="meta">Keine Relationships.</div>
           {% endif %}
+          <form class="form-grid relation-form" method="post" action="/objects/{{ object.id }}/relationships">
+            <h3>Relationship anlegen</h3>
+            <label>Richtung
+              <select name="direction">
+                <option value="inbound" {% if object.kind == "service" %}selected{% endif %}>Ziel → dieses Objekt</option>
+                <option value="outbound">Dieses Objekt → Ziel</option>
+              </select>
+            </label>
+            <label>Relation
+              <select name="relation_type">
+                {% for relation_type in relation_types %}
+                  <option value="{{ relation_type }}" {% if relation_type == "hosts" %}selected{% endif %}>{{ relation_type }}</option>
+                {% endfor %}
+              </select>
+            </label>
+            <label>Zielobjekt
+              <select name="target_ref" required>
+                {% for target in relationship_targets %}
+                  <option value="{{ target.kind }}:{{ target.id }}" {% if object.kind == "service" and loop.first %}selected{% endif %}>{{ target.kind }} · {{ target.label }} · {{ target.id }}</option>
+                {% endfor %}
+              </select>
+            </label>
+            <button type="submit">Relationship speichern</button>
+          </form>
         </section>
 
         {% if source_references %}

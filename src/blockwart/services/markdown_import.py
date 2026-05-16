@@ -6,11 +6,12 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from blockwart.models import CatalogObject
+from blockwart.models import CatalogObject, Relationship
 from blockwart.schemas.catalog import CatalogObjectIn
-from blockwart.services.catalog import upsert_object
+from blockwart.services.catalog import create_relationship, upsert_object
 from blockwart.services.seeds import SeedImportResult
 
 STATUS_MAP = {
@@ -60,6 +61,7 @@ def build_tools_import_plan(
     rows = _parse_markdown_tables(path.read_text(encoding="utf-8"))
 
     objects: list[dict[str, Any]] = []
+    relationships: list[dict[str, str]] = []
     seen_ids: set[str] = set()
     credential_refs: dict[str, dict[str, Any]] = {}
 
@@ -71,14 +73,22 @@ def build_tools_import_plan(
             continue
 
         slug_label = _slugify(_plain_text(label))
+        is_canonical_row = slug_label in CANONICAL_LABEL_IDS
         base_id = CANONICAL_LABEL_IDS.get(slug_label, slug_label)
+        typ = _plain_text(row.get("Typ", "") or row.get("Type", ""))
+        is_hosted_service = _is_hosted_service_row(row) and not is_canonical_row
         object_id = _unique_id(base_id, seen_ids)
+        system_id = (
+            _unique_id(_host_system_id(base_id, typ), seen_ids)
+            if is_hosted_service
+            else object_id
+        )
+        service_id = object_id
         status = _status_from_cell(row.get("Status", ""))
         ip_port = row.get("IP:Port", "") or row.get("Ort", "")
         access = row.get("Access", "") or row.get("Access/Auth", "")
         auth = row.get("Auth", "") or row.get("Access/Auth", "")
         usage = _plain_text(row.get("Nutzung", "") or row.get("Usage", ""))
-        typ = _plain_text(row.get("Typ", "") or row.get("Type", ""))
         ref_cell = row.get("Ref", "")
         source_references = _source_references(path, references_base, ref_cell)
         addresses = _addresses_from_cell(ip_port)
@@ -87,16 +97,19 @@ def build_tools_import_plan(
 
         credential_references: list[str] = []
         if credential_ref_id:
+            system_ref = f"system:{system_id}"
+            service_ref = f"service:{service_id}" if is_hosted_service else ""
             credential_refs[credential_ref_id] = _credential_reference_object(
                 credential_ref_id,
                 label=_plain_text(label),
                 auth=auth,
-                object_ref=f"system:{object_id}",
+                system_ref=system_ref,
+                service_ref=service_ref,
                 source_references=source_references,
             )
             credential_references.append(f"credential_reference:{credential_ref_id}")
 
-        data: dict[str, Any] = {
+        system_data: dict[str, Any] = {
             "schema_version": 1,
             "type": typ.lower() or "unknown",
             "source": "workspace_markdown_import",
@@ -110,23 +123,62 @@ def build_tools_import_plan(
             "credential_references": credential_references,
             "import_notes": {
                 "tools_row_type": typ,
+                "import_role": "host_system" if is_hosted_service else "system",
                 "access_summary": _plain_text(access),
                 "auth_reference_summary": _plain_text(auth),
             },
         }
         if usage:
-            data["purpose"] = usage
+            system_data["purpose"] = usage
 
         objects.append(
             {
-                "id": object_id,
+                "id": system_id,
                 "kind": "system",
-                "label": _plain_text(label),
+                "label": _host_system_label(_plain_text(label), typ)
+                if is_hosted_service
+                else _plain_text(label),
                 "status": status,
-                "summary": usage or typ or "Imported from workspace TOOLS.md.",
-                "data": data,
+                "summary": (
+                    f"Runtime host for {_plain_text(label)}."
+                    if is_hosted_service
+                    else usage or typ or "Imported from workspace TOOLS.md."
+                ),
+                "data": system_data,
             }
         )
+        if is_hosted_service:
+            service_ref = f"service:{service_id}"
+            system_ref = f"system:{system_id}"
+            system_data["related_services"] = [service_ref]
+            objects.append(
+                {
+                    "id": service_id,
+                    "kind": "service",
+                    "label": _plain_text(label),
+                    "status": status,
+                    "summary": usage or f"Service running on {system_id}.",
+                    "data": _service_data(
+                        label=_plain_text(label),
+                        usage=usage,
+                        typ=typ,
+                        system_ref=system_ref,
+                        addresses=addresses,
+                        ports=ports,
+                        source_references=source_references,
+                        credential_references=credential_references,
+                        access=access,
+                        auth=auth,
+                    ),
+                }
+            )
+            relationships.append(
+                {
+                    "from_ref": system_ref,
+                    "relation_type": "hosts",
+                    "to_ref": service_ref,
+                }
+            )
 
     objects.extend(credential_refs.values())
     payload = {
@@ -134,7 +186,7 @@ def build_tools_import_plan(
         "owner": "Kai + Zoe",
         "source": str(path),
         "objects": objects,
-        "relationships": [],
+        "relationships": relationships,
     }
     return MarkdownImportPlan(
         payload=payload,
@@ -152,8 +204,11 @@ def import_tools_markdown(
 ) -> SeedImportResult:
     plan = build_tools_import_plan(tools_path, references_root=references_root)
     objects = plan.payload["objects"]
+    relationships = plan.payload["relationships"]
     if not isinstance(objects, list):
         raise ValueError("Markdown import payload must contain objects")
+    if not isinstance(relationships, list):
+        raise ValueError("Markdown import payload must contain relationships")
 
     for raw_object in objects:
         payload = CatalogObjectIn.model_validate(raw_object)
@@ -162,7 +217,28 @@ def import_tools_markdown(
             payload = _merge_existing_object(existing, payload)
         upsert_object(session, payload)
 
-    return SeedImportResult(objects_imported=len(objects), relationships_imported=0)
+    inserted_relationships = 0
+    for relationship in relationships:
+        existing = session.scalar(
+            select(Relationship).where(
+                Relationship.from_ref == relationship["from_ref"],
+                Relationship.relation_type == relationship["relation_type"],
+                Relationship.to_ref == relationship["to_ref"],
+            )
+        )
+        create_relationship(
+            session,
+            from_ref=relationship["from_ref"],
+            relation_type=relationship["relation_type"],
+            to_ref=relationship["to_ref"],
+        )
+        if existing is None:
+            inserted_relationships += 1
+
+    return SeedImportResult(
+        objects_imported=len(objects),
+        relationships_imported=inserted_relationships,
+    )
 
 
 def _merge_existing_object(existing: CatalogObject, imported: CatalogObjectIn) -> CatalogObjectIn:
@@ -226,6 +302,88 @@ def _is_non_infra_row(row: dict[str, str]) -> bool:
     if typ in {"typ", ""}:
         return True
     return "Zeitplan" in row or "Activity" in row
+
+
+def _is_hosted_service_row(row: dict[str, str]) -> bool:
+    typ = _plain_text(row.get("Typ", "") or row.get("Type", "")).casefold()
+    if not typ:
+        return False
+    host_markers = ("ct", "vm", "lxc", "container")
+    non_service_markers = ("host", "network", "raspberry pi", "wsl2")
+    return any(marker in typ for marker in host_markers) and not any(
+        marker == typ for marker in non_service_markers
+    )
+
+
+def _host_system_id(base_id: str, typ: str) -> str:
+    text = _plain_text(typ).casefold()
+    suffix = "vm" if "vm" in text and "ct" not in text else "lxc"
+    return f"{base_id}-{suffix}"
+
+
+def _host_system_label(label: str, typ: str) -> str:
+    text = _plain_text(typ)
+    if text:
+        return f"{label} {text}"
+    return f"{label} LXC"
+
+
+def _service_data(
+    *,
+    label: str,
+    usage: str,
+    typ: str,
+    system_ref: str,
+    addresses: list[dict[str, str]],
+    ports: list[dict[str, Any]],
+    source_references: list[dict[str, str]],
+    credential_references: list[str],
+    access: str,
+    auth: str,
+) -> dict[str, Any]:
+    return {
+        "schema_version": 1,
+        "type": "application",
+        "source": "workspace_markdown_import",
+        "system_id": system_ref,
+        "purpose": usage,
+        "endpoints": _endpoints_from_network(label, addresses, ports),
+        "auth": {
+            "mode": _auth_mode(_plain_text(auth or access)),
+            "credential_references": credential_references,
+        },
+        "source_references": source_references,
+        "import_notes": {
+            "tools_row_type": typ,
+            "import_role": "hosted_service",
+            "access_summary": _plain_text(access),
+            "auth_reference_summary": _plain_text(auth),
+        },
+    }
+
+
+def _endpoints_from_network(
+    label: str,
+    addresses: list[dict[str, str]],
+    ports: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    if not addresses:
+        return []
+    ip = addresses[0]["ip"]
+    endpoints = []
+    for port in ports:
+        port_number = port["port"]
+        scheme = "https" if port_number in {443, 8443, 8006} else "http"
+        endpoints.append(
+            {
+                "name": label,
+                "url": f"{scheme}://{ip}:{port_number}",
+                "port": port_number,
+                "protocol": port.get("protocol", "tcp"),
+                "exposure": port.get("exposure", "lan"),
+            }
+        )
+    return endpoints
 
 
 def _plain_text(value: str) -> str:
@@ -345,10 +503,12 @@ def _credential_reference_object(
     *,
     label: str,
     auth: str,
-    object_ref: str,
+    system_ref: str,
+    service_ref: str = "",
     source_references: list[dict[str, str]],
 ) -> dict[str, Any]:
     text = _plain_text(auth)
+    service_refs = [service_ref] if service_ref else []
     return {
         "id": object_id,
         "kind": "credential_reference",
@@ -364,8 +524,8 @@ def _credential_reference_object(
             "reference": {"item_hint": text},
             "scope": {
                 "access_type": _access_type_from_auth(text),
-                "systems": [object_ref],
-                "services": [],
+                "systems": [system_ref],
+                "services": service_refs,
             },
             "source_references": source_references,
             "handling_rules": {

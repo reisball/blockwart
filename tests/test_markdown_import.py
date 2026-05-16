@@ -5,7 +5,7 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from blockwart.db.base import Base
 from blockwart.db.session import build_engine
-from blockwart.models import CatalogObject
+from blockwart.models import CatalogObject, Relationship
 from blockwart.schemas.catalog import CatalogObjectIn
 from blockwart.services.catalog import upsert_object
 from blockwart.services.markdown_import import build_tools_import_plan, import_tools_markdown
@@ -38,15 +38,27 @@ def test_build_tools_import_plan_parses_infrastructure_rows(tmp_path: Path) -> N
     plan = build_tools_import_plan(tools_path, references_root=tmp_path)
 
     assert plan.source_rows == 1
-    assert plan.object_count == 2
+    assert plan.object_count == 3
     assert plan.credential_reference_count == 1
     system = plan.payload["objects"][0]
-    assert system["id"] == "demo-box"
+    service = plan.payload["objects"][1]
+    assert system["id"] == "demo-box-lxc"
     assert system["kind"] == "system"
+    assert system["data"]["related_services"] == ["service:demo-box"]
+    assert service["id"] == "demo-box"
+    assert service["kind"] == "service"
+    assert service["data"]["system_id"] == "system:demo-box-lxc"
     assert system["data"]["network"]["addresses"][0]["ip"] == "192.168.50.200"
     assert {item["port"] for item in system["data"]["ports"]} == {22, 8080}
     assert system["data"]["credential_references"] == [
         "credential_reference:demo-box-access-reference"
+    ]
+    assert plan.payload["relationships"] == [
+        {
+            "from_ref": "system:demo-box-lxc",
+            "relation_type": "hosts",
+            "to_ref": "service:demo-box",
+        }
     ]
 
 
@@ -73,6 +85,50 @@ def test_import_tools_markdown_writes_valid_objects(tmp_path: Path) -> None:
     assert result.objects_imported == 1
     assert {row.id for row in rows} == {"no-auth-api"}
     assert rows[0].kind == "system"
+
+
+def test_import_tools_markdown_creates_hosted_service_relationship(tmp_path: Path) -> None:
+    tools_path = tmp_path / "TOOLS.md"
+    tools_path.write_text(
+        "\n".join(
+            [
+                "| System | Typ | IP:Port | Status | Access | Auth | Nutzung | Ref | Skill |",
+                "|--------|-----|---------|--------|--------|------|---------|-----|-------|",
+                (
+                    "| Agent Zero | CT 121 | 192.168.50.78:80 | ✅ | "
+                    "SSH(key): zoe · Web | zoe key-only; Agent Zero auth configured in UI | "
+                    "LAN-only Agent Zero AI framework test instance | "
+                    "[Details](references/agent-zero.md) | - |"
+                ),
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    with _session() as session:
+        result = import_tools_markdown(session, tools_path, references_root=tmp_path)
+        objects = {row.id: row for row in session.scalars(select(CatalogObject)).all()}
+        relationships = session.scalars(select(Relationship)).all()
+
+    assert result.objects_imported == 3
+    assert result.relationships_imported == 1
+    assert objects["agent-zero-lxc"].kind == "system"
+    assert objects["agent-zero"].kind == "service"
+    assert objects["agent-zero"].data_json.count("system:agent-zero-lxc") == 1
+    assert [
+        {
+            "from_ref": relationship.from_ref,
+            "relation_type": relationship.relation_type,
+            "to_ref": relationship.to_ref,
+        }
+        for relationship in relationships
+    ] == [
+        {
+            "from_ref": "system:agent-zero-lxc",
+            "relation_type": "hosts",
+            "to_ref": "service:agent-zero",
+        }
+    ]
 
 
 def test_import_tools_markdown_merges_canonical_existing_objects(tmp_path: Path) -> None:

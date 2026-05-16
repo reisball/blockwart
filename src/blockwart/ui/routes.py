@@ -13,7 +13,9 @@ from blockwart.api.deps import get_session
 from blockwart.domain.security import find_secret_violations
 from blockwart.schemas.catalog import CatalogObjectIn, CatalogObjectOut
 from blockwart.services.catalog import (
+    create_relationship,
     get_object,
+    list_objects,
     list_relationships_for_object,
     search_objects,
     upsert_object,
@@ -23,6 +25,7 @@ templates = Jinja2Templates(directory="src/blockwart/ui/templates")
 router = APIRouter(tags=["ui"])
 
 OBJECT_KINDS = ("system", "service", "credential_reference", "runbook", "decision", "project")
+RELATION_TYPES = ("hosts", "depends_on", "uses", "documents", "related_to")
 UI_KIND_PRIORITY = {kind: index for index, kind in enumerate(OBJECT_KINDS)}
 SAFE_DATA_JSON_FALLBACK = "{\n  \"schema_version\": 1\n}"
 
@@ -38,6 +41,7 @@ def index(
     objects = _sort_for_browse(
         search_objects(session, query=q.strip() or None, kind=normalized_kind or None)
     )
+    systems = _sort_for_browse(search_objects(session, kind="system"))
     object_counts = Counter(obj.kind for obj in search_objects(session))
     total_objects = sum(object_counts.values())
     return templates.TemplateResponse(
@@ -53,6 +57,7 @@ def index(
             "total_objects": total_objects,
             "error": None,
             "form": _empty_form(),
+            "systems": systems,
         },
     )
 
@@ -68,6 +73,9 @@ def object_detail(
         raise HTTPException(status_code=404, detail="Catalog object not found")
     relationships = list_relationships_for_object(session, catalog_object)
     relationship_groups = _group_relationships(catalog_object, relationships)
+    relationship_targets = [
+        obj for obj in _sort_for_browse(list_objects(session)) if obj.id != catalog_object.id
+    ]
     object_data = catalog_object.data
     return templates.TemplateResponse(
         request,
@@ -77,6 +85,8 @@ def object_detail(
             "object": catalog_object,
             "relationships": relationships,
             "relationship_groups": relationship_groups,
+            "relationship_targets": relationship_targets,
+            "relation_types": RELATION_TYPES,
             "source_references": _source_references(object_data),
             "network": _network_summary(object_data),
             "ports": _list_of_mappings(object_data.get("ports")),
@@ -100,6 +110,7 @@ def save_object(
     status: Annotated[str, Form()] = "unknown",
     summary: Annotated[str, Form()] = "",
     data_json: Annotated[str, Form()] = "{}",
+    hosted_on_system_id: Annotated[str, Form()] = "",
 ):
     form = {
         "id": object_id,
@@ -108,10 +119,15 @@ def save_object(
         "status": status,
         "summary": summary,
         "data_json": data_json,
+        "hosted_on_system_id": hosted_on_system_id,
     }
     try:
         data = json.loads(data_json or "{}")
         _reject_secret_shaped_form_data(data)
+        hosted_on_system_id = hosted_on_system_id.strip()
+        if kind == "service" and hosted_on_system_id:
+            _require_existing_ref(session, f"system:{hosted_on_system_id}")
+            data["system_id"] = f"system:{hosted_on_system_id}"
         payload = CatalogObjectIn(
             id=object_id,
             kind=kind,
@@ -121,6 +137,13 @@ def save_object(
             data=data,
         )
         upsert_object(session, payload)
+        if kind == "service" and hosted_on_system_id:
+            create_relationship(
+                session,
+                from_ref=f"system:{hosted_on_system_id}",
+                relation_type="hosts",
+                to_ref=f"service:{payload.id}",
+            )
     except (json.JSONDecodeError, ValidationError, ValueError) as exc:
         form["data_json"] = SAFE_DATA_JSON_FALLBACK
         objects = search_objects(session)
@@ -138,10 +161,39 @@ def save_object(
                 "total_objects": sum(object_counts.values()),
                 "error": _safe_error_message(exc),
                 "form": form,
+                "systems": _sort_for_browse(search_objects(session, kind="system")),
             },
             status_code=422,
         )
     return RedirectResponse(url=f"/objects/{payload.id}", status_code=303)
+
+
+@router.post("/objects/{object_id}/relationships", response_class=HTMLResponse)
+def save_relationship(
+    object_id: str,
+    session: Annotated[Session, Depends(get_session)],
+    direction: Annotated[str, Form()],
+    relation_type: Annotated[str, Form()],
+    target_ref: Annotated[str, Form()],
+):
+    catalog_object = get_object(session, object_id)
+    if catalog_object is None:
+        raise HTTPException(status_code=404, detail="Catalog object not found")
+    if relation_type not in RELATION_TYPES:
+        raise HTTPException(status_code=422, detail="Unsupported relation type")
+    _require_existing_ref(session, target_ref)
+    object_ref = f"{catalog_object.kind}:{catalog_object.id}"
+    if direction == "inbound":
+        from_ref, to_ref = target_ref, object_ref
+    else:
+        from_ref, to_ref = object_ref, target_ref
+    create_relationship(
+        session,
+        from_ref=from_ref,
+        relation_type=relation_type,
+        to_ref=to_ref,
+    )
+    return RedirectResponse(url=f"/objects/{object_id}", status_code=303)
 
 
 @router.post("/objects/{object_id}", response_class=HTMLResponse)
@@ -183,6 +235,12 @@ def update_object(
                 "object": catalog_object,
                 "relationships": relationships,
                 "relationship_groups": _group_relationships(catalog_object, relationships),
+                "relationship_targets": [
+                    obj
+                    for obj in _sort_for_browse(list_objects(session))
+                    if obj.id != catalog_object.id
+                ],
+                "relation_types": RELATION_TYPES,
                 "source_references": _source_references(object_data),
                 "network": _network_summary(object_data),
                 "ports": _list_of_mappings(object_data.get("ports")),
@@ -206,7 +264,17 @@ def _empty_form() -> dict[str, str]:
         "status": "active",
         "summary": "",
         "data_json": SAFE_DATA_JSON_FALLBACK,
+        "hosted_on_system_id": "",
     }
+
+
+def _require_existing_ref(session: Session, ref: str) -> None:
+    if ":" not in ref:
+        raise HTTPException(status_code=422, detail="Invalid object reference")
+    kind, object_id = ref.split(":", 1)
+    target = get_object(session, object_id)
+    if target is None or target.kind != kind:
+        raise HTTPException(status_code=422, detail="Relationship target does not exist")
 
 
 def _reject_secret_shaped_form_data(data: object) -> None:
