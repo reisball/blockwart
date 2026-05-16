@@ -76,7 +76,7 @@
           </div>
         </section>
 
-        {% if network.hostnames or network.addresses or ports or endpoints %}
+        {% if network.addresses or ports or endpoints %}
           <section class="panel">
             <div class="panel-head">
               <h2 class="section-title">Netzwerk</h2>
@@ -84,9 +84,6 @@
             </div>
             {% if edit_section == "network" %}
               <form class="form-grid" method="post" action="/objects/{{ object.id }}/network">
-                <label>Hostnames
-                  <input name="hostnames" value="{{ network.hostnames|join(', ') }}" autocomplete="off" />
-                </label>
                 {% if network.addresses %}
                   <h3>Adressen</h3>
                   <div class="table-wrap">
@@ -145,14 +142,6 @@
                 </div>
               </form>
             {% else %}
-              {% if network.hostnames %}
-                <h3>Hostnames</h3>
-                <ul class="chips">
-                  {% for hostname in network.hostnames %}
-                    <li class="chip">{{ hostname }}</li>
-                  {% endfor %}
-                </ul>
-              {% endif %}
               {% if network.addresses %}
                 <h3>Adressen</h3>
                 <div class="table-wrap">

@@ -302,9 +302,7 @@ async def update_network(
         raise HTTPException(status_code=404, detail="Catalog object not found")
     form = await request.form()
     data = _editable_data_copy(existing_object.data)
-    hostnames = _split_multivalue(str(form.get("hostnames", "")))
     network = dict(data.get("network") if isinstance(data.get("network"), Mapping) else {})
-    network["hostnames"] = hostnames
     network["addresses"] = [
         {
             **address,

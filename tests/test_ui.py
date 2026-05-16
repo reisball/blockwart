@@ -81,6 +81,7 @@ def test_object_detail_shows_data_and_relationships(client: TestClient) -> None:
     assert "Created at" in response.text
     assert "Last changed" in response.text
     assert "Hostname" in response.text
+    assert "Hostnames" not in response.text
     assert "n8n" in response.text
     assert "Ausgehend" in response.text
     assert "Zugriff" in response.text
@@ -330,7 +331,6 @@ def test_panel_edit_forms_update_existing_network_and_access(
     network_response = client.post(
         "/objects/edit-demo/network",
         data={
-            "hostnames": "edit-demo, edit-alias",
             "address_ip": "192.168.50.221",
             "address_interface": "eth0",
             "address_scope": "lan",
@@ -356,7 +356,9 @@ def test_panel_edit_forms_update_existing_network_and_access(
     assert network_response.status_code == 303
     assert access_response.status_code == 303
     detail = client.get("/objects/edit-demo")
-    assert "edit-alias" in detail.text
+    assert "Hostname" in detail.text
+    assert "edit-demo" in detail.text
+    assert "Hostnames" not in detail.text
     assert "192.168.50.221" in detail.text
     assert "SSH admin" in detail.text
     assert "key-only" in detail.text
