@@ -37,47 +37,107 @@
     <main class="page detail-grid">
       <section class="stack">
         <section class="panel">
-          <h2 class="section-title">Überblick</h2>
-          <div class="overview-card">
-            <div class="overview-primary">
-              <div class="fact-label">Hostname</div>
-              <div class="overview-hostname">{{ network.hostnames|first or "-" }}</div>
-            </div>
-            <div class="overview-labels">
-              <div class="overview-label">
-                <span>ID</span>
-                <strong>{{ object.id }}</strong>
-              </div>
-              <div class="overview-label">
-                <span>Typ</span>
-                <strong>{{ object.kind }}</strong>
-              </div>
-              <div class="overview-label">
-                <span>Status</span>
-                <strong>{{ object.status }}</strong>
-              </div>
+          <div class="panel-head">
+            <h2 class="section-title">Überblick</h2>
+            {% if edit_section == "overview" %}
+              <a class="button button-small button-muted" href="/objects/{{ object.id }}">Abbrechen</a>
+            {% else %}
+              <a class="button button-small button-muted" href="/objects/{{ object.id }}?edit=overview">Edit</a>
+            {% endif %}
+          </div>
+          {% if edit_section == "overview" %}
+            {% if error %}
+              <div class="error">{{ error }}</div>
+            {% endif %}
+            <form class="form-grid" method="post" action="/objects/{{ object.id }}">
+              <label>Label
+                <input name="label" value="{{ object.label }}" autocomplete="off" required />
+              </label>
+              <label>Hostname
+                <input name="hostname" value="{{ network.hostnames|first or '' }}" autocomplete="off" />
+              </label>
+              <label>Typ
+                <select name="kind">
+                  {% for object_kind in object_kinds %}
+                    <option value="{{ object_kind }}" {% if object_kind == object.kind %}selected{% endif %}>{{ object_kind }}</option>
+                  {% endfor %}
+                </select>
+              </label>
+              <label>Status
+                <select name="status">
+                  {% for object_status in object_statuses %}
+                    <option value="{{ object_status }}" {% if object_status == object.status %}selected{% endif %}>{{ object_status }}</option>
+                  {% endfor %}
+                </select>
+              </label>
               {% if container %}
-                <div class="overview-label">
-                  <span>Container</span>
-                  <strong>{{ container.label or container.id }}</strong>
-                </div>
+                <label>Container ID
+                  <input name="container_id" value="{{ container.id or '' }}" autocomplete="off" />
+                </label>
+                <label>Container Label
+                  <input name="container_label" value="{{ container.label or '' }}" autocomplete="off" />
+                </label>
               {% endif %}
-              <div class="overview-label">
-                <span>Relationships</span>
-                <strong>{{ relationships|length }}</strong>
+              <label>Kurzbeschreibung
+                <textarea class="summary-input" name="summary" placeholder="Kurzbeschreibung">{{ object.summary or "" }}</textarea>
+              </label>
+              <div class="overview-times">
+                <div class="fact fact-small">
+                  <div class="fact-label">Created at</div>
+                  <div class="fact-value">{{ object.created_at or "-" }}</div>
+                </div>
+                <div class="fact fact-small">
+                  <div class="fact-label">Last changed</div>
+                  <div class="fact-value">{{ object.last_changed or object.updated_at or "-" }}</div>
+                </div>
+              </div>
+              <div class="button-row">
+                <button type="submit">Speichern</button>
+                <a class="button button-muted" href="/objects/{{ object.id }}">Abbrechen</a>
+              </div>
+            </form>
+          {% else %}
+            <div class="overview-card">
+              <div class="overview-primary">
+                <div class="fact-label">Hostname</div>
+                <div class="overview-hostname">{{ network.hostnames|first or "-" }}</div>
+              </div>
+              <div class="overview-labels">
+                <div class="overview-label">
+                  <span>ID</span>
+                  <strong>{{ object.id }}</strong>
+                </div>
+                <div class="overview-label">
+                  <span>Typ</span>
+                  <strong>{{ object.kind }}</strong>
+                </div>
+                <div class="overview-label">
+                  <span>Status</span>
+                  <strong>{{ object.status }}</strong>
+                </div>
+                {% if container %}
+                  <div class="overview-label">
+                    <span>Container</span>
+                    <strong>{{ container.label or container.id }}</strong>
+                  </div>
+                {% endif %}
+                <div class="overview-label">
+                  <span>Relationships</span>
+                  <strong>{{ relationships|length }}</strong>
+                </div>
               </div>
             </div>
-          </div>
-          <div class="overview-times">
-            <div class="fact fact-small">
-              <div class="fact-label">Created at</div>
-              <div class="fact-value">{{ object.created_at or "-" }}</div>
+            <div class="overview-times">
+              <div class="fact fact-small">
+                <div class="fact-label">Created at</div>
+                <div class="fact-value">{{ object.created_at or "-" }}</div>
+              </div>
+              <div class="fact fact-small">
+                <div class="fact-label">Last changed</div>
+                <div class="fact-value">{{ object.last_changed or object.updated_at or "-" }}</div>
+              </div>
             </div>
-            <div class="fact fact-small">
-              <div class="fact-label">Last changed</div>
-              <div class="fact-value">{{ object.last_changed or object.updated_at or "-" }}</div>
-            </div>
-          </div>
+          {% endif %}
         </section>
 
         {% if network.addresses or ports or endpoints %}
@@ -318,25 +378,6 @@
           </section>
         {% endif %}
       </section>
-      <aside class="panel panel-sticky">
-        <h2 class="section-title">Bearbeiten</h2>
-        {% if error %}
-          <div class="error">{{ error }}</div>
-        {% endif %}
-        <form class="form-grid" method="post" action="/objects/{{ object.id }}">
-          <label>Typ<input value="{{ object.kind }}" disabled /></label>
-          <label>Label<input name="label" value="{{ object.label }}" autocomplete="off" required /></label>
-          <label>Status
-            <select name="status">
-              {% for object_status in object_statuses %}
-                <option value="{{ object_status }}" {% if object_status == object.status %}selected{% endif %}>{{ object_status }}</option>
-              {% endfor %}
-            </select>
-          </label>
-          <label>Kurzbeschreibung<textarea class="summary-input" name="summary" placeholder="Kurzbeschreibung">{{ object.summary or "" }}</textarea></label>
-          <button type="submit">Speichern</button>
-        </form>
-      </aside>
     </main>
   </body>
 </html>

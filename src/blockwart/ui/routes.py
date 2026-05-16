@@ -224,19 +224,50 @@ def update_object(
     object_id: str,
     session: Annotated[Session, Depends(get_session)],
     label: Annotated[str, Form()],
+    kind: Annotated[str | None, Form()] = None,
     status: Annotated[str, Form()] = "active",
     summary: Annotated[str, Form()] = "",
+    hostname: Annotated[str | None, Form()] = None,
+    container_id: Annotated[str | None, Form()] = None,
+    container_label: Annotated[str | None, Form()] = None,
     data_json: Annotated[str | None, Form()] = None,
 ):
     try:
         existing_object = get_object(session, object_id)
         if existing_object is None:
             raise HTTPException(status_code=404, detail="Catalog object not found")
-        data = existing_object.data if data_json is None else json.loads(data_json or "{}")
+        data = _editable_data_copy(
+            existing_object.data if data_json is None else json.loads(data_json or "{}")
+        )
+        if hostname is not None:
+            network = dict(data.get("network") if isinstance(data.get("network"), Mapping) else {})
+            existing_hostnames = network.get("hostnames")
+            hostname_values = (
+                [str(value) for value in existing_hostnames]
+                if isinstance(existing_hostnames, list)
+                else []
+            )
+            primary_hostname = hostname.strip()
+            network["hostnames"] = (
+                [primary_hostname, *hostname_values[1:]]
+                if primary_hostname
+                else hostname_values[1:]
+            )
+            data["network"] = network
+        if container_id is not None or container_label is not None:
+            container = dict(
+                data.get("container") if isinstance(data.get("container"), Mapping) else {}
+            )
+            if container_id is not None:
+                container["id"] = container_id.strip()
+            if container_label is not None:
+                container["label"] = container_label.strip()
+            if container:
+                data["container"] = container
         _reject_secret_shaped_form_data(data)
         payload = CatalogObjectIn(
             id=object_id,
-            kind=existing_object.kind,
+            kind=kind or existing_object.kind,
             label=label,
             status=status or "active",
             summary=summary or None,
@@ -284,7 +315,7 @@ def update_object(
                 "object_kinds": OBJECT_KINDS,
                 "object_statuses": OBJECT_STATUSES_UI,
                 "error": _safe_error_message(exc),
-                "edit_section": "",
+                "edit_section": "overview",
             },
             status_code=422,
         )

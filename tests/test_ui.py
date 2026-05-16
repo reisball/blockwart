@@ -90,6 +90,8 @@ def test_object_detail_shows_data_and_relationships(client: TestClient) -> None:
     assert "/objects/n8n-api-credential" not in response.text
     assert "references/n8n.md" in response.text
     assert "Daten JSON" not in response.text
+    assert "Bearbeiten" not in response.text
+    assert 'href="/objects/n8n?edit=overview"' in response.text
     assert "Relationship anlegen" not in response.text
     assert 'data-theme-value="dark"' in response.text
     assert 'data-theme-value="light"' in response.text
@@ -191,6 +193,35 @@ def test_update_object_form_updates_detail(client: TestClient) -> None:
     detail = client.get("/objects/n8n")
     assert "n8n Workflows" in detail.text
     assert "Updated through UI." in detail.text
+
+
+def test_overview_edit_updates_object_metadata(client: TestClient) -> None:
+    edit_response = client.get("/objects/n8n?edit=overview")
+
+    assert edit_response.status_code == 200
+    assert 'name="hostname"' in edit_response.text
+    assert "Created at" in edit_response.text
+    assert "Last changed" in edit_response.text
+    assert "Bearbeiten" not in edit_response.text
+
+    response = client.post(
+        "/objects/n8n",
+        data={
+            "label": "n8n Workflows",
+            "hostname": "n8n-main",
+            "kind": "system",
+            "status": "inactive",
+            "summary": "Updated through overview.",
+        },
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 303
+    detail = client.get("/objects/n8n")
+    assert "n8n Workflows" in detail.text
+    assert "n8n-main" in detail.text
+    assert "inactive" in detail.text
+    assert "Updated through overview." in detail.text
 
 
 def test_detail_form_can_create_relationship(client: TestClient, session_factory) -> None:
