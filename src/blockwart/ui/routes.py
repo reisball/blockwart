@@ -616,6 +616,8 @@ def _group_relationships(
 
 
 def _relationship_system_ports(catalog_object: CatalogObjectOut) -> list[dict[str, str]]:
+    if catalog_object.kind == "service":
+        return _relationship_service_ports(catalog_object, None)
     ports: list[dict[str, str]] = []
     seen: set[str] = set()
     for port_data in _list_of_mappings(catalog_object.data.get("ports")):
