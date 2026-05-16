@@ -1,0 +1,41 @@
+[build-system]
+requires = ["setuptools>=69", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "blockwart"
+version = "0.1.0"
+description = "Infrastructure knowledge and credential-reference platform."
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+  "alembic>=1.13",
+  "fastapi>=0.115",
+  "jinja2>=3.1",
+  "pydantic>=2.8",
+  "pydantic-settings>=2.4",
+  "python-multipart>=0.0.9",
+  "sqlalchemy>=2.0",
+  "uvicorn[standard]>=0.30",
+]
+
+[project.optional-dependencies]
+dev = [
+  "httpx>=0.27",
+  "pytest>=8.2",
+  "ruff>=0.6",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+

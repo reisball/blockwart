@@ -1,0 +1,7 @@
+# Secret-safe pilot seed placeholder.
+# Real import data is specified in:
+# /home/zoe/shared/infra-knowledge-platform/specs/pilot-import-mapping.md
+
+schema_version: 1
+objects: []
+
