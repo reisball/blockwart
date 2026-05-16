@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
 from blockwart.models import CatalogObject, Relationship
@@ -228,6 +228,7 @@ def import_tools_markdown(
 
     inserted_relationships = 0
     for relationship in relationships:
+        _remove_stale_workspace_host_relationships(session, relationship)
         existing = session.scalar(
             select(Relationship).where(
                 Relationship.from_ref == relationship["from_ref"],
@@ -248,6 +249,42 @@ def import_tools_markdown(
         objects_imported=len(objects),
         relationships_imported=inserted_relationships,
     )
+
+
+def _remove_stale_workspace_host_relationships(
+    session: Session,
+    relationship: dict[str, str],
+) -> None:
+    if relationship["relation_type"] != "hosts" or not relationship["to_ref"].startswith(
+        "service:"
+    ):
+        return
+    stale_relationships = session.scalars(
+        select(Relationship).where(
+            Relationship.relation_type == "hosts",
+            Relationship.to_ref == relationship["to_ref"],
+            Relationship.from_ref != relationship["from_ref"],
+        )
+    ).all()
+    for stale_relationship in stale_relationships:
+        stale_object_id = stale_relationship.from_ref.split(":", 1)[1]
+        stale_object = session.get(CatalogObject, stale_object_id)
+        if stale_object is None:
+            continue
+        stale_data = json.loads(stale_object.data_json)
+        if stale_data.get("source") != "workspace_markdown_import":
+            continue
+        session.delete(stale_relationship)
+        session.flush()
+        remaining_relationship = session.scalar(
+            select(Relationship).where(
+                (Relationship.from_ref == stale_relationship.from_ref)
+                | (Relationship.to_ref == stale_relationship.from_ref)
+            )
+        )
+        if remaining_relationship is None:
+            session.execute(delete(CatalogObject).where(CatalogObject.id == stale_object_id))
+    session.commit()
 
 
 def _merge_existing_object(existing: CatalogObject, imported: CatalogObjectIn) -> CatalogObjectIn:
