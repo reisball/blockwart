@@ -116,40 +116,23 @@
           </section>
         {% endif %}
 
-        {% if access_methods or credential_references %}
+        {% if access_methods %}
           <section class="panel">
-            <h2 class="section-title">Zugriff & Credential-Referenzen</h2>
-            {% if access_methods %}
-              <div class="table-wrap">
-                <table class="table">
-                  <thead><tr><th>Typ</th><th>Endpoint</th><th>Auth</th><th>Referenzen</th></tr></thead>
-                  <tbody>
-                    {% for method in access_methods %}
-                      <tr>
-                        <td>{{ method.type }}</td>
-                        <td>{{ method.endpoint or "-" }}</td>
-                        <td>{{ method.auth_mode }}</td>
-                        <td>
-                          {% for ref in method.credential_references %}
-                            <a class="ref-chip" href="/objects/{{ ref.split(':', 1)[1] }}">{{ ref }}</a>
-                          {% else %}
-                            <span class="meta">keine</span>
-                          {% endfor %}
-                        </td>
-                      </tr>
-                    {% endfor %}
-                  </tbody>
-                </table>
-              </div>
-            {% endif %}
-            {% if credential_references %}
-              <h3>Alle Credential-Referenzen</h3>
-              <ul class="chips">
-                {% for credential in credential_references %}
-                  <li><a class="ref-chip" href="/objects/{{ credential.id }}">{{ credential.ref }}</a></li>
+            <h2 class="section-title">Zugriff</h2>
+            <div class="table-wrap">
+              <table class="table">
+                <thead><tr><th>Typ</th><th>Endpoint</th><th>Auth</th></tr></thead>
+                <tbody>
+                  {% for method in access_methods %}
+                    <tr>
+                      <td>{{ method.type }}</td>
+                      <td>{{ method.endpoint or "-" }}</td>
+                      <td>{{ method.auth_mode }}</td>
+                    </tr>
                 {% endfor %}
-              </ul>
-            {% endif %}
+                </tbody>
+              </table>
+            </div>
           </section>
         {% endif %}
 

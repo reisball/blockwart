@@ -24,7 +24,7 @@ from blockwart.services.catalog import (
 templates = Jinja2Templates(directory="src/blockwart/ui/templates")
 router = APIRouter(tags=["ui"])
 
-OBJECT_KINDS = ("system", "service", "credential_reference", "runbook", "decision", "project")
+OBJECT_KINDS = ("system", "service", "runbook", "decision", "project")
 RELATION_TYPES = ("hosts", "depends_on", "uses", "documents", "related_to")
 UI_KIND_PRIORITY = {kind: index for index, kind in enumerate(OBJECT_KINDS)}
 SAFE_DATA_JSON_FALLBACK = "{\n  \"schema_version\": 1\n}"
@@ -38,11 +38,11 @@ def index(
     kind: str = "",
 ):
     normalized_kind = kind if kind in OBJECT_KINDS else ""
-    objects = _sort_for_browse(
+    objects = _visible_objects(
         search_objects(session, query=q.strip() or None, kind=normalized_kind or None)
     )
     systems = _sort_for_browse(search_objects(session, kind="system"))
-    object_counts = Counter(obj.kind for obj in search_objects(session))
+    object_counts = Counter(obj.kind for obj in _visible_objects(search_objects(session)))
     total_objects = sum(object_counts.values())
     return templates.TemplateResponse(
         request,
@@ -75,7 +75,9 @@ def object_detail(
     relationships = list_relationships_for_object(session, catalog_object)
     object_map = {f"{obj.kind}:{obj.id}": obj for obj in all_objects}
     relationship_groups = _group_relationships(catalog_object, relationships, object_map)
-    relationship_targets = [obj for obj in all_objects if obj.id != catalog_object.id]
+    relationship_targets = [
+        obj for obj in all_objects if obj.id != catalog_object.id and obj.kind in OBJECT_KINDS
+    ]
     object_data = catalog_object.data
     return templates.TemplateResponse(
         request,
@@ -93,7 +95,7 @@ def object_detail(
             "ports": _list_of_mappings(object_data.get("ports")),
             "endpoints": _list_of_mappings(object_data.get("endpoints")),
             "access_methods": _access_methods(object_data),
-            "credential_references": _credential_references(object_data),
+            "credential_references": [],
             "data_json": json.dumps(catalog_object.data, indent=2, sort_keys=True),
             "object_kinds": OBJECT_KINDS,
             "error": None,
@@ -147,7 +149,7 @@ def save_object(
             )
     except (json.JSONDecodeError, ValidationError, ValueError) as exc:
         form["data_json"] = SAFE_DATA_JSON_FALLBACK
-        objects = search_objects(session)
+        objects = _visible_objects(search_objects(session))
         object_counts = Counter(obj.kind for obj in objects)
         return templates.TemplateResponse(
             request,
@@ -250,7 +252,7 @@ def update_object(
                 "ports": _list_of_mappings(object_data.get("ports")),
                 "endpoints": _list_of_mappings(object_data.get("endpoints")),
                 "access_methods": _access_methods(object_data),
-                "credential_references": _credential_references(object_data),
+                "credential_references": [],
                 "data_json": SAFE_DATA_JSON_FALLBACK,
                 "object_kinds": OBJECT_KINDS,
                 "error": _safe_error_message(exc),
@@ -304,6 +306,10 @@ def _sort_for_browse(objects: list[CatalogObjectOut]) -> list[CatalogObjectOut]:
             obj.id.casefold(),
         ),
     )
+
+
+def _visible_objects(objects: list[CatalogObjectOut]) -> list[CatalogObjectOut]:
+    return _sort_for_browse([obj for obj in objects if obj.kind != "credential_reference"])
 
 
 def _group_relationships(
@@ -396,11 +402,7 @@ def _access_methods(data: Mapping[str, Any]) -> list[dict[str, Any]]:
             "type": str(method.get("type") or "access"),
             "endpoint": str(method.get("endpoint") or ""),
             "auth_mode": str(method.get("auth_mode") or "unknown"),
-            "credential_references": [
-                ref for ref in method.get("credential_references", []) if _is_credential_ref(ref)
-            ]
-            if isinstance(method.get("credential_references"), list)
-            else [],
+            "credential_references": [],
         }
         for method in methods
     ]

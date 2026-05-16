@@ -38,8 +38,8 @@ def test_build_tools_import_plan_parses_infrastructure_rows(tmp_path: Path) -> N
     plan = build_tools_import_plan(tools_path, references_root=tmp_path)
 
     assert plan.source_rows == 1
-    assert plan.object_count == 3
-    assert plan.credential_reference_count == 1
+    assert plan.object_count == 2
+    assert plan.credential_reference_count == 0
     system = plan.payload["objects"][0]
     service = plan.payload["objects"][1]
     assert system["id"] == "ct-200"
@@ -57,9 +57,9 @@ def test_build_tools_import_plan_parses_infrastructure_rows(tmp_path: Path) -> N
     assert system["data"]["network"]["addresses"][0]["ip"] == "192.168.50.200"
     assert {item["port"] for item in system["data"]["ports"]} == {22}
     assert {item["port"] for item in service["data"]["endpoints"]} == {8080}
-    assert system["data"]["credential_references"] == [
-        "credential_reference:demo-box-access-reference"
-    ]
+    assert "credential_references" not in system["data"]
+    assert {method["type"] for method in system["data"]["access_methods"]} == {"ssh"}
+    assert {method["type"] for method in service["data"]["access_methods"]} == {"web"}
     assert plan.payload["relationships"] == [
         {
             "from_ref": "system:ct-200",
@@ -117,7 +117,7 @@ def test_import_tools_markdown_creates_hosted_service_relationship(tmp_path: Pat
         objects = {row.id: row for row in session.scalars(select(CatalogObject)).all()}
         relationships = session.scalars(select(Relationship)).all()
 
-    assert result.objects_imported == 3
+    assert result.objects_imported == 2
     assert result.relationships_imported == 1
     assert objects["ct-121"].kind == "system"
     assert objects["ct-121"].label == "Agent Zero"
@@ -272,7 +272,7 @@ def test_import_tools_markdown_merges_canonical_existing_objects(tmp_path: Path)
         result = import_tools_markdown(session, tools_path, references_root=tmp_path)
         row = session.get(CatalogObject, "fabrik")
 
-    assert result.objects_imported == 2
+    assert result.objects_imported == 1
     assert row is not None
     assert row.label == "Fabrik"
     assert "related_services" in row.data_json

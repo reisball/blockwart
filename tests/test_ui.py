@@ -54,9 +54,9 @@ def test_index_shows_kind_counts(client: TestClient) -> None:
     response = client.get("/")
 
     assert response.status_code == 200
-    assert "<strong>52</strong> alle" in response.text
+    assert "<strong>28</strong> alle" in response.text
     assert "system" in response.text
-    assert "credential_reference" in response.text
+    assert "credential_reference" not in response.text
 
 
 def test_object_detail_shows_data_and_relationships(client: TestClient) -> None:
@@ -66,9 +66,9 @@ def test_object_detail_shows_data_and_relationships(client: TestClient) -> None:
     assert "n8n Web UI" in response.text
     assert "Relationships" in response.text
     assert "Ausgehend" in response.text
-    assert "Zugriff & Credential-Referenzen" in response.text
-    assert "credential_reference:n8n-api-credential" in response.text
-    assert "/objects/n8n-api-credential" in response.text
+    assert "Zugriff" in response.text
+    assert "Credential-Referenzen" not in response.text
+    assert "/objects/n8n-api-credential" not in response.text
     assert "references/n8n.md" in response.text
 
 

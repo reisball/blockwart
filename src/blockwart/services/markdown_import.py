@@ -63,7 +63,6 @@ def build_tools_import_plan(
     objects: list[dict[str, Any]] = []
     relationships: list[dict[str, str]] = []
     seen_ids: set[str] = set()
-    credential_refs: dict[str, dict[str, Any]] = {}
 
     for row in rows:
         label = row.get("System") or row.get("Name")
@@ -95,21 +94,6 @@ def build_tools_import_plan(
         ports = _ports_from_cell(ip_port)
         system_ports = _system_ports(ports) if is_hosted_service else ports
         service_ports = _service_ports(ports) if is_hosted_service else ports
-        credential_ref_id = _credential_reference_id(object_id, auth)
-
-        credential_references: list[str] = []
-        if credential_ref_id:
-            system_ref = f"system:{system_id}"
-            service_ref = f"service:{service_id}" if is_hosted_service else ""
-            credential_refs[credential_ref_id] = _credential_reference_object(
-                credential_ref_id,
-                label=_plain_text(label),
-                auth=auth,
-                system_ref=system_ref,
-                service_ref=service_ref,
-                source_references=source_references,
-            )
-            credential_references.append(f"credential_reference:{credential_ref_id}")
 
         system_data: dict[str, Any] = {
             "schema_version": 1,
@@ -122,12 +106,11 @@ def build_tools_import_plan(
             },
             "ports": system_ports,
             "access_methods": _access_methods(
-                access,
+                _system_access_text(access) if is_hosted_service else access,
                 addresses,
                 system_ports,
-                credential_references,
+                [],
             ),
-            "credential_references": credential_references,
             "import_notes": {
                 "tools_row_type": typ,
                 "import_role": "host_system" if is_hosted_service else "system",
@@ -175,7 +158,6 @@ def build_tools_import_plan(
                         addresses=addresses,
                         ports=service_ports,
                         source_references=source_references,
-                        credential_references=credential_references,
                         access=access,
                         auth=auth,
                     ),
@@ -189,7 +171,6 @@ def build_tools_import_plan(
                 }
             )
 
-    objects.extend(credential_refs.values())
     payload = {
         "schema_version": 1,
         "owner": "Kai + Zoe",
@@ -201,7 +182,7 @@ def build_tools_import_plan(
         payload=payload,
         source_rows=len(rows),
         object_count=len(objects),
-        credential_reference_count=len(credential_refs),
+        credential_reference_count=0,
     )
 
 
@@ -429,7 +410,6 @@ def _service_data(
     addresses: list[dict[str, str]],
     ports: list[dict[str, Any]],
     source_references: list[dict[str, str]],
-    credential_references: list[str],
     access: str,
     auth: str,
 ) -> dict[str, Any]:
@@ -440,9 +420,14 @@ def _service_data(
         "system_id": system_ref,
         "purpose": usage,
         "endpoints": _endpoints_from_network(label, addresses, ports),
+        "access_methods": _access_methods(
+            _service_access_text(access),
+            addresses,
+            ports,
+            [],
+        ),
         "auth": {
             "mode": _auth_mode(_plain_text(auth or access)),
-            "credential_references": credential_references,
         },
         "source_references": source_references,
         "import_notes": {
@@ -452,6 +437,26 @@ def _service_data(
             "auth_reference_summary": _plain_text(auth),
         },
     }
+
+
+def _system_access_text(access: str) -> str:
+    return _filter_access_chunks(access, {"ssh", "smb", "host"})
+
+
+def _service_access_text(access: str) -> str:
+    return _filter_access_chunks(access, {"web", "api", "openclaw"})
+
+
+def _filter_access_chunks(access: str, allowed_markers: set[str]) -> str:
+    chunks: list[str] = []
+    for chunk in re.split(r"\s+·\s+|,\s*", access):
+        text = _plain_text(chunk)
+        if not text or text == "-":
+            continue
+        lower = text.casefold()
+        if any(marker in lower for marker in allowed_markers):
+            chunks.append(text)
+    return " · ".join(chunks)
 
 
 def _endpoints_from_network(
