@@ -4,205 +4,25 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>{{ title }}</title>
-    <style>
-      :root {
-        color-scheme: light;
-        font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-        background: #f5f6f8;
-        color: #171a1f;
-      }
-      * {
-        box-sizing: border-box;
-      }
-      body {
-        margin: 0;
-      }
-      a {
-        color: #1f6feb;
-      }
-      header,
-      main {
-        max-width: 1180px;
-        margin: 0 auto;
-        padding: 22px 24px;
-      }
-      header {
-        border-bottom: 1px solid #d9dde3;
-      }
-      h1 {
-        margin: 8px 0 4px;
-        font-size: 28px;
-        line-height: 1.15;
-      }
-      h3 {
-        margin: 0 0 8px;
-        font-size: 14px;
-      }
-      .meta {
-        color: #5a6472;
-      }
-      main {
-        display: grid;
-        grid-template-columns: minmax(0, 1fr) 380px;
-        gap: 20px;
-      }
-      .panel {
-        border: 1px solid #d9dde3;
-        background: #ffffff;
-        border-radius: 8px;
-        padding: 16px;
-      }
-      .section-title {
-        margin: 0 0 10px;
-        font-size: 16px;
-      }
-      .stack {
-        display: grid;
-        gap: 14px;
-      }
-      .facts {
-        display: grid;
-        grid-template-columns: repeat(2, minmax(0, 1fr));
-        gap: 10px;
-      }
-      .fact,
-      .chip,
-      .ref-chip {
-        border: 1px solid #e1e5eb;
-        background: #fbfcfe;
-        border-radius: 6px;
-      }
-      .fact {
-        padding: 10px;
-      }
-      .fact-label {
-        color: #667085;
-        font-size: 12px;
-        text-transform: uppercase;
-      }
-      .fact-value {
-        margin-top: 3px;
-        overflow-wrap: anywhere;
-        font-weight: 650;
-      }
-      .chips {
-        display: flex;
-        flex-wrap: wrap;
-        gap: 6px;
-        margin: 0;
-        padding: 0;
-        list-style: none;
-      }
-      .chip,
-      .ref-chip {
-        display: inline-flex;
-        gap: 6px;
-        align-items: center;
-        padding: 6px 8px;
-        color: #344054;
-        font-size: 13px;
-        text-decoration: none;
-      }
-      .table {
-        width: 100%;
-        border-collapse: collapse;
-        font-size: 13px;
-      }
-      .table th,
-      .table td {
-        border-bottom: 1px solid #e1e5eb;
-        padding: 8px 6px;
-        text-align: left;
-        vertical-align: top;
-      }
-      .table th {
-        color: #667085;
-        font-weight: 650;
-      }
-      .rel {
-        display: grid;
-        gap: 6px;
-        margin: 0;
-        padding: 0;
-        list-style: none;
-      }
-      .rel li {
-        border: 1px solid #e1e5eb;
-        border-radius: 6px;
-        padding: 8px;
-        font-size: 13px;
-        overflow-wrap: anywhere;
-      }
-      input,
-      select,
-      textarea,
-      button {
-        width: 100%;
-        border: 1px solid #cbd2dc;
-        border-radius: 6px;
-        background: #ffffff;
-        color: #171a1f;
-        font: inherit;
-        padding: 10px 12px;
-      }
-      textarea {
-        min-height: 150px;
-        resize: vertical;
-      }
-      textarea.code {
-        min-height: 420px;
-        font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-        font-size: 13px;
-      }
-      button {
-        width: auto;
-        min-width: 96px;
-        cursor: pointer;
-        background: #1f6feb;
-        color: #fff;
-        border-color: #1f6feb;
-        font-weight: 650;
-      }
-      .form-grid {
-        display: grid;
-        gap: 10px;
-      }
-      .error {
-        border: 1px solid #d92d20;
-        background: #fff1f0;
-        color: #b42318;
-        border-radius: 6px;
-        padding: 10px 12px;
-        margin-bottom: 12px;
-        font-size: 14px;
-      }
-      pre {
-        margin: 0;
-        overflow: auto;
-        white-space: pre-wrap;
-        font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-        font-size: 13px;
-      }
-      @media (max-width: 860px) {
-        main {
-          grid-template-columns: 1fr;
-        }
-        .facts {
-          grid-template-columns: 1fr;
-        }
-      }
-    </style>
+    <link rel="stylesheet" href="/static/app.css" />
   </head>
   <body>
-    <header>
-      <a href="/">Zur Suche</a>
-      <h1>{{ object.label }}</h1>
-      <div class="meta">{{ object.kind }}:{{ object.id }} · {{ object.status }}</div>
-      {% if object.summary %}
-        <p>{{ object.summary }}</p>
-      {% endif %}
+    <header class="topbar">
+      <div class="topbar-inner">
+        <a class="breadcrumb" href="/">Zur Suche</a>
+        <div class="title-row">
+          <div>
+            <h1>{{ object.label }}</h1>
+            <div class="meta">{{ object.kind }}:{{ object.id }} · {{ object.status }}</div>
+          </div>
+          <span class="pill">{{ object.status }}</span>
+        </div>
+        {% if object.summary %}
+          <p class="summary">{{ object.summary }}</p>
+        {% endif %}
+      </div>
     </header>
-    <main>
+    <main class="page detail-grid">
       <section class="stack">
         <section class="panel">
           <h2 class="section-title">Überblick</h2>
@@ -238,48 +58,54 @@
               </ul>
             {% endif %}
             {% if network.addresses %}
-              <h3 style="margin-top: 14px">Adressen</h3>
-              <table class="table">
-                <thead><tr><th>IP</th><th>Interface</th><th>Scope</th></tr></thead>
-                <tbody>
-                  {% for address in network.addresses %}
-                    <tr>
-                      <td>{{ address.ip }}</td>
-                      <td>{{ address.interface or "-" }}</td>
-                      <td>{{ address.scope or address.network or "-" }}</td>
-                    </tr>
-                  {% endfor %}
-                </tbody>
-              </table>
+              <h3>Adressen</h3>
+              <div class="table-wrap">
+                <table class="table">
+                  <thead><tr><th>IP</th><th>Interface</th><th>Scope</th></tr></thead>
+                  <tbody>
+                    {% for address in network.addresses %}
+                      <tr>
+                        <td>{{ address.ip }}</td>
+                        <td>{{ address.interface or "-" }}</td>
+                        <td>{{ address.scope or address.network or "-" }}</td>
+                      </tr>
+                    {% endfor %}
+                  </tbody>
+                </table>
+              </div>
             {% endif %}
             {% if ports %}
-              <h3 style="margin-top: 14px">Ports</h3>
-              <table class="table">
-                <thead><tr><th>Port</th><th>Zweck</th><th>Exposure</th></tr></thead>
-                <tbody>
-                  {% for port in ports %}
-                    <tr>
-                      <td>{{ port.port }}/{{ port.protocol or "tcp" }}</td>
-                      <td>{{ port.purpose or "-" }}</td>
-                      <td>{{ port.exposure or "-" }}</td>
-                    </tr>
-                  {% endfor %}
-                </tbody>
-              </table>
+              <h3>Ports</h3>
+              <div class="table-wrap">
+                <table class="table">
+                  <thead><tr><th>Port</th><th>Zweck</th><th>Exposure</th></tr></thead>
+                  <tbody>
+                    {% for port in ports %}
+                      <tr>
+                        <td>{{ port.port }}/{{ port.protocol or "tcp" }}</td>
+                        <td>{{ port.purpose or "-" }}</td>
+                        <td>{{ port.exposure or "-" }}</td>
+                      </tr>
+                    {% endfor %}
+                  </tbody>
+                </table>
+              </div>
             {% endif %}
             {% if endpoints %}
-              <h3 style="margin-top: 14px">Endpoints</h3>
-              <table class="table">
-                <tbody>
-                  {% for endpoint in endpoints %}
-                    <tr>
-                      <td>{{ endpoint.name or endpoint.type or "endpoint" }}</td>
-                      <td>{{ endpoint.url or endpoint.endpoint or endpoint.host or "-" }}</td>
-                      <td>{{ endpoint.port or "" }}</td>
-                    </tr>
-                  {% endfor %}
-                </tbody>
-              </table>
+              <h3>Endpoints</h3>
+              <div class="table-wrap">
+                <table class="table">
+                  <tbody>
+                    {% for endpoint in endpoints %}
+                      <tr>
+                        <td>{{ endpoint.name or endpoint.type or "endpoint" }}</td>
+                        <td>{{ endpoint.url or endpoint.endpoint or endpoint.host or "-" }}</td>
+                        <td>{{ endpoint.port or "" }}</td>
+                      </tr>
+                    {% endfor %}
+                  </tbody>
+                </table>
+              </div>
             {% endif %}
           </section>
         {% endif %}
@@ -288,28 +114,30 @@
           <section class="panel">
             <h2 class="section-title">Zugriff & Credential-Referenzen</h2>
             {% if access_methods %}
-              <table class="table">
-                <thead><tr><th>Typ</th><th>Endpoint</th><th>Auth</th><th>Referenzen</th></tr></thead>
-                <tbody>
-                  {% for method in access_methods %}
-                    <tr>
-                      <td>{{ method.type }}</td>
-                      <td>{{ method.endpoint or "-" }}</td>
-                      <td>{{ method.auth_mode }}</td>
-                      <td>
-                        {% for ref in method.credential_references %}
-                          <a class="ref-chip" href="/objects/{{ ref.split(':', 1)[1] }}">{{ ref }}</a>
-                        {% else %}
-                          <span class="meta">keine</span>
-                        {% endfor %}
-                      </td>
-                    </tr>
-                  {% endfor %}
-                </tbody>
-              </table>
+              <div class="table-wrap">
+                <table class="table">
+                  <thead><tr><th>Typ</th><th>Endpoint</th><th>Auth</th><th>Referenzen</th></tr></thead>
+                  <tbody>
+                    {% for method in access_methods %}
+                      <tr>
+                        <td>{{ method.type }}</td>
+                        <td>{{ method.endpoint or "-" }}</td>
+                        <td>{{ method.auth_mode }}</td>
+                        <td>
+                          {% for ref in method.credential_references %}
+                            <a class="ref-chip" href="/objects/{{ ref.split(':', 1)[1] }}">{{ ref }}</a>
+                          {% else %}
+                            <span class="meta">keine</span>
+                          {% endfor %}
+                        </td>
+                      </tr>
+                    {% endfor %}
+                  </tbody>
+                </table>
+              </div>
             {% endif %}
             {% if credential_references %}
-              <h3 style="margin-top: 14px">Alle Credential-Referenzen</h3>
+              <h3>Alle Credential-Referenzen</h3>
               <ul class="chips">
                 {% for credential in credential_references %}
                   <li><a class="ref-chip" href="/objects/{{ credential.id }}">{{ credential.ref }}</a></li>
@@ -354,17 +182,17 @@
           <pre>{{ data_json }}</pre>
         </section>
       </section>
-      <aside class="panel">
+      <aside class="panel panel-sticky">
         <h2 class="section-title">Bearbeiten</h2>
         {% if error %}
           <div class="error">{{ error }}</div>
         {% endif %}
         <form class="form-grid" method="post" action="/objects/{{ object.id }}">
-          <input value="{{ object.kind }}" disabled />
-          <input name="label" value="{{ object.label }}" required />
-          <input name="status" value="{{ object.status }}" />
-          <textarea name="summary" placeholder="Kurzbeschreibung">{{ object.summary or "" }}</textarea>
-          <textarea class="code" name="data_json" spellcheck="false">{{ data_json }}</textarea>
+          <label>Typ<input value="{{ object.kind }}" disabled /></label>
+          <label>Label<input name="label" value="{{ object.label }}" autocomplete="off" required /></label>
+          <label>Status<input name="status" value="{{ object.status }}" autocomplete="off" /></label>
+          <label>Kurzbeschreibung<textarea class="summary-input" name="summary" placeholder="Kurzbeschreibung">{{ object.summary or "" }}</textarea></label>
+          <label>Daten JSON<textarea class="code" name="data_json" spellcheck="false">{{ data_json }}</textarea></label>
           <button type="submit">Speichern</button>
         </form>
       </aside>

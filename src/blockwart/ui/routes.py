@@ -23,6 +23,7 @@ templates = Jinja2Templates(directory="src/blockwart/ui/templates")
 router = APIRouter(tags=["ui"])
 
 OBJECT_KINDS = ("system", "service", "credential_reference", "runbook", "decision", "project")
+UI_KIND_PRIORITY = {kind: index for index, kind in enumerate(OBJECT_KINDS)}
 SAFE_DATA_JSON_FALLBACK = "{\n  \"schema_version\": 1\n}"
 
 
@@ -34,7 +35,9 @@ def index(
     kind: str = "",
 ):
     normalized_kind = kind if kind in OBJECT_KINDS else ""
-    objects = search_objects(session, query=q.strip() or None, kind=normalized_kind or None)
+    objects = _sort_for_browse(
+        search_objects(session, query=q.strip() or None, kind=normalized_kind or None)
+    )
     object_counts = Counter(obj.kind for obj in search_objects(session))
     total_objects = sum(object_counts.values())
     return templates.TemplateResponse(
@@ -218,6 +221,17 @@ def _safe_error_message(exc: Exception) -> str:
     if isinstance(exc, ValueError):
         return str(exc)
     return "Invalid catalog object payload."
+
+
+def _sort_for_browse(objects: list[CatalogObjectOut]) -> list[CatalogObjectOut]:
+    return sorted(
+        objects,
+        key=lambda obj: (
+            UI_KIND_PRIORITY.get(obj.kind, len(UI_KIND_PRIORITY)),
+            obj.label.casefold(),
+            obj.id.casefold(),
+        ),
+    )
 
 
 def _group_relationships(
