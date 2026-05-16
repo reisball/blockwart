@@ -42,20 +42,27 @@ def test_build_tools_import_plan_parses_infrastructure_rows(tmp_path: Path) -> N
     assert plan.credential_reference_count == 1
     system = plan.payload["objects"][0]
     service = plan.payload["objects"][1]
-    assert system["id"] == "demo-box-lxc"
+    assert system["id"] == "ct-200"
     assert system["kind"] == "system"
     assert system["data"]["related_services"] == ["service:demo-box"]
+    assert system["data"]["container"] == {
+        "id": "ct-200",
+        "type": "ct",
+        "number": "200",
+        "label": "CT 200",
+    }
     assert service["id"] == "demo-box"
     assert service["kind"] == "service"
-    assert service["data"]["system_id"] == "system:demo-box-lxc"
+    assert service["data"]["system_id"] == "system:ct-200"
     assert system["data"]["network"]["addresses"][0]["ip"] == "192.168.50.200"
-    assert {item["port"] for item in system["data"]["ports"]} == {22, 8080}
+    assert {item["port"] for item in system["data"]["ports"]} == {22}
+    assert {item["port"] for item in service["data"]["endpoints"]} == {8080}
     assert system["data"]["credential_references"] == [
         "credential_reference:demo-box-access-reference"
     ]
     assert plan.payload["relationships"] == [
         {
-            "from_ref": "system:demo-box-lxc",
+            "from_ref": "system:ct-200",
             "relation_type": "hosts",
             "to_ref": "service:demo-box",
         }
@@ -112,9 +119,10 @@ def test_import_tools_markdown_creates_hosted_service_relationship(tmp_path: Pat
 
     assert result.objects_imported == 3
     assert result.relationships_imported == 1
-    assert objects["agent-zero-lxc"].kind == "system"
+    assert objects["ct-121"].kind == "system"
+    assert objects["ct-121"].label == "Agent Zero"
     assert objects["agent-zero"].kind == "service"
-    assert objects["agent-zero"].data_json.count("system:agent-zero-lxc") == 1
+    assert objects["agent-zero"].data_json.count("system:ct-121") == 1
     assert [
         {
             "from_ref": relationship.from_ref,
@@ -124,7 +132,7 @@ def test_import_tools_markdown_creates_hosted_service_relationship(tmp_path: Pat
         for relationship in relationships
     ] == [
         {
-            "from_ref": "system:agent-zero-lxc",
+            "from_ref": "system:ct-121",
             "relation_type": "hosts",
             "to_ref": "service:agent-zero",
         }

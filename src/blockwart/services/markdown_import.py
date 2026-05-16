@@ -93,6 +93,8 @@ def build_tools_import_plan(
         source_references = _source_references(path, references_base, ref_cell)
         addresses = _addresses_from_cell(ip_port)
         ports = _ports_from_cell(ip_port)
+        system_ports = _system_ports(ports) if is_hosted_service else ports
+        service_ports = _service_ports(ports) if is_hosted_service else ports
         credential_ref_id = _credential_reference_id(object_id, auth)
 
         credential_references: list[str] = []
@@ -118,8 +120,13 @@ def build_tools_import_plan(
                 "hostnames": [_slugify(_plain_text(label))],
                 "addresses": addresses,
             },
-            "ports": ports,
-            "access_methods": _access_methods(access, addresses, ports, credential_references),
+            "ports": system_ports,
+            "access_methods": _access_methods(
+                access,
+                addresses,
+                system_ports,
+                credential_references,
+            ),
             "credential_references": credential_references,
             "import_notes": {
                 "tools_row_type": typ,
@@ -128,6 +135,8 @@ def build_tools_import_plan(
                 "auth_reference_summary": _plain_text(auth),
             },
         }
+        if is_hosted_service:
+            system_data["container"] = _container_data(typ)
         if usage:
             system_data["purpose"] = usage
 
@@ -164,7 +173,7 @@ def build_tools_import_plan(
                         typ=typ,
                         system_ref=system_ref,
                         addresses=addresses,
-                        ports=ports,
+                        ports=service_ports,
                         source_references=source_references,
                         credential_references=credential_references,
                         access=access,
@@ -316,16 +325,60 @@ def _is_hosted_service_row(row: dict[str, str]) -> bool:
 
 
 def _host_system_id(base_id: str, typ: str) -> str:
-    text = _plain_text(typ).casefold()
-    suffix = "vm" if "vm" in text and "ct" not in text else "lxc"
-    return f"{base_id}-{suffix}"
+    container = _container_data(typ)
+    container_id = str(container.get("id") or "")
+    if container_id:
+        return container_id
+    return f"{base_id}-runtime"
 
 
 def _host_system_label(label: str, typ: str) -> str:
+    return label
+
+
+def _container_data(typ: str) -> dict[str, str]:
     text = _plain_text(typ)
-    if text:
-        return f"{label} {text}"
-    return f"{label} LXC"
+    match = re.search(r"\b(CT|VM|LXC)\s+(\d+)\b", text, flags=re.IGNORECASE)
+    if match:
+        container_type = match.group(1).lower()
+        number = match.group(2)
+        normalized_type = "ct" if container_type in {"ct", "lxc"} else "vm"
+        return {
+            "id": f"{normalized_type}-{number}",
+            "type": normalized_type,
+            "number": number,
+            "label": f"{normalized_type.upper()} {number}",
+        }
+    return {
+        "id": "",
+        "type": "container",
+        "number": "",
+        "label": text,
+    }
+
+
+def _system_ports(ports: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    system_port_numbers = {22, 445}
+    return [
+        {
+            **port,
+            "scope": "system",
+        }
+        for port in ports
+        if port.get("port") in system_port_numbers
+    ]
+
+
+def _service_ports(ports: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    system_port_numbers = {22, 445}
+    return [
+        {
+            **port,
+            "scope": "service",
+        }
+        for port in ports
+        if port.get("port") not in system_port_numbers
+    ]
 
 
 def _service_data(
@@ -381,6 +434,7 @@ def _endpoints_from_network(
                 "port": port_number,
                 "protocol": port.get("protocol", "tcp"),
                 "exposure": port.get("exposure", "lan"),
+                "scope": "service",
             }
         )
     return endpoints

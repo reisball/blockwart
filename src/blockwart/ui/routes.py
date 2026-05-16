@@ -71,11 +71,11 @@ def object_detail(
     catalog_object = get_object(session, object_id)
     if catalog_object is None:
         raise HTTPException(status_code=404, detail="Catalog object not found")
+    all_objects = _sort_for_browse(list_objects(session))
     relationships = list_relationships_for_object(session, catalog_object)
-    relationship_groups = _group_relationships(catalog_object, relationships)
-    relationship_targets = [
-        obj for obj in _sort_for_browse(list_objects(session)) if obj.id != catalog_object.id
-    ]
+    object_map = {f"{obj.kind}:{obj.id}": obj for obj in all_objects}
+    relationship_groups = _group_relationships(catalog_object, relationships, object_map)
+    relationship_targets = [obj for obj in all_objects if obj.id != catalog_object.id]
     object_data = catalog_object.data
     return templates.TemplateResponse(
         request,
@@ -89,6 +89,7 @@ def object_detail(
             "relation_types": RELATION_TYPES,
             "source_references": _source_references(object_data),
             "network": _network_summary(object_data),
+            "container": _container_summary(object_data),
             "ports": _list_of_mappings(object_data.get("ports")),
             "endpoints": _list_of_mappings(object_data.get("endpoints")),
             "access_methods": _access_methods(object_data),
@@ -226,6 +227,8 @@ def update_object(
         if catalog_object is None:
             raise HTTPException(status_code=404, detail="Catalog object not found") from exc
         relationships = list_relationships_for_object(session, catalog_object)
+        all_objects = _sort_for_browse(list_objects(session))
+        object_map = {f"{obj.kind}:{obj.id}": obj for obj in all_objects}
         object_data = catalog_object.data
         return templates.TemplateResponse(
             request,
@@ -234,15 +237,16 @@ def update_object(
                 "title": f"{catalog_object.label} - Blockwart",
                 "object": catalog_object,
                 "relationships": relationships,
-                "relationship_groups": _group_relationships(catalog_object, relationships),
-                "relationship_targets": [
-                    obj
-                    for obj in _sort_for_browse(list_objects(session))
-                    if obj.id != catalog_object.id
-                ],
+                "relationship_groups": _group_relationships(
+                    catalog_object,
+                    relationships,
+                    object_map,
+                ),
+                "relationship_targets": [obj for obj in all_objects if obj.id != catalog_object.id],
                 "relation_types": RELATION_TYPES,
                 "source_references": _source_references(object_data),
                 "network": _network_summary(object_data),
+                "container": _container_summary(object_data),
                 "ports": _list_of_mappings(object_data.get("ports")),
                 "endpoints": _list_of_mappings(object_data.get("endpoints")),
                 "access_methods": _access_methods(object_data),
@@ -305,27 +309,45 @@ def _sort_for_browse(objects: list[CatalogObjectOut]) -> list[CatalogObjectOut]:
 def _group_relationships(
     catalog_object: CatalogObjectOut,
     relationships: list[dict[str, str]],
+    object_map: dict[str, CatalogObjectOut],
 ) -> dict[str, list[dict[str, str]]]:
     current_ref = f"{catalog_object.kind}:{catalog_object.id}"
     grouped: dict[str, list[dict[str, str]]] = {}
     for relationship in relationships:
         direction = "outbound" if relationship["from_ref"] == current_ref else "inbound"
+        other_ref = (
+            relationship["to_ref"]
+            if direction == "outbound"
+            else relationship["from_ref"]
+        )
+        other_object = object_map.get(other_ref)
         grouped.setdefault(direction, []).append(
             {
                 **relationship,
-                "other_ref": (
-                    relationship["to_ref"]
-                    if direction == "outbound"
-                    else relationship["from_ref"]
-                ),
-                "other_id": _object_id_from_ref(
-                    relationship["to_ref"]
-                    if direction == "outbound"
-                    else relationship["from_ref"]
-                ),
+                "other_ref": other_ref,
+                "other_id": _object_id_from_ref(other_ref),
+                "other_label": other_object.label if other_object else other_ref,
+                "service_ports": _relationship_service_ports(catalog_object, other_object),
             }
         )
     return grouped
+
+
+def _relationship_service_ports(
+    catalog_object: CatalogObjectOut,
+    other_object: CatalogObjectOut | None,
+) -> list[dict[str, str]]:
+    service = catalog_object if catalog_object.kind == "service" else other_object
+    if service is None or service.kind != "service":
+        return []
+    ports: list[dict[str, str]] = []
+    for endpoint in _list_of_mappings(service.data.get("endpoints")):
+        port = endpoint.get("port")
+        if port is None:
+            continue
+        protocol = str(endpoint.get("protocol") or "tcp")
+        ports.append({"label": "service", "value": f"{port}/{protocol}"})
+    return ports
 
 
 def _object_id_from_ref(value: str) -> str:
@@ -360,6 +382,11 @@ def _network_summary(data: Mapping[str, Any]) -> dict[str, list[Mapping[str, Any
         "addresses": _list_of_mappings(network.get("addresses")),
         "mac_addresses": _list_of_mappings(network.get("mac_addresses")),
     }
+
+
+def _container_summary(data: Mapping[str, Any]) -> Mapping[str, Any] | None:
+    container = data.get("container")
+    return container if isinstance(container, Mapping) else None
 
 
 def _access_methods(data: Mapping[str, Any]) -> list[dict[str, Any]]:

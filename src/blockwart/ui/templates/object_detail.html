@@ -39,6 +39,12 @@
               <div class="fact-label">ID</div>
               <div class="fact-value">{{ object.id }}</div>
             </div>
+            {% if container %}
+              <div class="fact">
+                <div class="fact-label">Container</div>
+                <div class="fact-value">{{ container.label or container.id }}</div>
+              </div>
+            {% endif %}
             <div class="fact">
               <div class="fact-label">Relationships</div>
               <div class="fact-value">{{ relationships|length }}</div>
@@ -156,7 +162,11 @@
                 {% for relationship in items %}
                   <li>
                     <strong>{{ relationship.relation_type }}</strong>
-                    <a href="/objects/{{ relationship.other_id }}">{{ relationship.other_ref }}</a>
+                    <a href="/objects/{{ relationship.other_id }}">{{ relationship.other_label }}</a>
+                    <span class="meta">{{ relationship.other_ref }}</span>
+                    {% for port in relationship.service_ports %}
+                      <span class="badge">{{ port.label }} {{ port.value }}</span>
+                    {% endfor %}
                   </li>
                 {% endfor %}
               </ul>
