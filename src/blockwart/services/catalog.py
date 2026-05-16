@@ -1,32 +1,52 @@
 import json
 
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
-from blockwart.models import CatalogObject
+from blockwart.models import AuditEvent, CatalogObject, Relationship
 from blockwart.schemas.catalog import CatalogObjectIn, CatalogObjectOut
+
+
+def _to_schema(row: CatalogObject) -> CatalogObjectOut:
+    return CatalogObjectOut(
+        id=row.id,
+        kind=row.kind,  # type: ignore[arg-type]
+        label=row.label,
+        status=row.status,
+        summary=row.summary,
+        data=json.loads(row.data_json),
+    )
+
+
+def _write_audit(session: Session, object_id: str | None, action: str, summary: str) -> None:
+    session.add(
+        AuditEvent(
+            object_id=object_id,
+            action=action,
+            actor="system",
+            summary=summary,
+        )
+    )
 
 
 def list_objects(session: Session) -> list[CatalogObjectOut]:
     statement = select(CatalogObject).order_by(CatalogObject.kind, CatalogObject.label)
     rows = session.scalars(statement).all()
-    return [
-        CatalogObjectOut(
-            id=row.id,
-            kind=row.kind,  # type: ignore[arg-type]
-            label=row.label,
-            status=row.status,
-            summary=row.summary,
-            data=json.loads(row.data_json),
-        )
-        for row in rows
-    ]
+    return [_to_schema(row) for row in rows]
+
+
+def get_object(session: Session, object_id: str) -> CatalogObjectOut | None:
+    row = session.get(CatalogObject, object_id)
+    if row is None:
+        return None
+    return _to_schema(row)
 
 
 def upsert_object(session: Session, payload: CatalogObjectIn) -> CatalogObjectOut:
     row = session.get(CatalogObject, payload.id)
     data_json = json.dumps(payload.data, sort_keys=True)
     if row is None:
+        action = "create"
         row = CatalogObject(
             id=payload.id,
             kind=payload.kind,
@@ -37,11 +57,32 @@ def upsert_object(session: Session, payload: CatalogObjectIn) -> CatalogObjectOu
         )
         session.add(row)
     else:
+        action = "update"
         row.kind = payload.kind
         row.label = payload.label
         row.status = payload.status
         row.summary = payload.summary
         row.data_json = data_json
 
+    summary = f"{action.title()} catalog object {payload.kind}:{payload.id}"
+    _write_audit(session, payload.id, action, summary)
     session.commit()
     return CatalogObjectOut(**payload.model_dump())
+
+
+def delete_object(session: Session, object_id: str) -> bool:
+    row = session.get(CatalogObject, object_id)
+    if row is None:
+        return False
+
+    kind = row.kind
+    object_ref = f"{kind}:{object_id}"
+    session.execute(
+        delete(Relationship).where(
+            (Relationship.from_ref == object_ref) | (Relationship.to_ref == object_ref)
+        )
+    )
+    session.delete(row)
+    _write_audit(session, object_id, "delete", f"Delete catalog object {object_ref}")
+    session.commit()
+    return True

@@ -53,12 +53,13 @@ def upgrade() -> None:
         sa.Column("actor", sa.String(length=128), nullable=False),
         sa.Column("summary", sa.Text(), nullable=False),
         sa.Column("created_at", sa.DateTime(), server_default=sa.func.now(), nullable=False),
-        sa.ForeignKeyConstraint(["object_id"], ["catalog_objects.id"]),
         sa.PrimaryKeyConstraint("id"),
     )
+    op.create_index("ix_audit_events_object_id", "audit_events", ["object_id"])
 
 
 def downgrade() -> None:
+    op.drop_index("ix_audit_events_object_id", table_name="audit_events")
     op.drop_table("audit_events")
     op.drop_index("ix_relationships_to_ref", table_name="relationships")
     op.drop_index("ix_relationships_relation_type", table_name="relationships")

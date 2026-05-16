@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import DateTime, ForeignKey, Integer, String, Text, func
+from sqlalchemy import DateTime, Integer, String, Text, func
 from sqlalchemy.orm import Mapped, mapped_column
 
 from blockwart.db.base import Base
@@ -36,7 +36,7 @@ class AuditEvent(Base):
     __tablename__ = "audit_events"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    object_id: Mapped[str | None] = mapped_column(ForeignKey("catalog_objects.id"), nullable=True)
+    object_id: Mapped[str | None] = mapped_column(String(128), nullable=True, index=True)
     action: Mapped[str] = mapped_column(String(96))
     actor: Mapped[str] = mapped_column(String(128), default="system")
     summary: Mapped[str] = mapped_column(Text)
