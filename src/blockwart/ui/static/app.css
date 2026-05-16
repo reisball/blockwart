@@ -516,6 +516,11 @@ button:hover,
   margin-top: 9px;
 }
 
+.relationship-detail {
+  width: fit-content;
+  margin-top: 10px;
+}
+
 .port-chip {
   border: 1px solid var(--border);
   border-radius: 7px;

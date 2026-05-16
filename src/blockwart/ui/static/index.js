@@ -27,8 +27,9 @@
 
   for (const card of cards) {
     const toggle = card.querySelector("[data-object-toggle]");
-    const detailLink = card.querySelector("[data-detail-link]");
-    detailLink?.addEventListener("click", (event) => event.stopPropagation());
+    for (const detailLink of card.querySelectorAll("[data-detail-link]")) {
+      detailLink.addEventListener("click", (event) => event.stopPropagation());
+    }
     toggle?.addEventListener("click", () => toggleCard(card));
     toggle?.addEventListener("keydown", (event) => {
       if (event.key !== "Enter" && event.key !== " ") {
