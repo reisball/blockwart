@@ -12,7 +12,19 @@ Current local keys:
 
 ## Pilot Seed Import
 
-The pilot catalog seed lives at `seeds/pilot_objects.yaml`. Import code should call
-`blockwart.services.seeds.import_seed_file(session, "seeds/pilot_objects.yaml")` with a fresh
-or existing SQLAlchemy session. The seed stores credential references only; it must not contain raw
-passwords, tokens, private keys, cookies, or `.env` file bodies.
+The pilot catalog seed lives at `seeds/pilot_objects.yaml`. Use the packaged CLI for local or
+deployment-prep initialization:
+
+```bash
+blockwart-seed --create-schema --seed seeds/pilot_objects.yaml
+```
+
+The CLI uses `BLOCKWART_DATABASE_URL` unless `--database-url` is supplied. It can also print a
+database summary without importing:
+
+```bash
+blockwart-seed --summary-only
+```
+
+The seed stores credential references only; it must not contain raw passwords, tokens, private keys,
+cookies, or `.env` file bodies.

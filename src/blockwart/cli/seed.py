@@ -1,0 +1,87 @@
+from __future__ import annotations
+
+import argparse
+import sys
+from collections.abc import Sequence
+from pathlib import Path
+
+from sqlalchemy.orm import sessionmaker
+
+from blockwart.db.base import Base
+from blockwart.db.session import build_engine
+from blockwart.models import AuditEvent, CatalogObject, Relationship
+from blockwart.services.seeds import import_seed_file
+
+DEFAULT_SEED_PATH = Path("seeds/pilot_objects.yaml")
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        prog="blockwart-seed",
+        description="Initialize a Blockwart database and import a seed file.",
+    )
+    parser.add_argument(
+        "--database-url",
+        help="SQLAlchemy database URL. Defaults to BLOCKWART_DATABASE_URL or local config.",
+    )
+    parser.add_argument(
+        "--seed",
+        default=str(DEFAULT_SEED_PATH),
+        help=f"Seed YAML file to import. Default: {DEFAULT_SEED_PATH}",
+    )
+    parser.add_argument(
+        "--create-schema",
+        action="store_true",
+        help="Create database tables before importing the seed.",
+    )
+    parser.add_argument(
+        "--summary-only",
+        action="store_true",
+        help="Print current object, relationship, and audit counts without importing.",
+    )
+    return parser
+
+
+def main(argv: Sequence[str] | None = None) -> int:
+    parser = build_parser()
+    args = parser.parse_args(argv)
+
+    engine = build_engine(args.database_url)
+    if args.create_schema:
+        Base.metadata.create_all(bind=engine)
+
+    session_factory = sessionmaker(bind=engine, autoflush=False, autocommit=False)
+    with session_factory() as session:
+        if args.summary_only:
+            _print_summary(session)
+            return 0
+
+        seed_path = Path(args.seed)
+        if not seed_path.exists():
+            print(f"seed_error=missing_file path={seed_path}", file=sys.stderr)
+            return 2
+
+        result = import_seed_file(session, seed_path)
+        print(
+            "seed_imported "
+            f"objects={result.objects_imported} "
+            f"relationships={result.relationships_imported}"
+        )
+        _print_summary(session)
+        return 0
+
+
+def _print_summary(session) -> None:
+    object_count = session.query(CatalogObject).count()
+    relationship_count = session.query(Relationship).count()
+    audit_count = session.query(AuditEvent).count()
+    print(
+        "catalog_summary "
+        f"objects={object_count} "
+        f"relationships={relationship_count} "
+        f"audit_events={audit_count}"
+    )
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

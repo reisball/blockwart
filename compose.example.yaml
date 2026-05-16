@@ -1,0 +1,15 @@
+services:
+  blockwart:
+    build: .
+    environment:
+      BLOCKWART_ENV: production
+      BLOCKWART_DATABASE_URL: sqlite:////data/blockwart.sqlite3
+      BLOCKWART_SECRET_REFERENCE: vaultwarden:Blockwart
+    ports:
+      - "127.0.0.1:8000:8000"
+    volumes:
+      - blockwart-data:/data
+    restart: unless-stopped
+
+volumes:
+  blockwart-data:

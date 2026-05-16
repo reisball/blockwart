@@ -36,6 +36,12 @@ Run the app:
 uvicorn blockwart.main:app --reload
 ```
 
+Initialize or refresh a local pilot database:
+
+```bash
+blockwart-seed --create-schema --seed seeds/pilot_objects.yaml
+```
+
 Run checks:
 
 ```bash
@@ -55,6 +61,12 @@ It returns sanitized object context, relationships, and credential-reference IDs
 resolves credential values. See docs/agent-api.md.
 
 A local MCP-compatible stdio wrapper is available as blockwart-mcp. See docs/mcp.md.
+
+## Deployment Readiness
+
+Blockwart includes a Dockerfile, a localhost-only compose example, and deployment notes. They are
+for controlled rollout preparation only; no persistent service or gateway registration is created
+by this repository. See docs/deployment.md.
 
 ## Secret Policy
 

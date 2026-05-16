@@ -1,0 +1,9 @@
+.git
+.pytest_cache
+.ruff_cache
+.venv
+__pycache__
+*.pyc
+blockwart.sqlite3
+exports/*
+!exports/.gitkeep

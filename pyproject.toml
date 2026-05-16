@@ -29,6 +29,7 @@ dev = [
 
 [project.scripts]
 blockwart-mcp = "blockwart.mcp.server:main"
+blockwart-seed = "blockwart.cli.seed:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
