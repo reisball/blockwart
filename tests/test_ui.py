@@ -73,6 +73,19 @@ def test_object_detail_shows_data_and_relationships(client: TestClient) -> None:
     assert "credential_references" not in response.text
     assert "/objects/n8n-api-credential" not in response.text
     assert "references/n8n.md" in response.text
+    assert "Daten JSON" not in response.text
+    assert "Relationship anlegen" not in response.text
+
+
+def test_relationship_add_form_is_hidden_behind_add_button(client: TestClient) -> None:
+    response = client.get("/objects/n8n")
+    add_response = client.get("/objects/n8n?edit=relationship-add")
+
+    assert response.status_code == 200
+    assert 'href="/objects/n8n?edit=relationship-add"' in response.text
+    assert "Relationship anlegen" not in response.text
+    assert add_response.status_code == 200
+    assert "Relationship anlegen" in add_response.text
 
 
 def test_create_object_form_redirects_to_detail(client: TestClient) -> None:
@@ -248,6 +261,87 @@ def test_system_detail_labels_inherited_service_access(
     assert "Demo Service" in response.text
     assert "http://192.168.50.210:8080" in response.text
     assert "credential_references" not in response.text
+
+
+def test_panel_edit_forms_update_existing_network_and_access(
+    client: TestClient,
+    session_factory,
+) -> None:
+    with session_factory() as session:
+        upsert_object(
+            session,
+            CatalogObjectIn(
+                id="edit-demo",
+                kind="system",
+                label="Edit Demo",
+                status="active",
+                summary="Editable object.",
+                data={
+                    "schema_version": 1,
+                    "network": {
+                        "hostnames": ["edit-demo"],
+                        "addresses": [{"ip": "192.168.50.220", "scope": "lan"}],
+                    },
+                    "ports": [
+                        {
+                            "port": 22,
+                            "protocol": "tcp",
+                            "purpose": "SSH",
+                            "exposure": "lan",
+                        }
+                    ],
+                    "access_methods": [
+                        {
+                            "type": "ssh",
+                            "endpoint": "ssh://192.168.50.220:22",
+                            "auth_mode": "key",
+                        }
+                    ],
+                },
+            ),
+        )
+
+    network_edit = client.get("/objects/edit-demo?edit=network")
+    access_edit = client.get("/objects/edit-demo?edit=access")
+
+    assert network_edit.status_code == 200
+    assert 'name="address_ip"' in network_edit.text
+    assert access_edit.status_code == 200
+    assert 'name="method_endpoint"' in access_edit.text
+
+    network_response = client.post(
+        "/objects/edit-demo/network",
+        data={
+            "hostnames": "edit-demo, edit-alias",
+            "address_ip": "192.168.50.221",
+            "address_interface": "eth0",
+            "address_scope": "lan",
+            "port_value": "22",
+            "port_protocol": "tcp",
+            "port_purpose": "SSH admin",
+            "port_exposure": "lan",
+        },
+        follow_redirects=False,
+    )
+    access_response = client.post(
+        "/objects/edit-demo/access",
+        data={
+            "method_ref": "system:edit-demo",
+            "method_index": "0",
+            "method_type": "ssh",
+            "method_endpoint": "ssh://192.168.50.221:22",
+            "method_auth_mode": "key-only",
+        },
+        follow_redirects=False,
+    )
+
+    assert network_response.status_code == 303
+    assert access_response.status_code == 303
+    detail = client.get("/objects/edit-demo")
+    assert "edit-alias" in detail.text
+    assert "192.168.50.221" in detail.text
+    assert "SSH admin" in detail.text
+    assert "key-only" in detail.text
 
 
 def test_update_object_form_does_not_echo_rejected_secret_values(client: TestClient) -> None:

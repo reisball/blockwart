@@ -67,6 +67,7 @@ def object_detail(
     request: Request,
     object_id: str,
     session: Annotated[Session, Depends(get_session)],
+    edit: str = "",
 ):
     catalog_object = get_object(session, object_id)
     if catalog_object is None:
@@ -107,6 +108,7 @@ def object_detail(
             ),
             "object_kinds": OBJECT_KINDS,
             "error": None,
+            "edit_section": edit,
         },
     )
 
@@ -215,13 +217,13 @@ def update_object(
     label: Annotated[str, Form()],
     status: Annotated[str, Form()] = "unknown",
     summary: Annotated[str, Form()] = "",
-    data_json: Annotated[str, Form()] = "{}",
+    data_json: Annotated[str | None, Form()] = None,
 ):
     try:
         existing_object = get_object(session, object_id)
         if existing_object is None:
             raise HTTPException(status_code=404, detail="Catalog object not found")
-        data = json.loads(data_json or "{}")
+        data = existing_object.data if data_json is None else json.loads(data_json or "{}")
         _reject_secret_shaped_form_data(data)
         payload = CatalogObjectIn(
             id=object_id,
@@ -272,10 +274,155 @@ def update_object(
                 "data_json": SAFE_DATA_JSON_FALLBACK,
                 "object_kinds": OBJECT_KINDS,
                 "error": _safe_error_message(exc),
+                "edit_section": "",
             },
             status_code=422,
         )
     return RedirectResponse(url=f"/objects/{payload.id}", status_code=303)
+
+
+@router.post("/objects/{object_id}/network", response_class=HTMLResponse)
+async def update_network(
+    request: Request,
+    object_id: str,
+    session: Annotated[Session, Depends(get_session)],
+):
+    existing_object = get_object(session, object_id)
+    if existing_object is None:
+        raise HTTPException(status_code=404, detail="Catalog object not found")
+    form = await request.form()
+    data = _editable_data_copy(existing_object.data)
+    hostnames = _split_multivalue(str(form.get("hostnames", "")))
+    network = dict(data.get("network") if isinstance(data.get("network"), Mapping) else {})
+    network["hostnames"] = hostnames
+    network["addresses"] = [
+        {
+            **address,
+            "ip": ip,
+            "interface": interface,
+            "scope": scope,
+        }
+        for address, ip, interface, scope in zip(
+            _padded_mappings(network.get("addresses"), len(form.getlist("address_ip"))),
+            form.getlist("address_ip"),
+            form.getlist("address_interface"),
+            form.getlist("address_scope"),
+            strict=False,
+        )
+        if str(ip).strip()
+    ]
+    data["network"] = network
+    data["ports"] = [
+        {
+            **port,
+            "port": int(port_value),
+            "protocol": protocol or "tcp",
+            "purpose": purpose,
+            "exposure": exposure,
+        }
+        for port, port_value, protocol, purpose, exposure in zip(
+            _padded_mappings(data.get("ports"), len(form.getlist("port_value"))),
+            form.getlist("port_value"),
+            form.getlist("port_protocol"),
+            form.getlist("port_purpose"),
+            form.getlist("port_exposure"),
+            strict=False,
+        )
+        if str(port_value).strip()
+    ]
+    data["endpoints"] = [
+        {
+            **endpoint,
+            "name": name,
+            "url": url,
+            "port": int(port_value) if str(port_value).strip() else "",
+        }
+        for endpoint, name, url, port_value in zip(
+            _padded_mappings(data.get("endpoints"), len(form.getlist("endpoint_name"))),
+            form.getlist("endpoint_name"),
+            form.getlist("endpoint_url"),
+            form.getlist("endpoint_port"),
+            strict=False,
+        )
+        if str(name).strip() or str(url).strip() or str(port_value).strip()
+    ]
+    _reject_secret_shaped_form_data(data)
+    upsert_object(
+        session,
+        CatalogObjectIn(
+            id=existing_object.id,
+            kind=existing_object.kind,
+            label=existing_object.label,
+            status=existing_object.status,
+            summary=existing_object.summary,
+            data=data,
+        ),
+    )
+    return RedirectResponse(url=f"/objects/{object_id}", status_code=303)
+
+
+@router.post("/objects/{object_id}/access", response_class=HTMLResponse)
+async def update_access(
+    request: Request,
+    object_id: str,
+    session: Annotated[Session, Depends(get_session)],
+):
+    if get_object(session, object_id) is None:
+        raise HTTPException(status_code=404, detail="Catalog object not found")
+    form = await request.form()
+    refs = [str(value) for value in form.getlist("method_ref")]
+    indexes = [str(value) for value in form.getlist("method_index")]
+    types = [str(value) for value in form.getlist("method_type")]
+    endpoints = [str(value) for value in form.getlist("method_endpoint")]
+    auth_modes = [str(value) for value in form.getlist("method_auth_mode")]
+    changed_objects: dict[str, CatalogObjectOut] = {}
+    changed_data: dict[str, dict[str, Any]] = {}
+    for ref, index_text, method_type, endpoint, auth_mode in zip(
+        refs,
+        indexes,
+        types,
+        endpoints,
+        auth_modes,
+        strict=False,
+    ):
+        if ":" not in ref:
+            continue
+        kind, target_id = ref.split(":", 1)
+        target = changed_objects.get(ref) or get_object(session, target_id)
+        if target is None or target.kind != kind:
+            continue
+        changed_objects[ref] = target
+        data = changed_data.setdefault(ref, _editable_data_copy(target.data))
+        methods = data.get("access_methods")
+        if not isinstance(methods, list):
+            continue
+        try:
+            index = int(index_text)
+        except ValueError:
+            continue
+        if index < 0 or index >= len(methods) or not isinstance(methods[index], dict):
+            continue
+        methods[index] = {
+            **methods[index],
+            "type": method_type,
+            "endpoint": endpoint,
+            "auth_mode": auth_mode,
+        }
+    for ref, data in changed_data.items():
+        _reject_secret_shaped_form_data(data)
+        target = changed_objects[ref]
+        upsert_object(
+            session,
+            CatalogObjectIn(
+                id=target.id,
+                kind=target.kind,
+                label=target.label,
+                status=target.status,
+                summary=target.summary,
+                data=data,
+            ),
+        )
+    return RedirectResponse(url=f"/objects/{object_id}", status_code=303)
 
 
 def _empty_form() -> dict[str, str]:
@@ -381,6 +528,7 @@ def _display_access_methods(
         catalog_object.data,
         source_kind=catalog_object.kind,
         source_label=catalog_object.label,
+        source_ref=f"{catalog_object.kind}:{catalog_object.id}",
     )
     if catalog_object.kind != "system":
         return methods
@@ -395,6 +543,7 @@ def _display_access_methods(
                 service.data,
                 source_kind="service",
                 source_label=service.label,
+                source_ref=f"service:{service.id}",
             )
         )
     return methods
@@ -444,6 +593,7 @@ def _access_methods(
     *,
     source_kind: str,
     source_label: str,
+    source_ref: str,
 ) -> list[dict[str, Any]]:
     methods = _list_of_mappings(data.get("access_methods"))
     return [
@@ -453,9 +603,26 @@ def _access_methods(
             "auth_mode": str(method.get("auth_mode") or "unknown"),
             "source_kind": source_kind,
             "source_label": source_label,
+            "source_ref": source_ref,
+            "index": index,
         }
-        for method in methods
+        for index, method in enumerate(methods)
     ]
+
+
+def _editable_data_copy(data: Mapping[str, Any]) -> dict[str, Any]:
+    return json.loads(json.dumps(data))
+
+
+def _split_multivalue(value: str) -> list[str]:
+    return [item.strip() for item in value.replace("\n", ",").split(",") if item.strip()]
+
+
+def _padded_mappings(value: Any, count: int) -> list[dict[str, Any]]:
+    items = [dict(item) for item in _list_of_mappings(value)]
+    while len(items) < count:
+        items.append({})
+    return items[:count]
 
 
 def _without_credential_references(value: Any) -> Any:

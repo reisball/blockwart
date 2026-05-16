@@ -185,6 +185,25 @@ button:hover,
   color: #fff;
 }
 
+.button-small {
+  min-width: 0;
+  min-height: 34px;
+  padding: 6px 10px;
+  font-size: 13px;
+}
+
+.button-muted {
+  background: var(--surface-muted);
+  border-color: var(--border-strong);
+  color: var(--text);
+}
+
+.button-muted:hover {
+  background: #e2e8f0;
+  border-color: var(--border-strong);
+  color: var(--text);
+}
+
 .stats {
   display: flex;
   flex-wrap: wrap;
@@ -250,6 +269,18 @@ button:hover,
   border-radius: var(--radius);
   padding: 16px;
   box-shadow: var(--shadow);
+}
+
+.panel-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.panel-head .section-title {
+  margin-bottom: 0;
 }
 
 .panel-sticky {
@@ -381,6 +412,13 @@ button:hover,
   font-weight: 700;
 }
 
+.edit-table input {
+  min-width: 120px;
+  min-height: 36px;
+  padding: 7px 9px;
+  font-size: 13px;
+}
+
 .rel {
   display: grid;
   gap: 7px;
@@ -406,6 +444,13 @@ button:hover,
   margin-top: 16px;
   padding-top: 14px;
   border-top: 1px solid var(--border);
+}
+
+.button-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
 }
 
 .error {

@@ -54,91 +54,192 @@
 
         {% if network.hostnames or network.addresses or ports or endpoints %}
           <section class="panel">
-            <h2 class="section-title">Netzwerk</h2>
-            {% if network.hostnames %}
-              <h3>Hostnames</h3>
-              <ul class="chips">
-                {% for hostname in network.hostnames %}
-                  <li class="chip">{{ hostname }}</li>
-                {% endfor %}
-              </ul>
-            {% endif %}
-            {% if network.addresses %}
-              <h3>Adressen</h3>
-              <div class="table-wrap">
-                <table class="table">
-                  <thead><tr><th>IP</th><th>Interface</th><th>Scope</th></tr></thead>
-                  <tbody>
-                    {% for address in network.addresses %}
-                      <tr>
-                        <td>{{ address.ip }}</td>
-                        <td>{{ address.interface or "-" }}</td>
-                        <td>{{ address.scope or address.network or "-" }}</td>
-                      </tr>
-                    {% endfor %}
-                  </tbody>
-                </table>
-              </div>
-            {% endif %}
-            {% if ports %}
-              <h3>Ports</h3>
-              <div class="table-wrap">
-                <table class="table">
-                  <thead><tr><th>Port</th><th>Zweck</th><th>Exposure</th></tr></thead>
-                  <tbody>
-                    {% for port in ports %}
-                      <tr>
-                        <td>{{ port.port }}/{{ port.protocol or "tcp" }}</td>
-                        <td>{{ port.purpose or "-" }}</td>
-                        <td>{{ port.exposure or "-" }}</td>
-                      </tr>
-                    {% endfor %}
-                  </tbody>
-                </table>
-              </div>
-            {% endif %}
-            {% if endpoints %}
-              <h3>Endpoints</h3>
-              <div class="table-wrap">
-                <table class="table">
-                  <tbody>
-                    {% for endpoint in endpoints %}
-                      <tr>
-                        <td>{{ endpoint.name or endpoint.type or "endpoint" }}</td>
-                        <td>{{ endpoint.url or endpoint.endpoint or endpoint.host or "-" }}</td>
-                        <td>{{ endpoint.port or "" }}</td>
-                      </tr>
-                    {% endfor %}
-                  </tbody>
-                </table>
-              </div>
+            <div class="panel-head">
+              <h2 class="section-title">Netzwerk</h2>
+              <a class="button button-small button-muted" href="/objects/{{ object.id }}?edit=network">Edit</a>
+            </div>
+            {% if edit_section == "network" %}
+              <form class="form-grid" method="post" action="/objects/{{ object.id }}/network">
+                <label>Hostnames
+                  <input name="hostnames" value="{{ network.hostnames|join(', ') }}" autocomplete="off" />
+                </label>
+                {% if network.addresses %}
+                  <h3>Adressen</h3>
+                  <div class="table-wrap">
+                    <table class="table edit-table">
+                      <thead><tr><th>IP</th><th>Interface</th><th>Scope</th></tr></thead>
+                      <tbody>
+                        {% for address in network.addresses %}
+                          <tr>
+                            <td><input name="address_ip" value="{{ address.ip }}" autocomplete="off" /></td>
+                            <td><input name="address_interface" value="{{ address.interface or '' }}" autocomplete="off" /></td>
+                            <td><input name="address_scope" value="{{ address.scope or address.network or '' }}" autocomplete="off" /></td>
+                          </tr>
+                        {% endfor %}
+                      </tbody>
+                    </table>
+                  </div>
+                {% endif %}
+                {% if ports %}
+                  <h3>Ports</h3>
+                  <div class="table-wrap">
+                    <table class="table edit-table">
+                      <thead><tr><th>Port</th><th>Protokoll</th><th>Zweck</th><th>Exposure</th></tr></thead>
+                      <tbody>
+                        {% for port in ports %}
+                          <tr>
+                            <td><input name="port_value" value="{{ port.port }}" inputmode="numeric" /></td>
+                            <td><input name="port_protocol" value="{{ port.protocol or 'tcp' }}" autocomplete="off" /></td>
+                            <td><input name="port_purpose" value="{{ port.purpose or '' }}" autocomplete="off" /></td>
+                            <td><input name="port_exposure" value="{{ port.exposure or '' }}" autocomplete="off" /></td>
+                          </tr>
+                        {% endfor %}
+                      </tbody>
+                    </table>
+                  </div>
+                {% endif %}
+                {% if endpoints %}
+                  <h3>Endpoints</h3>
+                  <div class="table-wrap">
+                    <table class="table edit-table">
+                      <thead><tr><th>Name</th><th>URL</th><th>Port</th></tr></thead>
+                      <tbody>
+                        {% for endpoint in endpoints %}
+                          <tr>
+                            <td><input name="endpoint_name" value="{{ endpoint.name or endpoint.type or '' }}" autocomplete="off" /></td>
+                            <td><input name="endpoint_url" value="{{ endpoint.url or endpoint.endpoint or endpoint.host or '' }}" autocomplete="off" /></td>
+                            <td><input name="endpoint_port" value="{{ endpoint.port or '' }}" inputmode="numeric" /></td>
+                          </tr>
+                        {% endfor %}
+                      </tbody>
+                    </table>
+                  </div>
+                {% endif %}
+                <div class="button-row">
+                  <button type="submit">Speichern</button>
+                  <a class="button button-muted" href="/objects/{{ object.id }}">Abbrechen</a>
+                </div>
+              </form>
+            {% else %}
+              {% if network.hostnames %}
+                <h3>Hostnames</h3>
+                <ul class="chips">
+                  {% for hostname in network.hostnames %}
+                    <li class="chip">{{ hostname }}</li>
+                  {% endfor %}
+                </ul>
+              {% endif %}
+              {% if network.addresses %}
+                <h3>Adressen</h3>
+                <div class="table-wrap">
+                  <table class="table">
+                    <thead><tr><th>IP</th><th>Interface</th><th>Scope</th></tr></thead>
+                    <tbody>
+                      {% for address in network.addresses %}
+                        <tr>
+                          <td>{{ address.ip }}</td>
+                          <td>{{ address.interface or "-" }}</td>
+                          <td>{{ address.scope or address.network or "-" }}</td>
+                        </tr>
+                      {% endfor %}
+                    </tbody>
+                  </table>
+                </div>
+              {% endif %}
+              {% if ports %}
+                <h3>Ports</h3>
+                <div class="table-wrap">
+                  <table class="table">
+                    <thead><tr><th>Port</th><th>Zweck</th><th>Exposure</th></tr></thead>
+                    <tbody>
+                      {% for port in ports %}
+                        <tr>
+                          <td>{{ port.port }}/{{ port.protocol or "tcp" }}</td>
+                          <td>{{ port.purpose or "-" }}</td>
+                          <td>{{ port.exposure or "-" }}</td>
+                        </tr>
+                      {% endfor %}
+                    </tbody>
+                  </table>
+                </div>
+              {% endif %}
+              {% if endpoints %}
+                <h3>Endpoints</h3>
+                <div class="table-wrap">
+                  <table class="table">
+                    <tbody>
+                      {% for endpoint in endpoints %}
+                        <tr>
+                          <td>{{ endpoint.name or endpoint.type or "endpoint" }}</td>
+                          <td>{{ endpoint.url or endpoint.endpoint or endpoint.host or "-" }}</td>
+                          <td>{{ endpoint.port or "" }}</td>
+                        </tr>
+                      {% endfor %}
+                    </tbody>
+                  </table>
+                </div>
+              {% endif %}
             {% endif %}
           </section>
         {% endif %}
 
         {% if access_methods %}
           <section class="panel">
-            <h2 class="section-title">Zugriff</h2>
-            <div class="table-wrap">
-              <table class="table">
-                <thead><tr><th>Quelle</th><th>Typ</th><th>Endpoint</th><th>Auth</th></tr></thead>
-                <tbody>
-                  {% for method in access_methods %}
-                    <tr>
-                      <td><span class="badge">{{ method.source_kind }}</span> {{ method.source_label }}</td>
-                      <td>{{ method.type }}</td>
-                      <td>{{ method.endpoint or "-" }}</td>
-                      <td>{{ method.auth_mode }}</td>
-                    </tr>
-                {% endfor %}
-                </tbody>
-              </table>
+            <div class="panel-head">
+              <h2 class="section-title">Zugriff</h2>
+              <a class="button button-small button-muted" href="/objects/{{ object.id }}?edit=access">Edit</a>
             </div>
+            {% if edit_section == "access" %}
+              <form class="form-grid" method="post" action="/objects/{{ object.id }}/access">
+                <div class="table-wrap">
+                  <table class="table edit-table">
+                    <thead><tr><th>Quelle</th><th>Typ</th><th>Endpoint</th><th>Auth</th></tr></thead>
+                    <tbody>
+                      {% for method in access_methods %}
+                        <tr>
+                          <td>
+                            <span class="badge">{{ method.source_kind }}</span> {{ method.source_label }}
+                            <input type="hidden" name="method_ref" value="{{ method.source_ref }}" />
+                            <input type="hidden" name="method_index" value="{{ method.index }}" />
+                          </td>
+                          <td><input name="method_type" value="{{ method.type }}" autocomplete="off" /></td>
+                          <td><input name="method_endpoint" value="{{ method.endpoint }}" autocomplete="off" /></td>
+                          <td><input name="method_auth_mode" value="{{ method.auth_mode }}" autocomplete="off" /></td>
+                        </tr>
+                      {% endfor %}
+                    </tbody>
+                  </table>
+                </div>
+                <div class="button-row">
+                  <button type="submit">Speichern</button>
+                  <a class="button button-muted" href="/objects/{{ object.id }}">Abbrechen</a>
+                </div>
+              </form>
+            {% else %}
+              <div class="table-wrap">
+                <table class="table">
+                  <thead><tr><th>Quelle</th><th>Typ</th><th>Endpoint</th><th>Auth</th></tr></thead>
+                  <tbody>
+                    {% for method in access_methods %}
+                      <tr>
+                        <td><span class="badge">{{ method.source_kind }}</span> {{ method.source_label }}</td>
+                        <td>{{ method.type }}</td>
+                        <td>{{ method.endpoint or "-" }}</td>
+                        <td>{{ method.auth_mode }}</td>
+                      </tr>
+                  {% endfor %}
+                  </tbody>
+                </table>
+              </div>
+            {% endif %}
           </section>
         {% endif %}
 
         <section class="panel">
-          <h2 class="section-title">Relationships</h2>
+          <div class="panel-head">
+            <h2 class="section-title">Relationships</h2>
+            <a class="button button-small" href="/objects/{{ object.id }}?edit=relationship-add">Add</a>
+          </div>
           {% if relationships %}
             {% for direction, items in relationship_groups.items() %}
               <h3>{{ "Ausgehend" if direction == "outbound" else "Eingehend" }}</h3>
@@ -158,30 +259,35 @@
           {% else %}
             <div class="meta">Keine Relationships.</div>
           {% endif %}
-          <form class="form-grid relation-form" method="post" action="/objects/{{ object.id }}/relationships">
-            <h3>Relationship anlegen</h3>
-            <label>Richtung
-              <select name="direction">
-                <option value="inbound" {% if object.kind == "service" %}selected{% endif %}>Ziel → dieses Objekt</option>
-                <option value="outbound">Dieses Objekt → Ziel</option>
-              </select>
-            </label>
-            <label>Relation
-              <select name="relation_type">
-                {% for relation_type in relation_types %}
-                  <option value="{{ relation_type }}" {% if relation_type == "hosts" %}selected{% endif %}>{{ relation_type }}</option>
-                {% endfor %}
-              </select>
-            </label>
-            <label>Zielobjekt
-              <select name="target_ref" required>
-                {% for target in relationship_targets %}
-                  <option value="{{ target.kind }}:{{ target.id }}" {% if object.kind == "service" and loop.first %}selected{% endif %}>{{ target.kind }} · {{ target.label }} · {{ target.id }}</option>
-                {% endfor %}
-              </select>
-            </label>
-            <button type="submit">Relationship speichern</button>
-          </form>
+          {% if edit_section == "relationship-add" %}
+            <form class="form-grid relation-form" method="post" action="/objects/{{ object.id }}/relationships">
+              <h3>Relationship anlegen</h3>
+              <label>Richtung
+                <select name="direction">
+                  <option value="inbound" {% if object.kind == "service" %}selected{% endif %}>Ziel → dieses Objekt</option>
+                  <option value="outbound">Dieses Objekt → Ziel</option>
+                </select>
+              </label>
+              <label>Relation
+                <select name="relation_type">
+                  {% for relation_type in relation_types %}
+                    <option value="{{ relation_type }}" {% if relation_type == "hosts" %}selected{% endif %}>{{ relation_type }}</option>
+                  {% endfor %}
+                </select>
+              </label>
+              <label>Zielobjekt
+                <select name="target_ref" required>
+                  {% for target in relationship_targets %}
+                    <option value="{{ target.kind }}:{{ target.id }}" {% if object.kind == "service" and loop.first %}selected{% endif %}>{{ target.kind }} · {{ target.label }} · {{ target.id }}</option>
+                  {% endfor %}
+                </select>
+              </label>
+              <div class="button-row">
+                <button type="submit">Relationship speichern</button>
+                <a class="button button-muted" href="/objects/{{ object.id }}">Abbrechen</a>
+              </div>
+            </form>
+          {% endif %}
         </section>
 
         {% if source_references %}
@@ -194,11 +300,6 @@
             </ul>
           </section>
         {% endif %}
-
-        <section class="panel">
-          <h2 class="section-title">Rohdaten</h2>
-          <pre>{{ data_json }}</pre>
-        </section>
       </section>
       <aside class="panel panel-sticky">
         <h2 class="section-title">Bearbeiten</h2>
@@ -210,7 +311,6 @@
           <label>Label<input name="label" value="{{ object.label }}" autocomplete="off" required /></label>
           <label>Status<input name="status" value="{{ object.status }}" autocomplete="off" /></label>
           <label>Kurzbeschreibung<textarea class="summary-input" name="summary" placeholder="Kurzbeschreibung">{{ object.summary or "" }}</textarea></label>
-          <label>Daten JSON<textarea class="code" name="data_json" spellcheck="false">{{ data_json }}</textarea></label>
           <button type="submit">Speichern</button>
         </form>
       </aside>
