@@ -38,40 +38,44 @@
       <section class="stack">
         <section class="panel">
           <h2 class="section-title">Überblick</h2>
-          <div class="facts">
-            <div class="fact">
-              <div class="fact-label">Typ</div>
-              <div class="fact-value">{{ object.kind }}</div>
+          <div class="overview-card">
+            <div class="overview-primary">
+              <div class="fact-label">Hostname</div>
+              <div class="overview-hostname">{{ network.hostnames|first or "-" }}</div>
             </div>
-            <div class="fact">
-              <div class="fact-label">Status</div>
-              <div class="fact-value">{{ object.status }}</div>
+            <div class="overview-labels">
+              <div class="overview-label">
+                <span>ID</span>
+                <strong>{{ object.id }}</strong>
+              </div>
+              <div class="overview-label">
+                <span>Typ</span>
+                <strong>{{ object.kind }}</strong>
+              </div>
+              <div class="overview-label">
+                <span>Status</span>
+                <strong>{{ object.status }}</strong>
+              </div>
+              {% if container %}
+                <div class="overview-label">
+                  <span>Container</span>
+                  <strong>{{ container.label or container.id }}</strong>
+                </div>
+              {% endif %}
+              <div class="overview-label">
+                <span>Relationships</span>
+                <strong>{{ relationships|length }}</strong>
+              </div>
             </div>
-            <div class="fact">
+          </div>
+          <div class="overview-times">
+            <div class="fact fact-small">
               <div class="fact-label">Created at</div>
               <div class="fact-value">{{ object.created_at or "-" }}</div>
             </div>
-            <div class="fact">
+            <div class="fact fact-small">
               <div class="fact-label">Last changed</div>
               <div class="fact-value">{{ object.last_changed or object.updated_at or "-" }}</div>
-            </div>
-            <div class="fact">
-              <div class="fact-label">ID</div>
-              <div class="fact-value">{{ object.id }}</div>
-            </div>
-            <div class="fact">
-              <div class="fact-label">Hostname</div>
-              <div class="fact-value">{{ network.hostnames|first or "-" }}</div>
-            </div>
-            {% if container %}
-              <div class="fact">
-                <div class="fact-label">Container</div>
-                <div class="fact-value">{{ container.label or container.id }}</div>
-              </div>
-            {% endif %}
-            <div class="fact">
-              <div class="fact-label">Relationships</div>
-              <div class="fact-value">{{ relationships|length }}</div>
             </div>
           </div>
         </section>
