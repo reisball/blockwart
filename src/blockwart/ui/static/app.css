@@ -479,11 +479,16 @@ button:hover,
 }
 
 .relationship-node {
+  position: relative;
   min-width: 0;
   border: 1px solid var(--border);
   background: var(--surface-muted);
   border-radius: 7px;
   padding: 10px;
+}
+
+.relationship-edge .relationship-node {
+  padding-right: 86px;
 }
 
 .relationship-node-current {
@@ -518,7 +523,9 @@ button:hover,
 
 .relationship-detail {
   width: fit-content;
-  margin-top: 10px;
+  position: absolute;
+  top: 10px;
+  right: 10px;
 }
 
 .port-chip {
