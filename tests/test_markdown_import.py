@@ -60,6 +60,10 @@ def test_build_tools_import_plan_parses_infrastructure_rows(tmp_path: Path) -> N
     assert "credential_references" not in system["data"]
     assert {method["type"] for method in system["data"]["access_methods"]} == {"ssh"}
     assert {method["type"] for method in service["data"]["access_methods"]} == {"web"}
+    assert all(
+        "credential_references" not in method
+        for method in system["data"]["access_methods"] + service["data"]["access_methods"]
+    )
     assert plan.payload["relationships"] == [
         {
             "from_ref": "system:ct-200",

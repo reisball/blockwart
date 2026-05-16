@@ -94,9 +94,17 @@ def object_detail(
             "container": _container_summary(object_data),
             "ports": _list_of_mappings(object_data.get("ports")),
             "endpoints": _list_of_mappings(object_data.get("endpoints")),
-            "access_methods": _access_methods(object_data),
+            "access_methods": _display_access_methods(
+                catalog_object,
+                relationship_groups,
+                object_map,
+            ),
             "credential_references": [],
-            "data_json": json.dumps(catalog_object.data, indent=2, sort_keys=True),
+            "data_json": json.dumps(
+                _without_credential_references(catalog_object.data),
+                indent=2,
+                sort_keys=True,
+            ),
             "object_kinds": OBJECT_KINDS,
             "error": None,
         },
@@ -251,7 +259,15 @@ def update_object(
                 "container": _container_summary(object_data),
                 "ports": _list_of_mappings(object_data.get("ports")),
                 "endpoints": _list_of_mappings(object_data.get("endpoints")),
-                "access_methods": _access_methods(object_data),
+                "access_methods": _display_access_methods(
+                    catalog_object,
+                    _group_relationships(
+                        catalog_object,
+                        relationships,
+                        object_map,
+                    ),
+                    object_map,
+                ),
                 "credential_references": [],
                 "data_json": SAFE_DATA_JSON_FALLBACK,
                 "object_kinds": OBJECT_KINDS,
@@ -356,6 +372,34 @@ def _relationship_service_ports(
     return ports
 
 
+def _display_access_methods(
+    catalog_object: CatalogObjectOut,
+    relationship_groups: dict[str, list[dict[str, str]]],
+    object_map: dict[str, CatalogObjectOut],
+) -> list[dict[str, Any]]:
+    methods = _access_methods(
+        catalog_object.data,
+        source_kind=catalog_object.kind,
+        source_label=catalog_object.label,
+    )
+    if catalog_object.kind != "system":
+        return methods
+    for relationship in relationship_groups.get("outbound", []):
+        if relationship.get("relation_type") != "hosts":
+            continue
+        service = object_map.get(relationship.get("to_ref", ""))
+        if service is None or service.kind != "service":
+            continue
+        methods.extend(
+            _access_methods(
+                service.data,
+                source_kind="service",
+                source_label=service.label,
+            )
+        )
+    return methods
+
+
 def _object_id_from_ref(value: str) -> str:
     if ":" not in value:
         return value
@@ -395,17 +439,43 @@ def _container_summary(data: Mapping[str, Any]) -> Mapping[str, Any] | None:
     return container if isinstance(container, Mapping) else None
 
 
-def _access_methods(data: Mapping[str, Any]) -> list[dict[str, Any]]:
+def _access_methods(
+    data: Mapping[str, Any],
+    *,
+    source_kind: str,
+    source_label: str,
+) -> list[dict[str, Any]]:
     methods = _list_of_mappings(data.get("access_methods"))
     return [
         {
             "type": str(method.get("type") or "access"),
             "endpoint": str(method.get("endpoint") or ""),
             "auth_mode": str(method.get("auth_mode") or "unknown"),
-            "credential_references": [],
+            "source_kind": source_kind,
+            "source_label": source_label,
         }
         for method in methods
     ]
+
+
+def _without_credential_references(value: Any) -> Any:
+    if isinstance(value, Mapping):
+        cleaned: dict[str, Any] = {}
+        for key, child in value.items():
+            if key == "credential_references":
+                continue
+            cleaned[key] = _without_credential_references(child)
+        return cleaned
+    if isinstance(value, list):
+        return [
+            cleaned_child
+            for item in value
+            if not _is_credential_ref(item)
+            for cleaned_child in [_without_credential_references(item)]
+        ]
+    if _is_credential_ref(value):
+        return ""
+    return value
 
 
 def _credential_references(data: Mapping[str, Any]) -> list[dict[str, str]]:

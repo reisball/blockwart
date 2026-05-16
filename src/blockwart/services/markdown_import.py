@@ -686,10 +686,11 @@ def _access_methods(
                 "type": method_type,
                 "endpoint": endpoint,
                 "auth_mode": _auth_mode(text),
-                "credential_references": credential_references,
                 "notes": text,
             }
         )
+        if credential_references:
+            methods[-1]["credential_references"] = credential_references
     return methods
 
 

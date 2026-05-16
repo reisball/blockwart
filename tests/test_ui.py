@@ -10,6 +10,8 @@ from blockwart.api.deps import get_session
 from blockwart.db.base import Base
 from blockwart.main import create_app
 from blockwart.models import Relationship
+from blockwart.schemas.catalog import CatalogObjectIn
+from blockwart.services.catalog import upsert_object
 from blockwart.services.seeds import import_seed_file
 
 SEED_PATH = Path(__file__).resolve().parents[1] / "seeds" / "pilot_objects.yaml"
@@ -68,6 +70,7 @@ def test_object_detail_shows_data_and_relationships(client: TestClient) -> None:
     assert "Ausgehend" in response.text
     assert "Zugriff" in response.text
     assert "Credential-Referenzen" not in response.text
+    assert "credential_references" not in response.text
     assert "/objects/n8n-api-credential" not in response.text
     assert "references/n8n.md" in response.text
 
@@ -177,6 +180,74 @@ def test_detail_form_can_create_relationship(client: TestClient, session_factory
             to_ref="service:n8n-web-ui",
         ).one_or_none()
     assert relationship is not None
+
+
+def test_system_detail_labels_inherited_service_access(
+    client: TestClient,
+    session_factory,
+) -> None:
+    with session_factory() as session:
+        upsert_object(
+            session,
+            CatalogObjectIn(
+                id="demo-host",
+                kind="system",
+                label="Demo Host",
+                status="active",
+                summary="Host.",
+                data={
+                    "schema_version": 1,
+                    "network": {"addresses": [{"ip": "192.168.50.210"}]},
+                    "access_methods": [
+                        {
+                            "type": "ssh",
+                            "endpoint": "ssh://192.168.50.210:22",
+                            "auth_mode": "ssh-key",
+                        }
+                    ],
+                },
+            ),
+        )
+        upsert_object(
+            session,
+            CatalogObjectIn(
+                id="demo-service",
+                kind="service",
+                label="Demo Service",
+                status="active",
+                summary="Service.",
+                data={
+                    "schema_version": 1,
+                    "system_id": "system:demo-host",
+                    "access_methods": [
+                        {
+                            "type": "web",
+                            "endpoint": "http://192.168.50.210:8080",
+                            "auth_mode": "configured-in-ui",
+                        }
+                    ],
+                },
+            ),
+        )
+        session.add(
+            Relationship(
+                from_ref="system:demo-host",
+                relation_type="hosts",
+                to_ref="service:demo-service",
+            )
+        )
+        session.commit()
+
+    response = client.get("/objects/demo-host")
+
+    assert response.status_code == 200
+    assert "system" in response.text
+    assert "Demo Host" in response.text
+    assert "ssh://192.168.50.210:22" in response.text
+    assert "service" in response.text
+    assert "Demo Service" in response.text
+    assert "http://192.168.50.210:8080" in response.text
+    assert "credential_references" not in response.text
 
 
 def test_update_object_form_does_not_echo_rejected_secret_values(client: TestClient) -> None:

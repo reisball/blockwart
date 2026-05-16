@@ -121,10 +121,11 @@
             <h2 class="section-title">Zugriff</h2>
             <div class="table-wrap">
               <table class="table">
-                <thead><tr><th>Typ</th><th>Endpoint</th><th>Auth</th></tr></thead>
+                <thead><tr><th>Quelle</th><th>Typ</th><th>Endpoint</th><th>Auth</th></tr></thead>
                 <tbody>
                   {% for method in access_methods %}
                     <tr>
+                      <td><span class="badge">{{ method.source_kind }}</span> {{ method.source_label }}</td>
                       <td>{{ method.type }}</td>
                       <td>{{ method.endpoint or "-" }}</td>
                       <td>{{ method.auth_mode }}</td>
