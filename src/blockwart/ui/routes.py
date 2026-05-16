@@ -42,12 +42,14 @@ def index(
     session: Annotated[Session, Depends(get_session)],
     q: str = "",
     kind: str = "",
+    create: str = "",
 ):
     normalized_kind = kind if kind in OBJECT_KINDS else ""
     objects = _visible_objects(
         search_objects(session, query=q.strip() or None, kind=normalized_kind or None)
     )
     systems = _sort_for_browse(search_objects(session, kind="system"))
+    relation_targets = _visible_objects(list_objects(session))
     object_counts = Counter(obj.kind for obj in _visible_objects(search_objects(session)))
     total_objects = sum(object_counts.values())
     return templates.TemplateResponse(
@@ -65,6 +67,9 @@ def index(
             "error": None,
             "form": _empty_form(),
             "systems": systems,
+            "relation_targets": relation_targets,
+            "relation_types": RELATION_TYPES,
+            "show_create_form": create == "1",
         },
     )
 
@@ -132,6 +137,8 @@ def save_object(
     summary: Annotated[str, Form()] = "",
     data_json: Annotated[str, Form()] = "{}",
     hosted_on_system_id: Annotated[str, Form()] = "",
+    relation_target_ref: Annotated[str, Form()] = "",
+    relation_type: Annotated[str, Form()] = "hosts",
 ):
     form = {
         "id": object_id,
@@ -141,14 +148,30 @@ def save_object(
         "summary": summary,
         "data_json": data_json,
         "hosted_on_system_id": hosted_on_system_id,
+        "relation_target_ref": relation_target_ref,
+        "relation_type": relation_type,
     }
     try:
         data = json.loads(data_json or "{}")
         _reject_secret_shaped_form_data(data)
         hosted_on_system_id = hosted_on_system_id.strip()
+        relation_target_ref = relation_target_ref.strip()
+        if hosted_on_system_id and not relation_target_ref:
+            relation_target_ref = f"system:{hosted_on_system_id}"
+            relation_type = "hosts"
+        if relation_target_ref:
+            if relation_type not in RELATION_TYPES:
+                raise ValueError("Unsupported relation type")
+            _require_existing_ref(session, relation_target_ref)
         if kind == "service" and hosted_on_system_id:
             _require_existing_ref(session, f"system:{hosted_on_system_id}")
             data["system_id"] = f"system:{hosted_on_system_id}"
+        elif (
+            kind == "service"
+            and relation_type == "hosts"
+            and relation_target_ref.startswith("system:")
+        ):
+            data["system_id"] = relation_target_ref
         payload = CatalogObjectIn(
             id=object_id,
             kind=kind,
@@ -158,12 +181,12 @@ def save_object(
             data=data,
         )
         upsert_object(session, payload)
-        if kind == "service" and hosted_on_system_id:
+        if relation_target_ref:
             create_relationship(
                 session,
-                from_ref=f"system:{hosted_on_system_id}",
-                relation_type="hosts",
-                to_ref=f"service:{payload.id}",
+                from_ref=relation_target_ref,
+                relation_type=relation_type,
+                to_ref=f"{payload.kind}:{payload.id}",
             )
     except (json.JSONDecodeError, ValidationError, ValueError) as exc:
         form["data_json"] = SAFE_DATA_JSON_FALLBACK
@@ -184,6 +207,9 @@ def save_object(
                 "error": _safe_error_message(exc),
                 "form": form,
                 "systems": _sort_for_browse(search_objects(session, kind="system")),
+                "relation_targets": _visible_objects(list_objects(session)),
+                "relation_types": RELATION_TYPES,
+                "show_create_form": True,
             },
             status_code=422,
         )
@@ -473,6 +499,8 @@ def _empty_form() -> dict[str, str]:
         "summary": "",
         "data_json": SAFE_DATA_JSON_FALLBACK,
         "hosted_on_system_id": "",
+        "relation_target_ref": "",
+        "relation_type": "hosts",
     }
 
 

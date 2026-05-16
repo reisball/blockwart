@@ -63,13 +63,28 @@ def test_index_shows_kind_counts(client: TestClient) -> None:
     assert 'value="decision"' not in response.text
     assert 'value="project"' not in response.text
     assert 'value="runbook"' not in response.text
-    assert 'value="active"' in response.text
-    assert 'value="inactive"' in response.text
-    assert 'value="deleted"' in response.text
     assert "credential_reference" not in response.text
+    assert "Neues Objekt anlegen" in response.text
+    assert 'class="panel panel-sticky"' not in response.text
     assert 'data-theme-value="dark"' in response.text
     assert 'data-theme-value="light"' in response.text
     assert "/static/theme.js" in response.text
+
+
+def test_create_object_form_is_hidden_behind_button(client: TestClient) -> None:
+    response = client.get("/")
+    create_response = client.get("/?create=1")
+
+    assert response.status_code == 200
+    assert 'href="/?create=1"' in response.text
+    assert 'name="object_id"' not in response.text
+    assert create_response.status_code == 200
+    assert "Neues Objekt anlegen" in create_response.text
+    assert 'name="object_id"' in create_response.text
+    assert 'name="relation_target_ref"' in create_response.text
+    assert 'value="active"' in create_response.text
+    assert 'value="inactive"' in create_response.text
+    assert 'value="deleted"' in create_response.text
 
 
 def test_object_detail_shows_data_and_relationships(client: TestClient) -> None:
