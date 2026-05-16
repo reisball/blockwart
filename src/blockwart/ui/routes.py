@@ -48,8 +48,10 @@ def index(
     objects = _visible_objects(
         search_objects(session, query=q.strip() or None, kind=normalized_kind or None)
     )
+    all_objects = _sort_for_browse(list_objects(session))
     systems = _sort_for_browse(search_objects(session, kind="system"))
-    relation_targets = _visible_objects(list_objects(session))
+    relation_targets = _visible_objects(all_objects)
+    object_map = {f"{obj.kind}:{obj.id}": obj for obj in all_objects}
     object_counts = Counter(obj.kind for obj in _visible_objects(search_objects(session)))
     total_objects = sum(object_counts.values())
     return templates.TemplateResponse(
@@ -70,6 +72,7 @@ def index(
             "relation_targets": relation_targets,
             "relation_types": RELATION_TYPES,
             "show_create_form": create == "1",
+            "index_relationships": _index_relationship_cards(session, objects, object_map),
         },
     )
 
@@ -204,6 +207,8 @@ def save_object(
     except (json.JSONDecodeError, ValidationError, ValueError) as exc:
         form["data_json"] = SAFE_DATA_JSON_FALLBACK
         objects = _visible_objects(search_objects(session))
+        all_objects = _sort_for_browse(list_objects(session))
+        object_map = {f"{obj.kind}:{obj.id}": obj for obj in all_objects}
         object_counts = Counter(obj.kind for obj in objects)
         return templates.TemplateResponse(
             request,
@@ -220,9 +225,14 @@ def save_object(
                 "error": _safe_error_message(exc),
                 "form": form,
                 "systems": _sort_for_browse(search_objects(session, kind="system")),
-                "relation_targets": _visible_objects(list_objects(session)),
+                "relation_targets": _visible_objects(all_objects),
                 "relation_types": RELATION_TYPES,
                 "show_create_form": True,
+                "index_relationships": _index_relationship_cards(
+                    session,
+                    objects,
+                    object_map,
+                ),
             },
             status_code=422,
         )
@@ -557,6 +567,26 @@ def _visible_objects(objects: list[CatalogObjectOut]) -> list[CatalogObjectOut]:
     return _sort_for_browse([obj for obj in objects if obj.kind in OBJECT_KINDS])
 
 
+def _index_relationship_cards(
+    session: Session,
+    objects: list[CatalogObjectOut],
+    object_map: dict[str, CatalogObjectOut],
+) -> dict[str, dict[str, Any]]:
+    cards: dict[str, dict[str, Any]] = {}
+    for catalog_object in objects:
+        relationships = list_relationships_for_object(session, catalog_object)
+        grouped = _group_relationships(catalog_object, relationships, object_map)
+        cards[catalog_object.id] = {
+            "system_ports": _relationship_system_ports(catalog_object),
+            "relationships": [
+                relationship
+                for direction in ("outbound", "inbound")
+                for relationship in grouped.get(direction, [])
+            ],
+        }
+    return cards
+
+
 def _group_relationships(
     catalog_object: CatalogObjectOut,
     relationships: list[dict[str, str]],
@@ -582,6 +612,17 @@ def _group_relationships(
             }
         )
     return grouped
+
+
+def _relationship_system_ports(catalog_object: CatalogObjectOut) -> list[dict[str, str]]:
+    ports: list[dict[str, str]] = []
+    for port_data in _list_of_mappings(catalog_object.data.get("ports")):
+        port = port_data.get("port")
+        if port is None:
+            continue
+        protocol = str(port_data.get("protocol") or "tcp")
+        ports.append({"label": "system", "value": f"{port}/{protocol}"})
+    return ports
 
 
 def _relationship_service_ports(

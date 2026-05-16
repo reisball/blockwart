@@ -49,7 +49,7 @@ def test_index_lists_seeded_objects_and_filters_search(client: TestClient) -> No
     assert response.status_code == 200
     assert "brieftraeger" in response.text
     assert "Referenzdoku" in response.text
-    assert "brieftraeger-ocr-worker" not in response.text
+    assert "brieftraeger-ocr-worker" in response.text
 
 
 def test_index_shows_kind_counts(client: TestClient) -> None:
@@ -79,6 +79,10 @@ def test_create_object_form_is_hidden_behind_button(client: TestClient) -> None:
     assert response.status_code == 200
     assert 'href="/?create=1"' in response.text
     assert 'name="object_id"' not in response.text
+    assert 'role="button"' in response.text
+    assert 'data-object-toggle' in response.text
+    assert 'data-detail-link' in response.text
+    assert "/static/index.js" in response.text
     assert create_response.status_code == 200
     assert "Neues Objekt anlegen" in create_response.text
     assert 'role="dialog"' in create_response.text

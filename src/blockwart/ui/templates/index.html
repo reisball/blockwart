@@ -11,6 +11,7 @@
     </script>
     <link rel="stylesheet" href="/static/app.css" />
     <script src="/static/theme.js" defer></script>
+    <script src="/static/index.js" defer></script>
   </head>
   <body>
     <header class="topbar">
@@ -122,35 +123,84 @@
         {% if objects %}
           <div class="list">
             {% for object in objects %}
-              <a class="object-row" href="/objects/{{ object.id }}">
-                <div class="kind">{{ object.kind }}<br /><span class="status">{{ object.status }}</span></div>
-                <div>
-                  <div class="label">
-                    {% if object.data.network and object.data.network.hostnames %}
-                      {{ object.data.network.hostnames|first }}
-                    {% else %}
-                      {{ object.label }}
-                    {% endif %}
+              {% set object_relationships = index_relationships[object.id] %}
+              <article class="object-card" data-object-card>
+                <div class="object-row" role="button" tabindex="0" aria-expanded="false" data-object-toggle>
+                  <div class="kind">{{ object.kind }}<br /><span class="status">{{ object.status }}</span></div>
+                  <div>
+                    <div class="label">
+                      {% if object.data.network and object.data.network.hostnames %}
+                        {{ object.data.network.hostnames|first }}
+                      {% else %}
+                        {{ object.label }}
+                      {% endif %}
+                    </div>
+                    <div class="summary">{{ object.summary or object.id }}</div>
+                    <div class="badges">
+                      {% if object.data.network and object.data.network.addresses %}
+                        {% for address in object.data.network.addresses[:2] %}
+                          <span class="badge">{{ address.ip }}</span>
+                        {% endfor %}
+                      {% endif %}
+                      {% if object.data.ports %}
+                        {% for port in object.data.ports[:2] %}
+                          <span class="badge">{{ port.port }}/{{ port.protocol or "tcp" }}</span>
+                        {% endfor %}
+                      {% endif %}
+                      {% if object.data.source_references %}
+                        <span class="badge">Referenzdoku</span>
+                      {% endif %}
+                    </div>
                   </div>
-                  <div class="summary">{{ object.summary or object.id }}</div>
-                  <div class="badges">
-                    {% if object.data.network and object.data.network.addresses %}
-                      {% for address in object.data.network.addresses[:2] %}
-                        <span class="badge">{{ address.ip }}</span>
+                  <div class="object-actions">
+                    <span class="object-id">{{ object.id }}</span>
+                    <a class="button button-small button-muted" href="/objects/{{ object.id }}" data-detail-link>Details</a>
+                  </div>
+                </div>
+                <div class="object-expanded" data-object-expanded>
+                  <div class="relationship-map">
+                    <div class="relationship-node relationship-node-current">
+                      <span>{{ object.kind }}</span>
+                      <strong>
+                        {% if object.data.network and object.data.network.hostnames %}
+                          {{ object.data.network.hostnames|first }}
+                        {% else %}
+                          {{ object.label }}
+                        {% endif %}
+                      </strong>
+                      <small>{{ object.kind }}:{{ object.id }}</small>
+                      {% if object_relationships.system_ports %}
+                        <div class="relationship-ports">
+                          {% for port in object_relationships.system_ports %}
+                            <span class="port-chip port-chip-system">{{ port.label }} {{ port.value }}</span>
+                          {% endfor %}
+                        </div>
+                      {% endif %}
+                    </div>
+                    {% if object_relationships.relationships %}
+                      {% for relationship in object_relationships.relationships %}
+                        <div class="relationship-edge">
+                          <div class="relationship-line" aria-hidden="true"></div>
+                          <div class="relationship-node">
+                            <span>{{ relationship.relation_type }}</span>
+                            <strong>{{ relationship.other_label }}</strong>
+                            <small>{{ relationship.other_ref }}</small>
+                            {% if relationship.service_ports %}
+                              <div class="relationship-ports">
+                                {% for port in relationship.service_ports %}
+                                  <span class="port-chip port-chip-service">{{ port.label }} {{ port.value }}</span>
+                                {% endfor %}
+                              </div>
+                            {% endif %}
+                          </div>
+                        </div>
                       {% endfor %}
-                    {% endif %}
-                    {% if object.data.ports %}
-                      {% for port in object.data.ports[:2] %}
-                        <span class="badge">{{ port.port }}/{{ port.protocol or "tcp" }}</span>
-                      {% endfor %}
-                    {% endif %}
-                    {% if object.data.source_references %}
-                      <span class="badge">Referenzdoku</span>
+                    {% else %}
+                      <div class="empty relationship-empty">Keine Beziehungen erfasst.</div>
                     {% endif %}
                   </div>
                 </div>
-                <div class="object-id">{{ object.id }}</div>
-              </a>
+              </article>
             {% endfor %}
           </div>
         {% else %}
