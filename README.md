@@ -43,6 +43,17 @@ pytest
 python -m compileall src
 ```
 
+## Agent Read API
+
+The first agent-facing surface is read-only and lives under /api/agent:
+
+- GET /api/agent/search
+- GET /api/agent/objects/{object_id}
+- GET /api/agent/context
+
+It returns sanitized object context, relationships, and credential-reference IDs only. It never
+resolves credential values. See docs/agent-api.md.
+
 ## Secret Policy
 
 Blockwart stores credential references, never credential values.
@@ -62,4 +73,3 @@ Forbidden:
 - private keys
 - cookies/sessions
 - exported password-store data
-
