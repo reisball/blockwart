@@ -45,7 +45,17 @@ def test_index_lists_seeded_objects_and_filters_search(client: TestClient) -> No
 
     assert response.status_code == 200
     assert "Brieftraeger" in response.text
+    assert "Referenzdoku" in response.text
     assert "brieftraeger-ocr-worker" not in response.text
+
+
+def test_index_shows_kind_counts(client: TestClient) -> None:
+    response = client.get("/")
+
+    assert response.status_code == 200
+    assert "<strong>52</strong> alle" in response.text
+    assert "system" in response.text
+    assert "credential_reference" in response.text
 
 
 def test_object_detail_shows_data_and_relationships(client: TestClient) -> None:
@@ -54,7 +64,11 @@ def test_object_detail_shows_data_and_relationships(client: TestClient) -> None:
     assert response.status_code == 200
     assert "n8n Web UI" in response.text
     assert "Relationships" in response.text
-    assert "system:n8n" in response.text
+    assert "Ausgehend" in response.text
+    assert "Zugriff & Credential-Referenzen" in response.text
+    assert "credential_reference:n8n-api-credential" in response.text
+    assert "/objects/n8n-api-credential" in response.text
+    assert "references/n8n.md" in response.text
 
 
 def test_create_object_form_redirects_to_detail(client: TestClient) -> None:

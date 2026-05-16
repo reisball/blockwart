@@ -44,6 +44,24 @@
         gap: 10px;
         margin-top: 18px;
       }
+      .stats {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        margin-top: 14px;
+      }
+      .stat {
+        border: 1px solid #d9dde3;
+        border-radius: 6px;
+        background: #fbfcfe;
+        color: #344054;
+        padding: 7px 9px;
+        font-size: 13px;
+        text-decoration: none;
+      }
+      .stat strong {
+        color: #171a1f;
+      }
       input,
       select,
       textarea,
@@ -112,6 +130,19 @@
         font-size: 14px;
         line-height: 1.35;
       }
+      .badges {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+        margin-top: 8px;
+      }
+      .badge {
+        border: 1px solid #e1e5eb;
+        border-radius: 999px;
+        color: #475467;
+        padding: 3px 7px;
+        font-size: 12px;
+      }
       .panel {
         border: 1px solid #d9dde3;
         background: #ffffff;
@@ -162,6 +193,12 @@
           </select>
           <button type="submit">Suchen</button>
         </form>
+        <nav class="stats" aria-label="Objektzahlen">
+          <a class="stat" href="/"><strong>{{ total_objects }}</strong> alle</a>
+          {% for object_kind in object_kinds %}
+            <a class="stat" href="/?kind={{ object_kind }}"><strong>{{ object_counts[object_kind] or 0 }}</strong> {{ object_kind }}</a>
+          {% endfor %}
+        </nav>
       </div>
     </header>
     <main>
@@ -175,6 +212,21 @@
                 <div>
                   <div class="label">{{ object.label }}</div>
                   <div class="summary">{{ object.summary or object.id }}</div>
+                  <div class="badges">
+                    {% if object.data.network and object.data.network.addresses %}
+                      {% for address in object.data.network.addresses[:2] %}
+                        <span class="badge">{{ address.ip }}</span>
+                      {% endfor %}
+                    {% endif %}
+                    {% if object.data.ports %}
+                      {% for port in object.data.ports[:2] %}
+                        <span class="badge">{{ port.port }}/{{ port.protocol or "tcp" }}</span>
+                      {% endfor %}
+                    {% endif %}
+                    {% if object.data.source_references %}
+                      <span class="badge">Referenzdoku</span>
+                    {% endif %}
+                  </div>
                 </div>
                 <div class="status">{{ object.id }}</div>
               </a>
@@ -206,4 +258,3 @@
     </main>
   </body>
 </html>
-

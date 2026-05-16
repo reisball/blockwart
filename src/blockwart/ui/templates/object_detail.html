@@ -34,6 +34,10 @@
         font-size: 28px;
         line-height: 1.15;
       }
+      h3 {
+        margin: 0 0 8px;
+        font-size: 14px;
+      }
       .meta {
         color: #5a6472;
       }
@@ -52,6 +56,69 @@
         margin: 0 0 10px;
         font-size: 16px;
       }
+      .stack {
+        display: grid;
+        gap: 14px;
+      }
+      .facts {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 10px;
+      }
+      .fact,
+      .chip,
+      .ref-chip {
+        border: 1px solid #e1e5eb;
+        background: #fbfcfe;
+        border-radius: 6px;
+      }
+      .fact {
+        padding: 10px;
+      }
+      .fact-label {
+        color: #667085;
+        font-size: 12px;
+        text-transform: uppercase;
+      }
+      .fact-value {
+        margin-top: 3px;
+        overflow-wrap: anywhere;
+        font-weight: 650;
+      }
+      .chips {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+        margin: 0;
+        padding: 0;
+        list-style: none;
+      }
+      .chip,
+      .ref-chip {
+        display: inline-flex;
+        gap: 6px;
+        align-items: center;
+        padding: 6px 8px;
+        color: #344054;
+        font-size: 13px;
+        text-decoration: none;
+      }
+      .table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 13px;
+      }
+      .table th,
+      .table td {
+        border-bottom: 1px solid #e1e5eb;
+        padding: 8px 6px;
+        text-align: left;
+        vertical-align: top;
+      }
+      .table th {
+        color: #667085;
+        font-weight: 650;
+      }
       .rel {
         display: grid;
         gap: 6px;
@@ -63,7 +130,6 @@
         border: 1px solid #e1e5eb;
         border-radius: 6px;
         padding: 8px;
-        font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
         font-size: 13px;
         overflow-wrap: anywhere;
       }
@@ -121,6 +187,9 @@
         main {
           grid-template-columns: 1fr;
         }
+        .facts {
+          grid-template-columns: 1fr;
+        }
       }
     </style>
   </head>
@@ -134,19 +203,156 @@
       {% endif %}
     </header>
     <main>
-      <section class="panel">
-        <h2 class="section-title">Daten</h2>
-        <pre>{{ data_json }}</pre>
-        <h2 class="section-title" style="margin-top: 20px">Relationships</h2>
-        {% if relationships %}
-          <ul class="rel">
-            {% for relationship in relationships %}
-              <li>{{ relationship.from_ref }} {{ relationship.relation_type }} {{ relationship.to_ref }}</li>
-            {% endfor %}
-          </ul>
-        {% else %}
-          <div class="meta">Keine Relationships.</div>
+      <section class="stack">
+        <section class="panel">
+          <h2 class="section-title">Überblick</h2>
+          <div class="facts">
+            <div class="fact">
+              <div class="fact-label">Typ</div>
+              <div class="fact-value">{{ object.kind }}</div>
+            </div>
+            <div class="fact">
+              <div class="fact-label">Status</div>
+              <div class="fact-value">{{ object.status }}</div>
+            </div>
+            <div class="fact">
+              <div class="fact-label">ID</div>
+              <div class="fact-value">{{ object.id }}</div>
+            </div>
+            <div class="fact">
+              <div class="fact-label">Relationships</div>
+              <div class="fact-value">{{ relationships|length }}</div>
+            </div>
+          </div>
+        </section>
+
+        {% if network.hostnames or network.addresses or ports or endpoints %}
+          <section class="panel">
+            <h2 class="section-title">Netzwerk</h2>
+            {% if network.hostnames %}
+              <h3>Hostnames</h3>
+              <ul class="chips">
+                {% for hostname in network.hostnames %}
+                  <li class="chip">{{ hostname }}</li>
+                {% endfor %}
+              </ul>
+            {% endif %}
+            {% if network.addresses %}
+              <h3 style="margin-top: 14px">Adressen</h3>
+              <table class="table">
+                <thead><tr><th>IP</th><th>Interface</th><th>Scope</th></tr></thead>
+                <tbody>
+                  {% for address in network.addresses %}
+                    <tr>
+                      <td>{{ address.ip }}</td>
+                      <td>{{ address.interface or "-" }}</td>
+                      <td>{{ address.scope or address.network or "-" }}</td>
+                    </tr>
+                  {% endfor %}
+                </tbody>
+              </table>
+            {% endif %}
+            {% if ports %}
+              <h3 style="margin-top: 14px">Ports</h3>
+              <table class="table">
+                <thead><tr><th>Port</th><th>Zweck</th><th>Exposure</th></tr></thead>
+                <tbody>
+                  {% for port in ports %}
+                    <tr>
+                      <td>{{ port.port }}/{{ port.protocol or "tcp" }}</td>
+                      <td>{{ port.purpose or "-" }}</td>
+                      <td>{{ port.exposure or "-" }}</td>
+                    </tr>
+                  {% endfor %}
+                </tbody>
+              </table>
+            {% endif %}
+            {% if endpoints %}
+              <h3 style="margin-top: 14px">Endpoints</h3>
+              <table class="table">
+                <tbody>
+                  {% for endpoint in endpoints %}
+                    <tr>
+                      <td>{{ endpoint.name or endpoint.type or "endpoint" }}</td>
+                      <td>{{ endpoint.url or endpoint.endpoint or endpoint.host or "-" }}</td>
+                      <td>{{ endpoint.port or "" }}</td>
+                    </tr>
+                  {% endfor %}
+                </tbody>
+              </table>
+            {% endif %}
+          </section>
         {% endif %}
+
+        {% if access_methods or credential_references %}
+          <section class="panel">
+            <h2 class="section-title">Zugriff & Credential-Referenzen</h2>
+            {% if access_methods %}
+              <table class="table">
+                <thead><tr><th>Typ</th><th>Endpoint</th><th>Auth</th><th>Referenzen</th></tr></thead>
+                <tbody>
+                  {% for method in access_methods %}
+                    <tr>
+                      <td>{{ method.type }}</td>
+                      <td>{{ method.endpoint or "-" }}</td>
+                      <td>{{ method.auth_mode }}</td>
+                      <td>
+                        {% for ref in method.credential_references %}
+                          <a class="ref-chip" href="/objects/{{ ref.split(':', 1)[1] }}">{{ ref }}</a>
+                        {% else %}
+                          <span class="meta">keine</span>
+                        {% endfor %}
+                      </td>
+                    </tr>
+                  {% endfor %}
+                </tbody>
+              </table>
+            {% endif %}
+            {% if credential_references %}
+              <h3 style="margin-top: 14px">Alle Credential-Referenzen</h3>
+              <ul class="chips">
+                {% for credential in credential_references %}
+                  <li><a class="ref-chip" href="/objects/{{ credential.id }}">{{ credential.ref }}</a></li>
+                {% endfor %}
+              </ul>
+            {% endif %}
+          </section>
+        {% endif %}
+
+        <section class="panel">
+          <h2 class="section-title">Relationships</h2>
+          {% if relationships %}
+            {% for direction, items in relationship_groups.items() %}
+              <h3>{{ "Ausgehend" if direction == "outbound" else "Eingehend" }}</h3>
+              <ul class="rel">
+                {% for relationship in items %}
+                  <li>
+                    <strong>{{ relationship.relation_type }}</strong>
+                    <a href="/objects/{{ relationship.other_id }}">{{ relationship.other_ref }}</a>
+                  </li>
+                {% endfor %}
+              </ul>
+            {% endfor %}
+          {% else %}
+            <div class="meta">Keine Relationships.</div>
+          {% endif %}
+        </section>
+
+        {% if source_references %}
+          <section class="panel">
+            <h2 class="section-title">Referenzdoku</h2>
+            <ul class="rel">
+              {% for reference in source_references %}
+                <li><strong>{{ reference.label }}</strong><br /><span class="meta">{{ reference.uri }}</span></li>
+              {% endfor %}
+            </ul>
+          </section>
+        {% endif %}
+
+        <section class="panel">
+          <h2 class="section-title">Rohdaten</h2>
+          <pre>{{ data_json }}</pre>
+        </section>
       </section>
       <aside class="panel">
         <h2 class="section-title">Bearbeiten</h2>
