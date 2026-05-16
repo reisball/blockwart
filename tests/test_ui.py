@@ -47,7 +47,7 @@ def test_index_lists_seeded_objects_and_filters_search(client: TestClient) -> No
     response = client.get("/?q=brieftraeger&kind=system")
 
     assert response.status_code == 200
-    assert "Brieftraeger" in response.text
+    assert "brieftraeger" in response.text
     assert "Referenzdoku" in response.text
     assert "brieftraeger-ocr-worker" not in response.text
 
@@ -60,6 +60,7 @@ def test_index_shows_kind_counts(client: TestClient) -> None:
     assert "system" in response.text
     assert "netzwerk" in response.text
     assert "service" in response.text
+    assert "host" in response.text
     assert 'value="decision"' not in response.text
     assert 'value="project"' not in response.text
     assert 'value="runbook"' not in response.text
@@ -83,7 +84,9 @@ def test_create_object_form_is_hidden_behind_button(client: TestClient) -> None:
     assert 'role="dialog"' in create_response.text
     assert 'class="modal-overlay"' in create_response.text
     assert 'name="object_id"' in create_response.text
+    assert 'name="hostname"' in create_response.text
     assert 'name="relation_target_ref"' in create_response.text
+    assert 'value="host"' in create_response.text
     assert 'value="active"' in create_response.text
     assert 'value="inactive"' in create_response.text
     assert 'value="deleted"' in create_response.text
@@ -216,7 +219,9 @@ def test_overview_edit_updates_object_metadata(client: TestClient) -> None:
     edit_response = client.get("/objects/n8n?edit=overview")
 
     assert edit_response.status_code == 200
+    assert 'name="label"' not in edit_response.text
     assert 'name="hostname"' in edit_response.text
+    assert "Container ID" not in edit_response.text
     assert "Created at" in edit_response.text
     assert "Last changed" in edit_response.text
     assert "Bearbeiten" not in edit_response.text
@@ -224,7 +229,6 @@ def test_overview_edit_updates_object_metadata(client: TestClient) -> None:
     response = client.post(
         "/objects/n8n",
         data={
-            "label": "n8n Workflows",
             "hostname": "n8n-main",
             "kind": "system",
             "status": "inactive",
@@ -235,7 +239,6 @@ def test_overview_edit_updates_object_metadata(client: TestClient) -> None:
 
     assert response.status_code == 303
     detail = client.get("/objects/n8n")
-    assert "n8n Workflows" in detail.text
     assert "n8n-main" in detail.text
     assert "inactive" in detail.text
     assert "Updated through overview." in detail.text

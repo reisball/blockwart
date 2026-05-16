@@ -132,7 +132,8 @@ def save_object(
     session: Annotated[Session, Depends(get_session)],
     object_id: Annotated[str, Form()],
     kind: Annotated[str, Form()],
-    label: Annotated[str, Form()],
+    label: Annotated[str | None, Form()] = None,
+    hostname: Annotated[str | None, Form()] = None,
     status: Annotated[str, Form()] = "active",
     summary: Annotated[str, Form()] = "",
     data_json: Annotated[str, Form()] = "{}",
@@ -143,7 +144,8 @@ def save_object(
     form = {
         "id": object_id,
         "kind": kind,
-        "label": label,
+        "label": label or "",
+        "hostname": hostname or "",
         "status": status,
         "summary": summary,
         "data_json": data_json,
@@ -154,6 +156,17 @@ def save_object(
     try:
         data = json.loads(data_json or "{}")
         _reject_secret_shaped_form_data(data)
+        primary_hostname = (hostname or label or object_id).strip()
+        if primary_hostname:
+            network = dict(data.get("network") if isinstance(data.get("network"), Mapping) else {})
+            existing_hostnames = network.get("hostnames")
+            hostname_values = (
+                [str(value) for value in existing_hostnames]
+                if isinstance(existing_hostnames, list)
+                else []
+            )
+            network["hostnames"] = [primary_hostname, *hostname_values[1:]]
+            data["network"] = network
         hosted_on_system_id = hosted_on_system_id.strip()
         relation_target_ref = relation_target_ref.strip()
         if hosted_on_system_id and not relation_target_ref:
@@ -175,7 +188,7 @@ def save_object(
         payload = CatalogObjectIn(
             id=object_id,
             kind=kind,
-            label=label,
+            label=primary_hostname or object_id,
             status=status or "active",
             summary=summary or None,
             data=data,
@@ -249,7 +262,7 @@ def update_object(
     request: Request,
     object_id: str,
     session: Annotated[Session, Depends(get_session)],
-    label: Annotated[str, Form()],
+    label: Annotated[str | None, Form()] = None,
     kind: Annotated[str | None, Form()] = None,
     status: Annotated[str, Form()] = "active",
     summary: Annotated[str, Form()] = "",
@@ -265,6 +278,7 @@ def update_object(
         data = _editable_data_copy(
             existing_object.data if data_json is None else json.loads(data_json or "{}")
         )
+        primary_hostname = None
         if hostname is not None:
             network = dict(data.get("network") if isinstance(data.get("network"), Mapping) else {})
             existing_hostnames = network.get("hostnames")
@@ -294,7 +308,7 @@ def update_object(
         payload = CatalogObjectIn(
             id=object_id,
             kind=kind or existing_object.kind,
-            label=label,
+            label=primary_hostname or label or existing_object.label,
             status=status or "active",
             summary=summary or None,
             data=data,
@@ -495,6 +509,7 @@ def _empty_form() -> dict[str, str]:
         "id": "",
         "kind": "system",
         "label": "",
+        "hostname": "",
         "status": "active",
         "summary": "",
         "data_json": SAFE_DATA_JSON_FALLBACK,

@@ -7,6 +7,7 @@ from blockwart.domain.references import TypedReference
 from blockwart.domain.security import find_secret_violations
 
 ObjectKind = Literal[
+    "host",
     "system",
     "netzwerk",
     "service",
@@ -15,9 +16,9 @@ ObjectKind = Literal[
     "decision",
     "project",
 ]
-PublicObjectKind = Literal["system", "netzwerk", "service"]
+PublicObjectKind = Literal["host", "system", "netzwerk", "service"]
 ObjectStatus = Literal["active", "inactive", "deleted"]
-PUBLIC_OBJECT_KINDS: tuple[PublicObjectKind, ...] = ("system", "netzwerk", "service")
+PUBLIC_OBJECT_KINDS: tuple[PublicObjectKind, ...] = ("host", "system", "netzwerk", "service")
 OBJECT_STATUSES: tuple[ObjectStatus, ...] = ("active", "inactive", "deleted")
 
 REFERENCE_TARGETS = {
@@ -30,7 +31,7 @@ REFERENCE_TARGETS = {
     "related_runbooks": {"runbook"},
 }
 
-DEPENDENCY_TARGETS = {"system", "netzwerk", "service"}
+DEPENDENCY_TARGETS = {"host", "system", "netzwerk", "service"}
 CREDENTIAL_PROVIDERS = {"vaultwarden", "secrets_json", "env_file", "local_file", "external"}
 CREDENTIAL_ACCESS_TYPES = {"ssh", "web", "api", "database", "smb", "sudo", "token", "other"}
 RUNBOOK_RISK_LEVELS = {"read-only", "safe-change", "disruptive", "destructive"}
@@ -284,7 +285,7 @@ class CatalogObjectIn(BaseModel):
     def validate_catalog_data(self) -> "CatalogObjectIn":
         if "schema_version" in self.data and self.data["schema_version"] != 1:
             raise ValueError("data.schema_version must be 1")
-        if self.kind == "system":
+        if self.kind in {"host", "system"}:
             _validate_system_data(self.data)
         elif self.kind == "netzwerk":
             _validate_network(self.data)

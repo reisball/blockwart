@@ -72,8 +72,8 @@
                 <label>ID
                   <input name="object_id" value="{{ form.id }}" placeholder="n8n" autocomplete="off" spellcheck="false" required />
                 </label>
-                <label>Label
-                  <input name="label" value="{{ form.label }}" placeholder="n8n Web UI" autocomplete="off" required />
+                <label>Hostname
+                  <input name="hostname" value="{{ form.hostname or form.label }}" placeholder="n8n" autocomplete="off" required />
                 </label>
                 <label>Typ
                   <select name="kind">
@@ -125,7 +125,13 @@
               <a class="object-row" href="/objects/{{ object.id }}">
                 <div class="kind">{{ object.kind }}<br /><span class="status">{{ object.status }}</span></div>
                 <div>
-                  <div class="label">{{ object.label }}</div>
+                  <div class="label">
+                    {% if object.data.network and object.data.network.hostnames %}
+                      {{ object.data.network.hostnames|first }}
+                    {% else %}
+                      {{ object.label }}
+                    {% endif %}
+                  </div>
                   <div class="summary">{{ object.summary or object.id }}</div>
                   <div class="badges">
                     {% if object.data.network and object.data.network.addresses %}

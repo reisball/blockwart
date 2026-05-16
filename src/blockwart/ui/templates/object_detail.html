@@ -18,7 +18,7 @@
         <a class="breadcrumb" href="/">Zur Suche</a>
         <div class="title-row">
           <div>
-            <h1>{{ object.label }}</h1>
+            <h1>{{ network.hostnames|first or object.label }}</h1>
             <div class="meta">{{ object.kind }}:{{ object.id }} · {{ object.status }}</div>
           </div>
           <div class="top-actions">
@@ -50,9 +50,10 @@
               <div class="error">{{ error }}</div>
             {% endif %}
             <form class="form-grid" method="post" action="/objects/{{ object.id }}">
-              <label>Label
-                <input name="label" value="{{ object.label }}" autocomplete="off" required />
-              </label>
+              <div class="fact fact-small">
+                <div class="fact-label">ID</div>
+                <div class="fact-value">{{ object.id }}</div>
+              </div>
               <label>Hostname
                 <input name="hostname" value="{{ network.hostnames|first or '' }}" autocomplete="off" />
               </label>
@@ -70,14 +71,6 @@
                   {% endfor %}
                 </select>
               </label>
-              {% if container %}
-                <label>Container ID
-                  <input name="container_id" value="{{ container.id or '' }}" autocomplete="off" />
-                </label>
-                <label>Container Label
-                  <input name="container_label" value="{{ container.label or '' }}" autocomplete="off" />
-                </label>
-              {% endif %}
               <label>Kurzbeschreibung
                 <textarea class="summary-input" name="summary" placeholder="Kurzbeschreibung">{{ object.summary or "" }}</textarea>
               </label>
@@ -115,12 +108,6 @@
                   <span>Status</span>
                   <strong>{{ object.status }}</strong>
                 </div>
-                {% if container %}
-                  <div class="overview-label">
-                    <span>Container</span>
-                    <strong>{{ container.label or container.id }}</strong>
-                  </div>
-                {% endif %}
                 <div class="overview-label">
                   <span>Relationships</span>
                   <strong>{{ relationships|length }}</strong>
