@@ -6,7 +6,19 @@ from pydantic import BaseModel, Field, model_validator
 from blockwart.domain.references import TypedReference
 from blockwart.domain.security import find_secret_violations
 
-ObjectKind = Literal["system", "service", "credential_reference", "runbook", "decision", "project"]
+ObjectKind = Literal[
+    "system",
+    "netzwerk",
+    "service",
+    "credential_reference",
+    "runbook",
+    "decision",
+    "project",
+]
+PublicObjectKind = Literal["system", "netzwerk", "service"]
+ObjectStatus = Literal["active", "inactive", "deleted"]
+PUBLIC_OBJECT_KINDS: tuple[PublicObjectKind, ...] = ("system", "netzwerk", "service")
+OBJECT_STATUSES: tuple[ObjectStatus, ...] = ("active", "inactive", "deleted")
 
 REFERENCE_TARGETS = {
     "credential_references": {"credential_reference"},
@@ -18,7 +30,7 @@ REFERENCE_TARGETS = {
     "related_runbooks": {"runbook"},
 }
 
-DEPENDENCY_TARGETS = {"system", "service"}
+DEPENDENCY_TARGETS = {"system", "netzwerk", "service"}
 CREDENTIAL_PROVIDERS = {"vaultwarden", "secrets_json", "env_file", "local_file", "external"}
 CREDENTIAL_ACCESS_TYPES = {"ssh", "web", "api", "database", "smb", "sudo", "token", "other"}
 RUNBOOK_RISK_LEVELS = {"read-only", "safe-change", "disruptive", "destructive"}
@@ -257,7 +269,7 @@ class CatalogObjectIn(BaseModel):
     id: str = Field(pattern=r"^[a-z0-9][a-z0-9-]*[a-z0-9]$|^[a-z0-9]$")
     kind: ObjectKind
     label: str
-    status: str = "unknown"
+    status: ObjectStatus = "active"
     summary: str | None = None
     data: dict[str, Any] = Field(default_factory=dict)
 
@@ -274,6 +286,8 @@ class CatalogObjectIn(BaseModel):
             raise ValueError("data.schema_version must be 1")
         if self.kind == "system":
             _validate_system_data(self.data)
+        elif self.kind == "netzwerk":
+            _validate_network(self.data)
         elif self.kind == "service":
             _validate_service_data(self.data)
         elif self.kind == "credential_reference":
@@ -284,7 +298,9 @@ class CatalogObjectIn(BaseModel):
 
 
 class CatalogObjectOut(CatalogObjectIn):
-    pass
+    created_at: str | None = None
+    updated_at: str | None = None
+    last_changed: str | None = None
 
 
 class HealthOut(BaseModel):

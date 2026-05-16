@@ -17,8 +17,8 @@ from blockwart.services.seeds import SeedImportResult
 STATUS_MAP = {
     "✅": "active",
     "🟢": "active",
-    "🟡": "partial",
-    "⚠️": "partial",
+    "🟡": "inactive",
+    "⚠️": "inactive",
     "❌": "inactive",
 }
 
@@ -515,7 +515,13 @@ def _status_from_cell(value: str) -> str:
         if marker in value:
             return status
     text = _plain_text(value).casefold()
-    return text or "unknown"
+    if "deleted" in text:
+        return "deleted"
+    if "inactive" in text:
+        return "inactive"
+    if "active" in text:
+        return "active"
+    return "inactive"
 
 
 def _source_references(

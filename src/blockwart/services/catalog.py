@@ -1,4 +1,5 @@
 import json
+from datetime import UTC, datetime
 
 from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
@@ -8,14 +9,36 @@ from blockwart.schemas.catalog import CatalogObjectIn, CatalogObjectOut
 
 
 def _to_schema(row: CatalogObject) -> CatalogObjectOut:
+    updated_at = _format_timestamp(row.updated_at)
     return CatalogObjectOut(
         id=row.id,
         kind=row.kind,  # type: ignore[arg-type]
         label=row.label,
-        status=row.status,
+        status=_normalize_status(row.status),
         summary=row.summary,
         data=json.loads(row.data_json),
+        created_at=_format_timestamp(row.created_at),
+        updated_at=updated_at,
+        last_changed=updated_at,
     )
+
+
+def _normalize_status(status: str | None) -> str:
+    if status in {"active", "inactive", "deleted"}:
+        return status
+    if status in {"partial", "unknown", "", None}:
+        return "inactive"
+    return "inactive"
+
+
+def _format_timestamp(value: datetime | None) -> str | None:
+    if value is None:
+        return None
+    return value.isoformat(timespec="microseconds")
+
+
+def _now() -> datetime:
+    return datetime.now(UTC).replace(tzinfo=None)
 
 
 def _write_audit(session: Session, object_id: str | None, action: str, summary: str) -> None:
@@ -100,6 +123,7 @@ def create_relationship(
         )
     )
     if existing is None:
+        changed_at = _now()
         session.add(
             Relationship(
                 from_ref=from_ref,
@@ -113,6 +137,7 @@ def create_relationship(
             "relationship_create",
             f"Create relationship {from_ref} {relation_type} {to_ref}",
         )
+        _touch_objects_for_refs(session, [from_ref, to_ref], changed_at)
         session.commit()
     return {"from_ref": from_ref, "relation_type": relation_type, "to_ref": to_ref}
 
@@ -120,6 +145,7 @@ def create_relationship(
 def upsert_object(session: Session, payload: CatalogObjectIn) -> CatalogObjectOut:
     row = session.get(CatalogObject, payload.id)
     data_json = json.dumps(payload.data, sort_keys=True)
+    changed_at = _now()
     if row is None:
         action = "create"
         row = CatalogObject(
@@ -129,6 +155,8 @@ def upsert_object(session: Session, payload: CatalogObjectIn) -> CatalogObjectOu
             status=payload.status,
             summary=payload.summary,
             data_json=data_json,
+            created_at=changed_at,
+            updated_at=changed_at,
         )
         session.add(row)
     else:
@@ -138,11 +166,13 @@ def upsert_object(session: Session, payload: CatalogObjectIn) -> CatalogObjectOu
         row.status = payload.status
         row.summary = payload.summary
         row.data_json = data_json
+        row.updated_at = changed_at
 
     summary = f"{action.title()} catalog object {payload.kind}:{payload.id}"
     _write_audit(session, payload.id, action, summary)
     session.commit()
-    return CatalogObjectOut(**payload.model_dump())
+    session.refresh(row)
+    return _to_schema(row)
 
 
 def delete_object(session: Session, object_id: str) -> bool:
@@ -161,3 +191,13 @@ def delete_object(session: Session, object_id: str) -> bool:
     _write_audit(session, object_id, "delete", f"Delete catalog object {object_ref}")
     session.commit()
     return True
+
+
+def _touch_objects_for_refs(session: Session, refs: list[str], changed_at: datetime) -> None:
+    for ref in refs:
+        if ":" not in ref:
+            continue
+        _, object_id = ref.split(":", 1)
+        row = session.get(CatalogObject, object_id)
+        if row is not None:
+            row.updated_at = changed_at

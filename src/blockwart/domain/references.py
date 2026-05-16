@@ -2,6 +2,7 @@ from dataclasses import dataclass
 
 VALID_REFERENCE_KINDS = {
     "system",
+    "netzwerk",
     "service",
     "credential_reference",
     "runbook",
@@ -28,4 +29,3 @@ class TypedReference:
 
     def __str__(self) -> str:
         return f"{self.kind}:{self.object_id}"
-

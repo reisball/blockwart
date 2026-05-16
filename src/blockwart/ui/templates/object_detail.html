@@ -48,6 +48,14 @@
               <div class="fact-value">{{ object.status }}</div>
             </div>
             <div class="fact">
+              <div class="fact-label">Created at</div>
+              <div class="fact-value">{{ object.created_at or "-" }}</div>
+            </div>
+            <div class="fact">
+              <div class="fact-label">Last changed</div>
+              <div class="fact-value">{{ object.last_changed or object.updated_at or "-" }}</div>
+            </div>
+            <div class="fact">
               <div class="fact-label">ID</div>
               <div class="fact-value">{{ object.id }}</div>
             </div>
@@ -321,7 +329,13 @@
         <form class="form-grid" method="post" action="/objects/{{ object.id }}">
           <label>Typ<input value="{{ object.kind }}" disabled /></label>
           <label>Label<input name="label" value="{{ object.label }}" autocomplete="off" required /></label>
-          <label>Status<input name="status" value="{{ object.status }}" autocomplete="off" /></label>
+          <label>Status
+            <select name="status">
+              {% for object_status in object_statuses %}
+                <option value="{{ object_status }}" {% if object_status == object.status %}selected{% endif %}>{{ object_status }}</option>
+              {% endfor %}
+            </select>
+          </label>
           <label>Kurzbeschreibung<textarea class="summary-input" name="summary" placeholder="Kurzbeschreibung">{{ object.summary or "" }}</textarea></label>
           <button type="submit">Speichern</button>
         </form>

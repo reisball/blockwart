@@ -56,8 +56,16 @@ def test_index_shows_kind_counts(client: TestClient) -> None:
     response = client.get("/")
 
     assert response.status_code == 200
-    assert "<strong>28</strong> alle" in response.text
+    assert "<strong>25</strong> alle" in response.text
     assert "system" in response.text
+    assert "netzwerk" in response.text
+    assert "service" in response.text
+    assert 'value="decision"' not in response.text
+    assert 'value="project"' not in response.text
+    assert 'value="runbook"' not in response.text
+    assert 'value="active"' in response.text
+    assert 'value="inactive"' in response.text
+    assert 'value="deleted"' in response.text
     assert "credential_reference" not in response.text
     assert 'data-theme-value="dark"' in response.text
     assert 'data-theme-value="light"' in response.text
@@ -70,6 +78,8 @@ def test_object_detail_shows_data_and_relationships(client: TestClient) -> None:
     assert response.status_code == 200
     assert "n8n Web UI" in response.text
     assert "Relationships" in response.text
+    assert "Created at" in response.text
+    assert "Last changed" in response.text
     assert "Ausgehend" in response.text
     assert "Zugriff" in response.text
     assert "Credential-Referenzen" not in response.text

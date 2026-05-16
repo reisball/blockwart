@@ -11,7 +11,12 @@ from sqlalchemy.orm import Session
 
 from blockwart.api.deps import get_session
 from blockwart.domain.security import find_secret_violations
-from blockwart.schemas.catalog import CatalogObjectIn, CatalogObjectOut
+from blockwart.schemas.catalog import (
+    OBJECT_STATUSES,
+    PUBLIC_OBJECT_KINDS,
+    CatalogObjectIn,
+    CatalogObjectOut,
+)
 from blockwart.services.catalog import (
     create_relationship,
     get_object,
@@ -24,7 +29,8 @@ from blockwart.services.catalog import (
 templates = Jinja2Templates(directory="src/blockwart/ui/templates")
 router = APIRouter(tags=["ui"])
 
-OBJECT_KINDS = ("system", "service", "runbook", "decision", "project")
+OBJECT_KINDS = PUBLIC_OBJECT_KINDS
+OBJECT_STATUSES_UI = OBJECT_STATUSES
 RELATION_TYPES = ("hosts", "depends_on", "uses", "documents", "related_to")
 UI_KIND_PRIORITY = {kind: index for index, kind in enumerate(OBJECT_KINDS)}
 SAFE_DATA_JSON_FALLBACK = "{\n  \"schema_version\": 1\n}"
@@ -53,6 +59,7 @@ def index(
             "q": q,
             "kind": normalized_kind,
             "object_kinds": OBJECT_KINDS,
+            "object_statuses": OBJECT_STATUSES_UI,
             "object_counts": object_counts,
             "total_objects": total_objects,
             "error": None,
@@ -107,6 +114,7 @@ def object_detail(
                 sort_keys=True,
             ),
             "object_kinds": OBJECT_KINDS,
+            "object_statuses": OBJECT_STATUSES_UI,
             "error": None,
             "edit_section": edit,
         },
@@ -120,7 +128,7 @@ def save_object(
     object_id: Annotated[str, Form()],
     kind: Annotated[str, Form()],
     label: Annotated[str, Form()],
-    status: Annotated[str, Form()] = "unknown",
+    status: Annotated[str, Form()] = "active",
     summary: Annotated[str, Form()] = "",
     data_json: Annotated[str, Form()] = "{}",
     hosted_on_system_id: Annotated[str, Form()] = "",
@@ -145,7 +153,7 @@ def save_object(
             id=object_id,
             kind=kind,
             label=label,
-            status=status or "unknown",
+            status=status or "active",
             summary=summary or None,
             data=data,
         )
@@ -170,6 +178,7 @@ def save_object(
                 "q": "",
                 "kind": "",
                 "object_kinds": OBJECT_KINDS,
+                "object_statuses": OBJECT_STATUSES_UI,
                 "object_counts": object_counts,
                 "total_objects": sum(object_counts.values()),
                 "error": _safe_error_message(exc),
@@ -215,7 +224,7 @@ def update_object(
     object_id: str,
     session: Annotated[Session, Depends(get_session)],
     label: Annotated[str, Form()],
-    status: Annotated[str, Form()] = "unknown",
+    status: Annotated[str, Form()] = "active",
     summary: Annotated[str, Form()] = "",
     data_json: Annotated[str | None, Form()] = None,
 ):
@@ -229,7 +238,7 @@ def update_object(
             id=object_id,
             kind=existing_object.kind,
             label=label,
-            status=status or "unknown",
+            status=status or "active",
             summary=summary or None,
             data=data,
         )
@@ -273,6 +282,7 @@ def update_object(
                 "credential_references": [],
                 "data_json": SAFE_DATA_JSON_FALLBACK,
                 "object_kinds": OBJECT_KINDS,
+                "object_statuses": OBJECT_STATUSES_UI,
                 "error": _safe_error_message(exc),
                 "edit_section": "",
             },
@@ -472,7 +482,7 @@ def _sort_for_browse(objects: list[CatalogObjectOut]) -> list[CatalogObjectOut]:
 
 
 def _visible_objects(objects: list[CatalogObjectOut]) -> list[CatalogObjectOut]:
-    return _sort_for_browse([obj for obj in objects if obj.kind != "credential_reference"])
+    return _sort_for_browse([obj for obj in objects if obj.kind in OBJECT_KINDS])
 
 
 def _group_relationships(

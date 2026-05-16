@@ -523,19 +523,19 @@ objects:
   - id: runbook-check-ollama-api
     kind: runbook
     label: Check Ollama API
-    status: draft
+    status: inactive
     summary: Non-mutating health check for the LAN Ollama API.
     data: {schema_version: 1, target_refs: [system:ollama, service:ollama-api], safety: read_only, steps: ["Call the service health target from a trusted LAN host.", "Confirm the response lists installed model metadata without importing model internals."]}
   - id: runbook-sync-vaultwarden-cli
     kind: runbook
     label: Sync Vaultwarden CLI
-    status: draft
+    status: inactive
     summary: Reminder runbook for synchronizing Vaultwarden CLI metadata before approved secret access.
     data: {schema_version: 1, target_refs: [system:vaultwarden, service:vaultwarden-cli-api], safety: secret_safe, steps: ["Synchronize the CLI before reading any allowed vault item.", "Do not paste, persist, or import returned credential values into Blockwart."]}
   - id: runbook-review-splunk-public-exposure
     kind: runbook
     label: Review Splunk public exposure
-    status: draft
+    status: inactive
     summary: Non-secret review checklist for Splunk public web/API exposure.
     data: {schema_version: 1, target_refs: [system:splunk, service:splunk-web, service:splunk-management-api], safety: review_only, steps: ["Verify documented public URLs still match routing.", "Confirm Blockwart contains credential references only."]}
 

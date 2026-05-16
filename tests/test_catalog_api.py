@@ -53,6 +53,10 @@ def test_create_get_update_and_list_catalog_object(client: TestClient, session_f
     create_response = client.put("/api/objects/n8n", json=payload)
     assert create_response.status_code == 200
     assert create_response.json()["label"] == "n8n"
+    assert create_response.json()["created_at"]
+    assert create_response.json()["updated_at"]
+    assert create_response.json()["last_changed"] == create_response.json()["updated_at"]
+    assert create_response.json()["created_at"] == create_response.json()["updated_at"]
 
     get_response = client.get("/api/objects/n8n")
     assert get_response.status_code == 200
@@ -62,6 +66,9 @@ def test_create_get_update_and_list_catalog_object(client: TestClient, session_f
     update_response = client.put("/api/objects/n8n", json=payload)
     assert update_response.status_code == 200
     assert update_response.json()["label"] == "n8n workflow"
+    assert update_response.json()["created_at"] == create_response.json()["created_at"]
+    assert update_response.json()["updated_at"] > create_response.json()["updated_at"]
+    assert update_response.json()["last_changed"] == update_response.json()["updated_at"]
 
     list_response = client.get("/api/objects")
     assert list_response.status_code == 200
@@ -76,6 +83,21 @@ def test_get_missing_catalog_object_returns_404(client: TestClient) -> None:
     response = client.get("/api/objects/missing")
 
     assert response.status_code == 404
+
+
+def test_rejects_unsupported_status(client: TestClient) -> None:
+    response = client.put(
+        "/api/objects/bad-status",
+        json={
+            "id": "bad-status",
+            "kind": "system",
+            "label": "Bad Status",
+            "status": "partial",
+            "data": {"schema_version": 1},
+        },
+    )
+
+    assert response.status_code == 422
 
 
 def test_delete_catalog_object_writes_audit_event(client: TestClient, session_factory) -> None:

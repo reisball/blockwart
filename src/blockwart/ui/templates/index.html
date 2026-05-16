@@ -109,7 +109,13 @@
             </select>
           </label>
           <label>Label<input name="label" value="{{ form.label }}" placeholder="n8n Web UI" autocomplete="off" required /></label>
-          <label>Status<input name="status" value="{{ form.status }}" placeholder="active" autocomplete="off" /></label>
+          <label>Status
+            <select name="status">
+              {% for object_status in object_statuses %}
+                <option value="{{ object_status }}" {% if object_status == form.status %}selected{% endif %}>{{ object_status }}</option>
+              {% endfor %}
+            </select>
+          </label>
           <label>Kurzbeschreibung<textarea class="summary-input" name="summary" placeholder="Wofür ist das Objekt da?">{{ form.summary }}</textarea></label>
           <label>Daten JSON<textarea name="data_json" spellcheck="false">{{ form.data_json }}</textarea></label>
           <button type="submit">Speichern</button>
