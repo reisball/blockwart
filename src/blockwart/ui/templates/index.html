@@ -55,67 +55,69 @@
       <section>
         <div class="panel-head">
           <h2 class="section-title">{{ objects|length }} Treffer</h2>
-          {% if show_create_form %}
-            <a class="button button-small button-muted" href="/">Abbrechen</a>
-          {% else %}
-            <a class="button button-small" href="/?create=1">Neues Objekt anlegen</a>
-          {% endif %}
+          <a class="button button-small" href="/?create=1">Neues Objekt anlegen</a>
         </div>
         {% if show_create_form %}
-          <section class="panel create-panel">
-            <h2 class="section-title">Neues Objekt anlegen</h2>
-            {% if error %}
-              <div class="error">{{ error }}</div>
-            {% endif %}
-            <form class="form-grid" method="post" action="/objects">
-              <label>ID
-                <input name="object_id" value="{{ form.id }}" placeholder="n8n" autocomplete="off" spellcheck="false" required />
-              </label>
-              <label>Label
-                <input name="label" value="{{ form.label }}" placeholder="n8n Web UI" autocomplete="off" required />
-              </label>
-              <label>Typ
-                <select name="kind">
-                  {% for object_kind in object_kinds %}
-                    <option value="{{ object_kind }}" {% if object_kind == form.kind %}selected{% endif %}>{{ object_kind }}</option>
-                  {% endfor %}
-                </select>
-              </label>
-              <label>Status
-                <select name="status">
-                  {% for object_status in object_statuses %}
-                    <option value="{{ object_status }}" {% if object_status == form.status %}selected{% endif %}>{{ object_status }}</option>
-                  {% endfor %}
-                </select>
-              </label>
-              <label>Relationship
-                <select name="relation_target_ref">
-                  <option value="">Keine Relationship setzen</option>
-                  {% for target in relation_targets %}
-                    {% set target_ref = target.kind ~ ":" ~ target.id %}
-                    <option value="{{ target_ref }}" {% if target_ref == form.relation_target_ref or target.id == form.hosted_on_system_id %}selected{% endif %}>{{ target.label }} · {{ target_ref }}</option>
-                  {% endfor %}
-                </select>
-              </label>
-              <label>Relationstyp
-                <select name="relation_type">
-                  {% for relation in relation_types %}
-                    <option value="{{ relation }}" {% if relation == form.relation_type %}selected{% endif %}>{{ relation }}</option>
-                  {% endfor %}
-                </select>
-              </label>
-              <label>Kurzbeschreibung
-                <textarea class="summary-input" name="summary" placeholder="Wofür ist das Objekt da?">{{ form.summary }}</textarea>
-              </label>
-              <label>Daten JSON
-                <textarea name="data_json" spellcheck="false">{{ form.data_json }}</textarea>
-              </label>
-              <div class="button-row">
-                <button type="submit">Speichern</button>
-                <a class="button button-muted" href="/">Abbrechen</a>
+          <div class="modal-overlay" role="presentation">
+            <a class="modal-backdrop" href="/" aria-label="Objekt-Anlegen schließen"></a>
+            <section class="panel modal-window" role="dialog" aria-modal="true" aria-labelledby="create-object-title">
+              <div class="modal-head">
+                <h2 class="section-title" id="create-object-title">Neues Objekt anlegen</h2>
+                <a class="button button-small button-muted" href="/">Schließen</a>
               </div>
-            </form>
-          </section>
+              {% if error %}
+                <div class="error">{{ error }}</div>
+              {% endif %}
+              <form class="form-grid" method="post" action="/objects">
+                <label>ID
+                  <input name="object_id" value="{{ form.id }}" placeholder="n8n" autocomplete="off" spellcheck="false" required />
+                </label>
+                <label>Label
+                  <input name="label" value="{{ form.label }}" placeholder="n8n Web UI" autocomplete="off" required />
+                </label>
+                <label>Typ
+                  <select name="kind">
+                    {% for object_kind in object_kinds %}
+                      <option value="{{ object_kind }}" {% if object_kind == form.kind %}selected{% endif %}>{{ object_kind }}</option>
+                    {% endfor %}
+                  </select>
+                </label>
+                <label>Status
+                  <select name="status">
+                    {% for object_status in object_statuses %}
+                      <option value="{{ object_status }}" {% if object_status == form.status %}selected{% endif %}>{{ object_status }}</option>
+                    {% endfor %}
+                  </select>
+                </label>
+                <label>Relationship
+                  <select name="relation_target_ref">
+                    <option value="">Keine Relationship setzen</option>
+                    {% for target in relation_targets %}
+                      {% set target_ref = target.kind ~ ":" ~ target.id %}
+                      <option value="{{ target_ref }}" {% if target_ref == form.relation_target_ref or target.id == form.hosted_on_system_id %}selected{% endif %}>{{ target.label }} · {{ target_ref }}</option>
+                    {% endfor %}
+                  </select>
+                </label>
+                <label>Relationstyp
+                  <select name="relation_type">
+                    {% for relation in relation_types %}
+                      <option value="{{ relation }}" {% if relation == form.relation_type %}selected{% endif %}>{{ relation }}</option>
+                    {% endfor %}
+                  </select>
+                </label>
+                <label>Kurzbeschreibung
+                  <textarea class="summary-input" name="summary" placeholder="Wofür ist das Objekt da?">{{ form.summary }}</textarea>
+                </label>
+                <label>Daten JSON
+                  <textarea name="data_json" spellcheck="false">{{ form.data_json }}</textarea>
+                </label>
+                <div class="button-row">
+                  <button type="submit">Speichern</button>
+                  <a class="button button-muted" href="/">Abbrechen</a>
+                </div>
+              </form>
+            </section>
+          </div>
         {% endif %}
         {% if objects %}
           <div class="list">

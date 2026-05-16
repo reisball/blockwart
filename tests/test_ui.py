@@ -80,6 +80,8 @@ def test_create_object_form_is_hidden_behind_button(client: TestClient) -> None:
     assert 'name="object_id"' not in response.text
     assert create_response.status_code == 200
     assert "Neues Objekt anlegen" in create_response.text
+    assert 'role="dialog"' in create_response.text
+    assert 'class="modal-overlay"' in create_response.text
     assert 'name="object_id"' in create_response.text
     assert 'name="relation_target_ref"' in create_response.text
     assert 'value="active"' in create_response.text
