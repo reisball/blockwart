@@ -463,7 +463,6 @@ button:hover,
 
 .relationship-map {
   display: grid;
-  grid-template-columns: minmax(180px, 0.85fr) repeat(auto-fit, minmax(210px, 1fr));
   gap: 12px;
   align-items: stretch;
   border-top: 1px solid var(--border);
@@ -472,7 +471,7 @@ button:hover,
 
 .relationship-edge {
   display: grid;
-  grid-template-columns: 28px minmax(0, 1fr);
+  grid-template-columns: minmax(180px, 0.85fr) 28px minmax(210px, 1fr);
   align-items: center;
   gap: 8px;
 }
@@ -493,7 +492,7 @@ button:hover,
   transition: border-color 0.16s ease, background 0.16s ease, transform 0.16s ease;
 }
 
-.relationship-edge .relationship-node {
+.relationship-node-with-detail {
   padding-right: 86px;
 }
 

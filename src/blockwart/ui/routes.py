@@ -578,14 +578,87 @@ def _index_relationship_cards(
         relationships = list_relationships_for_object(session, catalog_object)
         grouped = _group_relationships(catalog_object, relationships, object_map)
         cards[catalog_object.id] = {
-            "system_ports": _relationship_system_ports(catalog_object),
-            "relationships": [
-                relationship
-                for direction in ("outbound", "inbound")
-                for relationship in grouped.get(direction, [])
-            ],
+            "relationships": _relationship_display_cards(catalog_object, grouped, object_map),
         }
     return cards
+
+
+def _relationship_display_sort_key(card: dict[str, Any]) -> tuple[int, str, str]:
+    left_kind = card["left"]["kind"]
+    right_kind = card["right"]["kind"]
+    is_system_service = left_kind == "system" and right_kind == "service"
+    return (0 if is_system_service else 1, card["left"]["label"], card["right"]["label"])
+
+
+def _relationship_display_cards(
+    catalog_object: CatalogObjectOut,
+    grouped: dict[str, list[dict[str, str]]],
+    object_map: dict[str, CatalogObjectOut],
+) -> list[dict[str, Any]]:
+    cards: list[dict[str, Any]] = []
+    current_ref = f"{catalog_object.kind}:{catalog_object.id}"
+    for relationship in [
+        relationship
+        for direction in ("outbound", "inbound")
+        for relationship in grouped.get(direction, [])
+    ]:
+        from_ref = relationship["from_ref"]
+        to_ref = relationship["to_ref"]
+        from_object = object_map.get(from_ref)
+        to_object = object_map.get(to_ref)
+        left_ref = from_ref
+        right_ref = to_ref
+        left_ref, right_ref = _system_service_refs(
+            from_ref,
+            to_ref,
+            from_object,
+            to_object,
+        )
+        left_object = object_map.get(left_ref)
+        right_object = object_map.get(right_ref)
+        cards.append(
+            {
+                **relationship,
+                "left": _relationship_node(left_ref, left_object),
+                "right": _relationship_node(right_ref, right_object),
+                "current_side": "left" if left_ref == current_ref else "right",
+            }
+        )
+    return sorted(cards, key=_relationship_display_sort_key)
+
+
+def _system_service_refs(
+    from_ref: str,
+    to_ref: str,
+    from_object: CatalogObjectOut | None,
+    to_object: CatalogObjectOut | None,
+) -> tuple[str, str]:
+    if from_object is not None and to_object is not None:
+        if from_object.kind == "system" and to_object.kind == "service":
+            return from_ref, to_ref
+        if from_object.kind == "service" and to_object.kind == "system":
+            return to_ref, from_ref
+    if from_ref.startswith("system:") and to_ref.startswith("service:"):
+        return from_ref, to_ref
+    if from_ref.startswith("service:") and to_ref.startswith("system:"):
+        return to_ref, from_ref
+    return from_ref, to_ref
+
+
+def _relationship_node(
+    ref: str,
+    catalog_object: CatalogObjectOut | None,
+) -> dict[str, Any]:
+    kind = catalog_object.kind if catalog_object else ref.split(":", 1)[0]
+    return {
+        "ref": ref,
+        "id": catalog_object.id if catalog_object else _object_id_from_ref(ref),
+        "kind": kind,
+        "label": catalog_object.label if catalog_object else ref,
+        "status": catalog_object.status if catalog_object else "",
+        "data": catalog_object.data if catalog_object else {},
+        "ports": _relationship_node_ports(catalog_object),
+    }
 
 
 def _group_relationships(
@@ -612,10 +685,19 @@ def _group_relationships(
                 "other_label": other_object.label if other_object else other_ref,
                 "other_status": other_object.status if other_object else "",
                 "other_data": other_object.data if other_object else {},
-                "service_ports": _relationship_service_ports(catalog_object, other_object),
             }
         )
     return grouped
+
+
+def _relationship_node_ports(catalog_object: CatalogObjectOut | None) -> list[dict[str, str]]:
+    if catalog_object is None:
+        return []
+    if catalog_object.kind == "system":
+        return _relationship_system_ports(catalog_object)
+    if catalog_object.kind == "service":
+        return _relationship_service_ports(catalog_object, None)
+    return []
 
 
 def _relationship_system_ports(catalog_object: CatalogObjectOut) -> list[dict[str, str]]:

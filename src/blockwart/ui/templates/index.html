@@ -162,40 +162,46 @@
                 </div>
                 <div class="object-expanded" data-object-expanded>
                   <div class="relationship-map">
-                    <div class="relationship-node relationship-node-current" role="button" tabindex="0" data-relationship-node data-detail-target="relationship-detail-{{ object.id }}-current">
-                      <span class="relationship-type">Typ {{ object.kind }}</span>
-                      <strong class="relationship-node-name">
-                        {% if object.data.network and object.data.network.hostnames %}
-                          {{ object.data.network.hostnames|first }}
-                        {% else %}
-                          {{ object.label }}
-                        {% endif %}
-                      </strong>
-                      <small>{{ object.kind }}:{{ object.id }}</small>
-                      {% if object_relationships.system_ports %}
-                        <div class="relationship-ports">
-                          {% for port in object_relationships.system_ports %}
-                            <span class="port-chip port-chip-system">{{ port.label }} {{ port.value }}</span>
-                          {% endfor %}
-                        </div>
-                      {% endif %}
-                    </div>
                     {% if object_relationships.relationships %}
                       {% for relationship in object_relationships.relationships %}
                         <div class="relationship-edge">
-                          <div class="relationship-line" aria-hidden="true"></div>
-                          <div class="relationship-node" role="button" tabindex="0" data-relationship-node data-detail-target="relationship-detail-{{ object.id }}-{{ loop.index }}">
-                            <span class="relationship-type">Typ {{ relationship.other_kind }}</span>
-                            <strong class="relationship-node-name">{{ relationship.other_label }}</strong>
-                            <small>{{ relationship.other_ref }}</small>
-                            {% if relationship.service_ports %}
+                          <div class="relationship-node {% if relationship.current_side == 'left' %}relationship-node-current{% endif %}" role="button" tabindex="0" data-relationship-node data-detail-target="relationship-detail-{{ object.id }}-{{ loop.index }}-left">
+                            <span class="relationship-type">Typ {{ relationship.left.kind }}</span>
+                            <strong class="relationship-node-name">
+                              {% if relationship.left.data.network and relationship.left.data.network.hostnames %}
+                                {{ relationship.left.data.network.hostnames|first }}
+                              {% else %}
+                                {{ relationship.left.label }}
+                              {% endif %}
+                            </strong>
+                            <small>{{ relationship.left.ref }}</small>
+                            {% if relationship.left.ports %}
                               <div class="relationship-ports">
-                                {% for port in relationship.service_ports %}
-                                  <span class="port-chip port-chip-service">{{ port.label }} {{ port.value }}</span>
+                                {% for port in relationship.left.ports %}
+                                  <span class="port-chip port-chip-{{ relationship.left.kind }}">{{ port.label }} {{ port.value }}</span>
                                 {% endfor %}
                               </div>
                             {% endif %}
-                            <a class="button button-small button-muted relationship-detail" href="/objects/{{ relationship.other_id }}" data-detail-link>Details</a>
+                          </div>
+                          <div class="relationship-line" aria-hidden="true"></div>
+                          <div class="relationship-node relationship-node-with-detail {% if relationship.current_side == 'right' %}relationship-node-current{% endif %}" role="button" tabindex="0" data-relationship-node data-detail-target="relationship-detail-{{ object.id }}-{{ loop.index }}-right">
+                            <span class="relationship-type">Typ {{ relationship.right.kind }}</span>
+                            <strong class="relationship-node-name">
+                              {% if relationship.right.data.network and relationship.right.data.network.hostnames %}
+                                {{ relationship.right.data.network.hostnames|first }}
+                              {% else %}
+                                {{ relationship.right.label }}
+                              {% endif %}
+                            </strong>
+                            <small>{{ relationship.right.ref }}</small>
+                            {% if relationship.right.ports %}
+                              <div class="relationship-ports">
+                                {% for port in relationship.right.ports %}
+                                  <span class="port-chip port-chip-{{ relationship.right.kind }}">{{ port.label }} {{ port.value }}</span>
+                                {% endfor %}
+                              </div>
+                            {% endif %}
+                            <a class="button button-small button-muted relationship-detail" href="/objects/{{ relationship.right.id }}" data-detail-link>Details</a>
                           </div>
                         </div>
                       {% endfor %}
@@ -204,73 +210,47 @@
                     {% endif %}
                   </div>
                   <div class="relationship-detail-stack">
-                    <section class="relationship-detail-panel" id="relationship-detail-{{ object.id }}-current" data-relationship-detail-panel>
-                      <div class="relationship-detail-panel-head">
-                        <div>
-                          <span class="relationship-type">Typ {{ object.kind }}</span>
-                          <strong class="relationship-node-name">
-                            {% if object.data.network and object.data.network.hostnames %}
-                              {{ object.data.network.hostnames|first }}
-                            {% else %}
-                              {{ object.label }}
-                            {% endif %}
-                          </strong>
-                        </div>
-                        <small>{{ object.kind }}:{{ object.id }}</small>
-                      </div>
-                      <div class="relationship-detail-grid">
-                        <div><span>Status</span><strong>{{ object.status }}</strong></div>
-                        <div><span>ID</span><strong>{{ object.id }}</strong></div>
-                        {% if object.data.network and object.data.network.addresses %}
-                          <div class="relationship-detail-wide">
-                            <span>Adressen</span>
-                            {% for address in object.data.network.addresses[:3] %}
-                              <strong>{{ address.ip }}{% if address.scope %} · {{ address.scope }}{% endif %}</strong>
-                            {% endfor %}
-                          </div>
-                        {% endif %}
-                        {% if object_relationships.system_ports %}
-                          <div class="relationship-detail-wide">
-                            <span>Ports</span>
-                            {% for port in object_relationships.system_ports %}
-                              <strong>{{ port.label }} {{ port.value }}</strong>
-                            {% endfor %}
-                          </div>
-                        {% endif %}
-                      </div>
-                    </section>
                     {% for relationship in object_relationships.relationships %}
-                      <section class="relationship-detail-panel" id="relationship-detail-{{ object.id }}-{{ loop.index }}" data-relationship-detail-panel>
-                        <div class="relationship-detail-panel-head">
-                          <div>
-                            <span class="relationship-type">Typ {{ relationship.other_kind }}</span>
-                            <strong class="relationship-node-name">{{ relationship.other_label }}</strong>
+                      {% set relationship_index = loop.index %}
+                      {% for node_side, node in (("left", relationship.left), ("right", relationship.right)) %}
+                        <section class="relationship-detail-panel" id="relationship-detail-{{ object.id }}-{{ relationship_index }}-{{ node_side }}" data-relationship-detail-panel>
+                          <div class="relationship-detail-panel-head">
+                            <div>
+                              <span class="relationship-type">Typ {{ node.kind }}</span>
+                              <strong class="relationship-node-name">
+                                {% if node.data.network and node.data.network.hostnames %}
+                                  {{ node.data.network.hostnames|first }}
+                                {% else %}
+                                  {{ node.label }}
+                                {% endif %}
+                              </strong>
+                            </div>
+                            <small>{{ node.ref }}</small>
                           </div>
-                          <small>{{ relationship.other_ref }}</small>
-                        </div>
-                        <div class="relationship-detail-grid">
-                          {% if relationship.other_status %}
-                            <div><span>Status</span><strong>{{ relationship.other_status }}</strong></div>
-                          {% endif %}
-                          <div><span>ID</span><strong>{{ relationship.other_id }}</strong></div>
-                          {% if relationship.other_data.network and relationship.other_data.network.addresses %}
-                            <div class="relationship-detail-wide">
-                              <span>Adressen</span>
-                              {% for address in relationship.other_data.network.addresses[:3] %}
-                                <strong>{{ address.ip }}{% if address.scope %} · {{ address.scope }}{% endif %}</strong>
-                              {% endfor %}
-                            </div>
-                          {% endif %}
-                          {% if relationship.service_ports %}
-                            <div class="relationship-detail-wide">
-                              <span>Ports</span>
-                              {% for port in relationship.service_ports %}
-                                <strong>{{ port.label }} {{ port.value }}</strong>
-                              {% endfor %}
-                            </div>
-                          {% endif %}
-                        </div>
-                      </section>
+                          <div class="relationship-detail-grid">
+                            {% if node.status %}
+                              <div><span>Status</span><strong>{{ node.status }}</strong></div>
+                            {% endif %}
+                            <div><span>ID</span><strong>{{ node.id }}</strong></div>
+                            {% if node.data.network and node.data.network.addresses %}
+                              <div class="relationship-detail-wide">
+                                <span>Adressen</span>
+                                {% for address in node.data.network.addresses[:3] %}
+                                  <strong>{{ address.ip }}{% if address.scope %} · {{ address.scope }}{% endif %}</strong>
+                                {% endfor %}
+                              </div>
+                            {% endif %}
+                            {% if node.ports %}
+                              <div class="relationship-detail-wide">
+                                <span>Ports</span>
+                                {% for port in node.ports %}
+                                  <strong>{{ port.label }} {{ port.value }}</strong>
+                                {% endfor %}
+                              </div>
+                            {% endif %}
+                          </div>
+                        </section>
+                      {% endfor %}
                     {% endfor %}
                   </div>
                 </div>

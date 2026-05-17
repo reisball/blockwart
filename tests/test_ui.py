@@ -104,6 +104,25 @@ def test_create_object_form_is_hidden_behind_button(client: TestClient) -> None:
     assert 'value="deleted"' in create_response.text
 
 
+def test_service_result_keeps_service_on_right_side(client: TestClient) -> None:
+    response = client.get("/?q=n8n-web-ui")
+
+    assert response.status_code == 200
+    object_marker = '<span class="object-id">n8n-web-ui</span>'
+    object_index = response.text.find(object_marker)
+    assert object_index >= 0
+    article_start = response.text.rfind("<article", 0, object_index)
+    article_end = response.text.find("</article>", object_index)
+    article = response.text[article_start:article_end]
+
+    relationship_start = article.find('class="relationship-map"')
+    relationship_end = article.find('class="relationship-detail-stack"')
+    relationships = article[relationship_start:relationship_end]
+
+    assert relationships.find("system:n8n") < relationships.find("service:n8n-web-ui")
+    assert relationships.find("Typ system") < relationships.find("Typ service")
+
+
 def test_object_detail_shows_data_and_relationships(client: TestClient) -> None:
     response = client.get("/objects/n8n")
 
