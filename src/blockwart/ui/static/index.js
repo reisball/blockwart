@@ -1,5 +1,7 @@
 (() => {
   const cards = Array.from(document.querySelectorAll("[data-object-card]"));
+  const createKindSelect = document.querySelector("[data-kind-select]");
+  const platformField = document.querySelector("[data-platform-field]");
 
   function closeCard(card) {
     card.classList.remove("is-expanded");
@@ -91,4 +93,14 @@
     }
     closeAll();
   });
+
+  function updatePlatformField() {
+    if (!createKindSelect || !platformField) {
+      return;
+    }
+    platformField.hidden = !["service", "system"].includes(createKindSelect.value);
+  }
+
+  createKindSelect?.addEventListener("change", updatePlatformField);
+  updatePlatformField();
 })();

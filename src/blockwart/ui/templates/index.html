@@ -80,13 +80,13 @@
                   <input name="labels" value="{{ form.labels }}" placeholder="infra, docker, intern" autocomplete="off" />
                 </label>
                 <label>Typ
-                  <select name="kind">
+                  <select name="kind" data-kind-select>
                     {% for object_kind in object_kinds %}
                       <option value="{{ object_kind }}" {% if object_kind == form.kind %}selected{% endif %}>{{ object_kind }}</option>
                     {% endfor %}
                   </select>
                 </label>
-                <label>Plattform
+                <label data-platform-field {% if form.kind not in ["system", "service"] %}hidden{% endif %}>Plattform
                   <select name="platform">
                     <option value="">Keine Plattform</option>
                     {% for platform in platform_types %}

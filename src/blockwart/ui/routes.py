@@ -35,6 +35,7 @@ OBJECT_KINDS = PUBLIC_OBJECT_KINDS
 OBJECT_STATUSES_UI = OBJECT_STATUSES
 RELATION_TYPES = ("hosts", "depends_on", "uses", "documents", "related_to")
 PLATFORM_TYPES = ("LXC", "VM")
+PLATFORM_OBJECT_KINDS = {"service", "system"}
 UI_KIND_PRIORITY = {kind: index for index, kind in enumerate(OBJECT_KINDS)}
 SAFE_DATA_JSON_FALLBACK = "{\n  \"schema_version\": 1\n}"
 
@@ -174,7 +175,7 @@ def save_object(
             data["labels"] = label_values
         else:
             data.pop("labels", None)
-        if kind == "system" and platform:
+        if kind in PLATFORM_OBJECT_KINDS and platform:
             data["platform"] = platform
         else:
             data.pop("platform", None)

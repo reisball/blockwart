@@ -98,6 +98,8 @@ def test_create_object_form_is_hidden_behind_button(client: TestClient) -> None:
     assert 'name="object_id"' in create_response.text
     assert 'name="hostname"' in create_response.text
     assert 'name="labels"' in create_response.text
+    assert "data-kind-select" in create_response.text
+    assert "data-platform-field" in create_response.text
     assert 'name="platform"' in create_response.text
     assert 'name="relation_target_ref"' in create_response.text
     assert 'name="data_json"' not in create_response.text
@@ -212,6 +214,7 @@ def test_create_service_form_can_set_host_system(
             "hosted_on_system_id": "fabrik",
             "label": "Test Service",
             "status": "active",
+            "platform": "VM",
             "summary": "Created from UI test.",
             "data_json": '{"schema_version": 1}',
         },
@@ -222,11 +225,14 @@ def test_create_service_form_can_set_host_system(
     detail = client.get("/objects/test-service")
     assert "system:fabrik" in detail.text
     with session_factory() as session:
+        catalog_object = get_object(session, "test-service")
         relationship = session.query(Relationship).filter_by(
             from_ref="system:fabrik",
             relation_type="hosts",
             to_ref="service:test-service",
         ).one_or_none()
+    assert catalog_object is not None
+    assert catalog_object.data["platform"] == "VM"
     assert relationship is not None
 
 
