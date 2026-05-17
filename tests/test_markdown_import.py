@@ -45,14 +45,14 @@ def test_build_tools_import_plan_parses_infrastructure_rows(tmp_path: Path) -> N
     assert system["id"] == "ct-200"
     assert system["kind"] == "system"
     assert system["data"]["platform"] == "LXC"
-    assert system["data"]["related_services"] == ["service:demo-box"]
+    assert system["data"]["related_services"] == ["service:ct-200_demo-box"]
     assert system["data"]["container"] == {
         "id": "ct-200",
         "type": "ct",
         "number": "200",
         "label": "CT 200",
     }
-    assert service["id"] == "demo-box"
+    assert service["id"] == "ct-200_demo-box"
     assert service["kind"] == "service"
     assert service["data"]["platform"] == "LXC"
     assert service["data"]["system_id"] == "system:ct-200"
@@ -70,7 +70,7 @@ def test_build_tools_import_plan_parses_infrastructure_rows(tmp_path: Path) -> N
         {
             "from_ref": "system:ct-200",
             "relation_type": "hosts",
-            "to_ref": "service:demo-box",
+            "to_ref": "service:ct-200_demo-box",
         }
     ]
 
@@ -97,7 +97,7 @@ def test_import_tools_markdown_writes_valid_objects(tmp_path: Path) -> None:
 
     assert result.objects_imported == 1
     assert {row.id for row in rows} == {"no-auth-api"}
-    assert rows[0].kind == "system"
+    assert rows[0].kind == "service"
 
 
 def test_build_tools_import_plan_sets_wsl_platform(tmp_path: Path) -> None:
@@ -119,7 +119,7 @@ def test_build_tools_import_plan_sets_wsl_platform(tmp_path: Path) -> None:
     plan = build_tools_import_plan(tools_path, references_root=tmp_path)
     system = plan.payload["objects"][0]
 
-    assert system["kind"] == "system"
+    assert system["kind"] == "service"
     assert system["data"]["platform"] == "WSL"
 
 
@@ -151,9 +151,9 @@ def test_import_tools_markdown_creates_hosted_service_relationship(tmp_path: Pat
     assert objects["ct-121"].kind == "system"
     assert objects["ct-121"].label == "Agent Zero"
     assert '"platform": "LXC"' in objects["ct-121"].data_json
-    assert objects["agent-zero"].kind == "service"
-    assert '"platform": "LXC"' in objects["agent-zero"].data_json
-    assert objects["agent-zero"].data_json.count("system:ct-121") == 1
+    assert objects["ct-121_agent-zero"].kind == "service"
+    assert '"platform": "LXC"' in objects["ct-121_agent-zero"].data_json
+    assert objects["ct-121_agent-zero"].data_json.count("system:ct-121") == 1
     assert [
         {
             "from_ref": relationship.from_ref,
@@ -165,7 +165,7 @@ def test_import_tools_markdown_creates_hosted_service_relationship(tmp_path: Pat
         {
             "from_ref": "system:ct-121",
             "relation_type": "hosts",
-            "to_ref": "service:agent-zero",
+            "to_ref": "service:ct-121_agent-zero",
         }
     ]
 
@@ -204,7 +204,7 @@ def test_import_tools_markdown_updates_previous_workspace_import_shape(tmp_path:
             ),
         )
         import_tools_markdown(session, tools_path, references_root=tmp_path)
-        row = session.get(CatalogObject, "agent-zero")
+        row = session.get(CatalogObject, "ct-121_agent-zero")
 
     assert row is not None
     assert "system:ct-121" in row.data_json
@@ -268,7 +268,7 @@ def test_import_tools_markdown_removes_stale_workspace_host_relationship(
     assert [
         (relationship.from_ref, relationship.relation_type, relationship.to_ref)
         for relationship in relationships
-    ] == [("system:ct-121", "hosts", "service:agent-zero")]
+    ] == [("system:ct-121", "hosts", "service:ct-121_agent-zero")]
 
 
 def test_import_tools_markdown_merges_canonical_existing_objects(tmp_path: Path) -> None:
@@ -306,5 +306,4 @@ def test_import_tools_markdown_merges_canonical_existing_objects(tmp_path: Path)
     assert result.objects_imported == 1
     assert row is not None
     assert row.label == "Fabrik"
-    assert "related_services" in row.data_json
     assert "workspace_markdown_import" in row.data_json

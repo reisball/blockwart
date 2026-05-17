@@ -267,7 +267,7 @@ def _validate_runbook_data(data: dict[str, Any]) -> None:
 
 
 class CatalogObjectIn(BaseModel):
-    id: str = Field(pattern=r"^[a-z0-9][a-z0-9-]*[a-z0-9]$|^[a-z0-9]$")
+    id: str = Field(pattern=r"^[a-z0-9][a-z0-9_-]*[a-z0-9]$|^[a-z0-9]$")
     kind: ObjectKind
     label: str
     status: ObjectStatus = "active"

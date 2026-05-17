@@ -1,6 +1,7 @@
 from dataclasses import dataclass
 
 VALID_REFERENCE_KINDS = {
+    "host",
     "system",
     "netzwerk",
     "service",

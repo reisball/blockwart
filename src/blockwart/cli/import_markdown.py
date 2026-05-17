@@ -9,7 +9,7 @@ from sqlalchemy.orm import sessionmaker
 
 from blockwart.db.base import Base
 from blockwart.db.session import build_engine
-from blockwart.models import CatalogObject, Relationship
+from blockwart.models import AuditEvent, CatalogObject, Relationship
 from blockwart.services.markdown_import import build_tools_import_plan, import_tools_markdown
 
 DEFAULT_TOOLS_PATH = Path("/home/zoe/.openclaw/workspace/TOOLS.md")
@@ -45,6 +45,11 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Write parsed objects to the database. Without this, only prints a dry-run summary.",
     )
+    parser.add_argument(
+        "--replace",
+        action="store_true",
+        help="Delete all catalog objects, relationships, and audit events before importing.",
+    )
     return parser
 
 
@@ -78,6 +83,11 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     session_factory = sessionmaker(bind=engine, autoflush=False, autocommit=False)
     with session_factory() as session:
+        if args.replace:
+            session.query(AuditEvent).delete()
+            session.query(Relationship).delete()
+            session.query(CatalogObject).delete()
+            session.commit()
         result = import_tools_markdown(
             session,
             tools_path,

@@ -63,6 +63,7 @@ def build_tools_import_plan(
     objects: list[dict[str, Any]] = []
     relationships: list[dict[str, str]] = []
     seen_ids: set[str] = set()
+    hosted_system_refs: list[str] = []
 
     for row in rows:
         label = row.get("System") or row.get("Name")
@@ -72,17 +73,16 @@ def build_tools_import_plan(
             continue
 
         slug_label = _slugify(_plain_text(label))
-        is_canonical_row = slug_label in CANONICAL_LABEL_IDS
         base_id = CANONICAL_LABEL_IDS.get(slug_label, slug_label)
         typ = _plain_text(row.get("Typ", "") or row.get("Type", ""))
-        is_hosted_service = _is_hosted_service_row(row) and not is_canonical_row
-        object_id = _unique_id(base_id, seen_ids)
+        is_hosted_service = _is_hosted_service_row(row)
         system_id = (
             _unique_id(_host_system_id(base_id, typ), seen_ids)
             if is_hosted_service
-            else object_id
+            else _unique_id(base_id, seen_ids)
         )
-        service_id = object_id
+        service_id = _unique_id(_service_id(system_id, base_id), seen_ids)
+        display_label = _display_label(_plain_text(label))
         status = _status_from_cell(row.get("Status", ""))
         ip_port = row.get("IP:Port", "") or row.get("Ort", "")
         access = row.get("Access", "") or row.get("Access/Auth", "")
@@ -129,13 +129,13 @@ def build_tools_import_plan(
         objects.append(
             {
                 "id": system_id,
-                "kind": "system",
-                "label": _host_system_label(_plain_text(label), typ)
+                "kind": "system" if is_hosted_service else _object_kind_from_type(typ),
+                "label": _host_system_label(display_label, typ)
                 if is_hosted_service
-                else _plain_text(label),
+                else display_label,
                 "status": status,
                 "summary": (
-                    f"Runtime host for {_plain_text(label)}."
+                    f"Runtime host for {display_label}."
                     if is_hosted_service
                     else usage or typ or "Imported from workspace TOOLS.md."
                 ),
@@ -150,11 +150,11 @@ def build_tools_import_plan(
                 {
                     "id": service_id,
                     "kind": "service",
-                    "label": _plain_text(label),
+                    "label": display_label,
                     "status": status,
                     "summary": usage or f"Service running on {system_id}.",
                     "data": _service_data(
-                        label=_plain_text(label),
+                        label=display_label,
                         usage=usage,
                         typ=typ,
                         system_ref=system_ref,
@@ -174,6 +174,17 @@ def build_tools_import_plan(
                     "to_ref": service_ref,
                 }
             )
+            hosted_system_refs.append(system_ref)
+
+    if any(obj["id"] == "fabrik" and obj["kind"] == "host" for obj in objects):
+        relationships.extend(
+            {
+                "from_ref": "host:fabrik",
+                "relation_type": "hosts",
+                "to_ref": system_ref,
+            }
+            for system_ref in hosted_system_refs
+        )
 
     payload = {
         "schema_version": 1,
@@ -211,6 +222,8 @@ def import_tools_markdown(
             payload = _merge_existing_object(existing, payload)
         upsert_object(session, payload)
 
+    _remove_stale_workspace_services(session, objects)
+
     inserted_relationships = 0
     for relationship in relationships:
         _remove_stale_workspace_host_relationships(session, relationship)
@@ -234,6 +247,44 @@ def import_tools_markdown(
         objects_imported=len(objects),
         relationships_imported=inserted_relationships,
     )
+
+
+def _remove_stale_workspace_services(session: Session, objects: list[dict[str, Any]]) -> None:
+    imported_service_ids = {
+        str(obj["id"])
+        for obj in objects
+        if obj.get("kind") == "service"
+        and isinstance(obj.get("data"), dict)
+        and obj["data"].get("source") == "workspace_markdown_import"
+    }
+    imported_services = {
+        str(obj["label"]): str(obj["id"])
+        for obj in objects
+        if obj.get("kind") == "service"
+        and isinstance(obj.get("data"), dict)
+        and obj["data"].get("source") == "workspace_markdown_import"
+    }
+    if not imported_services:
+        return
+
+    rows = session.scalars(select(CatalogObject).where(CatalogObject.kind == "service")).all()
+    for row in rows:
+        if row.id in imported_service_ids:
+            continue
+        expected_id = imported_services.get(row.label)
+        if not expected_id or row.id == expected_id:
+            continue
+        data = json.loads(row.data_json or "{}")
+        if data.get("source") != "workspace_markdown_import":
+            continue
+        stale_ref = f"service:{row.id}"
+        session.execute(
+            delete(Relationship).where(
+                (Relationship.from_ref == stale_ref) | (Relationship.to_ref == stale_ref)
+            )
+        )
+        session.delete(row)
+    session.commit()
 
 
 def _remove_stale_workspace_host_relationships(
@@ -348,6 +399,17 @@ def _is_hosted_service_row(row: dict[str, str]) -> bool:
     )
 
 
+def _object_kind_from_type(typ: str) -> str:
+    text = _plain_text(typ).casefold()
+    if text == "host" or "raspberry pi" in text:
+        return "host"
+    if text == "network":
+        return "netzwerk"
+    if "service" in text:
+        return "service"
+    return "system"
+
+
 def _host_system_id(base_id: str, typ: str) -> str:
     container = _container_data(typ)
     container_id = str(container.get("id") or "")
@@ -356,8 +418,17 @@ def _host_system_id(base_id: str, typ: str) -> str:
     return f"{base_id}-runtime"
 
 
+def _service_id(system_id: str, base_id: str) -> str:
+    return f"{system_id}_{base_id}"
+
+
 def _host_system_label(label: str, typ: str) -> str:
     return label
+
+
+def _display_label(label: str) -> str:
+    cleaned = re.sub(r"\s+\([^)]*\)$", "", label).strip()
+    return cleaned or label
 
 
 def _container_data(typ: str) -> dict[str, str]:
