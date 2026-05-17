@@ -48,8 +48,10 @@ def index(
     q: str = "",
     kind: str = "",
     create: str = "",
+    cols: str = "1",
 ):
     normalized_kind = kind if kind in OBJECT_KINDS else ""
+    layout_cols = cols if cols in {"1", "2", "3"} else "1"
     objects = _visible_objects(
         search_objects(session, query=q.strip() or None, kind=normalized_kind or None)
     )
@@ -67,6 +69,7 @@ def index(
             "objects": objects,
             "q": q,
             "kind": normalized_kind,
+            "layout_cols": layout_cols,
             "object_kinds": OBJECT_KINDS,
             "object_statuses": OBJECT_STATUSES_UI,
             "platform_types": PLATFORM_TYPES,
@@ -240,6 +243,7 @@ def save_object(
                 "objects": objects,
                 "q": "",
                 "kind": "",
+                "layout_cols": "1",
                 "object_kinds": OBJECT_KINDS,
                 "object_statuses": OBJECT_STATUSES_UI,
                 "platform_types": PLATFORM_TYPES,

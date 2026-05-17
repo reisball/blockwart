@@ -281,6 +281,10 @@ button:hover,
   gap: 8px;
 }
 
+.stats::-webkit-scrollbar {
+  height: 6px;
+}
+
 .stat,
 .badge,
 .chip,
@@ -354,6 +358,48 @@ button:hover,
   margin-bottom: 0;
 }
 
+.panel-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+  justify-content: flex-end;
+}
+
+.view-toggle {
+  display: inline-flex;
+  gap: 3px;
+  min-height: 34px;
+  padding: 3px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: var(--surface-muted);
+}
+
+.view-option {
+  display: inline-flex;
+  min-width: 30px;
+  min-height: 26px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 5px;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 750;
+  text-decoration: none;
+}
+
+.view-option:hover {
+  background: var(--hover-bg);
+  color: var(--text);
+}
+
+.view-option[aria-current="page"] {
+  background: var(--surface);
+  color: var(--text);
+  box-shadow: var(--shadow);
+}
+
 .panel-sticky {
   position: sticky;
   top: 14px;
@@ -400,12 +446,99 @@ button:hover,
   gap: 8px;
 }
 
+.list-cols-2 {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.list-cols-3 {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.list-cols-2 .object-row,
+.list-cols-3 .object-row {
+  grid-template-columns: 1fr;
+  gap: 8px;
+  padding: 10px;
+}
+
+.list-cols-2 .kind,
+.list-cols-3 .kind {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
+.list-cols-2 .kind span,
+.list-cols-3 .kind span {
+  margin: 0;
+  font-size: 12px;
+}
+
+.list-cols-2 .summary,
+.list-cols-3 .summary {
+  display: -webkit-box;
+  max-width: none;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.list-cols-2 .object-actions,
+.list-cols-3 .object-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  justify-items: stretch;
+}
+
+.list-cols-2 .object-id,
+.list-cols-3 .object-id {
+  min-width: 0;
+  font-size: 12px;
+}
+
 .object-card {
   border: 1px solid var(--border);
   background: var(--surface);
   border-radius: var(--radius);
   box-shadow: var(--shadow);
   overflow: hidden;
+}
+
+.list-cols-2 .object-card.is-expanded,
+.list-cols-3 .object-card.is-expanded {
+  grid-column: 1 / -1;
+}
+
+.list-cols-2 .object-card.is-expanded .object-row,
+.list-cols-3 .object-card.is-expanded .object-row {
+  grid-template-columns: 150px minmax(0, 1fr) minmax(92px, auto);
+  gap: 12px;
+  padding: 12px;
+}
+
+.list-cols-2 .object-card.is-expanded .kind,
+.list-cols-3 .object-card.is-expanded .kind {
+  display: block;
+}
+
+.list-cols-2 .object-card.is-expanded .kind span,
+.list-cols-3 .object-card.is-expanded .kind span {
+  margin: 0 0 5px;
+  font-size: 13px;
+}
+
+.list-cols-2 .object-card.is-expanded .summary,
+.list-cols-3 .object-card.is-expanded .summary {
+  display: block;
+  max-width: 76ch;
+  overflow: visible;
+}
+
+.list-cols-2 .object-card.is-expanded .object-actions,
+.list-cols-3 .object-card.is-expanded .object-actions {
+  display: grid;
+  justify-items: end;
 }
 
 .object-card:hover,
@@ -442,7 +575,21 @@ button:hover,
 }
 
 .kind span {
-  display: block;
+  display: inline-flex;
+  width: fit-content;
+  min-height: 24px;
+  align-items: center;
+  margin: 0 0 5px;
+  padding: 2px 7px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface-muted);
+  line-height: 1.25;
+}
+
+.kind .status {
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--border));
+  color: var(--text);
 }
 
 .object-actions {
@@ -881,7 +1028,9 @@ pre {
   .toolbar,
   .page-grid,
   .detail-grid,
-  .object-row {
+  .object-row,
+  .list-cols-2,
+  .list-cols-3 {
     grid-template-columns: 1fr;
   }
 
@@ -892,29 +1041,170 @@ pre {
   .overview-card {
     grid-template-columns: 1fr;
   }
+
+  .relationship-edge {
+    grid-template-columns: 1fr;
+  }
+
+  .relationship-line {
+    width: 2px;
+    height: 18px;
+    justify-self: center;
+  }
 }
 
 @media (max-width: 520px) {
   .page,
   .topbar-inner {
-    padding: 16px;
+    padding: 14px 16px;
+  }
+
+  .topbar-inner {
+    gap: 10px;
   }
 
   h1 {
     font-size: 25px;
   }
 
+  .subtle {
+    font-size: 14px;
+    line-height: 1.35;
+  }
+
+  .title-row {
+    gap: 8px;
+  }
+
+  .top-actions {
+    width: 100%;
+    justify-content: flex-start;
+  }
+
+  .theme-toggle {
+    min-height: 32px;
+  }
+
+  .theme-option {
+    min-height: 26px;
+    padding: 3px 8px;
+  }
+
+  .toolbar {
+    grid-template-columns: minmax(0, 1fr) minmax(112px, 0.48fr);
+    gap: 8px;
+    align-items: end;
+  }
+
+  .toolbar label:first-child {
+    grid-column: 1 / -1;
+  }
+
+  input,
+  select,
+  textarea,
+  button {
+    min-height: 40px;
+    padding: 8px 10px;
+  }
+
+  button,
+  .button {
+    min-width: 0;
+  }
+
+  .stats {
+    flex-wrap: nowrap;
+    margin-right: -16px;
+    padding: 1px 16px 5px 0;
+    overflow-x: auto;
+    scrollbar-width: thin;
+  }
+
+  .stat {
+    flex: 0 0 auto;
+    padding: 6px 9px;
+  }
+
+  .panel-head {
+    align-items: center;
+  }
+
+  .panel {
+    padding: 14px;
+  }
+
+  .object-row {
+    gap: 8px;
+    padding: 10px;
+  }
+
+  .kind {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 5px;
+  }
+
+  .kind span {
+    margin: 0;
+    font-size: 12px;
+  }
+
+  .object-actions {
+    display: flex;
+    justify-content: space-between;
+    justify-items: stretch;
+    align-items: center;
+  }
+
+  .object-id {
+    min-width: 0;
+  }
+
+  .button-small {
+    min-height: 32px;
+    padding: 5px 9px;
+  }
+
+  .badges,
+  .chips {
+    gap: 5px;
+    margin-top: 7px;
+  }
+
+  .badge,
+  .chip,
+  .ref-chip,
+  .pill {
+    min-height: 25px;
+    padding: 3px 7px;
+    font-size: 12px;
+  }
+
   .overview-times {
     grid-template-columns: 1fr;
+  }
+
+  .overview-card {
+    gap: 10px;
+  }
+
+  .overview-primary {
+    padding: 12px;
+  }
+
+  .overview-labels {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .overview-label {
     grid-template-columns: 1fr;
     gap: 2px;
+    padding: 7px 8px;
   }
 
   .overview-hostname {
-    font-size: 24px;
+    font-size: 23px;
   }
 }
 

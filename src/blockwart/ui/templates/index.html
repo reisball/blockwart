@@ -9,9 +9,9 @@
         document.documentElement.dataset.theme = "light";
       }
     </script>
-    <link rel="stylesheet" href="/static/app.css?v=052" />
-    <script src="/static/theme.js?v=052" defer></script>
-    <script src="/static/index.js?v=052" defer></script>
+    <link rel="stylesheet" href="/static/app.css?v=054" />
+    <script src="/static/theme.js?v=054" defer></script>
+    <script src="/static/index.js?v=054" defer></script>
   </head>
   <body>
     <header class="topbar">
@@ -29,6 +29,7 @@
           </div>
         </div>
         <form class="toolbar" method="get" action="/">
+          <input type="hidden" name="cols" value="{{ layout_cols }}" />
           <label>
             Suche
             <input type="search" name="q" value="{{ q }}" placeholder="System, Service, Port, Referenz..." autocomplete="off" spellcheck="false" />
@@ -45,9 +46,9 @@
           <button type="submit">Suchen</button>
         </form>
         <nav class="stats" aria-label="Objektzahlen">
-          <a class="stat" href="/" {% if not kind %}aria-current="page"{% endif %}><strong>{{ total_objects }}</strong> alle</a>
+          <a class="stat" href="/?cols={{ layout_cols }}" {% if not kind %}aria-current="page"{% endif %}><strong>{{ total_objects }}</strong> alle</a>
           {% for object_kind in object_kinds %}
-            <a class="stat" href="/?kind={{ object_kind }}" {% if object_kind == kind %}aria-current="page"{% endif %}><strong>{{ object_counts[object_kind] or 0 }}</strong> {{ object_kind }}</a>
+            <a class="stat" href="/?kind={{ object_kind }}&cols={{ layout_cols }}" {% if object_kind == kind %}aria-current="page"{% endif %}><strong>{{ object_counts[object_kind] or 0 }}</strong> {{ object_kind }}</a>
           {% endfor %}
         </nav>
       </div>
@@ -56,15 +57,26 @@
       <section>
         <div class="panel-head">
           <h2 class="section-title">{{ objects|length }} Treffer</h2>
-          <a class="button button-small" href="/?create=1">Neues Objekt anlegen</a>
+          <div class="panel-actions">
+            <div class="view-toggle" role="group" aria-label="Spaltenansicht">
+              {% for col_value in ["1", "2", "3"] %}
+                <a class="view-option" href="/?q={{ q|urlencode }}&kind={{ kind }}&cols={{ col_value }}" {% if layout_cols == col_value %}aria-current="page"{% endif %}>{{ col_value }}</a>
+              {% endfor %}
+            </div>
+            {% if not q and not kind and layout_cols == "1" %}
+              <a class="button button-small" href="/?create=1">Neues Objekt anlegen</a>
+            {% else %}
+              <a class="button button-small" href="/?q={{ q|urlencode }}&kind={{ kind }}&cols={{ layout_cols }}&create=1">Neues Objekt anlegen</a>
+            {% endif %}
+          </div>
         </div>
         {% if show_create_form %}
           <div class="modal-overlay" role="presentation">
-            <a class="modal-backdrop" href="/" aria-label="Objekt-Anlegen schließen"></a>
+            <a class="modal-backdrop" href="/?q={{ q|urlencode }}&kind={{ kind }}&cols={{ layout_cols }}" aria-label="Objekt-Anlegen schließen"></a>
             <section class="panel modal-window" role="dialog" aria-modal="true" aria-labelledby="create-object-title">
               <div class="modal-head">
                 <h2 class="section-title" id="create-object-title">Neues Objekt anlegen</h2>
-                <a class="button button-small button-muted" href="/">Schließen</a>
+                <a class="button button-small button-muted" href="/?q={{ q|urlencode }}&kind={{ kind }}&cols={{ layout_cols }}">Schließen</a>
               </div>
               {% if error %}
                 <div class="error">{{ error }}</div>
@@ -122,14 +134,14 @@
                 </label>
                 <div class="button-row">
                   <button type="submit">Speichern</button>
-                  <a class="button button-muted" href="/">Abbrechen</a>
+                  <a class="button button-muted" href="/?q={{ q|urlencode }}&kind={{ kind }}&cols={{ layout_cols }}">Abbrechen</a>
                 </div>
               </form>
             </section>
           </div>
         {% endif %}
         {% if objects %}
-          <div class="list">
+          <div class="list list-cols-{{ layout_cols }}">
             {% for object in objects %}
               {% set object_relationships = index_relationships[object.id] %}
               <article class="object-card" data-object-card>
