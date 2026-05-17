@@ -52,6 +52,23 @@ def _write_audit(session: Session, object_id: str | None, action: str, summary: 
     )
 
 
+def list_audit_events_for_object(session: Session, object_id: str) -> list[dict[str, str]]:
+    statement = (
+        select(AuditEvent)
+        .where(AuditEvent.object_id == object_id)
+        .order_by(AuditEvent.created_at.desc(), AuditEvent.id.desc())
+    )
+    return [
+        {
+            "action": row.action,
+            "actor": row.actor,
+            "summary": _audit_summary(row.summary),
+            "created_at": _format_log_timestamp(row.created_at),
+        }
+        for row in session.scalars(statement).all()
+    ]
+
+
 def list_objects(session: Session) -> list[CatalogObjectOut]:
     statement = select(CatalogObject).order_by(CatalogObject.kind, CatalogObject.label)
     rows = session.scalars(statement).all()
@@ -148,6 +165,7 @@ def upsert_object(session: Session, payload: CatalogObjectIn) -> CatalogObjectOu
     changed_at = _now()
     if row is None:
         action = "create"
+        audit_summary = f"Objekt erstellt: {payload.kind}:{payload.id}"
         row = CatalogObject(
             id=payload.id,
             kind=payload.kind,
@@ -161,6 +179,7 @@ def upsert_object(session: Session, payload: CatalogObjectIn) -> CatalogObjectOu
         session.add(row)
     else:
         action = "update"
+        audit_summary = _update_summary(row, payload, data_json)
         row.kind = payload.kind
         row.label = payload.label
         row.status = payload.status
@@ -168,11 +187,86 @@ def upsert_object(session: Session, payload: CatalogObjectIn) -> CatalogObjectOu
         row.data_json = data_json
         row.updated_at = changed_at
 
-    summary = f"{action.title()} catalog object {payload.kind}:{payload.id}"
-    _write_audit(session, payload.id, action, summary)
+    _write_audit(session, payload.id, action, audit_summary)
     session.commit()
     session.refresh(row)
     return _to_schema(row)
+
+
+def _update_summary(row: CatalogObject, payload: CatalogObjectIn, data_json: str) -> str:
+    changes: list[str] = []
+    if row.kind != payload.kind:
+        changes.append(_field_change("Typ", row.kind, payload.kind))
+    if row.label != payload.label:
+        changes.append(_field_change("Hostname", row.label, payload.label))
+    if _normalize_status(row.status) != _normalize_status(payload.status):
+        changes.append(_field_change("Status", _normalize_status(row.status), payload.status))
+    if (row.summary or "") != (payload.summary or ""):
+        changes.append(_field_change("Kurzbeschreibung", row.summary or "", payload.summary or ""))
+
+    old_data = json.loads(row.data_json or "{}")
+    if old_data != payload.data:
+        changes.extend(_data_changes(old_data, payload.data))
+    if not changes and row.data_json != data_json:
+        changes.append("Daten wurden geändert")
+    return "; ".join(changes) if changes else f"Objekt aktualisiert: {payload.kind}:{payload.id}"
+
+
+def _format_log_timestamp(value: datetime | None) -> str:
+    if value is None:
+        return ""
+    return value.strftime("%Y-%m-%d %H:%M:%S")
+
+
+def _audit_summary(summary: str) -> str:
+    if summary.startswith("Create catalog object "):
+        return f"Objekt erstellt: {summary.removeprefix('Create catalog object ')}"
+    if summary.startswith("Update catalog object "):
+        return f"Objekt aktualisiert: {summary.removeprefix('Update catalog object ')}"
+    if summary.startswith("Delete catalog object "):
+        return f"Objekt gelöscht: {summary.removeprefix('Delete catalog object ')}"
+    return summary
+
+
+def _data_changes(old_data: dict, new_data: dict) -> list[str]:
+    labels = {
+        "access_methods": "Zugriff",
+        "comment": "Kommentar",
+        "container": "Container",
+        "endpoints": "Endpoints",
+        "labels": "Label",
+        "network": "Netzwerk",
+        "platform": "Plattform",
+        "ports": "Ports",
+        "system_id": "System",
+    }
+    changes = []
+    for key in sorted(set(old_data) | set(new_data)):
+        if old_data.get(key) == new_data.get(key):
+            continue
+        label = labels.get(key, key)
+        old_value = old_data.get(key, "")
+        new_value = new_data.get(key, "")
+        if isinstance(old_value, str) and isinstance(new_value, str):
+            changes.append(_field_change(label, old_value, new_value))
+        else:
+            changes.append(f"Feld {label} wurde geändert")
+    return changes
+
+
+def _field_change(field: str, old_value: str | None, new_value: str | None) -> str:
+    old_display = _display_value(old_value)
+    new_display = _display_value(new_value)
+    return f"Feld {field} wurde von {old_display} auf {new_display} geändert"
+
+
+def _display_value(value: str | None) -> str:
+    text = (value or "").strip()
+    if not text:
+        return "leer"
+    if len(text) > 80:
+        return f"{text[:77]}..."
+    return text
 
 
 def delete_object(session: Session, object_id: str) -> bool:
@@ -188,7 +282,7 @@ def delete_object(session: Session, object_id: str) -> bool:
         )
     )
     session.delete(row)
-    _write_audit(session, object_id, "delete", f"Delete catalog object {object_ref}")
+    _write_audit(session, object_id, "delete", f"Objekt gelöscht: {object_ref}")
     session.commit()
     return True
 

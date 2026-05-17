@@ -343,16 +343,34 @@
           {% endif %}
         </section>
 
-        {% if source_references %}
-          <section class="panel">
-            <h2 class="section-title">Referenzdoku</h2>
-            <ul class="rel">
-              {% for reference in source_references %}
-                <li><strong>{{ reference.label }}</strong><br /><span class="meta">{{ reference.uri }}</span></li>
+        <section class="panel">
+          <h2 class="section-title">Kommentar</h2>
+          <form class="form-grid comment-form" method="post" action="/objects/{{ object.id }}/comment">
+            <label>Kommentar
+              <textarea name="comment" placeholder="Kommentar zum Objekt">{{ comment }}</textarea>
+            </label>
+            <div class="button-row">
+              <button type="submit">Kommentar speichern</button>
+            </div>
+          </form>
+        </section>
+
+        <section class="panel">
+          <h2 class="section-title">Audit</h2>
+          {% if audit_events %}
+            <ul class="audit-log">
+              {% for event in audit_events %}
+                <li>
+                  <time class="audit-time">{{ event.created_at }}</time>
+                  <div class="audit-summary">{{ event.summary }}</div>
+                  <div class="meta">{{ event.action }} · {{ event.actor }}</div>
+                </li>
               {% endfor %}
             </ul>
-          </section>
-        {% endif %}
+          {% else %}
+            <div class="meta">Keine Audit-Einträge.</div>
+          {% endif %}
+        </section>
       </section>
     </main>
   </body>

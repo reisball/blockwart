@@ -48,7 +48,7 @@ def test_index_lists_seeded_objects_and_filters_search(client: TestClient) -> No
 
     assert response.status_code == 200
     assert "brieftraeger" in response.text
-    assert "Referenzdoku" in response.text
+    assert "Referenzdoku" not in response.text
     assert "brieftraeger-ocr-worker" in response.text
 
 
@@ -147,7 +147,10 @@ def test_object_detail_shows_data_and_relationships(client: TestClient) -> None:
     assert "Credential-Referenzen" not in response.text
     assert "credential_references" not in response.text
     assert "/objects/n8n-api-credential" not in response.text
-    assert "references/n8n.md" in response.text
+    assert "Kommentar" in response.text
+    assert "Audit" in response.text
+    assert "Referenzdoku" not in response.text
+    assert "references/n8n.md" not in response.text
     assert "Daten JSON" not in response.text
     assert "Bearbeiten" not in response.text
     assert 'href="/objects/n8n?edit=overview"' in response.text
@@ -155,6 +158,27 @@ def test_object_detail_shows_data_and_relationships(client: TestClient) -> None:
     assert 'data-theme-value="dark"' in response.text
     assert 'data-theme-value="light"' in response.text
     assert "/static/theme.js" in response.text
+
+
+def test_comment_form_updates_object_and_audit(
+    client: TestClient,
+    session_factory,
+) -> None:
+    response = client.post(
+        "/objects/n8n/comment",
+        data={"comment": "Interner Kommentar"},
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 303
+    assert response.headers["location"] == "/objects/n8n"
+    detail = client.get("/objects/n8n")
+    assert "Interner Kommentar" in detail.text
+    assert "Feld Kommentar wurde von leer auf Interner Kommentar geändert" in detail.text
+    with session_factory() as session:
+        catalog_object = get_object(session, "n8n")
+    assert catalog_object is not None
+    assert catalog_object.data["comment"] == "Interner Kommentar"
 
 
 def test_relationship_add_form_is_hidden_behind_add_button(client: TestClient) -> None:

@@ -807,6 +807,42 @@ button:hover,
   border-top: 1px solid var(--border);
 }
 
+.comment-form textarea {
+  min-height: 118px;
+}
+
+.audit-log {
+  display: grid;
+  gap: 0;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.audit-log li {
+  display: grid;
+  gap: 4px;
+  padding: 11px 0;
+  border-top: 1px solid var(--border);
+}
+
+.audit-log li:first-child {
+  padding-top: 0;
+  border-top: 0;
+}
+
+.audit-time {
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 12px;
+}
+
+.audit-summary {
+  color: var(--text);
+  font-size: 14px;
+  overflow-wrap: anywhere;
+}
+
 .button-row {
   display: flex;
   flex-wrap: wrap;

@@ -22,6 +22,7 @@ from blockwart.schemas.catalog import (
 from blockwart.services.catalog import (
     create_relationship,
     get_object,
+    list_audit_events_for_object,
     list_objects,
     list_relationships_for_object,
     search_objects,
@@ -110,7 +111,8 @@ def object_detail(
             "relationship_groups": relationship_groups,
             "relationship_targets": relationship_targets,
             "relation_types": RELATION_TYPES,
-            "source_references": _source_references(object_data),
+            "comment": str(object_data.get("comment") or ""),
+            "audit_events": list_audit_events_for_object(session, catalog_object.id),
             "network": _network_summary(object_data),
             "container": _container_summary(object_data),
             "ports": _list_of_mappings(object_data.get("ports")),
@@ -288,6 +290,36 @@ def save_relationship(
     return RedirectResponse(url=f"/objects/{object_id}", status_code=303)
 
 
+@router.post("/objects/{object_id}/comment", response_class=HTMLResponse)
+def update_comment(
+    object_id: str,
+    session: Annotated[Session, Depends(get_session)],
+    comment: Annotated[str, Form()] = "",
+):
+    existing_object = get_object(session, object_id)
+    if existing_object is None:
+        raise HTTPException(status_code=404, detail="Catalog object not found")
+    data = _editable_data_copy(existing_object.data)
+    cleaned_comment = comment.strip()
+    if cleaned_comment:
+        data["comment"] = cleaned_comment
+    else:
+        data.pop("comment", None)
+    _reject_secret_shaped_form_data(data)
+    upsert_object(
+        session,
+        CatalogObjectIn(
+            id=existing_object.id,
+            kind=existing_object.kind,
+            label=existing_object.label,
+            status=existing_object.status,
+            summary=existing_object.summary,
+            data=data,
+        ),
+    )
+    return RedirectResponse(url=f"/objects/{object_id}", status_code=303)
+
+
 @router.post("/objects/{object_id}", response_class=HTMLResponse)
 def update_object(
     request: Request,
@@ -367,7 +399,8 @@ def update_object(
                 ),
                 "relationship_targets": [obj for obj in all_objects if obj.id != catalog_object.id],
                 "relation_types": RELATION_TYPES,
-                "source_references": _source_references(object_data),
+                "comment": str(object_data.get("comment") or ""),
+                "audit_events": list_audit_events_for_object(session, catalog_object.id),
                 "network": _network_summary(object_data),
                 "container": _container_summary(object_data),
                 "ports": _list_of_mappings(object_data.get("ports")),
@@ -812,17 +845,6 @@ def _object_id_from_ref(value: str) -> str:
     if ":" not in value:
         return value
     return value.split(":", 1)[1]
-
-
-def _source_references(data: Mapping[str, Any]) -> list[dict[str, str]]:
-    references = _list_of_mappings(data.get("source_references"))
-    return [
-        {
-            "label": str(reference.get("label") or reference.get("uri") or "reference"),
-            "uri": str(reference.get("uri") or ""),
-        }
-        for reference in references
-    ]
 
 
 def _network_summary(data: Mapping[str, Any]) -> dict[str, list[Mapping[str, Any]] | list[str]]:
