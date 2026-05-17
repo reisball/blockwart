@@ -34,6 +34,7 @@ router = APIRouter(tags=["ui"])
 OBJECT_KINDS = PUBLIC_OBJECT_KINDS
 OBJECT_STATUSES_UI = OBJECT_STATUSES
 RELATION_TYPES = ("hosts", "depends_on", "uses", "documents", "related_to")
+PLATFORM_TYPES = ("LXC", "VM")
 UI_KIND_PRIORITY = {kind: index for index, kind in enumerate(OBJECT_KINDS)}
 SAFE_DATA_JSON_FALLBACK = "{\n  \"schema_version\": 1\n}"
 
@@ -66,6 +67,7 @@ def index(
             "kind": normalized_kind,
             "object_kinds": OBJECT_KINDS,
             "object_statuses": OBJECT_STATUSES_UI,
+            "platform_types": PLATFORM_TYPES,
             "object_counts": object_counts,
             "total_objects": total_objects,
             "error": None,
@@ -139,6 +141,7 @@ def save_object(
     kind: Annotated[str, Form()],
     label: Annotated[str | None, Form()] = None,
     labels: Annotated[str, Form()] = "",
+    platform: Annotated[str, Form()] = "",
     hostname: Annotated[str | None, Form()] = None,
     status: Annotated[str, Form()] = "active",
     summary: Annotated[str, Form()] = "",
@@ -152,6 +155,7 @@ def save_object(
         "kind": kind,
         "label": label or "",
         "labels": labels,
+        "platform": platform,
         "hostname": hostname or "",
         "status": status,
         "summary": summary,
@@ -163,11 +167,17 @@ def save_object(
     try:
         data = json.loads(data_json or "{}")
         _reject_secret_shaped_form_data(data)
+        if platform and platform not in PLATFORM_TYPES:
+            raise ValueError("Unsupported platform")
         label_values = _split_label_values(labels)
         if label_values:
             data["labels"] = label_values
         else:
             data.pop("labels", None)
+        if kind == "system" and platform:
+            data["platform"] = platform
+        else:
+            data.pop("platform", None)
         primary_hostname = (hostname or label or object_id).strip()
         if primary_hostname:
             network = dict(data.get("network") if isinstance(data.get("network"), Mapping) else {})
@@ -229,6 +239,7 @@ def save_object(
                 "kind": "",
                 "object_kinds": OBJECT_KINDS,
                 "object_statuses": OBJECT_STATUSES_UI,
+                "platform_types": PLATFORM_TYPES,
                 "object_counts": object_counts,
                 "total_objects": sum(object_counts.values()),
                 "error": _safe_error_message(exc),
@@ -529,6 +540,7 @@ def _empty_form() -> dict[str, str]:
         "kind": "system",
         "label": "",
         "labels": "",
+        "platform": "",
         "hostname": "",
         "status": "active",
         "summary": "",

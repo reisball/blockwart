@@ -86,6 +86,14 @@
                     {% endfor %}
                   </select>
                 </label>
+                <label>Plattform
+                  <select name="platform">
+                    <option value="">Keine Plattform</option>
+                    {% for platform in platform_types %}
+                      <option value="{{ platform }}" {% if platform == form.platform %}selected{% endif %}>{{ platform }}</option>
+                    {% endfor %}
+                  </select>
+                </label>
                 <label>Status
                   <select name="status">
                     {% for object_status in object_statuses %}
@@ -154,6 +162,9 @@
                         {% for label in object.data.labels[:3] %}
                           <span class="badge">{{ label }}</span>
                         {% endfor %}
+                      {% endif %}
+                      {% if object.data.platform %}
+                        <span class="badge">{{ object.data.platform }}</span>
                       {% endif %}
                       {% if object.data.source_references %}
                         <span class="badge">Referenzdoku</span>
