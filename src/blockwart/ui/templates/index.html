@@ -160,8 +160,11 @@
                 <div class="object-expanded" data-object-expanded>
                   <div class="relationship-map">
                     <div class="relationship-node relationship-node-current" role="button" tabindex="0" data-relationship-node data-detail-target="relationship-detail-{{ object.id }}-current">
-                      <span>{{ object.kind }}</span>
-                      <strong>
+                      <div class="relationship-type">
+                        <span>Typ</span>
+                        <strong>{{ object.kind }}</strong>
+                      </div>
+                      <strong class="relationship-node-name">
                         {% if object.data.network and object.data.network.hostnames %}
                           {{ object.data.network.hostnames|first }}
                         {% else %}
@@ -182,8 +185,11 @@
                         <div class="relationship-edge">
                           <div class="relationship-line" aria-hidden="true"></div>
                           <div class="relationship-node" role="button" tabindex="0" data-relationship-node data-detail-target="relationship-detail-{{ object.id }}-{{ loop.index }}">
-                            <span>{{ relationship.other_kind }}</span>
-                            <strong>{{ relationship.other_label }}</strong>
+                            <div class="relationship-type">
+                              <span>Typ</span>
+                              <strong>{{ relationship.other_kind }}</strong>
+                            </div>
+                            <strong class="relationship-node-name">{{ relationship.other_label }}</strong>
                             <small>{{ relationship.other_ref }}</small>
                             {% if relationship.service_ports %}
                               <div class="relationship-ports">
@@ -204,8 +210,11 @@
                     <section class="relationship-detail-panel" id="relationship-detail-{{ object.id }}-current" data-relationship-detail-panel>
                       <div class="relationship-detail-panel-head">
                         <div>
-                          <span>{{ object.kind }}</span>
-                          <strong>
+                          <div class="relationship-type">
+                            <span>Typ</span>
+                            <strong>{{ object.kind }}</strong>
+                          </div>
+                          <strong class="relationship-node-name">
                             {% if object.data.network and object.data.network.hostnames %}
                               {{ object.data.network.hostnames|first }}
                             {% else %}
@@ -240,8 +249,11 @@
                       <section class="relationship-detail-panel" id="relationship-detail-{{ object.id }}-{{ loop.index }}" data-relationship-detail-panel>
                         <div class="relationship-detail-panel-head">
                           <div>
-                            <span>{{ relationship.other_kind }}</span>
-                            <strong>{{ relationship.other_label }}</strong>
+                            <div class="relationship-type">
+                              <span>Typ</span>
+                              <strong>{{ relationship.other_kind }}</strong>
+                            </div>
+                            <strong class="relationship-node-name">{{ relationship.other_label }}</strong>
                           </div>
                           <small>{{ relationship.other_ref }}</small>
                         </div>

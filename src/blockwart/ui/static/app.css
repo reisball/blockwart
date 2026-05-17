@@ -517,6 +517,14 @@ button:hover,
   overflow-wrap: anywhere;
 }
 
+.relationship-type strong {
+  margin-top: 2px;
+}
+
+.relationship-node-name {
+  margin-top: 8px;
+}
+
 .relationship-node small {
   margin-top: 4px;
   text-transform: none;

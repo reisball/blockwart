@@ -84,7 +84,8 @@ def test_create_object_form_is_hidden_behind_button(client: TestClient) -> None:
     assert 'data-detail-link' in response.text
     assert 'class="button button-small button-muted relationship-detail"' in response.text
     assert "<span>hosts</span>" not in response.text
-    assert "<span>service</span>" in response.text
+    assert "<span>Typ</span>" in response.text
+    assert "<strong>service</strong>" in response.text
     assert "data-relationship-node" in response.text
     assert "data-relationship-detail-panel" in response.text
     assert "<span>Beschreibung</span>" not in response.text
