@@ -11,7 +11,7 @@ from blockwart.db.base import Base
 from blockwart.main import create_app
 from blockwart.models import Relationship
 from blockwart.schemas.catalog import CatalogObjectIn
-from blockwart.services.catalog import upsert_object
+from blockwart.services.catalog import get_object, upsert_object
 from blockwart.services.seeds import import_seed_file
 
 SEED_PATH = Path(__file__).resolve().parents[1] / "seeds" / "pilot_objects.yaml"
@@ -97,7 +97,9 @@ def test_create_object_form_is_hidden_behind_button(client: TestClient) -> None:
     assert 'class="modal-overlay"' in create_response.text
     assert 'name="object_id"' in create_response.text
     assert 'name="hostname"' in create_response.text
+    assert 'name="labels"' in create_response.text
     assert 'name="relation_target_ref"' in create_response.text
+    assert 'name="data_json"' not in create_response.text
     assert 'value="host"' in create_response.text
     assert 'value="active"' in create_response.text
     assert 'value="inactive"' in create_response.text
@@ -160,7 +162,10 @@ def test_relationship_add_form_is_hidden_behind_add_button(client: TestClient) -
     assert "Relationship anlegen" in add_response.text
 
 
-def test_create_object_form_redirects_to_detail(client: TestClient) -> None:
+def test_create_object_form_redirects_to_detail(
+    client: TestClient,
+    session_factory,
+) -> None:
     response = client.post(
         "/objects",
         data={
@@ -168,6 +173,7 @@ def test_create_object_form_redirects_to_detail(client: TestClient) -> None:
             "kind": "system",
             "label": "Test System",
             "status": "active",
+            "labels": "infra, docker\nintern",
             "summary": "Created from UI test.",
             "data_json": '{"schema_version": 1}',
         },
@@ -178,6 +184,14 @@ def test_create_object_form_redirects_to_detail(client: TestClient) -> None:
     assert response.headers["location"] == "/objects/test-system"
     detail = client.get("/objects/test-system")
     assert "Test System" in detail.text
+    index = client.get("/?q=test-system")
+    assert "infra" in index.text
+    assert "docker" in index.text
+    assert "intern" in index.text
+    with session_factory() as session:
+        catalog_object = get_object(session, "test-system")
+    assert catalog_object is not None
+    assert catalog_object.data["labels"] == ["infra", "docker", "intern"]
 
 
 def test_create_service_form_can_set_host_system(

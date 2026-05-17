@@ -76,6 +76,9 @@
                 <label>Hostname
                   <input name="hostname" value="{{ form.hostname or form.label }}" placeholder="n8n" autocomplete="off" required />
                 </label>
+                <label>Label
+                  <input name="labels" value="{{ form.labels }}" placeholder="infra, docker, intern" autocomplete="off" />
+                </label>
                 <label>Typ
                   <select name="kind">
                     {% for object_kind in object_kinds %}
@@ -108,9 +111,6 @@
                 </label>
                 <label>Kurzbeschreibung
                   <textarea class="summary-input" name="summary" placeholder="Wofür ist das Objekt da?">{{ form.summary }}</textarea>
-                </label>
-                <label>Daten JSON
-                  <textarea name="data_json" spellcheck="false">{{ form.data_json }}</textarea>
                 </label>
                 <div class="button-row">
                   <button type="submit">Speichern</button>
@@ -148,6 +148,11 @@
                       {% if object.data.ports %}
                         {% for port in object.data.ports[:2] %}
                           <span class="badge">{{ port.port }}/{{ port.protocol or "tcp" }}</span>
+                        {% endfor %}
+                      {% endif %}
+                      {% if object.data.labels %}
+                        {% for label in object.data.labels[:3] %}
+                          <span class="badge">{{ label }}</span>
                         {% endfor %}
                       {% endif %}
                       {% if object.data.source_references %}

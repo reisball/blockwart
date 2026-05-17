@@ -1,4 +1,5 @@
 import json
+import re
 from collections import Counter
 from collections.abc import Mapping
 from typing import Annotated, Any
@@ -137,6 +138,7 @@ def save_object(
     object_id: Annotated[str, Form()],
     kind: Annotated[str, Form()],
     label: Annotated[str | None, Form()] = None,
+    labels: Annotated[str, Form()] = "",
     hostname: Annotated[str | None, Form()] = None,
     status: Annotated[str, Form()] = "active",
     summary: Annotated[str, Form()] = "",
@@ -149,6 +151,7 @@ def save_object(
         "id": object_id,
         "kind": kind,
         "label": label or "",
+        "labels": labels,
         "hostname": hostname or "",
         "status": status,
         "summary": summary,
@@ -160,6 +163,11 @@ def save_object(
     try:
         data = json.loads(data_json or "{}")
         _reject_secret_shaped_form_data(data)
+        label_values = _split_label_values(labels)
+        if label_values:
+            data["labels"] = label_values
+        else:
+            data.pop("labels", None)
         primary_hostname = (hostname or label or object_id).strip()
         if primary_hostname:
             network = dict(data.get("network") if isinstance(data.get("network"), Mapping) else {})
@@ -520,6 +528,7 @@ def _empty_form() -> dict[str, str]:
         "id": "",
         "kind": "system",
         "label": "",
+        "labels": "",
         "hostname": "",
         "status": "active",
         "summary": "",
@@ -528,6 +537,18 @@ def _empty_form() -> dict[str, str]:
         "relation_target_ref": "",
         "relation_type": "hosts",
     }
+
+
+def _split_label_values(raw_labels: str) -> list[str]:
+    labels: list[str] = []
+    seen: set[str] = set()
+    for value in re.split(r"[,;\n]+", raw_labels):
+        label = value.strip()
+        if not label or label.casefold() in seen:
+            continue
+        seen.add(label.casefold())
+        labels.append(label)
+    return labels
 
 
 def _require_existing_ref(session: Session, ref: str) -> None:
