@@ -165,6 +165,14 @@ def test_relationship_add_form_is_hidden_behind_add_button(client: TestClient) -
     assert "Relationship anlegen" not in response.text
     assert add_response.status_code == 200
     assert "Relationship anlegen" in add_response.text
+    form_start = add_response.text.find('<form class="form-grid relation-form"')
+    form_end = add_response.text.find("</form>", form_start)
+    form_html = add_response.text[form_start:form_end]
+    assert "Zielobjekt" in form_html
+    assert '<select name="direction"' not in form_html
+    assert '<select name="relation_type"' not in form_html
+    assert ">Richtung" not in form_html
+    assert "<label>Relation" not in form_html
 
 
 def test_create_object_form_redirects_to_detail(

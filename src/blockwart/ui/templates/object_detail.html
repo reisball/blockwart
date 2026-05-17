@@ -326,19 +326,8 @@
           {% if edit_section == "relationship-add" %}
             <form class="form-grid relation-form" method="post" action="/objects/{{ object.id }}/relationships">
               <h3>Relationship anlegen</h3>
-              <label>Richtung
-                <select name="direction">
-                  <option value="inbound" {% if object.kind == "service" %}selected{% endif %}>Ziel → dieses Objekt</option>
-                  <option value="outbound">Dieses Objekt → Ziel</option>
-                </select>
-              </label>
-              <label>Relation
-                <select name="relation_type">
-                  {% for relation_type in relation_types %}
-                    <option value="{{ relation_type }}" {% if relation_type == "hosts" %}selected{% endif %}>{{ relation_type }}</option>
-                  {% endfor %}
-                </select>
-              </label>
+              <input type="hidden" name="direction" value="{{ 'inbound' if object.kind == 'service' else 'outbound' }}" />
+              <input type="hidden" name="relation_type" value="hosts" />
               <label>Zielobjekt
                 <select name="target_ref" required>
                   {% for target in relationship_targets %}
