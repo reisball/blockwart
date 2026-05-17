@@ -44,6 +44,7 @@ def test_build_tools_import_plan_parses_infrastructure_rows(tmp_path: Path) -> N
     service = plan.payload["objects"][1]
     assert system["id"] == "ct-200"
     assert system["kind"] == "system"
+    assert system["data"]["platform"] == "LXC"
     assert system["data"]["related_services"] == ["service:demo-box"]
     assert system["data"]["container"] == {
         "id": "ct-200",
@@ -53,6 +54,7 @@ def test_build_tools_import_plan_parses_infrastructure_rows(tmp_path: Path) -> N
     }
     assert service["id"] == "demo-box"
     assert service["kind"] == "service"
+    assert service["data"]["platform"] == "LXC"
     assert service["data"]["system_id"] == "system:ct-200"
     assert system["data"]["network"]["addresses"][0]["ip"] == "192.168.50.200"
     assert {item["port"] for item in system["data"]["ports"]} == {22}
@@ -125,7 +127,9 @@ def test_import_tools_markdown_creates_hosted_service_relationship(tmp_path: Pat
     assert result.relationships_imported == 1
     assert objects["ct-121"].kind == "system"
     assert objects["ct-121"].label == "Agent Zero"
+    assert '"platform": "LXC"' in objects["ct-121"].data_json
     assert objects["agent-zero"].kind == "service"
+    assert '"platform": "LXC"' in objects["agent-zero"].data_json
     assert objects["agent-zero"].data_json.count("system:ct-121") == 1
     assert [
         {

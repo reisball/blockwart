@@ -118,6 +118,9 @@ def build_tools_import_plan(
                 "auth_reference_summary": _plain_text(auth),
             },
         }
+        platform = _platform_from_type(typ)
+        if platform:
+            system_data["platform"] = platform
         if is_hosted_service:
             system_data["container"] = _container_data(typ)
         if usage:
@@ -155,6 +158,7 @@ def build_tools_import_plan(
                         usage=usage,
                         typ=typ,
                         system_ref=system_ref,
+                        platform=platform,
                         addresses=addresses,
                         ports=service_ports,
                         source_references=source_references,
@@ -377,6 +381,15 @@ def _container_data(typ: str) -> dict[str, str]:
     }
 
 
+def _platform_from_type(typ: str) -> str:
+    text = _plain_text(typ).casefold()
+    if re.search(r"\b(ct|lxc)\b", text):
+        return "LXC"
+    if re.search(r"\bvm\b", text):
+        return "VM"
+    return ""
+
+
 def _system_ports(ports: list[dict[str, Any]]) -> list[dict[str, Any]]:
     system_port_numbers = {22, 445}
     return [
@@ -407,13 +420,14 @@ def _service_data(
     usage: str,
     typ: str,
     system_ref: str,
+    platform: str,
     addresses: list[dict[str, str]],
     ports: list[dict[str, Any]],
     source_references: list[dict[str, str]],
     access: str,
     auth: str,
 ) -> dict[str, Any]:
-    return {
+    data: dict[str, Any] = {
         "schema_version": 1,
         "type": "application",
         "source": "workspace_markdown_import",
@@ -437,6 +451,9 @@ def _service_data(
             "auth_reference_summary": _plain_text(auth),
         },
     }
+    if platform:
+        data["platform"] = platform
+    return data
 
 
 def _system_access_text(access: str) -> str:
