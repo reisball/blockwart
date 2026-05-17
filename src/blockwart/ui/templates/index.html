@@ -135,8 +135,11 @@
               <article class="object-card" data-object-card>
                 <div class="object-row" role="button" tabindex="0" aria-expanded="false" data-object-toggle>
                   <div class="kind">
-                    <span>Typ {{ object.kind }}</span>
-                    <span class="status">Status {{ object.status }}</span>
+                    <span>Typ: {{ object.kind }}</span>
+                    {% if object.data.platform %}
+                      <span>Plattform: {{ object.data.platform }}</span>
+                    {% endif %}
+                    <span class="status">Status: {{ object.status }}</span>
                   </div>
                   <div>
                     <div class="label">
@@ -163,9 +166,6 @@
                           <span class="badge">{{ label }}</span>
                         {% endfor %}
                       {% endif %}
-                      {% if object.data.platform %}
-                        <span class="badge">{{ object.data.platform }}</span>
-                      {% endif %}
                       {% if object.data.source_references %}
                         <span class="badge">Referenzdoku</span>
                       {% endif %}
@@ -182,7 +182,7 @@
                       {% for relationship in object_relationships.relationships %}
                         <div class="relationship-edge">
                           <div class="relationship-node {% if relationship.current_side == 'left' %}relationship-node-current{% endif %}" role="button" tabindex="0" data-relationship-node data-detail-target="relationship-detail-{{ object.id }}-{{ loop.index }}-left">
-                            <span class="relationship-type">Typ {{ relationship.left.kind }}</span>
+                            <span class="relationship-type">Typ: {{ relationship.left.kind }}</span>
                             <strong class="relationship-node-name">
                               {% if relationship.left.data.network and relationship.left.data.network.hostnames %}
                                 {{ relationship.left.data.network.hostnames|first }}
@@ -201,7 +201,7 @@
                           </div>
                           <div class="relationship-line" aria-hidden="true"></div>
                           <div class="relationship-node relationship-node-with-detail {% if relationship.current_side == 'right' %}relationship-node-current{% endif %}" role="button" tabindex="0" data-relationship-node data-detail-target="relationship-detail-{{ object.id }}-{{ loop.index }}-right">
-                            <span class="relationship-type">Typ {{ relationship.right.kind }}</span>
+                            <span class="relationship-type">Typ: {{ relationship.right.kind }}</span>
                             <strong class="relationship-node-name">
                               {% if relationship.right.data.network and relationship.right.data.network.hostnames %}
                                 {{ relationship.right.data.network.hostnames|first }}
@@ -232,7 +232,7 @@
                         <section class="relationship-detail-panel" id="relationship-detail-{{ object.id }}-{{ relationship_index }}-{{ node_side }}" data-relationship-detail-panel>
                           <div class="relationship-detail-panel-head">
                             <div>
-                              <span class="relationship-type">Typ {{ node.kind }}</span>
+                              <span class="relationship-type">Typ: {{ node.kind }}</span>
                               <strong class="relationship-node-name">
                                 {% if node.data.network and node.data.network.hostnames %}
                                   {{ node.data.network.hostnames|first }}
