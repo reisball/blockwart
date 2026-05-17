@@ -218,9 +218,6 @@
                       <div class="relationship-detail-grid">
                         <div><span>Status</span><strong>{{ object.status }}</strong></div>
                         <div><span>ID</span><strong>{{ object.id }}</strong></div>
-                        {% if object.summary %}
-                          <div class="relationship-detail-wide"><span>Beschreibung</span><strong>{{ object.summary }}</strong></div>
-                        {% endif %}
                         {% if object.data.network and object.data.network.addresses %}
                           <div class="relationship-detail-wide">
                             <span>Adressen</span>
@@ -253,9 +250,6 @@
                             <div><span>Status</span><strong>{{ relationship.other_status }}</strong></div>
                           {% endif %}
                           <div><span>ID</span><strong>{{ relationship.other_id }}</strong></div>
-                          {% if relationship.other_summary %}
-                            <div class="relationship-detail-wide"><span>Beschreibung</span><strong>{{ relationship.other_summary }}</strong></div>
-                          {% endif %}
                           {% if relationship.other_data.network and relationship.other_data.network.addresses %}
                             <div class="relationship-detail-wide">
                               <span>Adressen</span>

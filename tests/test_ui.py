@@ -87,6 +87,7 @@ def test_create_object_form_is_hidden_behind_button(client: TestClient) -> None:
     assert "<span>service</span>" in response.text
     assert "data-relationship-node" in response.text
     assert "data-relationship-detail-panel" in response.text
+    assert "<span>Beschreibung</span>" not in response.text
     assert "/static/index.js" in response.text
     assert create_response.status_code == 200
     assert "Neues Objekt anlegen" in create_response.text
