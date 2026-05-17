@@ -159,7 +159,7 @@
                 </div>
                 <div class="object-expanded" data-object-expanded>
                   <div class="relationship-map">
-                    <div class="relationship-node relationship-node-current">
+                    <div class="relationship-node relationship-node-current" role="button" tabindex="0" data-relationship-node data-detail-target="relationship-detail-{{ object.id }}-current">
                       <span>{{ object.kind }}</span>
                       <strong>
                         {% if object.data.network and object.data.network.hostnames %}
@@ -181,7 +181,7 @@
                       {% for relationship in object_relationships.relationships %}
                         <div class="relationship-edge">
                           <div class="relationship-line" aria-hidden="true"></div>
-                          <div class="relationship-node">
+                          <div class="relationship-node" role="button" tabindex="0" data-relationship-node data-detail-target="relationship-detail-{{ object.id }}-{{ loop.index }}">
                             <span>{{ relationship.other_kind }}</span>
                             <strong>{{ relationship.other_label }}</strong>
                             <small>{{ relationship.other_ref }}</small>
@@ -199,6 +199,82 @@
                     {% else %}
                       <div class="empty relationship-empty">Keine Beziehungen erfasst.</div>
                     {% endif %}
+                  </div>
+                  <div class="relationship-detail-stack">
+                    <section class="relationship-detail-panel" id="relationship-detail-{{ object.id }}-current" data-relationship-detail-panel>
+                      <div class="relationship-detail-panel-head">
+                        <div>
+                          <span>{{ object.kind }}</span>
+                          <strong>
+                            {% if object.data.network and object.data.network.hostnames %}
+                              {{ object.data.network.hostnames|first }}
+                            {% else %}
+                              {{ object.label }}
+                            {% endif %}
+                          </strong>
+                        </div>
+                        <small>{{ object.kind }}:{{ object.id }}</small>
+                      </div>
+                      <div class="relationship-detail-grid">
+                        <div><span>Status</span><strong>{{ object.status }}</strong></div>
+                        <div><span>ID</span><strong>{{ object.id }}</strong></div>
+                        {% if object.summary %}
+                          <div class="relationship-detail-wide"><span>Beschreibung</span><strong>{{ object.summary }}</strong></div>
+                        {% endif %}
+                        {% if object.data.network and object.data.network.addresses %}
+                          <div class="relationship-detail-wide">
+                            <span>Adressen</span>
+                            {% for address in object.data.network.addresses[:3] %}
+                              <strong>{{ address.ip }}{% if address.scope %} · {{ address.scope }}{% endif %}</strong>
+                            {% endfor %}
+                          </div>
+                        {% endif %}
+                        {% if object_relationships.system_ports %}
+                          <div class="relationship-detail-wide">
+                            <span>Ports</span>
+                            {% for port in object_relationships.system_ports %}
+                              <strong>{{ port.label }} {{ port.value }}</strong>
+                            {% endfor %}
+                          </div>
+                        {% endif %}
+                      </div>
+                    </section>
+                    {% for relationship in object_relationships.relationships %}
+                      <section class="relationship-detail-panel" id="relationship-detail-{{ object.id }}-{{ loop.index }}" data-relationship-detail-panel>
+                        <div class="relationship-detail-panel-head">
+                          <div>
+                            <span>{{ relationship.other_kind }}</span>
+                            <strong>{{ relationship.other_label }}</strong>
+                          </div>
+                          <small>{{ relationship.other_ref }}</small>
+                        </div>
+                        <div class="relationship-detail-grid">
+                          {% if relationship.other_status %}
+                            <div><span>Status</span><strong>{{ relationship.other_status }}</strong></div>
+                          {% endif %}
+                          <div><span>ID</span><strong>{{ relationship.other_id }}</strong></div>
+                          {% if relationship.other_summary %}
+                            <div class="relationship-detail-wide"><span>Beschreibung</span><strong>{{ relationship.other_summary }}</strong></div>
+                          {% endif %}
+                          {% if relationship.other_data.network and relationship.other_data.network.addresses %}
+                            <div class="relationship-detail-wide">
+                              <span>Adressen</span>
+                              {% for address in relationship.other_data.network.addresses[:3] %}
+                                <strong>{{ address.ip }}{% if address.scope %} · {{ address.scope }}{% endif %}</strong>
+                              {% endfor %}
+                            </div>
+                          {% endif %}
+                          {% if relationship.service_ports %}
+                            <div class="relationship-detail-wide">
+                              <span>Ports</span>
+                              {% for port in relationship.service_ports %}
+                                <strong>{{ port.label }} {{ port.value }}</strong>
+                              {% endfor %}
+                            </div>
+                          {% endif %}
+                        </div>
+                      </section>
+                    {% endfor %}
                   </div>
                 </div>
               </article>
