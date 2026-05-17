@@ -126,7 +126,10 @@
               {% set object_relationships = index_relationships[object.id] %}
               <article class="object-card" data-object-card>
                 <div class="object-row" role="button" tabindex="0" aria-expanded="false" data-object-toggle>
-                  <div class="kind">{{ object.kind }}<br /><span class="status">{{ object.status }}</span></div>
+                  <div class="kind">
+                    <span>Typ {{ object.kind }}</span>
+                    <span class="status">Status {{ object.status }}</span>
+                  </div>
                   <div>
                     <div class="label">
                       {% if object.data.network and object.data.network.hostnames %}
@@ -160,10 +163,7 @@
                 <div class="object-expanded" data-object-expanded>
                   <div class="relationship-map">
                     <div class="relationship-node relationship-node-current" role="button" tabindex="0" data-relationship-node data-detail-target="relationship-detail-{{ object.id }}-current">
-                      <div class="relationship-type">
-                        <span>Typ</span>
-                        <strong>{{ object.kind }}</strong>
-                      </div>
+                      <span class="relationship-type">Typ {{ object.kind }}</span>
                       <strong class="relationship-node-name">
                         {% if object.data.network and object.data.network.hostnames %}
                           {{ object.data.network.hostnames|first }}
@@ -185,10 +185,7 @@
                         <div class="relationship-edge">
                           <div class="relationship-line" aria-hidden="true"></div>
                           <div class="relationship-node" role="button" tabindex="0" data-relationship-node data-detail-target="relationship-detail-{{ object.id }}-{{ loop.index }}">
-                            <div class="relationship-type">
-                              <span>Typ</span>
-                              <strong>{{ relationship.other_kind }}</strong>
-                            </div>
+                            <span class="relationship-type">Typ {{ relationship.other_kind }}</span>
                             <strong class="relationship-node-name">{{ relationship.other_label }}</strong>
                             <small>{{ relationship.other_ref }}</small>
                             {% if relationship.service_ports %}
@@ -210,10 +207,7 @@
                     <section class="relationship-detail-panel" id="relationship-detail-{{ object.id }}-current" data-relationship-detail-panel>
                       <div class="relationship-detail-panel-head">
                         <div>
-                          <div class="relationship-type">
-                            <span>Typ</span>
-                            <strong>{{ object.kind }}</strong>
-                          </div>
+                          <span class="relationship-type">Typ {{ object.kind }}</span>
                           <strong class="relationship-node-name">
                             {% if object.data.network and object.data.network.hostnames %}
                               {{ object.data.network.hostnames|first }}
@@ -249,10 +243,7 @@
                       <section class="relationship-detail-panel" id="relationship-detail-{{ object.id }}-{{ loop.index }}" data-relationship-detail-panel>
                         <div class="relationship-detail-panel-head">
                           <div>
-                            <div class="relationship-type">
-                              <span>Typ</span>
-                              <strong>{{ relationship.other_kind }}</strong>
-                            </div>
+                            <span class="relationship-type">Typ {{ relationship.other_kind }}</span>
                             <strong class="relationship-node-name">{{ relationship.other_label }}</strong>
                           </div>
                           <small>{{ relationship.other_ref }}</small>

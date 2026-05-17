@@ -437,6 +437,10 @@ button:hover,
   overflow-wrap: anywhere;
 }
 
+.kind span {
+  display: block;
+}
+
 .object-actions {
   display: grid;
   justify-items: end;
@@ -517,12 +521,8 @@ button:hover,
   overflow-wrap: anywhere;
 }
 
-.relationship-type strong {
-  margin-top: 2px;
-}
-
 .relationship-node-name {
-  margin-top: 8px;
+  margin-top: 5px;
 }
 
 .relationship-node small {
