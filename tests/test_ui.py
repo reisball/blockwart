@@ -106,6 +106,7 @@ def test_create_object_form_is_hidden_behind_button(client: TestClient) -> None:
     assert 'value="host"' in create_response.text
     assert 'value="LXC"' in create_response.text
     assert 'value="VM"' in create_response.text
+    assert 'value="WSL"' in create_response.text
     assert 'value="active"' in create_response.text
     assert 'value="inactive"' in create_response.text
     assert 'value="deleted"' in create_response.text

@@ -100,6 +100,29 @@ def test_import_tools_markdown_writes_valid_objects(tmp_path: Path) -> None:
     assert rows[0].kind == "system"
 
 
+def test_build_tools_import_plan_sets_wsl_platform(tmp_path: Path) -> None:
+    tools_path = tmp_path / "TOOLS.md"
+    tools_path.write_text(
+        "\n".join(
+            [
+                "| System | Typ | IP:Port | Status | Access | Auth | Nutzung | Ref | Skill |",
+                "|--------|-----|---------|--------|--------|------|---------|-----|-------|",
+                (
+                    "| Demo WSL | WSL2 service | 192.168.50.210:8080 | ✅ | "
+                    "Web | no auth | Demo WSL service | [Details](references/wsl.md) | - |"
+                ),
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    plan = build_tools_import_plan(tools_path, references_root=tmp_path)
+    system = plan.payload["objects"][0]
+
+    assert system["kind"] == "system"
+    assert system["data"]["platform"] == "WSL"
+
+
 def test_import_tools_markdown_creates_hosted_service_relationship(tmp_path: Path) -> None:
     tools_path = tmp_path / "TOOLS.md"
     tools_path.write_text(

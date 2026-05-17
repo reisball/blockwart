@@ -34,7 +34,7 @@ router = APIRouter(tags=["ui"])
 OBJECT_KINDS = PUBLIC_OBJECT_KINDS
 OBJECT_STATUSES_UI = OBJECT_STATUSES
 RELATION_TYPES = ("hosts", "depends_on", "uses", "documents", "related_to")
-PLATFORM_TYPES = ("LXC", "VM")
+PLATFORM_TYPES = ("LXC", "VM", "WSL")
 PLATFORM_OBJECT_KINDS = {"service", "system"}
 UI_KIND_PRIORITY = {kind: index for index, kind in enumerate(OBJECT_KINDS)}
 SAFE_DATA_JSON_FALLBACK = "{\n  \"schema_version\": 1\n}"

@@ -387,6 +387,8 @@ def _platform_from_type(typ: str) -> str:
         return "LXC"
     if re.search(r"\bvm\b", text):
         return "VM"
+    if re.search(r"\bwsl2?\b", text):
+        return "WSL"
     return ""
 
 
