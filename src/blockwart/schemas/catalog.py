@@ -34,6 +34,7 @@ REFERENCE_TARGETS = {
 DEPENDENCY_TARGETS = {"host", "system", "netzwerk", "service"}
 CREDENTIAL_PROVIDERS = {"vaultwarden", "secrets_json", "env_file", "local_file", "external"}
 CREDENTIAL_ACCESS_TYPES = {"ssh", "web", "api", "database", "smb", "sudo", "token", "other"}
+SERVICE_ENDPOINT_TYPES = {"Web", "REST API", "MCP", "HEC"}
 RUNBOOK_RISK_LEVELS = {"read-only", "safe-change", "disruptive", "destructive"}
 FORBIDDEN_CREDENTIAL_REFERENCE_KEYS = {
     "credential",
@@ -170,7 +171,12 @@ def _validate_service_data(data: dict[str, Any]) -> None:
         for index, value in enumerate(_require_list(data["endpoints"], "data.endpoints")):
             endpoint = _require_mapping(value, f"data.endpoints[{index}]")
             if "type" in endpoint:
-                _require_string(endpoint["type"], f"data.endpoints[{index}].type")
+                endpoint_type = _require_string(endpoint["type"], f"data.endpoints[{index}].type")
+                if endpoint_type not in SERVICE_ENDPOINT_TYPES:
+                    allowed = ", ".join(sorted(SERVICE_ENDPOINT_TYPES))
+                    raise ValueError(
+                        f"data.endpoints[{index}].type must be one of: {allowed}"
+                    )
             if "url" in endpoint:
                 _require_string(endpoint["url"], f"data.endpoints[{index}].url")
             if "port" in endpoint:

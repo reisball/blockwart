@@ -53,6 +53,7 @@ HARDWARE_OBJECT_KINDS = {"host", "system"}
 NETWORK_ADDRESS_EDIT_KINDS = {"host", "system", "netzwerk"}
 NETWORK_PORT_EDIT_KINDS = {"host", "system"}
 NETWORK_ENDPOINT_EDIT_KINDS = {"service"}
+ENDPOINT_TYPES = ("Web", "REST API", "MCP", "HEC")
 
 
 def _metadata_timestamp(value: str | None) -> str:
@@ -277,7 +278,8 @@ def object_detail(
                 max(1, len(network["addresses"])),
             ),
             "port_rows": _padded_mappings(ports, max(1, len(ports))),
-            "endpoint_rows": _padded_mappings(endpoints, max(1, len(endpoints))),
+            "endpoint_rows": _endpoint_edit_rows(endpoints),
+            "endpoint_types": ENDPOINT_TYPES,
             "can_edit_network_addresses": catalog_object.kind in NETWORK_ADDRESS_EDIT_KINDS,
             "can_edit_network_ports": catalog_object.kind in NETWORK_PORT_EDIT_KINDS,
             "can_edit_network_endpoints": catalog_object.kind in NETWORK_ENDPOINT_EDIT_KINDS,
@@ -624,7 +626,8 @@ def update_object(
                     max(1, len(network["addresses"])),
                 ),
                 "port_rows": _padded_mappings(ports, max(1, len(ports))),
-                "endpoint_rows": _padded_mappings(endpoints, max(1, len(endpoints))),
+                "endpoint_rows": _endpoint_edit_rows(endpoints),
+                "endpoint_types": ENDPOINT_TYPES,
                 "can_edit_network_addresses": catalog_object.kind in NETWORK_ADDRESS_EDIT_KINDS,
                 "can_edit_network_ports": catalog_object.kind in NETWORK_PORT_EDIT_KINDS,
                 "can_edit_network_endpoints": catalog_object.kind in NETWORK_ENDPOINT_EDIT_KINDS,
@@ -692,17 +695,20 @@ async def update_network(
             if str(port_value).strip()
         ]
     if existing_object.kind in NETWORK_ENDPOINT_EDIT_KINDS:
-        data["endpoints"] = [
-            _endpoint_payload(endpoint, endpoint_type, url, port_value)
-            for endpoint, endpoint_type, url, port_value in zip(
-                _padded_mappings(data.get("endpoints"), len(form.getlist("endpoint_type"))),
-                form.getlist("endpoint_type"),
-                form.getlist("endpoint_url"),
-                form.getlist("endpoint_port"),
-                strict=False,
-            )
-            if str(endpoint_type).strip() or str(url).strip() or str(port_value).strip()
-        ]
+        try:
+            data["endpoints"] = [
+                _endpoint_payload(endpoint, endpoint_type, url, port_value)
+                for endpoint, endpoint_type, url, port_value in zip(
+                    _padded_mappings(data.get("endpoints"), len(form.getlist("endpoint_type"))),
+                    form.getlist("endpoint_type"),
+                    form.getlist("endpoint_url"),
+                    form.getlist("endpoint_port"),
+                    strict=False,
+                )
+                if str(endpoint_type).strip() or str(url).strip() or str(port_value).strip()
+            ]
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
     _reject_secret_shaped_form_data(data)
     upsert_object(
         session,
@@ -1392,6 +1398,15 @@ def _editable_data_copy(data: Mapping[str, Any]) -> dict[str, Any]:
     return json.loads(json.dumps(data))
 
 
+def _endpoint_edit_rows(endpoints: list[Mapping[str, Any]]) -> list[dict[str, Any]]:
+    rows = _padded_mappings(endpoints, max(1, len(endpoints)))
+    for row in rows:
+        row["type"] = _normalize_endpoint_type(
+            row.get("type") or row.get("name") or row.get("label")
+        )
+    return rows
+
+
 def _endpoint_payload(
     endpoint: Mapping[str, Any],
     endpoint_type: object,
@@ -1401,10 +1416,36 @@ def _endpoint_payload(
     payload = dict(endpoint)
     payload.pop("name", None)
     payload.pop("label", None)
-    payload["type"] = str(endpoint_type).strip()
+    normalized_type = _normalize_endpoint_type(endpoint_type)
+    if not normalized_type:
+        allowed = ", ".join(ENDPOINT_TYPES)
+        raise ValueError(f"endpoint type must be one of: {allowed}")
+    payload["type"] = normalized_type
     payload["url"] = str(url).strip()
     payload["port"] = int(port_value) if str(port_value).strip() else ""
     return payload
+
+
+def _normalize_endpoint_type(value: object) -> str:
+    raw = str(value or "").strip()
+    if not raw:
+        return ""
+    compact = re.sub(r"[^a-z0-9]+", "", raw.lower())
+    aliases = {
+        "web": "Web",
+        "webui": "Web",
+        "ui": "Web",
+        "rest": "REST API",
+        "restapi": "REST API",
+        "api": "REST API",
+        "apibase": "REST API",
+        "managementapi": "REST API",
+        "lanmanagementapi": "REST API",
+        "publicmanagementapi": "REST API",
+        "mcp": "MCP",
+        "hec": "HEC",
+    }
+    return aliases.get(compact, raw if raw in ENDPOINT_TYPES else "")
 
 
 def _split_multivalue(value: str) -> list[str]:

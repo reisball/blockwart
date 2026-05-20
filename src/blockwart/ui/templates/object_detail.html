@@ -216,7 +216,15 @@
                       <tbody>
                         {% for endpoint in endpoint_rows %}
                           <tr>
-                            <td><input name="endpoint_type" value="{{ endpoint.type or endpoint.name or endpoint.label or '' }}" autocomplete="off" /></td>
+                            <td>
+                              <select name="endpoint_type">
+                                <option value=""></option>
+                                {% set selected_endpoint_type = endpoint.type or endpoint.name or endpoint.label or '' %}
+                                {% for option in endpoint_types %}
+                                  <option value="{{ option }}" {% if selected_endpoint_type == option %}selected{% endif %}>{{ option }}</option>
+                                {% endfor %}
+                              </select>
+                            </td>
                             <td><input name="endpoint_url" value="{{ endpoint.url or endpoint.endpoint or endpoint.host or '' }}" autocomplete="off" /></td>
                             <td><input name="endpoint_port" value="{{ endpoint.port or '' }}" inputmode="numeric" /></td>
                           </tr>

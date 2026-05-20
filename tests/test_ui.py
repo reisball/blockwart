@@ -1069,7 +1069,11 @@ def test_service_network_edit_only_exposes_and_updates_endpoints(
 
     assert edit_response.status_code == 200
     assert "ENDPOINT TYPE" in edit_response.text
+    assert '<select name="endpoint_type">' in edit_response.text
+    for endpoint_type in ("Web", "REST API", "MCP", "HEC"):
+        assert f'<option value="{endpoint_type}"' in edit_response.text
     assert 'name="endpoint_type"' in edit_response.text
+    assert 'value="Web" selected' in edit_response.text
     assert 'name="endpoint_name"' not in edit_response.text
     assert 'name="endpoint_url"' in edit_response.text
     assert 'name="endpoint_port"' in edit_response.text
@@ -1103,6 +1107,19 @@ def test_service_network_edit_only_exposes_and_updates_endpoints(
     assert updated.data["endpoints"] == [
         {"type": "REST API", "url": "https://192.168.50.10/api", "port": 443}
     ]
+
+    invalid_response = client.post(
+        "/objects/service-network-scope/network",
+        data={
+            "endpoint_type": "SSH",
+            "endpoint_url": "ssh://192.168.50.10:22",
+            "endpoint_port": "22",
+        },
+        follow_redirects=False,
+    )
+
+    assert invalid_response.status_code == 422
+    assert "endpoint type must be one of: Web, REST API, MCP, HEC" in invalid_response.text
 
 
 def test_update_object_form_does_not_echo_rejected_secret_values(client: TestClient) -> None:

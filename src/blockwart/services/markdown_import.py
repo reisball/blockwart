@@ -563,7 +563,7 @@ def _endpoints_from_network(
         scheme = "https" if port_number in {443, 8443, 8006} else "http"
         endpoints.append(
             {
-                "type": label,
+                "type": "Web",
                 "url": f"{scheme}://{ip}:{port_number}",
                 "port": port_number,
                 "protocol": port.get("protocol", "tcp"),
