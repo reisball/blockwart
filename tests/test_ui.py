@@ -3,7 +3,7 @@ from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session, sessionmaker
 
 from blockwart.api.deps import get_session
@@ -16,7 +16,7 @@ from blockwart.domain.ui_schema import (
     ui_schema_payload,
 )
 from blockwart.main import create_app
-from blockwart.models import Relationship
+from blockwart.models import AuditEvent, Relationship
 from blockwart.schemas.catalog import PUBLIC_OBJECT_KINDS, CatalogObjectIn
 from blockwart.services.catalog import get_object, upsert_object
 from blockwart.services.seeds import import_seed_file
@@ -382,6 +382,13 @@ def test_host_detail_can_edit_host_hardware_fields(
     assert "Radeon 780M" in updated.text
     assert "2 TB NVMe" in updated.text
     assert "Hardware test object." in updated.text
+    assert "Feld Modell wurde von leer auf Beelink SER5 geändert" in updated.text
+    assert "Feld CPU Hersteller wurde von leer auf AMD geändert" in updated.text
+    assert "Feld CPU Name wurde von leer auf Ryzen 7 7840U geändert" in updated.text
+    assert "Feld CPU Cores wurde von leer auf 8 geändert" in updated.text
+    assert "Feld Memory wurde von leer auf 64 GB geändert" in updated.text
+    assert "Feld GPU wurde von leer auf Radeon 780M geändert" in updated.text
+    assert "Feld Storage / HDD wurde von leer auf 2 TB NVMe geändert" in updated.text
     with session_factory() as session:
         catalog_object = get_object(session, object_id)
     assert catalog_object is not None
@@ -460,6 +467,10 @@ def test_system_detail_can_edit_resource_hardware_fields(
     assert "16 GB" in updated.text
     assert "Shared GPU" in updated.text
     assert "500 GB" in updated.text
+    assert "Feld CPU Cores wurde von leer auf 4 geändert" in updated.text
+    assert "Feld Memory wurde von leer auf 16 GB geändert" in updated.text
+    assert "Feld GPU wurde von leer auf Shared GPU geändert" in updated.text
+    assert "Feld Storage / HDD wurde von leer auf 500 GB geändert" in updated.text
     with session_factory() as session:
         catalog_object = get_object(session, object_id)
     assert catalog_object is not None
@@ -469,6 +480,44 @@ def test_system_detail_can_edit_resource_hardware_fields(
         "gpu": "Shared GPU",
         "storage": "500 GB",
     }
+
+
+@pytest.mark.parametrize("kind", ["host", "system", "service", "netzwerk"])
+def test_object_data_updates_write_object_audit_for_public_kinds(
+    session_factory,
+    kind: str,
+) -> None:
+    object_id = f"audit-{kind}"
+    with session_factory() as session:
+        upsert_object(
+            session,
+            CatalogObjectIn(
+                id=object_id,
+                kind=kind,
+                label=f"Audit {kind}",
+                status="active",
+                data={"schema_version": 1},
+            ),
+        )
+        upsert_object(
+            session,
+            CatalogObjectIn(
+                id=object_id,
+                kind=kind,
+                label=f"Audit {kind}",
+                status="active",
+                data={"schema_version": 1, "comment": f"{kind} changed"},
+            ),
+        )
+        event = session.scalars(
+            select(AuditEvent)
+            .where(AuditEvent.object_id == object_id)
+            .order_by(AuditEvent.id.desc())
+        ).first()
+
+    assert event is not None
+    assert event.action == "update"
+    assert event.summary == f"Feld Kommentar wurde von leer auf {kind} changed geändert"
 
 
 @pytest.mark.parametrize("kind", ["netzwerk", "service"])

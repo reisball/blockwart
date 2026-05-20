@@ -229,29 +229,71 @@ def _audit_summary(summary: str) -> str:
 
 
 def _data_changes(old_data: dict, new_data: dict) -> list[str]:
+    return _nested_data_changes(old_data, new_data)
+
+
+def _nested_data_changes(old_value: object, new_value: object, path: str = "") -> list[str]:
+    if old_value == new_value:
+        return []
+    if isinstance(old_value, dict) and new_value is None:
+        return _nested_data_changes(old_value, {}, path)
+    if old_value is None and isinstance(new_value, dict):
+        return _nested_data_changes({}, new_value, path)
+    if isinstance(old_value, dict) and isinstance(new_value, dict):
+        changes: list[str] = []
+        for key in sorted(set(old_value) | set(new_value)):
+            child_path = f"{path}.{key}" if path else str(key)
+            changes.extend(
+                _nested_data_changes(
+                    old_value.get(key),
+                    new_value.get(key),
+                    child_path,
+                )
+            )
+        return changes
+    label = _data_field_label(path)
+    if _is_scalar_audit_value(old_value) and _is_scalar_audit_value(new_value):
+        return [_field_change(label, _audit_scalar(old_value), _audit_scalar(new_value))]
+    return [f"Feld {label} wurde geändert"]
+
+
+def _is_scalar_audit_value(value: object) -> bool:
+    return value is None or isinstance(value, str | int | float | bool)
+
+
+def _audit_scalar(value: object) -> str:
+    if value is None:
+        return ""
+    return str(value)
+
+
+def _data_field_label(path: str) -> str:
     labels = {
         "access_methods": "Zugriff",
         "comment": "Kommentar",
         "container": "Container",
+        "container.id": "Container ID",
+        "container.label": "Container Label",
         "endpoints": "Endpoints",
+        "hardware": "Hardware",
+        "hardware.cpu": "CPU",
+        "hardware.cpu.cores": "CPU Cores",
+        "hardware.cpu.name": "CPU Name",
+        "hardware.cpu.vendor": "CPU Hersteller",
+        "hardware.gpu": "GPU",
+        "hardware.memory": "Memory",
+        "hardware.model": "Modell",
+        "hardware.storage": "Storage / HDD",
         "labels": "Label",
         "network": "Netzwerk",
+        "network.addresses": "Netzwerkadressen",
+        "network.hostnames": "Hostname",
+        "network.interfaces": "Netzwerkinterfaces",
         "platform": "Plattform",
         "ports": "Ports",
         "system_id": "System",
     }
-    changes = []
-    for key in sorted(set(old_data) | set(new_data)):
-        if old_data.get(key) == new_data.get(key):
-            continue
-        label = labels.get(key, key)
-        old_value = old_data.get(key, "")
-        new_value = new_data.get(key, "")
-        if isinstance(old_value, str) and isinstance(new_value, str):
-            changes.append(_field_change(label, old_value, new_value))
-        else:
-            changes.append(f"Feld {label} wurde geändert")
-    return changes
+    return labels.get(path, path or "Daten")
 
 
 def _field_change(field: str, old_value: str | None, new_value: str | None) -> str:
