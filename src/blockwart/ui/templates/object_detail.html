@@ -9,7 +9,7 @@
         document.documentElement.dataset.theme = "light";
       }
     </script>
-    <link rel="stylesheet" href="/static/app.css?v=054" />
+    <link rel="stylesheet" href="/static/app.css?v=056" />
     <script src="/static/theme.js?v=054" defer></script>
   </head>
   <body>
@@ -76,12 +76,12 @@
               </label>
               <div class="overview-times">
                 <div class="fact fact-small">
-                  <div class="fact-label">Created at</div>
-                  <div class="fact-value">{{ object.created_at or "-" }}</div>
+                  <div class="fact-label">CREATED AT</div>
+                  <div class="fact-value">{{ object.created_at|metadata_timestamp }}</div>
                 </div>
                 <div class="fact fact-small">
-                  <div class="fact-label">Last changed</div>
-                  <div class="fact-value">{{ object.last_changed or object.updated_at or "-" }}</div>
+                  <div class="fact-label">LAST CHANGED</div>
+                  <div class="fact-value">{{ (object.last_changed or object.updated_at)|metadata_timestamp }}</div>
                 </div>
               </div>
               <div class="button-row">
@@ -116,12 +116,12 @@
             </div>
             <div class="overview-times">
               <div class="fact fact-small">
-                <div class="fact-label">Created at</div>
-                <div class="fact-value">{{ object.created_at or "-" }}</div>
+                <div class="fact-label">CREATED AT</div>
+                <div class="fact-value">{{ object.created_at|metadata_timestamp }}</div>
               </div>
               <div class="fact fact-small">
-                <div class="fact-label">Last changed</div>
-                <div class="fact-value">{{ object.last_changed or object.updated_at or "-" }}</div>
+                <div class="fact-label">LAST CHANGED</div>
+                <div class="fact-value">{{ (object.last_changed or object.updated_at)|metadata_timestamp }}</div>
               </div>
             </div>
           {% endif %}

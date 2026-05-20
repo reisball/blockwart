@@ -2,6 +2,7 @@ import json
 import re
 from collections import Counter
 from collections.abc import Mapping
+from datetime import UTC, datetime
 from typing import Annotated, Any
 from urllib.parse import urlparse
 
@@ -49,6 +50,52 @@ PLATFORM_TYPES = ("LXC", "VM", "WSL")
 UI_KIND_PRIORITY = {kind: index for index, kind in enumerate(OBJECT_KINDS)}
 SAFE_DATA_JSON_FALLBACK = "{\n  \"schema_version\": 1\n}"
 HARDWARE_OBJECT_KINDS = {"host", "system"}
+
+
+def _metadata_timestamp(value: str | None) -> str:
+    if not value:
+        return "-"
+    parsed = _parse_timestamp(value)
+    if parsed is None:
+        return value
+    exact = parsed.strftime("%d.%m.%Y, %H:%M Uhr")
+    return f"{exact} - {_relative_timestamp(parsed)}"
+
+
+def _parse_timestamp(value: str) -> datetime | None:
+    normalized = value.strip()
+    if normalized.endswith("Z"):
+        normalized = f"{normalized[:-1]}+00:00"
+    try:
+        parsed = datetime.fromisoformat(normalized)
+    except ValueError:
+        return None
+    if parsed.tzinfo is not None:
+        parsed = parsed.astimezone(UTC).replace(tzinfo=None)
+    return parsed
+
+
+def _relative_timestamp(value: datetime) -> str:
+    now = datetime.now(UTC).replace(tzinfo=None)
+    delta_seconds = int((now - value).total_seconds())
+    if delta_seconds < 0:
+        return "gerade eben"
+    minute = 60
+    hour = 60 * minute
+    day = 24 * hour
+    if delta_seconds < minute:
+        return "gerade eben"
+    if delta_seconds < hour:
+        minutes = delta_seconds // minute
+        return f"vor {minutes} Minute" if minutes == 1 else f"vor {minutes} Minuten"
+    if delta_seconds < day:
+        hours = delta_seconds // hour
+        return f"vor {hours} Stunde" if hours == 1 else f"vor {hours} Stunden"
+    days = delta_seconds // day
+    return f"vor {days} Tag" if days == 1 else f"vor {days} Tagen"
+
+
+templates.env.filters["metadata_timestamp"] = _metadata_timestamp
 
 
 @router.get("/", response_class=HTMLResponse)

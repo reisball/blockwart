@@ -1,3 +1,4 @@
+import re
 from collections.abc import Generator
 from pathlib import Path
 
@@ -604,8 +605,12 @@ def test_object_detail_shows_data_and_relationships(client: TestClient) -> None:
     assert response.status_code == 200
     assert "n8n Web UI" in response.text
     assert "Relationships" in response.text
-    assert "Created at" in response.text
-    assert "Last changed" in response.text
+    assert "CREATED AT" in response.text
+    assert "LAST CHANGED" in response.text
+    assert re.search(
+        r"\d{2}\.\d{2}\.\d{4}, \d{2}:\d{2} Uhr - (vor|gerade eben)",
+        response.text,
+    )
     assert "Hostname" in response.text
     assert "Hostnames" not in response.text
     assert "n8n" in response.text
@@ -834,8 +839,8 @@ def test_overview_edit_updates_object_metadata(client: TestClient, session_facto
     assert 'name="label"' not in edit_response.text
     assert 'name="primary_name"' in edit_response.text
     assert "Container ID" not in edit_response.text
-    assert "Created at" in edit_response.text
-    assert "Last changed" in edit_response.text
+    assert "CREATED AT" in edit_response.text
+    assert "LAST CHANGED" in edit_response.text
     assert "Bearbeiten" not in edit_response.text
 
     response = client.post(
