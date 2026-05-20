@@ -164,12 +164,33 @@ FIELD_DEFINITIONS: dict[str, UiField] = {
         placeholder="Wofür ist das Objekt da?",
         visible_in_create=True,
     ),
-    "hardware_cpu": UiField(
-        "hardware_cpu",
-        "CPU",
+    "hardware_model": UiField(
+        "hardware_model",
+        "Modell",
         "text",
-        "data_json.hardware.cpu",
-        placeholder="z.B. 8C/16T Ryzen 7",
+        "data_json.hardware.model",
+        placeholder="z.B. Beelink SER5",
+    ),
+    "hardware_cpu_vendor": UiField(
+        "hardware_cpu_vendor",
+        "CPU Hersteller",
+        "text",
+        "data_json.hardware.cpu.vendor",
+        placeholder="z.B. AMD",
+    ),
+    "hardware_cpu_name": UiField(
+        "hardware_cpu_name",
+        "CPU Name",
+        "text",
+        "data_json.hardware.cpu.name",
+        placeholder="z.B. Ryzen 7 7840U",
+    ),
+    "hardware_cpu_cores": UiField(
+        "hardware_cpu_cores",
+        "CPU Cores",
+        "number",
+        "data_json.hardware.cpu.cores",
+        placeholder="z.B. 8",
     ),
     "hardware_memory": UiField(
         "hardware_memory",
@@ -220,7 +241,10 @@ PLATFORM_CREATE_FIELDS = (
 COMMON_SCHEMA_FIELDS = COMMON_CREATE_FIELDS
 PLATFORM_SCHEMA_FIELDS = PLATFORM_CREATE_FIELDS
 HARDWARE_SCHEMA_FIELDS = (
-    "hardware_cpu",
+    "hardware_model",
+    "hardware_cpu_vendor",
+    "hardware_cpu_name",
+    "hardware_cpu_cores",
     "hardware_memory",
     "hardware_gpu",
     "hardware_storage",

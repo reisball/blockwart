@@ -232,18 +232,24 @@ def test_host_and_system_schema_include_hardware_fields(client: TestClient) -> N
     for kind in ("host", "system"):
         response = client.get(f"/settings/schema?kind={kind}")
         assert response.status_code == 200
-        assert "CPU" in response.text
+        assert "Modell" in response.text
+        assert "CPU Hersteller" in response.text
+        assert "CPU Name" in response.text
+        assert "CPU Cores" in response.text
         assert "Memory" in response.text
         assert "GPU" in response.text
         assert "Storage / HDD" in response.text
-        assert "data_json.hardware.cpu" in response.text
+        assert "data_json.hardware.model" in response.text
+        assert "data_json.hardware.cpu.vendor" in response.text
+        assert "data_json.hardware.cpu.name" in response.text
+        assert "data_json.hardware.cpu.cores" in response.text
         assert "data_json.hardware.memory" in response.text
         assert "data_json.hardware.gpu" in response.text
         assert "data_json.hardware.storage" in response.text
 
         fields = schema_field_payload(UI_SCHEMAS[kind])
         hardware_fields = [field for field in fields if str(field["key"]).startswith("hardware_")]
-        assert len(hardware_fields) == 4
+        assert len(hardware_fields) == 7
         assert all(field["visible_in_create"] is False for field in hardware_fields)
         assert all(field["visible_in_detail"] is True for field in hardware_fields)
 
@@ -313,10 +319,16 @@ def test_host_and_system_detail_can_edit_hardware_fields(
 
     assert detail.status_code == 200
     assert "Hardware" in detail.text
-    assert "CPU" in detail.text
+    assert "Modell" in detail.text
+    assert "CPU Hersteller" in detail.text
+    assert "CPU Name" in detail.text
+    assert "CPU Cores" in detail.text
     assert "Storage / HDD" in detail.text
     assert edit.status_code == 200
-    assert 'name="hardware_cpu"' in edit.text
+    assert 'name="hardware_model"' in edit.text
+    assert 'name="hardware_cpu_vendor"' in edit.text
+    assert 'name="hardware_cpu_name"' in edit.text
+    assert 'name="hardware_cpu_cores"' in edit.text
     assert 'name="hardware_memory"' in edit.text
     assert 'name="hardware_gpu"' in edit.text
     assert 'name="hardware_storage"' in edit.text
@@ -324,7 +336,10 @@ def test_host_and_system_detail_can_edit_hardware_fields(
     response = client.post(
         f"/objects/{object_id}",
         data={
-            "hardware_cpu": "Ryzen 7 7840U",
+            "hardware_model": "Beelink SER5",
+            "hardware_cpu_vendor": "AMD",
+            "hardware_cpu_name": "Ryzen 7 7840U",
+            "hardware_cpu_cores": "8",
             "hardware_memory": "64 GB",
             "hardware_gpu": "Radeon 780M",
             "hardware_storage": "2 TB NVMe",
@@ -334,7 +349,10 @@ def test_host_and_system_detail_can_edit_hardware_fields(
 
     assert response.status_code == 303
     updated = client.get(f"/objects/{object_id}")
+    assert "Beelink SER5" in updated.text
+    assert "AMD" in updated.text
     assert "Ryzen 7 7840U" in updated.text
+    assert "8" in updated.text
     assert "64 GB" in updated.text
     assert "Radeon 780M" in updated.text
     assert "2 TB NVMe" in updated.text
@@ -345,7 +363,12 @@ def test_host_and_system_detail_can_edit_hardware_fields(
     assert catalog_object.status == "active"
     assert catalog_object.summary == "Hardware test object."
     assert catalog_object.data["hardware"] == {
-        "cpu": "Ryzen 7 7840U",
+        "model": "Beelink SER5",
+        "cpu": {
+            "vendor": "AMD",
+            "name": "Ryzen 7 7840U",
+            "cores": "8",
+        },
         "memory": "64 GB",
         "gpu": "Radeon 780M",
         "storage": "2 TB NVMe",
@@ -376,7 +399,7 @@ def test_network_and_service_detail_do_not_show_hardware_panel(
 
     assert detail.status_code == 200
     assert edit.status_code == 200
-    assert 'name="hardware_cpu"' not in edit.text
+    assert 'name="hardware_cpu_name"' not in edit.text
     assert "Storage / HDD" not in detail.text
 
 

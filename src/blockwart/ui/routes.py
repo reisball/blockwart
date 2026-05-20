@@ -436,7 +436,10 @@ def update_object(
     hostname: Annotated[str | None, Form()] = None,
     container_id: Annotated[str | None, Form()] = None,
     container_label: Annotated[str | None, Form()] = None,
-    hardware_cpu: Annotated[str | None, Form()] = None,
+    hardware_model: Annotated[str | None, Form()] = None,
+    hardware_cpu_vendor: Annotated[str | None, Form()] = None,
+    hardware_cpu_name: Annotated[str | None, Form()] = None,
+    hardware_cpu_cores: Annotated[str | None, Form()] = None,
     hardware_memory: Annotated[str | None, Form()] = None,
     hardware_gpu: Annotated[str | None, Form()] = None,
     hardware_storage: Annotated[str | None, Form()] = None,
@@ -444,7 +447,15 @@ def update_object(
 ):
     submitted_hardware = any(
         value is not None
-        for value in (hardware_cpu, hardware_memory, hardware_gpu, hardware_storage)
+        for value in (
+            hardware_model,
+            hardware_cpu_vendor,
+            hardware_cpu_name,
+            hardware_cpu_cores,
+            hardware_memory,
+            hardware_gpu,
+            hardware_storage,
+        )
     )
     try:
         existing_object = get_object(session, object_id)
@@ -472,7 +483,10 @@ def update_object(
         if target_kind in HARDWARE_OBJECT_KINDS and submitted_hardware:
             _apply_hardware_fields(
                 data,
-                cpu=hardware_cpu,
+                model=hardware_model,
+                cpu_vendor=hardware_cpu_vendor,
+                cpu_name=hardware_cpu_name,
+                cpu_cores=hardware_cpu_cores,
                 memory=hardware_memory,
                 gpu=hardware_gpu,
                 storage=hardware_storage,
@@ -1050,9 +1064,22 @@ def _container_summary(data: Mapping[str, Any]) -> Mapping[str, Any] | None:
 def _hardware_summary(data: Mapping[str, Any]) -> dict[str, str]:
     hardware = data.get("hardware")
     if not isinstance(hardware, Mapping):
-        return {"cpu": "", "memory": "", "gpu": "", "storage": ""}
+        return {
+            "model": "",
+            "cpu_vendor": "",
+            "cpu_name": "",
+            "cpu_cores": "",
+            "memory": "",
+            "gpu": "",
+            "storage": "",
+        }
+    cpu = hardware.get("cpu")
+    cpu_data = cpu if isinstance(cpu, Mapping) else {}
     return {
-        "cpu": str(hardware.get("cpu") or ""),
+        "model": str(hardware.get("model") or ""),
+        "cpu_vendor": str(cpu_data.get("vendor") or ""),
+        "cpu_name": str(cpu_data.get("name") or ""),
+        "cpu_cores": str(cpu_data.get("cores") or ""),
         "memory": str(hardware.get("memory") or ""),
         "gpu": str(hardware.get("gpu") or ""),
         "storage": str(hardware.get("storage") or ""),
@@ -1062,7 +1089,10 @@ def _hardware_summary(data: Mapping[str, Any]) -> dict[str, str]:
 def _apply_hardware_fields(
     data: dict[str, Any],
     *,
-    cpu: str | None,
+    model: str | None,
+    cpu_vendor: str | None,
+    cpu_name: str | None,
+    cpu_cores: str | None,
     memory: str | None,
     gpu: str | None,
     storage: str | None,
@@ -1070,7 +1100,7 @@ def _apply_hardware_fields(
     existing_hardware = data.get("hardware")
     hardware = dict(existing_hardware if isinstance(existing_hardware, Mapping) else {})
     for key, value in {
-        "cpu": cpu,
+        "model": model,
         "memory": memory,
         "gpu": gpu,
         "storage": storage,
@@ -1082,6 +1112,23 @@ def _apply_hardware_fields(
             hardware[key] = clean_value
         else:
             hardware.pop(key, None)
+    cpu = dict(hardware.get("cpu") if isinstance(hardware.get("cpu"), Mapping) else {})
+    for key, value in {
+        "vendor": cpu_vendor,
+        "name": cpu_name,
+        "cores": cpu_cores,
+    }.items():
+        if value is None:
+            continue
+        clean_value = value.strip()
+        if clean_value:
+            cpu[key] = clean_value
+        else:
+            cpu.pop(key, None)
+    if cpu:
+        hardware["cpu"] = cpu
+    else:
+        hardware.pop("cpu", None)
     if hardware:
         data["hardware"] = hardware
     else:

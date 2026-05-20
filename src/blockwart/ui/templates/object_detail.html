@@ -142,8 +142,17 @@
                 <div class="error">{{ error }}</div>
               {% endif %}
               <form class="form-grid" method="post" action="/objects/{{ object.id }}">
-                <label>{{ schema_fields_by_key.hardware_cpu.label }}
-                  <input name="hardware_cpu" value="{{ hardware.cpu }}" autocomplete="off" placeholder="{{ schema_fields_by_key.hardware_cpu.placeholder }}" />
+                <label>{{ schema_fields_by_key.hardware_model.label }}
+                  <input name="hardware_model" value="{{ hardware.model }}" autocomplete="off" placeholder="{{ schema_fields_by_key.hardware_model.placeholder }}" />
+                </label>
+                <label>{{ schema_fields_by_key.hardware_cpu_vendor.label }}
+                  <input name="hardware_cpu_vendor" value="{{ hardware.cpu_vendor }}" autocomplete="off" placeholder="{{ schema_fields_by_key.hardware_cpu_vendor.placeholder }}" />
+                </label>
+                <label>{{ schema_fields_by_key.hardware_cpu_name.label }}
+                  <input name="hardware_cpu_name" value="{{ hardware.cpu_name }}" autocomplete="off" placeholder="{{ schema_fields_by_key.hardware_cpu_name.placeholder }}" />
+                </label>
+                <label>{{ schema_fields_by_key.hardware_cpu_cores.label }}
+                  <input name="hardware_cpu_cores" value="{{ hardware.cpu_cores }}" autocomplete="off" placeholder="{{ schema_fields_by_key.hardware_cpu_cores.placeholder }}" />
                 </label>
                 <label>{{ schema_fields_by_key.hardware_memory.label }}
                   <input name="hardware_memory" value="{{ hardware.memory }}" autocomplete="off" placeholder="{{ schema_fields_by_key.hardware_memory.placeholder }}" />
@@ -163,7 +172,10 @@
               <div class="table-wrap">
                 <table class="table">
                   <tbody>
-                    <tr><th>{{ schema_fields_by_key.hardware_cpu.label }}</th><td>{{ hardware.cpu or "-" }}</td></tr>
+                    <tr><th>{{ schema_fields_by_key.hardware_model.label }}</th><td>{{ hardware.model or "-" }}</td></tr>
+                    <tr><th>{{ schema_fields_by_key.hardware_cpu_vendor.label }}</th><td>{{ hardware.cpu_vendor or "-" }}</td></tr>
+                    <tr><th>{{ schema_fields_by_key.hardware_cpu_name.label }}</th><td>{{ hardware.cpu_name or "-" }}</td></tr>
+                    <tr><th>{{ schema_fields_by_key.hardware_cpu_cores.label }}</th><td>{{ hardware.cpu_cores or "-" }}</td></tr>
                     <tr><th>{{ schema_fields_by_key.hardware_memory.label }}</th><td>{{ hardware.memory or "-" }}</td></tr>
                     <tr><th>{{ schema_fields_by_key.hardware_gpu.label }}</th><td>{{ hardware.gpu or "-" }}</td></tr>
                     <tr><th>{{ schema_fields_by_key.hardware_storage.label }}</th><td>{{ hardware.storage or "-" }}</td></tr>
