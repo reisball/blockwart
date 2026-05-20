@@ -26,6 +26,7 @@ class UiTypeSchema:
     primary_name_label: str
     primary_name_storage: PrimaryNameStorage
     supports_platform: bool
+    create_fields: tuple[str, ...]
     panels: tuple[UiPanel, ...]
 
     def as_dict(self) -> dict[str, object]:
@@ -34,6 +35,7 @@ class UiTypeSchema:
             "primary_name_label": self.primary_name_label,
             "primary_name_storage": self.primary_name_storage,
             "supports_platform": self.supports_platform,
+            "create_fields": list(self.create_fields),
             "panels": [panel.as_dict() for panel in self.panels],
         }
 
@@ -47,6 +49,29 @@ CURRENT_UI_PANELS = (
     UiPanel("audit", "Audit", "audit"),
 )
 
+COMMON_CREATE_FIELDS = (
+    "kind",
+    "object_id",
+    "primary_name",
+    "labels",
+    "status",
+    "relationship",
+    "relation_type",
+    "summary",
+)
+
+PLATFORM_CREATE_FIELDS = (
+    "kind",
+    "object_id",
+    "primary_name",
+    "labels",
+    "platform",
+    "status",
+    "relationship",
+    "relation_type",
+    "summary",
+)
+
 
 UI_SCHEMAS: dict[str, UiTypeSchema] = {
     "host": UiTypeSchema(
@@ -54,6 +79,7 @@ UI_SCHEMAS: dict[str, UiTypeSchema] = {
         primary_name_label="Hostname",
         primary_name_storage="network_hostname",
         supports_platform=False,
+        create_fields=COMMON_CREATE_FIELDS,
         panels=CURRENT_UI_PANELS,
     ),
     "system": UiTypeSchema(
@@ -61,6 +87,7 @@ UI_SCHEMAS: dict[str, UiTypeSchema] = {
         primary_name_label="Hostname",
         primary_name_storage="network_hostname",
         supports_platform=True,
+        create_fields=PLATFORM_CREATE_FIELDS,
         panels=CURRENT_UI_PANELS,
     ),
     "netzwerk": UiTypeSchema(
@@ -68,6 +95,7 @@ UI_SCHEMAS: dict[str, UiTypeSchema] = {
         primary_name_label="Name",
         primary_name_storage="label",
         supports_platform=False,
+        create_fields=COMMON_CREATE_FIELDS,
         panels=CURRENT_UI_PANELS,
     ),
     "service": UiTypeSchema(
@@ -75,6 +103,7 @@ UI_SCHEMAS: dict[str, UiTypeSchema] = {
         primary_name_label="Service-Name",
         primary_name_storage="label",
         supports_platform=True,
+        create_fields=PLATFORM_CREATE_FIELDS,
         panels=CURRENT_UI_PANELS,
     ),
 }

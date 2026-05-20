@@ -3,6 +3,7 @@
   const createKindSelect = document.querySelector("[data-kind-select]");
   const platformField = document.querySelector("[data-platform-field]");
   const primaryNameLabel = document.querySelector("[data-primary-name-label]");
+  const createFields = Array.from(document.querySelectorAll("[data-create-field]"));
   const uiSchemas = window.BLOCKWART_UI_SCHEMAS || {};
 
   function closeCard(card) {
@@ -96,17 +97,31 @@
     closeAll();
   });
 
-  function updatePlatformField() {
-    if (!createKindSelect || !platformField) {
-      return;
-    }
-    const schema = uiSchemas[createKindSelect.value] || {};
-    platformField.hidden = !schema.supports_platform;
-    if (primaryNameLabel && schema.primary_name_label) {
-      primaryNameLabel.textContent = schema.primary_name_label;
+  function setFieldEnabled(field, enabled) {
+    field.hidden = !enabled;
+    for (const input of field.querySelectorAll("input, select, textarea")) {
+      input.disabled = !enabled;
     }
   }
 
-  createKindSelect?.addEventListener("change", updatePlatformField);
-  updatePlatformField();
+  function updateCreateFields() {
+    if (!createKindSelect) {
+      return;
+    }
+    const schema = uiSchemas[createKindSelect.value] || {};
+    const allowedFields = new Set(schema.create_fields || []);
+    if (primaryNameLabel && schema.primary_name_label) {
+      primaryNameLabel.textContent = schema.primary_name_label;
+    }
+    for (const field of createFields) {
+      const key = field.getAttribute("data-create-field");
+      setFieldEnabled(field, !key || allowedFields.has(key));
+    }
+    if (platformField) {
+      platformField.hidden = !allowedFields.has("platform");
+    }
+  }
+
+  createKindSelect?.addEventListener("change", updateCreateFields);
+  updateCreateFields();
 })();

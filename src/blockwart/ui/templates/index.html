@@ -85,23 +85,23 @@
                 <div class="error">{{ error }}</div>
               {% endif %}
               <form class="form-grid" method="post" action="/objects">
-                <label>ID
-                  <input name="object_id" value="{{ form.id }}" placeholder="n8n" autocomplete="off" spellcheck="false" required />
-                </label>
-              <label><span data-primary-name-label>{{ form_ui_schema.primary_name_label }}</span>
-                <input name="primary_name" data-primary-name-input value="{{ form.primary_name or form.hostname or form.label }}" placeholder="n8n" autocomplete="off" required />
-                </label>
-                <label>Label
-                  <input name="labels" value="{{ form.labels }}" placeholder="infra, docker, intern" autocomplete="off" />
-                </label>
-                <label>Typ
+                <label data-create-field="kind">Typ
                   <select name="kind" data-kind-select>
                     {% for object_kind in object_kinds %}
                       <option value="{{ object_kind }}" {% if object_kind == form.kind %}selected{% endif %}>{{ object_kind }}</option>
                     {% endfor %}
                   </select>
                 </label>
-                <label data-platform-field {% if not form_ui_schema.supports_platform %}hidden{% endif %}>Plattform
+                <label data-create-field="object_id">ID
+                  <input name="object_id" value="{{ form.id }}" placeholder="n8n" autocomplete="off" spellcheck="false" required />
+                </label>
+                <label data-create-field="primary_name"><span data-primary-name-label>{{ form_ui_schema.primary_name_label }}</span>
+                  <input name="primary_name" data-primary-name-input value="{{ form.primary_name or form.hostname or form.label }}" placeholder="n8n" autocomplete="off" required />
+                </label>
+                <label data-create-field="labels">Label
+                  <input name="labels" value="{{ form.labels }}" placeholder="infra, docker, intern" autocomplete="off" />
+                </label>
+                <label data-create-field="platform" data-platform-field {% if "platform" not in form_ui_schema.create_fields %}hidden{% endif %}>Plattform
                   <select name="platform">
                     <option value="">Keine Plattform</option>
                     {% for platform in platform_types %}
@@ -109,14 +109,14 @@
                     {% endfor %}
                   </select>
                 </label>
-                <label>Status
+                <label data-create-field="status">Status
                   <select name="status">
                     {% for object_status in object_statuses %}
                       <option value="{{ object_status }}" {% if object_status == form.status %}selected{% endif %}>{{ object_status }}</option>
                     {% endfor %}
                   </select>
                 </label>
-                <label>Relationship
+                <label data-create-field="relationship">Relationship
                   <select name="relation_target_ref">
                     <option value="">Keine Relationship setzen</option>
                     {% for target in relation_targets %}
@@ -125,14 +125,14 @@
                     {% endfor %}
                   </select>
                 </label>
-                <label>Relationstyp
+                <label data-create-field="relation_type">Relationstyp
                   <select name="relation_type">
                     {% for relation in relation_types %}
                       <option value="{{ relation }}" {% if relation == form.relation_type %}selected{% endif %}>{{ relation }}</option>
                     {% endfor %}
                   </select>
                 </label>
-                <label>Kurzbeschreibung
+                <label data-create-field="summary">Kurzbeschreibung
                   <textarea class="summary-input" name="summary" placeholder="Wofür ist das Objekt da?">{{ form.summary }}</textarea>
                 </label>
                 <div class="button-row">

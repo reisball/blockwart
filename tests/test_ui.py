@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from blockwart.api.deps import get_session
 from blockwart.db.base import Base
+from blockwart.domain.ui_schema import UI_SCHEMAS
 from blockwart.main import create_app
 from blockwart.models import Relationship
 from blockwart.schemas.catalog import CatalogObjectIn
@@ -95,6 +96,9 @@ def test_create_object_form_is_hidden_behind_button(client: TestClient) -> None:
     assert "Neues Objekt anlegen" in create_response.text
     assert 'role="dialog"' in create_response.text
     assert 'class="modal-overlay"' in create_response.text
+    assert create_response.text.find('data-create-field="kind"') < create_response.text.find(
+        'data-create-field="object_id"'
+    )
     assert 'name="object_id"' in create_response.text
     assert 'name="primary_name"' in create_response.text
     assert "Hostname" in create_response.text
@@ -111,6 +115,26 @@ def test_create_object_form_is_hidden_behind_button(client: TestClient) -> None:
     assert 'value="active"' in create_response.text
     assert 'value="inactive"' in create_response.text
     assert 'value="deleted"' in create_response.text
+
+
+def test_create_form_schema_gates_fields_by_type(client: TestClient) -> None:
+    response = client.get("/?create=1")
+
+    assert response.status_code == 200
+    assert "BLOCKWART_UI_SCHEMAS" in response.text
+    assert 'data-create-field="kind"' in response.text
+    assert 'data-create-field="platform"' in response.text
+    assert 'data-create-field="relationship"' in response.text
+    assert set(UI_SCHEMAS) == {"host", "system", "netzwerk", "service"}
+    assert "platform" in UI_SCHEMAS["system"].create_fields
+    assert "platform" in UI_SCHEMAS["service"].create_fields
+    assert "platform" not in UI_SCHEMAS["host"].create_fields
+    assert "platform" not in UI_SCHEMAS["netzwerk"].create_fields
+    for schema in UI_SCHEMAS.values():
+        assert schema.create_fields[0] == "kind"
+        assert "object_id" in schema.create_fields
+        assert "primary_name" in schema.create_fields
+        assert "summary" in schema.create_fields
 
 
 def test_service_result_keeps_service_on_right_side(client: TestClient) -> None:
