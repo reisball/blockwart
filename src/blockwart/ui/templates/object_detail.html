@@ -127,6 +127,53 @@
           {% endif %}
         </section>
 
+        {% if supports_hardware %}
+          <section class="panel">
+            <div class="panel-head">
+              <h2 class="section-title">Hardware</h2>
+              {% if edit_section == "hardware" %}
+                <a class="button button-small button-muted" href="/objects/{{ object.id }}">Abbrechen</a>
+              {% else %}
+                <a class="button button-small button-muted" href="/objects/{{ object.id }}?edit=hardware">Edit</a>
+              {% endif %}
+            </div>
+            {% if edit_section == "hardware" %}
+              {% if error %}
+                <div class="error">{{ error }}</div>
+              {% endif %}
+              <form class="form-grid" method="post" action="/objects/{{ object.id }}">
+                <label>CPU
+                  <input name="hardware_cpu" value="{{ hardware.cpu }}" autocomplete="off" placeholder="z.B. Ryzen 7 7840U" />
+                </label>
+                <label>Memory
+                  <input name="hardware_memory" value="{{ hardware.memory }}" autocomplete="off" placeholder="z.B. 64 GB" />
+                </label>
+                <label>GPU
+                  <input name="hardware_gpu" value="{{ hardware.gpu }}" autocomplete="off" placeholder="z.B. Radeon 780M" />
+                </label>
+                <label>Storage / HDD
+                  <input name="hardware_storage" value="{{ hardware.storage }}" autocomplete="off" placeholder="z.B. 2 TB NVMe" />
+                </label>
+                <div class="button-row">
+                  <button type="submit">Speichern</button>
+                  <a class="button button-muted" href="/objects/{{ object.id }}">Abbrechen</a>
+                </div>
+              </form>
+            {% else %}
+              <div class="table-wrap">
+                <table class="table">
+                  <tbody>
+                    <tr><th>CPU</th><td>{{ hardware.cpu or "-" }}</td></tr>
+                    <tr><th>Memory</th><td>{{ hardware.memory or "-" }}</td></tr>
+                    <tr><th>GPU</th><td>{{ hardware.gpu or "-" }}</td></tr>
+                    <tr><th>Storage / HDD</th><td>{{ hardware.storage or "-" }}</td></tr>
+                  </tbody>
+                </table>
+              </div>
+            {% endif %}
+          </section>
+        {% endif %}
+
         <section class="panel">
             <div class="panel-head">
               <h2 class="section-title">Netzwerk</h2>

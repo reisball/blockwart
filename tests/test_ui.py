@@ -248,6 +248,98 @@ def test_host_and_system_schema_include_hardware_fields(client: TestClient) -> N
         assert not any(str(field["key"]).startswith("hardware_") for field in fields)
 
 
+@pytest.mark.parametrize("kind", ["host", "system"])
+def test_host_and_system_detail_can_edit_hardware_fields(
+    client: TestClient,
+    session_factory,
+    kind: str,
+) -> None:
+    object_id = f"hardware-{kind}"
+    with session_factory() as session:
+        upsert_object(
+            session,
+            CatalogObjectIn(
+                id=object_id,
+                kind=kind,
+                label=f"Hardware {kind}",
+                status="active",
+                summary="Hardware test object.",
+                data={"schema_version": 1},
+            ),
+        )
+
+    detail = client.get(f"/objects/{object_id}")
+    edit = client.get(f"/objects/{object_id}?edit=hardware")
+
+    assert detail.status_code == 200
+    assert "Hardware" in detail.text
+    assert "CPU" in detail.text
+    assert "Storage / HDD" in detail.text
+    assert edit.status_code == 200
+    assert 'name="hardware_cpu"' in edit.text
+    assert 'name="hardware_memory"' in edit.text
+    assert 'name="hardware_gpu"' in edit.text
+    assert 'name="hardware_storage"' in edit.text
+
+    response = client.post(
+        f"/objects/{object_id}",
+        data={
+            "hardware_cpu": "Ryzen 7 7840U",
+            "hardware_memory": "64 GB",
+            "hardware_gpu": "Radeon 780M",
+            "hardware_storage": "2 TB NVMe",
+        },
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 303
+    updated = client.get(f"/objects/{object_id}")
+    assert "Ryzen 7 7840U" in updated.text
+    assert "64 GB" in updated.text
+    assert "Radeon 780M" in updated.text
+    assert "2 TB NVMe" in updated.text
+    assert "Hardware test object." in updated.text
+    with session_factory() as session:
+        catalog_object = get_object(session, object_id)
+    assert catalog_object is not None
+    assert catalog_object.status == "active"
+    assert catalog_object.summary == "Hardware test object."
+    assert catalog_object.data["hardware"] == {
+        "cpu": "Ryzen 7 7840U",
+        "memory": "64 GB",
+        "gpu": "Radeon 780M",
+        "storage": "2 TB NVMe",
+    }
+
+
+@pytest.mark.parametrize("kind", ["netzwerk", "service"])
+def test_network_and_service_detail_do_not_show_hardware_panel(
+    client: TestClient,
+    session_factory,
+    kind: str,
+) -> None:
+    object_id = f"no-hardware-{kind}"
+    with session_factory() as session:
+        upsert_object(
+            session,
+            CatalogObjectIn(
+                id=object_id,
+                kind=kind,
+                label=f"No Hardware {kind}",
+                status="active",
+                data={"schema_version": 1},
+            ),
+        )
+
+    detail = client.get(f"/objects/{object_id}")
+    edit = client.get(f"/objects/{object_id}?edit=hardware")
+
+    assert detail.status_code == 200
+    assert edit.status_code == 200
+    assert 'name="hardware_cpu"' not in edit.text
+    assert "Storage / HDD" not in detail.text
+
+
 def test_service_result_keeps_service_on_right_side(client: TestClient) -> None:
     response = client.get("/?q=n8n-web-ui")
 

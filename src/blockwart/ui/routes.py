@@ -44,6 +44,7 @@ RELATION_TYPES = ("hosts", "depends_on", "uses", "documents", "related_to")
 PLATFORM_TYPES = ("LXC", "VM", "WSL")
 UI_KIND_PRIORITY = {kind: index for index, kind in enumerate(OBJECT_KINDS)}
 SAFE_DATA_JSON_FALLBACK = "{\n  \"schema_version\": 1\n}"
+HARDWARE_OBJECT_KINDS = {"host", "system"}
 
 
 @router.get("/", response_class=HTMLResponse)
@@ -142,6 +143,7 @@ def object_detail(
         object_map,
     )
     network = _network_summary(object_data)
+    hardware = _hardware_summary(object_data)
     ports = _list_of_mappings(object_data.get("ports"))
     endpoints = _list_of_mappings(object_data.get("endpoints"))
     return templates.TemplateResponse(
@@ -159,6 +161,8 @@ def object_detail(
             "ui_schema": ui_schema,
             "primary_name_value": _primary_name_value(catalog_object),
             "network": network,
+            "hardware": hardware,
+            "supports_hardware": catalog_object.kind in HARDWARE_OBJECT_KINDS,
             "container": _container_summary(object_data),
             "ports": ports,
             "endpoints": endpoints,
@@ -374,21 +378,30 @@ def update_object(
     label: Annotated[str | None, Form()] = None,
     primary_name: Annotated[str | None, Form()] = None,
     kind: Annotated[str | None, Form()] = None,
-    status: Annotated[str, Form()] = "active",
-    summary: Annotated[str, Form()] = "",
+    status: Annotated[str | None, Form()] = None,
+    summary: Annotated[str | None, Form()] = None,
     hostname: Annotated[str | None, Form()] = None,
     container_id: Annotated[str | None, Form()] = None,
     container_label: Annotated[str | None, Form()] = None,
+    hardware_cpu: Annotated[str | None, Form()] = None,
+    hardware_memory: Annotated[str | None, Form()] = None,
+    hardware_gpu: Annotated[str | None, Form()] = None,
+    hardware_storage: Annotated[str | None, Form()] = None,
     data_json: Annotated[str | None, Form()] = None,
 ):
+    submitted_hardware = any(
+        value is not None
+        for value in (hardware_cpu, hardware_memory, hardware_gpu, hardware_storage)
+    )
     try:
         existing_object = get_object(session, object_id)
         if existing_object is None:
             raise HTTPException(status_code=404, detail="Catalog object not found")
+        target_kind = kind or existing_object.kind
         data = _editable_data_copy(
             existing_object.data if data_json is None else json.loads(data_json or "{}")
         )
-        ui_schema = get_ui_schema(kind or existing_object.kind)
+        ui_schema = get_ui_schema(target_kind)
         primary_value = None
         if primary_name is not None or hostname is not None or label is not None:
             primary_value = (primary_name or hostname or label or "").strip()
@@ -403,13 +416,21 @@ def update_object(
                 container["label"] = container_label.strip()
             if container:
                 data["container"] = container
+        if target_kind in HARDWARE_OBJECT_KINDS and submitted_hardware:
+            _apply_hardware_fields(
+                data,
+                cpu=hardware_cpu,
+                memory=hardware_memory,
+                gpu=hardware_gpu,
+                storage=hardware_storage,
+            )
         _reject_secret_shaped_form_data(data)
         payload = CatalogObjectIn(
             id=object_id,
-            kind=kind or existing_object.kind,
+            kind=target_kind,
             label=primary_value or label or existing_object.label,
-            status=status or "active",
-            summary=summary or None,
+            status=status or existing_object.status or "active",
+            summary=existing_object.summary if summary is None else summary or None,
             data=data,
         )
         upsert_object(session, payload)
@@ -423,6 +444,7 @@ def update_object(
         object_data = catalog_object.data
         ui_schema = get_ui_schema(catalog_object.kind)
         network = _network_summary(object_data)
+        hardware = _hardware_summary(object_data)
         ports = _list_of_mappings(object_data.get("ports"))
         endpoints = _list_of_mappings(object_data.get("endpoints"))
         relationship_groups = _group_relationships(
@@ -450,6 +472,8 @@ def update_object(
                 "ui_schema": ui_schema,
                 "primary_name_value": _primary_name_value(catalog_object),
                 "network": network,
+                "hardware": hardware,
+                "supports_hardware": catalog_object.kind in HARDWARE_OBJECT_KINDS,
                 "container": _container_summary(object_data),
                 "ports": ports,
                 "endpoints": endpoints,
@@ -466,7 +490,7 @@ def update_object(
                 "object_kinds": OBJECT_KINDS,
                 "object_statuses": OBJECT_STATUSES_UI,
                 "error": _safe_error_message(exc),
-                "edit_section": "overview",
+                "edit_section": "hardware" if submitted_hardware else "overview",
             },
             status_code=422,
         )
@@ -967,6 +991,47 @@ def _network_summary(data: Mapping[str, Any]) -> dict[str, list[Mapping[str, Any
 def _container_summary(data: Mapping[str, Any]) -> Mapping[str, Any] | None:
     container = data.get("container")
     return container if isinstance(container, Mapping) else None
+
+
+def _hardware_summary(data: Mapping[str, Any]) -> dict[str, str]:
+    hardware = data.get("hardware")
+    if not isinstance(hardware, Mapping):
+        return {"cpu": "", "memory": "", "gpu": "", "storage": ""}
+    return {
+        "cpu": str(hardware.get("cpu") or ""),
+        "memory": str(hardware.get("memory") or ""),
+        "gpu": str(hardware.get("gpu") or ""),
+        "storage": str(hardware.get("storage") or ""),
+    }
+
+
+def _apply_hardware_fields(
+    data: dict[str, Any],
+    *,
+    cpu: str | None,
+    memory: str | None,
+    gpu: str | None,
+    storage: str | None,
+) -> None:
+    existing_hardware = data.get("hardware")
+    hardware = dict(existing_hardware if isinstance(existing_hardware, Mapping) else {})
+    for key, value in {
+        "cpu": cpu,
+        "memory": memory,
+        "gpu": gpu,
+        "storage": storage,
+    }.items():
+        if value is None:
+            continue
+        clean_value = value.strip()
+        if clean_value:
+            hardware[key] = clean_value
+        else:
+            hardware.pop(key, None)
+    if hardware:
+        data["hardware"] = hardware
+    else:
+        data.pop("hardware", None)
 
 
 def _access_methods(
