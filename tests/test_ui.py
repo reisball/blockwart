@@ -1037,6 +1037,72 @@ def test_panel_edit_forms_update_existing_network_and_access(
     assert "key-only" in detail.text
 
 
+def test_service_network_edit_only_exposes_and_updates_endpoints(
+    client: TestClient,
+    session_factory,
+) -> None:
+    with session_factory() as session:
+        upsert_object(
+            session,
+            CatalogObjectIn(
+                id="service-network-scope",
+                kind="service",
+                label="Service Network Scope",
+                status="active",
+                summary="Endpoint-only network edit.",
+                data={
+                    "schema_version": 1,
+                    "network": {"addresses": [{"ip": "192.168.50.10", "scope": "lan"}]},
+                    "ports": [{"port": 443, "protocol": "tcp", "purpose": "HTTPS"}],
+                    "endpoints": [
+                        {
+                            "name": "Web UI",
+                            "url": "https://192.168.50.10",
+                            "port": 443,
+                        }
+                    ],
+                },
+            ),
+        )
+
+    edit_response = client.get("/objects/service-network-scope?edit=network")
+
+    assert edit_response.status_code == 200
+    assert 'name="endpoint_name"' in edit_response.text
+    assert 'name="endpoint_url"' in edit_response.text
+    assert 'name="endpoint_port"' in edit_response.text
+    assert 'name="address_ip"' not in edit_response.text
+    assert 'name="port_value"' not in edit_response.text
+
+    update_response = client.post(
+        "/objects/service-network-scope/network",
+        data={
+            "address_ip": "10.0.0.1",
+            "address_interface": "eth9",
+            "address_scope": "wan",
+            "port_value": "8443",
+            "port_protocol": "tcp",
+            "port_purpose": "Injected",
+            "port_exposure": "public",
+            "endpoint_name": "API",
+            "endpoint_url": "https://192.168.50.10/api",
+            "endpoint_port": "443",
+        },
+        follow_redirects=False,
+    )
+
+    assert update_response.status_code == 303
+    with session_factory() as session:
+        updated = get_object(session, "service-network-scope")
+
+    assert updated is not None
+    assert updated.data["network"]["addresses"] == [{"ip": "192.168.50.10", "scope": "lan"}]
+    assert updated.data["ports"] == [{"port": 443, "protocol": "tcp", "purpose": "HTTPS"}]
+    assert updated.data["endpoints"] == [
+        {"name": "API", "url": "https://192.168.50.10/api", "port": 443}
+    ]
+
+
 def test_update_object_form_does_not_echo_rejected_secret_values(client: TestClient) -> None:
     response = client.post(
         "/objects/n8n",

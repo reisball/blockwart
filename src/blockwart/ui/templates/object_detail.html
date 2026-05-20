@@ -173,52 +173,58 @@
             </div>
             {% if edit_section == "network" %}
               <form class="form-grid" method="post" action="/objects/{{ object.id }}/network">
-                <h3>Adressen</h3>
-                <div class="table-wrap">
-                  <table class="table edit-table">
-                    <thead><tr><th>IP</th><th>Interface</th><th>Scope</th></tr></thead>
-                    <tbody>
-                      {% for address in network_address_rows %}
-                        <tr>
-                          <td><input name="address_ip" value="{{ address.ip or '' }}" autocomplete="off" /></td>
-                          <td><input name="address_interface" value="{{ address.interface or '' }}" autocomplete="off" /></td>
-                          <td><input name="address_scope" value="{{ address.scope or address.network or '' }}" autocomplete="off" /></td>
-                        </tr>
-                      {% endfor %}
-                    </tbody>
-                  </table>
-                </div>
-                <h3>Ports</h3>
-                <div class="table-wrap">
-                  <table class="table edit-table">
-                    <thead><tr><th>Port</th><th>Protokoll</th><th>Zweck</th><th>Exposure</th></tr></thead>
-                    <tbody>
-                      {% for port in port_rows %}
-                        <tr>
-                          <td><input name="port_value" value="{{ port.port or '' }}" inputmode="numeric" /></td>
-                          <td><input name="port_protocol" value="{{ port.protocol or 'tcp' }}" autocomplete="off" /></td>
-                          <td><input name="port_purpose" value="{{ port.purpose or '' }}" autocomplete="off" /></td>
-                          <td><input name="port_exposure" value="{{ port.exposure or '' }}" autocomplete="off" /></td>
-                        </tr>
-                      {% endfor %}
-                    </tbody>
-                  </table>
-                </div>
-                <h3>Endpoints</h3>
-                <div class="table-wrap">
-                  <table class="table edit-table">
-                    <thead><tr><th>Name</th><th>URL</th><th>Port</th></tr></thead>
-                    <tbody>
-                      {% for endpoint in endpoint_rows %}
-                        <tr>
-                          <td><input name="endpoint_name" value="{{ endpoint.name or endpoint.type or '' }}" autocomplete="off" /></td>
-                          <td><input name="endpoint_url" value="{{ endpoint.url or endpoint.endpoint or endpoint.host or '' }}" autocomplete="off" /></td>
-                          <td><input name="endpoint_port" value="{{ endpoint.port or '' }}" inputmode="numeric" /></td>
-                        </tr>
-                      {% endfor %}
-                    </tbody>
-                  </table>
-                </div>
+                {% if can_edit_network_addresses %}
+                  <h3>Adressen</h3>
+                  <div class="table-wrap">
+                    <table class="table edit-table">
+                      <thead><tr><th>IP</th><th>Interface</th><th>Scope</th></tr></thead>
+                      <tbody>
+                        {% for address in network_address_rows %}
+                          <tr>
+                            <td><input name="address_ip" value="{{ address.ip or '' }}" autocomplete="off" /></td>
+                            <td><input name="address_interface" value="{{ address.interface or '' }}" autocomplete="off" /></td>
+                            <td><input name="address_scope" value="{{ address.scope or address.network or '' }}" autocomplete="off" /></td>
+                          </tr>
+                        {% endfor %}
+                      </tbody>
+                    </table>
+                  </div>
+                {% endif %}
+                {% if can_edit_network_ports %}
+                  <h3>Ports</h3>
+                  <div class="table-wrap">
+                    <table class="table edit-table">
+                      <thead><tr><th>Port</th><th>Protokoll</th><th>Zweck</th><th>Exposure</th></tr></thead>
+                      <tbody>
+                        {% for port in port_rows %}
+                          <tr>
+                            <td><input name="port_value" value="{{ port.port or '' }}" inputmode="numeric" /></td>
+                            <td><input name="port_protocol" value="{{ port.protocol or 'tcp' }}" autocomplete="off" /></td>
+                            <td><input name="port_purpose" value="{{ port.purpose or '' }}" autocomplete="off" /></td>
+                            <td><input name="port_exposure" value="{{ port.exposure or '' }}" autocomplete="off" /></td>
+                          </tr>
+                        {% endfor %}
+                      </tbody>
+                    </table>
+                  </div>
+                {% endif %}
+                {% if can_edit_network_endpoints %}
+                  <h3>Endpoints</h3>
+                  <div class="table-wrap">
+                    <table class="table edit-table">
+                      <thead><tr><th>Name</th><th>URL</th><th>Port</th></tr></thead>
+                      <tbody>
+                        {% for endpoint in endpoint_rows %}
+                          <tr>
+                            <td><input name="endpoint_name" value="{{ endpoint.name or endpoint.label or endpoint.type or '' }}" autocomplete="off" /></td>
+                            <td><input name="endpoint_url" value="{{ endpoint.url or endpoint.endpoint or endpoint.host or '' }}" autocomplete="off" /></td>
+                            <td><input name="endpoint_port" value="{{ endpoint.port or '' }}" inputmode="numeric" /></td>
+                          </tr>
+                        {% endfor %}
+                      </tbody>
+                    </table>
+                  </div>
+                {% endif %}
                 <div class="button-row">
                   <button type="submit">Speichern</button>
                   <a class="button button-muted" href="/objects/{{ object.id }}">Abbrechen</a>
@@ -266,7 +272,7 @@
                     <tbody>
                       {% for endpoint in endpoints %}
                         <tr>
-                          <td>{{ endpoint.name or endpoint.type or "endpoint" }}</td>
+                          <td>{{ endpoint.name or endpoint.label or endpoint.type or "endpoint" }}</td>
                           <td>{{ endpoint.url or endpoint.endpoint or endpoint.host or "-" }}</td>
                           <td>{{ endpoint.port or "" }}</td>
                         </tr>

@@ -50,6 +50,9 @@ PLATFORM_TYPES = ("LXC", "VM", "WSL")
 UI_KIND_PRIORITY = {kind: index for index, kind in enumerate(OBJECT_KINDS)}
 SAFE_DATA_JSON_FALLBACK = "{\n  \"schema_version\": 1\n}"
 HARDWARE_OBJECT_KINDS = {"host", "system"}
+NETWORK_ADDRESS_EDIT_KINDS = {"host", "system", "netzwerk"}
+NETWORK_PORT_EDIT_KINDS = {"host", "system"}
+NETWORK_ENDPOINT_EDIT_KINDS = {"service"}
 
 
 def _metadata_timestamp(value: str | None) -> str:
@@ -275,6 +278,9 @@ def object_detail(
             ),
             "port_rows": _padded_mappings(ports, max(1, len(ports))),
             "endpoint_rows": _padded_mappings(endpoints, max(1, len(endpoints))),
+            "can_edit_network_addresses": catalog_object.kind in NETWORK_ADDRESS_EDIT_KINDS,
+            "can_edit_network_ports": catalog_object.kind in NETWORK_PORT_EDIT_KINDS,
+            "can_edit_network_endpoints": catalog_object.kind in NETWORK_ENDPOINT_EDIT_KINDS,
             "access_methods": access_methods,
             "access_method_rows": _access_method_rows(catalog_object, access_methods),
             "credential_references": [],
@@ -619,6 +625,9 @@ def update_object(
                 ),
                 "port_rows": _padded_mappings(ports, max(1, len(ports))),
                 "endpoint_rows": _padded_mappings(endpoints, max(1, len(endpoints))),
+                "can_edit_network_addresses": catalog_object.kind in NETWORK_ADDRESS_EDIT_KINDS,
+                "can_edit_network_ports": catalog_object.kind in NETWORK_PORT_EDIT_KINDS,
+                "can_edit_network_endpoints": catalog_object.kind in NETWORK_ENDPOINT_EDIT_KINDS,
                 "access_methods": access_methods,
                 "access_method_rows": _access_method_rows(catalog_object, access_methods),
                 "credential_references": [],
@@ -645,57 +654,60 @@ async def update_network(
     form = await request.form()
     data = _editable_data_copy(existing_object.data)
     network = dict(data.get("network") if isinstance(data.get("network"), Mapping) else {})
-    network["addresses"] = [
-        {
-            **address,
-            "ip": ip,
-            "interface": interface,
-            "scope": scope,
-        }
-        for address, ip, interface, scope in zip(
-            _padded_mappings(network.get("addresses"), len(form.getlist("address_ip"))),
-            form.getlist("address_ip"),
-            form.getlist("address_interface"),
-            form.getlist("address_scope"),
-            strict=False,
-        )
-        if str(ip).strip()
-    ]
-    data["network"] = network
-    data["ports"] = [
-        {
-            **port,
-            "port": int(port_value),
-            "protocol": protocol or "tcp",
-            "purpose": purpose,
-            "exposure": exposure,
-        }
-        for port, port_value, protocol, purpose, exposure in zip(
-            _padded_mappings(data.get("ports"), len(form.getlist("port_value"))),
-            form.getlist("port_value"),
-            form.getlist("port_protocol"),
-            form.getlist("port_purpose"),
-            form.getlist("port_exposure"),
-            strict=False,
-        )
-        if str(port_value).strip()
-    ]
-    data["endpoints"] = [
-        {
-            **endpoint,
-            "name": name,
-            "url": url,
-            "port": int(port_value) if str(port_value).strip() else "",
-        }
-        for endpoint, name, url, port_value in zip(
-            _padded_mappings(data.get("endpoints"), len(form.getlist("endpoint_name"))),
-            form.getlist("endpoint_name"),
-            form.getlist("endpoint_url"),
-            form.getlist("endpoint_port"),
-            strict=False,
-        )
-        if str(name).strip() or str(url).strip() or str(port_value).strip()
-    ]
+    if existing_object.kind in NETWORK_ADDRESS_EDIT_KINDS:
+        network["addresses"] = [
+            {
+                **address,
+                "ip": ip,
+                "interface": interface,
+                "scope": scope,
+            }
+            for address, ip, interface, scope in zip(
+                _padded_mappings(network.get("addresses"), len(form.getlist("address_ip"))),
+                form.getlist("address_ip"),
+                form.getlist("address_interface"),
+                form.getlist("address_scope"),
+                strict=False,
+            )
+            if str(ip).strip()
+        ]
+        data["network"] = network
+    if existing_object.kind in NETWORK_PORT_EDIT_KINDS:
+        data["ports"] = [
+            {
+                **port,
+                "port": int(port_value),
+                "protocol": protocol or "tcp",
+                "purpose": purpose,
+                "exposure": exposure,
+            }
+            for port, port_value, protocol, purpose, exposure in zip(
+                _padded_mappings(data.get("ports"), len(form.getlist("port_value"))),
+                form.getlist("port_value"),
+                form.getlist("port_protocol"),
+                form.getlist("port_purpose"),
+                form.getlist("port_exposure"),
+                strict=False,
+            )
+            if str(port_value).strip()
+        ]
+    if existing_object.kind in NETWORK_ENDPOINT_EDIT_KINDS:
+        data["endpoints"] = [
+            {
+                **endpoint,
+                "name": name,
+                "url": url,
+                "port": int(port_value) if str(port_value).strip() else "",
+            }
+            for endpoint, name, url, port_value in zip(
+                _padded_mappings(data.get("endpoints"), len(form.getlist("endpoint_name"))),
+                form.getlist("endpoint_name"),
+                form.getlist("endpoint_url"),
+                form.getlist("endpoint_port"),
+                strict=False,
+            )
+            if str(name).strip() or str(url).strip() or str(port_value).strip()
+        ]
     _reject_secret_shaped_form_data(data)
     upsert_object(
         session,
