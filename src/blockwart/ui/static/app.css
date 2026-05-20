@@ -661,7 +661,12 @@ button:hover,
   text-decoration: none;
 }
 
-.relationship-pill:hover {
+.relationship-pill {
+  cursor: pointer;
+}
+
+.relationship-pill:hover,
+.relationship-pill.is-selected {
   border-color: var(--primary);
   background: var(--surface);
 }

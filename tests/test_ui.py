@@ -518,7 +518,11 @@ def test_service_result_keeps_service_on_right_side(client: TestClient) -> None:
     )
     assert relationships.find("system:n8n") < relationships.find("service:n8n-web-ui")
     assert relationships.find("Systeme") < relationships.find("Services")
-    assert "relationship-detail-stack" not in article
+    assert "relationship-detail-stack" in article
+    assert 'data-relationship-node' in relationships
+    assert 'data-detail-target=' in relationships
+    assert '<a class="relationship-pill' not in relationships
+    assert 'href="/objects/n8n-web-ui"' in article
 
 
 def test_host_result_groups_systems_and_services_in_one_relation_row(
