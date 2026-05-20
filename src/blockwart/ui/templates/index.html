@@ -10,6 +10,9 @@
       }
     </script>
     <link rel="stylesheet" href="/static/app.css?v=054" />
+    <script>
+      window.BLOCKWART_UI_SCHEMAS = {{ ui_schemas|tojson }};
+    </script>
     <script src="/static/theme.js?v=054" defer></script>
     <script src="/static/index.js?v=054" defer></script>
   </head>
@@ -85,8 +88,8 @@
                 <label>ID
                   <input name="object_id" value="{{ form.id }}" placeholder="n8n" autocomplete="off" spellcheck="false" required />
                 </label>
-                <label>Hostname
-                  <input name="hostname" value="{{ form.hostname or form.label }}" placeholder="n8n" autocomplete="off" required />
+              <label><span data-primary-name-label>{{ form_ui_schema.primary_name_label }}</span>
+                <input name="primary_name" data-primary-name-input value="{{ form.primary_name or form.hostname or form.label }}" placeholder="n8n" autocomplete="off" required />
                 </label>
                 <label>Label
                   <input name="labels" value="{{ form.labels }}" placeholder="infra, docker, intern" autocomplete="off" />
@@ -98,7 +101,7 @@
                     {% endfor %}
                   </select>
                 </label>
-                <label data-platform-field {% if form.kind not in ["system", "service"] %}hidden{% endif %}>Plattform
+                <label data-platform-field {% if not form_ui_schema.supports_platform %}hidden{% endif %}>Plattform
                   <select name="platform">
                     <option value="">Keine Plattform</option>
                     {% for platform in platform_types %}
@@ -155,11 +158,7 @@
                   </div>
                   <div>
                     <div class="label">
-                      {% if object.data.network and object.data.network.hostnames %}
-                        {{ object.data.network.hostnames|first }}
-                      {% else %}
-                        {{ object.label }}
-                      {% endif %}
+                      {{ display_names[object.id] }}
                     </div>
                     <div class="summary">{{ object.summary or object.id }}</div>
                     <div class="badges">
@@ -193,11 +192,7 @@
                           <div class="relationship-node {% if relationship.current_side == 'left' %}relationship-node-current{% endif %}" role="button" tabindex="0" data-relationship-node data-detail-target="relationship-detail-{{ object.id }}-{{ loop.index }}-left">
                             <span class="relationship-type">Typ: {{ relationship.left.kind }}</span>
                             <strong class="relationship-node-name">
-                              {% if relationship.left.data.network and relationship.left.data.network.hostnames %}
-                                {{ relationship.left.data.network.hostnames|first }}
-                              {% else %}
-                                {{ relationship.left.label }}
-                              {% endif %}
+                              {{ relationship.left.label }}
                             </strong>
                             <small>{{ relationship.left.ref }}</small>
                             {% if relationship.left.ports %}
@@ -212,11 +207,7 @@
                           <div class="relationship-node relationship-node-with-detail {% if relationship.current_side == 'right' %}relationship-node-current{% endif %}" role="button" tabindex="0" data-relationship-node data-detail-target="relationship-detail-{{ object.id }}-{{ loop.index }}-right">
                             <span class="relationship-type">Typ: {{ relationship.right.kind }}</span>
                             <strong class="relationship-node-name">
-                              {% if relationship.right.data.network and relationship.right.data.network.hostnames %}
-                                {{ relationship.right.data.network.hostnames|first }}
-                              {% else %}
-                                {{ relationship.right.label }}
-                              {% endif %}
+                              {{ relationship.right.label }}
                             </strong>
                             <small>{{ relationship.right.ref }}</small>
                             {% if relationship.right.ports %}
@@ -243,11 +234,7 @@
                             <div>
                               <span class="relationship-type">Typ: {{ node.kind }}</span>
                               <strong class="relationship-node-name">
-                                {% if node.data.network and node.data.network.hostnames %}
-                                  {{ node.data.network.hostnames|first }}
-                                {% else %}
-                                  {{ node.label }}
-                                {% endif %}
+                                {{ node.label }}
                               </strong>
                             </div>
                             <small>{{ node.ref }}</small>

@@ -18,7 +18,7 @@
         <a class="breadcrumb" href="/">Zur Suche</a>
         <div class="title-row">
           <div>
-            <h1>{{ network.hostnames|first or object.label }}</h1>
+            <h1>{{ primary_name_value }}</h1>
             <div class="meta">{{ object.kind }}:{{ object.id }} · {{ object.status }}</div>
           </div>
           <div class="top-actions">
@@ -54,8 +54,8 @@
                 <div class="fact-label">ID</div>
                 <div class="fact-value">{{ object.id }}</div>
               </div>
-              <label>Hostname
-                <input name="hostname" value="{{ network.hostnames|first or '' }}" autocomplete="off" />
+              <label>{{ ui_schema.primary_name_label }}
+                <input name="primary_name" value="{{ primary_name_value }}" autocomplete="off" />
               </label>
               <label>Typ
                 <select name="kind">
@@ -92,8 +92,8 @@
           {% else %}
             <div class="overview-card">
               <div class="overview-primary">
-                <div class="fact-label">Hostname</div>
-                <div class="overview-hostname">{{ network.hostnames|first or "-" }}</div>
+                <div class="fact-label">{{ ui_schema.primary_name_label }}</div>
+                <div class="overview-hostname">{{ primary_name_value or "-" }}</div>
               </div>
               <div class="overview-labels">
                 <div class="overview-label">
@@ -127,66 +127,59 @@
           {% endif %}
         </section>
 
-        {% if network.addresses or ports or endpoints %}
-          <section class="panel">
+        <section class="panel">
             <div class="panel-head">
               <h2 class="section-title">Netzwerk</h2>
               <a class="button button-small button-muted" href="/objects/{{ object.id }}?edit=network">Edit</a>
             </div>
             {% if edit_section == "network" %}
               <form class="form-grid" method="post" action="/objects/{{ object.id }}/network">
-                {% if network.addresses %}
-                  <h3>Adressen</h3>
-                  <div class="table-wrap">
-                    <table class="table edit-table">
-                      <thead><tr><th>IP</th><th>Interface</th><th>Scope</th></tr></thead>
-                      <tbody>
-                        {% for address in network.addresses %}
-                          <tr>
-                            <td><input name="address_ip" value="{{ address.ip }}" autocomplete="off" /></td>
-                            <td><input name="address_interface" value="{{ address.interface or '' }}" autocomplete="off" /></td>
-                            <td><input name="address_scope" value="{{ address.scope or address.network or '' }}" autocomplete="off" /></td>
-                          </tr>
-                        {% endfor %}
-                      </tbody>
-                    </table>
-                  </div>
-                {% endif %}
-                {% if ports %}
-                  <h3>Ports</h3>
-                  <div class="table-wrap">
-                    <table class="table edit-table">
-                      <thead><tr><th>Port</th><th>Protokoll</th><th>Zweck</th><th>Exposure</th></tr></thead>
-                      <tbody>
-                        {% for port in ports %}
-                          <tr>
-                            <td><input name="port_value" value="{{ port.port }}" inputmode="numeric" /></td>
-                            <td><input name="port_protocol" value="{{ port.protocol or 'tcp' }}" autocomplete="off" /></td>
-                            <td><input name="port_purpose" value="{{ port.purpose or '' }}" autocomplete="off" /></td>
-                            <td><input name="port_exposure" value="{{ port.exposure or '' }}" autocomplete="off" /></td>
-                          </tr>
-                        {% endfor %}
-                      </tbody>
-                    </table>
-                  </div>
-                {% endif %}
-                {% if endpoints %}
-                  <h3>Endpoints</h3>
-                  <div class="table-wrap">
-                    <table class="table edit-table">
-                      <thead><tr><th>Name</th><th>URL</th><th>Port</th></tr></thead>
-                      <tbody>
-                        {% for endpoint in endpoints %}
-                          <tr>
-                            <td><input name="endpoint_name" value="{{ endpoint.name or endpoint.type or '' }}" autocomplete="off" /></td>
-                            <td><input name="endpoint_url" value="{{ endpoint.url or endpoint.endpoint or endpoint.host or '' }}" autocomplete="off" /></td>
-                            <td><input name="endpoint_port" value="{{ endpoint.port or '' }}" inputmode="numeric" /></td>
-                          </tr>
-                        {% endfor %}
-                      </tbody>
-                    </table>
-                  </div>
-                {% endif %}
+                <h3>Adressen</h3>
+                <div class="table-wrap">
+                  <table class="table edit-table">
+                    <thead><tr><th>IP</th><th>Interface</th><th>Scope</th></tr></thead>
+                    <tbody>
+                      {% for address in network_address_rows %}
+                        <tr>
+                          <td><input name="address_ip" value="{{ address.ip or '' }}" autocomplete="off" /></td>
+                          <td><input name="address_interface" value="{{ address.interface or '' }}" autocomplete="off" /></td>
+                          <td><input name="address_scope" value="{{ address.scope or address.network or '' }}" autocomplete="off" /></td>
+                        </tr>
+                      {% endfor %}
+                    </tbody>
+                  </table>
+                </div>
+                <h3>Ports</h3>
+                <div class="table-wrap">
+                  <table class="table edit-table">
+                    <thead><tr><th>Port</th><th>Protokoll</th><th>Zweck</th><th>Exposure</th></tr></thead>
+                    <tbody>
+                      {% for port in port_rows %}
+                        <tr>
+                          <td><input name="port_value" value="{{ port.port or '' }}" inputmode="numeric" /></td>
+                          <td><input name="port_protocol" value="{{ port.protocol or 'tcp' }}" autocomplete="off" /></td>
+                          <td><input name="port_purpose" value="{{ port.purpose or '' }}" autocomplete="off" /></td>
+                          <td><input name="port_exposure" value="{{ port.exposure or '' }}" autocomplete="off" /></td>
+                        </tr>
+                      {% endfor %}
+                    </tbody>
+                  </table>
+                </div>
+                <h3>Endpoints</h3>
+                <div class="table-wrap">
+                  <table class="table edit-table">
+                    <thead><tr><th>Name</th><th>URL</th><th>Port</th></tr></thead>
+                    <tbody>
+                      {% for endpoint in endpoint_rows %}
+                        <tr>
+                          <td><input name="endpoint_name" value="{{ endpoint.name or endpoint.type or '' }}" autocomplete="off" /></td>
+                          <td><input name="endpoint_url" value="{{ endpoint.url or endpoint.endpoint or endpoint.host or '' }}" autocomplete="off" /></td>
+                          <td><input name="endpoint_port" value="{{ endpoint.port or '' }}" inputmode="numeric" /></td>
+                        </tr>
+                      {% endfor %}
+                    </tbody>
+                  </table>
+                </div>
                 <div class="button-row">
                   <button type="submit">Speichern</button>
                   <a class="button button-muted" href="/objects/{{ object.id }}">Abbrechen</a>
@@ -243,12 +236,13 @@
                   </table>
                 </div>
               {% endif %}
+              {% if not network.addresses and not ports and not endpoints %}
+                <div class="meta">Keine Netzwerkdaten erfasst.</div>
+              {% endif %}
             {% endif %}
-          </section>
-        {% endif %}
+        </section>
 
-        {% if access_methods %}
-          <section class="panel">
+        <section class="panel">
             <div class="panel-head">
               <h2 class="section-title">Zugriff</h2>
               <a class="button button-small button-muted" href="/objects/{{ object.id }}?edit=access">Edit</a>
@@ -259,16 +253,16 @@
                   <table class="table edit-table">
                     <thead><tr><th>Quelle</th><th>Typ</th><th>Endpoint</th><th>Auth</th></tr></thead>
                     <tbody>
-                      {% for method in access_methods %}
+                      {% for method in access_method_rows %}
                         <tr>
                           <td>
                             <span class="badge">{{ method.source_kind }}</span> {{ method.source_label }}
                             <input type="hidden" name="method_ref" value="{{ method.source_ref }}" />
                             <input type="hidden" name="method_index" value="{{ method.index }}" />
                           </td>
-                          <td><input name="method_type" value="{{ method.type }}" autocomplete="off" /></td>
-                          <td><input name="method_endpoint" value="{{ method.endpoint }}" autocomplete="off" /></td>
-                          <td><input name="method_auth_mode" value="{{ method.auth_mode }}" autocomplete="off" /></td>
+                          <td><input name="method_type" value="{{ method.type or '' }}" autocomplete="off" /></td>
+                          <td><input name="method_endpoint" value="{{ method.endpoint or '' }}" autocomplete="off" /></td>
+                          <td><input name="method_auth_mode" value="{{ method.auth_mode or '' }}" autocomplete="off" /></td>
                         </tr>
                       {% endfor %}
                     </tbody>
@@ -295,9 +289,11 @@
                   </tbody>
                 </table>
               </div>
+              {% if not access_methods %}
+                <div class="meta">Keine Zugriffsdaten erfasst.</div>
+              {% endif %}
             {% endif %}
           </section>
-        {% endif %}
 
         <section class="panel">
           <div class="panel-head">

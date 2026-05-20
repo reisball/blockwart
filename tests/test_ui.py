@@ -96,7 +96,8 @@ def test_create_object_form_is_hidden_behind_button(client: TestClient) -> None:
     assert 'role="dialog"' in create_response.text
     assert 'class="modal-overlay"' in create_response.text
     assert 'name="object_id"' in create_response.text
-    assert 'name="hostname"' in create_response.text
+    assert 'name="primary_name"' in create_response.text
+    assert "Hostname" in create_response.text
     assert 'name="labels"' in create_response.text
     assert "data-kind-select" in create_response.text
     assert "data-platform-field" in create_response.text
@@ -233,6 +234,59 @@ def test_create_object_form_redirects_to_detail(
     assert catalog_object is not None
     assert catalog_object.data["labels"] == ["infra", "docker", "intern"]
     assert catalog_object.data["platform"] == "LXC"
+    assert catalog_object.data["network"]["hostnames"][0] == "Test System"
+
+
+@pytest.mark.parametrize(
+    ("kind", "primary_label", "stores_hostname", "supports_platform"),
+    [
+        ("host", "Hostname", True, False),
+        ("system", "Hostname", True, True),
+        ("netzwerk", "Name", False, False),
+        ("service", "Service-Name", False, True),
+    ],
+)
+def test_ui_schema_drives_primary_name_storage_by_kind(
+    client: TestClient,
+    session_factory,
+    kind: str,
+    primary_label: str,
+    stores_hostname: bool,
+    supports_platform: bool,
+) -> None:
+    object_id = f"ui-schema-{kind}"
+    response = client.post(
+        "/objects",
+        data={
+            "object_id": object_id,
+            "kind": kind,
+            "primary_name": f"UI Name {kind}",
+            "status": "active",
+            "labels": "infra, docker\ninfra",
+            "platform": "LXC",
+            "summary": "Created from schema matrix.",
+            "data_json": '{"schema_version": 1}',
+        },
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 303
+    detail = client.get(f"/objects/{object_id}")
+    assert primary_label in detail.text
+    assert f"UI Name {kind}" in detail.text
+    with session_factory() as session:
+        catalog_object = get_object(session, object_id)
+    assert catalog_object is not None
+    assert catalog_object.label == f"UI Name {kind}"
+    assert catalog_object.data["labels"] == ["infra", "docker"]
+    if stores_hostname:
+        assert catalog_object.data["network"]["hostnames"][0] == f"UI Name {kind}"
+    else:
+        assert catalog_object.data.get("network", {}).get("hostnames") is None
+    if supports_platform:
+        assert catalog_object.data["platform"] == "LXC"
+    else:
+        assert "platform" not in catalog_object.data
 
 
 def test_create_service_form_can_set_host_system(
@@ -266,6 +320,8 @@ def test_create_service_form_can_set_host_system(
         ).one_or_none()
     assert catalog_object is not None
     assert catalog_object.data["platform"] == "VM"
+    assert catalog_object.label == "Test Service"
+    assert catalog_object.data.get("network", {}).get("hostnames") is None
     assert relationship is not None
 
 
@@ -305,12 +361,12 @@ def test_update_object_form_updates_detail(client: TestClient) -> None:
     assert "Updated through UI." in detail.text
 
 
-def test_overview_edit_updates_object_metadata(client: TestClient) -> None:
+def test_overview_edit_updates_object_metadata(client: TestClient, session_factory) -> None:
     edit_response = client.get("/objects/n8n?edit=overview")
 
     assert edit_response.status_code == 200
     assert 'name="label"' not in edit_response.text
-    assert 'name="hostname"' in edit_response.text
+    assert 'name="primary_name"' in edit_response.text
     assert "Container ID" not in edit_response.text
     assert "Created at" in edit_response.text
     assert "Last changed" in edit_response.text
@@ -319,7 +375,7 @@ def test_overview_edit_updates_object_metadata(client: TestClient) -> None:
     response = client.post(
         "/objects/n8n",
         data={
-            "hostname": "n8n-main",
+            "primary_name": "n8n-main",
             "kind": "system",
             "status": "inactive",
             "summary": "Updated through overview.",
@@ -332,6 +388,11 @@ def test_overview_edit_updates_object_metadata(client: TestClient) -> None:
     assert "n8n-main" in detail.text
     assert "inactive" in detail.text
     assert "Updated through overview." in detail.text
+    with session_factory() as session:
+        catalog_object = get_object(session, "n8n")
+    assert catalog_object is not None
+    assert catalog_object.label == "n8n-main"
+    assert catalog_object.data["network"]["hostnames"][0] == "n8n-main"
 
 
 def test_detail_form_can_create_relationship(client: TestClient, session_factory) -> None:

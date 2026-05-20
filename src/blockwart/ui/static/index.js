@@ -2,6 +2,8 @@
   const cards = Array.from(document.querySelectorAll("[data-object-card]"));
   const createKindSelect = document.querySelector("[data-kind-select]");
   const platformField = document.querySelector("[data-platform-field]");
+  const primaryNameLabel = document.querySelector("[data-primary-name-label]");
+  const uiSchemas = window.BLOCKWART_UI_SCHEMAS || {};
 
   function closeCard(card) {
     card.classList.remove("is-expanded");
@@ -98,7 +100,11 @@
     if (!createKindSelect || !platformField) {
       return;
     }
-    platformField.hidden = !["service", "system"].includes(createKindSelect.value);
+    const schema = uiSchemas[createKindSelect.value] || {};
+    platformField.hidden = !schema.supports_platform;
+    if (primaryNameLabel && schema.primary_name_label) {
+      primaryNameLabel.textContent = schema.primary_name_label;
+    }
   }
 
   createKindSelect?.addEventListener("change", updatePlatformField);

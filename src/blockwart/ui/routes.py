@@ -13,6 +13,7 @@ from sqlalchemy.orm import Session
 
 from blockwart.api.deps import get_session
 from blockwart.domain.security import find_secret_violations
+from blockwart.domain.ui_schema import get_ui_schema, ui_schema_payload
 from blockwart.schemas.catalog import (
     OBJECT_STATUSES,
     PUBLIC_OBJECT_KINDS,
@@ -36,7 +37,6 @@ OBJECT_KINDS = PUBLIC_OBJECT_KINDS
 OBJECT_STATUSES_UI = OBJECT_STATUSES
 RELATION_TYPES = ("hosts", "depends_on", "uses", "documents", "related_to")
 PLATFORM_TYPES = ("LXC", "VM", "WSL")
-PLATFORM_OBJECT_KINDS = {"service", "system"}
 UI_KIND_PRIORITY = {kind: index for index, kind in enumerate(OBJECT_KINDS)}
 SAFE_DATA_JSON_FALLBACK = "{\n  \"schema_version\": 1\n}"
 
@@ -61,6 +61,7 @@ def index(
     object_map = {f"{obj.kind}:{obj.id}": obj for obj in all_objects}
     object_counts = Counter(obj.kind for obj in _visible_objects(search_objects(session)))
     total_objects = sum(object_counts.values())
+    display_names = {obj.id: _primary_name_value(obj) for obj in all_objects}
     return templates.TemplateResponse(
         request,
         "index.html",
@@ -73,6 +74,9 @@ def index(
             "object_kinds": OBJECT_KINDS,
             "object_statuses": OBJECT_STATUSES_UI,
             "platform_types": PLATFORM_TYPES,
+            "ui_schemas": ui_schema_payload(),
+            "form_ui_schema": get_ui_schema(_empty_form()["kind"]),
+            "display_names": display_names,
             "object_counts": object_counts,
             "total_objects": total_objects,
             "error": None,
@@ -104,6 +108,15 @@ def object_detail(
         obj for obj in all_objects if obj.id != catalog_object.id and obj.kind in OBJECT_KINDS
     ]
     object_data = catalog_object.data
+    ui_schema = get_ui_schema(catalog_object.kind)
+    access_methods = _display_access_methods(
+        catalog_object,
+        relationship_groups,
+        object_map,
+    )
+    network = _network_summary(object_data)
+    ports = _list_of_mappings(object_data.get("ports"))
+    endpoints = _list_of_mappings(object_data.get("endpoints"))
     return templates.TemplateResponse(
         request,
         "object_detail.html",
@@ -116,15 +129,20 @@ def object_detail(
             "relation_types": RELATION_TYPES,
             "comment": str(object_data.get("comment") or ""),
             "audit_events": list_audit_events_for_object(session, catalog_object.id),
-            "network": _network_summary(object_data),
+            "ui_schema": ui_schema,
+            "primary_name_value": _primary_name_value(catalog_object),
+            "network": network,
             "container": _container_summary(object_data),
-            "ports": _list_of_mappings(object_data.get("ports")),
-            "endpoints": _list_of_mappings(object_data.get("endpoints")),
-            "access_methods": _display_access_methods(
-                catalog_object,
-                relationship_groups,
-                object_map,
+            "ports": ports,
+            "endpoints": endpoints,
+            "network_address_rows": _padded_mappings(
+                network["addresses"],
+                max(1, len(network["addresses"])),
             ),
+            "port_rows": _padded_mappings(ports, max(1, len(ports))),
+            "endpoint_rows": _padded_mappings(endpoints, max(1, len(endpoints))),
+            "access_methods": access_methods,
+            "access_method_rows": _access_method_rows(catalog_object, access_methods),
             "credential_references": [],
             "data_json": json.dumps(
                 _without_credential_references(catalog_object.data),
@@ -146,6 +164,7 @@ def save_object(
     object_id: Annotated[str, Form()],
     kind: Annotated[str, Form()],
     label: Annotated[str | None, Form()] = None,
+    primary_name: Annotated[str | None, Form()] = None,
     labels: Annotated[str, Form()] = "",
     platform: Annotated[str, Form()] = "",
     hostname: Annotated[str | None, Form()] = None,
@@ -160,6 +179,7 @@ def save_object(
         "id": object_id,
         "kind": kind,
         "label": label or "",
+        "primary_name": primary_name or hostname or label or "",
         "labels": labels,
         "platform": platform,
         "hostname": hostname or "",
@@ -173,6 +193,7 @@ def save_object(
     try:
         data = json.loads(data_json or "{}")
         _reject_secret_shaped_form_data(data)
+        ui_schema = get_ui_schema(kind)
         if platform and platform not in PLATFORM_TYPES:
             raise ValueError("Unsupported platform")
         label_values = _split_label_values(labels)
@@ -180,21 +201,12 @@ def save_object(
             data["labels"] = label_values
         else:
             data.pop("labels", None)
-        if kind in PLATFORM_OBJECT_KINDS and platform:
+        if ui_schema.supports_platform and platform:
             data["platform"] = platform
         else:
             data.pop("platform", None)
-        primary_hostname = (hostname or label or object_id).strip()
-        if primary_hostname:
-            network = dict(data.get("network") if isinstance(data.get("network"), Mapping) else {})
-            existing_hostnames = network.get("hostnames")
-            hostname_values = (
-                [str(value) for value in existing_hostnames]
-                if isinstance(existing_hostnames, list)
-                else []
-            )
-            network["hostnames"] = [primary_hostname, *hostname_values[1:]]
-            data["network"] = network
+        primary_value = (primary_name or hostname or label or object_id).strip()
+        _apply_primary_name(data, ui_schema, primary_value)
         hosted_on_system_id = hosted_on_system_id.strip()
         relation_target_ref = relation_target_ref.strip()
         if hosted_on_system_id and not relation_target_ref:
@@ -216,7 +228,7 @@ def save_object(
         payload = CatalogObjectIn(
             id=object_id,
             kind=kind,
-            label=primary_hostname or object_id,
+            label=primary_value or object_id,
             status=status or "active",
             summary=summary or None,
             data=data,
@@ -247,6 +259,9 @@ def save_object(
                 "object_kinds": OBJECT_KINDS,
                 "object_statuses": OBJECT_STATUSES_UI,
                 "platform_types": PLATFORM_TYPES,
+                "ui_schemas": ui_schema_payload(),
+                "form_ui_schema": get_ui_schema(kind),
+                "display_names": {obj.id: _primary_name_value(obj) for obj in all_objects},
                 "object_counts": object_counts,
                 "total_objects": sum(object_counts.values()),
                 "error": _safe_error_message(exc),
@@ -330,6 +345,7 @@ def update_object(
     object_id: str,
     session: Annotated[Session, Depends(get_session)],
     label: Annotated[str | None, Form()] = None,
+    primary_name: Annotated[str | None, Form()] = None,
     kind: Annotated[str | None, Form()] = None,
     status: Annotated[str, Form()] = "active",
     summary: Annotated[str, Form()] = "",
@@ -345,22 +361,11 @@ def update_object(
         data = _editable_data_copy(
             existing_object.data if data_json is None else json.loads(data_json or "{}")
         )
-        primary_hostname = None
-        if hostname is not None:
-            network = dict(data.get("network") if isinstance(data.get("network"), Mapping) else {})
-            existing_hostnames = network.get("hostnames")
-            hostname_values = (
-                [str(value) for value in existing_hostnames]
-                if isinstance(existing_hostnames, list)
-                else []
-            )
-            primary_hostname = hostname.strip()
-            network["hostnames"] = (
-                [primary_hostname, *hostname_values[1:]]
-                if primary_hostname
-                else hostname_values[1:]
-            )
-            data["network"] = network
+        ui_schema = get_ui_schema(kind or existing_object.kind)
+        primary_value = None
+        if primary_name is not None or hostname is not None or label is not None:
+            primary_value = (primary_name or hostname or label or "").strip()
+            _apply_primary_name(data, ui_schema, primary_value)
         if container_id is not None or container_label is not None:
             container = dict(
                 data.get("container") if isinstance(data.get("container"), Mapping) else {}
@@ -375,7 +380,7 @@ def update_object(
         payload = CatalogObjectIn(
             id=object_id,
             kind=kind or existing_object.kind,
-            label=primary_hostname or label or existing_object.label,
+            label=primary_value or label or existing_object.label,
             status=status or "active",
             summary=summary or None,
             data=data,
@@ -389,6 +394,20 @@ def update_object(
         all_objects = _sort_for_browse(list_objects(session))
         object_map = {f"{obj.kind}:{obj.id}": obj for obj in all_objects}
         object_data = catalog_object.data
+        ui_schema = get_ui_schema(catalog_object.kind)
+        network = _network_summary(object_data)
+        ports = _list_of_mappings(object_data.get("ports"))
+        endpoints = _list_of_mappings(object_data.get("endpoints"))
+        relationship_groups = _group_relationships(
+            catalog_object,
+            relationships,
+            object_map,
+        )
+        access_methods = _display_access_methods(
+            catalog_object,
+            relationship_groups,
+            object_map,
+        )
         return templates.TemplateResponse(
             request,
             "object_detail.html",
@@ -396,28 +415,25 @@ def update_object(
                 "title": f"{catalog_object.label} - Blockwart",
                 "object": catalog_object,
                 "relationships": relationships,
-                "relationship_groups": _group_relationships(
-                    catalog_object,
-                    relationships,
-                    object_map,
-                ),
+                "relationship_groups": relationship_groups,
                 "relationship_targets": [obj for obj in all_objects if obj.id != catalog_object.id],
                 "relation_types": RELATION_TYPES,
                 "comment": str(object_data.get("comment") or ""),
                 "audit_events": list_audit_events_for_object(session, catalog_object.id),
-                "network": _network_summary(object_data),
+                "ui_schema": ui_schema,
+                "primary_name_value": _primary_name_value(catalog_object),
+                "network": network,
                 "container": _container_summary(object_data),
-                "ports": _list_of_mappings(object_data.get("ports")),
-                "endpoints": _list_of_mappings(object_data.get("endpoints")),
-                "access_methods": _display_access_methods(
-                    catalog_object,
-                    _group_relationships(
-                        catalog_object,
-                        relationships,
-                        object_map,
-                    ),
-                    object_map,
+                "ports": ports,
+                "endpoints": endpoints,
+                "network_address_rows": _padded_mappings(
+                    network["addresses"],
+                    max(1, len(network["addresses"])),
                 ),
+                "port_rows": _padded_mappings(ports, max(1, len(ports))),
+                "endpoint_rows": _padded_mappings(endpoints, max(1, len(endpoints))),
+                "access_methods": access_methods,
+                "access_method_rows": _access_method_rows(catalog_object, access_methods),
                 "credential_references": [],
                 "data_json": SAFE_DATA_JSON_FALLBACK,
                 "object_kinds": OBJECT_KINDS,
@@ -542,12 +558,19 @@ async def update_access(
         data = changed_data.setdefault(ref, _editable_data_copy(target.data))
         methods = data.get("access_methods")
         if not isinstance(methods, list):
-            continue
+            methods = []
+            data["access_methods"] = methods
         try:
             index = int(index_text)
         except ValueError:
             continue
-        if index < 0 or index >= len(methods) or not isinstance(methods[index], dict):
+        if index < 0:
+            continue
+        while len(methods) <= index:
+            methods.append({})
+        if not isinstance(methods[index], dict):
+            methods[index] = {}
+        if not method_type.strip() and not endpoint.strip() and not auth_mode.strip():
             continue
         methods[index] = {
             **methods[index],
@@ -577,6 +600,7 @@ def _empty_form() -> dict[str, str]:
         "id": "",
         "kind": "system",
         "label": "",
+        "primary_name": "",
         "labels": "",
         "platform": "",
         "hostname": "",
@@ -622,6 +646,51 @@ def _safe_error_message(exc: Exception) -> str:
     if isinstance(exc, ValueError):
         return str(exc)
     return "Invalid catalog object payload."
+
+
+def _primary_name_value(catalog_object: CatalogObjectOut) -> str:
+    schema = get_ui_schema(catalog_object.kind)
+    if schema.primary_name_storage == "network_hostname":
+        network = _network_summary(catalog_object.data)
+        if network["hostnames"]:
+            return str(network["hostnames"][0])
+    return catalog_object.label
+
+
+def _apply_primary_name(data: dict[str, Any], schema: Any, value: str) -> None:
+    if schema.primary_name_storage != "network_hostname":
+        return
+    network = dict(data.get("network") if isinstance(data.get("network"), Mapping) else {})
+    existing_hostnames = network.get("hostnames")
+    hostname_values = (
+        [str(hostname) for hostname in existing_hostnames]
+        if isinstance(existing_hostnames, list)
+        else []
+    )
+    network["hostnames"] = [value, *hostname_values[1:]] if value else hostname_values[1:]
+    if network["hostnames"] or network.get("addresses") or network.get("mac_addresses"):
+        data["network"] = network
+    else:
+        data.pop("network", None)
+
+
+def _access_method_rows(
+    catalog_object: CatalogObjectOut,
+    access_methods: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    if access_methods:
+        return access_methods
+    return [
+        {
+            "type": "",
+            "endpoint": "",
+            "auth_mode": "",
+            "source_kind": catalog_object.kind,
+            "source_label": catalog_object.label,
+            "source_ref": f"{catalog_object.kind}:{catalog_object.id}",
+            "index": 0,
+        }
+    ]
 
 
 def _sort_for_browse(objects: list[CatalogObjectOut]) -> list[CatalogObjectOut]:
@@ -725,7 +794,7 @@ def _relationship_node(
         "ref": ref,
         "id": catalog_object.id if catalog_object else _object_id_from_ref(ref),
         "kind": kind,
-        "label": catalog_object.label if catalog_object else ref,
+        "label": _primary_name_value(catalog_object) if catalog_object else ref,
         "status": catalog_object.status if catalog_object else "",
         "data": catalog_object.data if catalog_object else {},
         "ports": _relationship_node_ports(catalog_object),
@@ -753,7 +822,7 @@ def _group_relationships(
                 "other_ref": other_ref,
                 "other_id": _object_id_from_ref(other_ref),
                 "other_kind": other_object.kind if other_object else other_ref.split(":", 1)[0],
-                "other_label": other_object.label if other_object else other_ref,
+                "other_label": _primary_name_value(other_object) if other_object else other_ref,
                 "other_status": other_object.status if other_object else "",
                 "other_data": other_object.data if other_object else {},
             }
