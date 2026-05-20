@@ -13,7 +13,7 @@ from sqlalchemy.orm import Session
 
 from blockwart.api.deps import get_session
 from blockwart.domain.security import find_secret_violations
-from blockwart.domain.ui_schema import get_ui_schema, ui_schema_payload
+from blockwart.domain.ui_schema import create_field_payload, get_ui_schema, ui_schema_payload
 from blockwart.schemas.catalog import (
     OBJECT_STATUSES,
     PUBLIC_OBJECT_KINDS,
@@ -86,6 +86,27 @@ def index(
             "relation_types": RELATION_TYPES,
             "show_create_form": create == "1",
             "index_relationships": _index_relationship_cards(session, objects, object_map),
+        },
+    )
+
+
+@router.get("/settings/schema", response_class=HTMLResponse)
+def schema_settings(
+    request: Request,
+    kind: str = "system",
+):
+    selected_kind = kind if kind in OBJECT_KINDS else "system"
+    schema = get_ui_schema(selected_kind)
+    return templates.TemplateResponse(
+        request,
+        "schema_settings.html",
+        context={
+            "title": "Schema Settings - Blockwart",
+            "object_kinds": OBJECT_KINDS,
+            "selected_kind": selected_kind,
+            "ui_schema": schema,
+            "create_fields": create_field_payload(schema),
+            "ui_schemas": ui_schema_payload(),
         },
     )
 

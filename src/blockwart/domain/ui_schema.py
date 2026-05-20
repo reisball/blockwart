@@ -5,6 +5,24 @@ PrimaryNameStorage = Literal["label", "network_hostname"]
 
 
 @dataclass(frozen=True)
+class UiField:
+    key: str
+    label: str
+    input_type: str
+    required: bool = False
+    placeholder: str = ""
+
+    def as_dict(self) -> dict[str, str | bool]:
+        return {
+            "key": self.key,
+            "label": self.label,
+            "input_type": self.input_type,
+            "required": self.required,
+            "placeholder": self.placeholder,
+        }
+
+
+@dataclass(frozen=True)
 class UiPanel:
     key: str
     label: str
@@ -48,6 +66,35 @@ CURRENT_UI_PANELS = (
     UiPanel("comment", "Kommentar", "comment"),
     UiPanel("audit", "Audit", "audit"),
 )
+
+FIELD_DEFINITIONS: dict[str, UiField] = {
+    "kind": UiField("kind", "Typ", "select", required=True),
+    "object_id": UiField(
+        "object_id",
+        "ID",
+        "text",
+        required=True,
+        placeholder="n8n",
+    ),
+    "primary_name": UiField(
+        "primary_name",
+        "Primärname",
+        "text",
+        required=True,
+        placeholder="n8n",
+    ),
+    "labels": UiField("labels", "Label", "text", placeholder="infra, docker, intern"),
+    "platform": UiField("platform", "Plattform", "select"),
+    "status": UiField("status", "Status", "select", required=True),
+    "relationship": UiField("relationship", "Relationship", "select"),
+    "relation_type": UiField("relation_type", "Relationstyp", "select"),
+    "summary": UiField(
+        "summary",
+        "Kurzbeschreibung",
+        "textarea",
+        placeholder="Wofür ist das Objekt da?",
+    ),
+}
 
 COMMON_CREATE_FIELDS = (
     "kind",
@@ -115,3 +162,14 @@ def get_ui_schema(kind: str) -> UiTypeSchema:
 
 def ui_schema_payload() -> dict[str, dict[str, object]]:
     return {kind: schema.as_dict() for kind, schema in UI_SCHEMAS.items()}
+
+
+def create_field_payload(schema: UiTypeSchema) -> list[dict[str, str | bool]]:
+    fields: list[dict[str, str | bool]] = []
+    for key in schema.create_fields:
+        field = FIELD_DEFINITIONS[key]
+        payload = field.as_dict()
+        if key == "primary_name":
+            payload["label"] = schema.primary_name_label
+        fields.append(payload)
+    return fields

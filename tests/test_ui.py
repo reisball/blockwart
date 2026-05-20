@@ -8,10 +8,15 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from blockwart.api.deps import get_session
 from blockwart.db.base import Base
-from blockwart.domain.ui_schema import UI_SCHEMAS
+from blockwart.domain.ui_schema import (
+    FIELD_DEFINITIONS,
+    UI_SCHEMAS,
+    create_field_payload,
+    ui_schema_payload,
+)
 from blockwart.main import create_app
 from blockwart.models import Relationship
-from blockwart.schemas.catalog import CatalogObjectIn
+from blockwart.schemas.catalog import PUBLIC_OBJECT_KINDS, CatalogObjectIn
 from blockwart.services.catalog import get_object, upsert_object
 from blockwart.services.seeds import import_seed_file
 
@@ -67,6 +72,7 @@ def test_index_shows_kind_counts(client: TestClient) -> None:
     assert 'value="runbook"' not in response.text
     assert "credential_reference" not in response.text
     assert "Neues Objekt anlegen" in response.text
+    assert 'href="/settings/schema"' in response.text
     assert 'class="panel panel-sticky"' not in response.text
     assert 'data-theme-value="dark"' in response.text
     assert 'data-theme-value="light"' in response.text
@@ -135,6 +141,73 @@ def test_create_form_schema_gates_fields_by_type(client: TestClient) -> None:
         assert "object_id" in schema.create_fields
         assert "primary_name" in schema.create_fields
         assert "summary" in schema.create_fields
+
+
+def test_schema_settings_page_shows_selected_type_schema(client: TestClient) -> None:
+    response = client.get("/settings/schema?kind=service")
+
+    assert response.status_code == 200
+    assert "Schema Settings" in response.text
+    assert '<option value="service" selected' in response.text
+    assert "service Schema" in response.text
+    assert "Service-Name" in response.text
+    assert "primary_name_storage" in response.text
+    assert "Create-Felder" in response.text
+    assert "Detail-Panels" in response.text
+    assert "<code>kind</code>" in response.text
+    assert "<code>primary_name</code>" in response.text
+    assert "<code>platform</code>" in response.text
+    assert "<code>overview</code>" in response.text
+    assert "<code>network</code>" in response.text
+    assert 'method="post"' not in response.text
+    assert "Speichern" not in response.text
+
+
+def test_schema_settings_page_falls_back_to_system_for_invalid_kind(
+    client: TestClient,
+) -> None:
+    response = client.get("/settings/schema?kind=credential_reference")
+
+    assert response.status_code == 200
+    assert '<option value="system" selected' in response.text
+    assert "system Schema" in response.text
+    assert "Hostname" in response.text
+
+
+@pytest.mark.parametrize(
+    ("kind", "primary_label", "storage", "platform_label"),
+    [
+        ("host", "Hostname", "network_hostname", False),
+        ("system", "Hostname", "network_hostname", True),
+        ("netzwerk", "Name", "label", False),
+        ("service", "Service-Name", "label", True),
+    ],
+)
+def test_schema_settings_type_matrix(
+    client: TestClient,
+    kind: str,
+    primary_label: str,
+    storage: str,
+    platform_label: bool,
+) -> None:
+    response = client.get(f"/settings/schema?kind={kind}")
+
+    assert response.status_code == 200
+    assert f'<option value="{kind}" selected' in response.text
+    assert primary_label in response.text
+    assert storage in response.text
+    assert ("<td>Plattform</td>" in response.text) is platform_label
+
+
+def test_ui_schema_payload_matches_public_object_kinds() -> None:
+    assert set(UI_SCHEMAS) == set(PUBLIC_OBJECT_KINDS)
+    assert set(ui_schema_payload()) == set(PUBLIC_OBJECT_KINDS)
+    for schema in UI_SCHEMAS.values():
+        assert all(field_key in FIELD_DEFINITIONS for field_key in schema.create_fields)
+        fields = create_field_payload(schema)
+        assert fields[0]["key"] == "kind"
+        primary_field = next(field for field in fields if field["key"] == "primary_name")
+        assert primary_field["label"] == schema.primary_name_label
 
 
 def test_service_result_keeps_service_on_right_side(client: TestClient) -> None:
