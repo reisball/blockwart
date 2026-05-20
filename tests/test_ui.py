@@ -229,27 +229,55 @@ def test_ui_schema_payload_matches_public_object_kinds() -> None:
 
 
 def test_host_and_system_schema_include_hardware_fields(client: TestClient) -> None:
-    for kind in ("host", "system"):
-        response = client.get(f"/settings/schema?kind={kind}")
-        assert response.status_code == 200
-        assert "Modell" in response.text
-        assert "CPU Hersteller" in response.text
-        assert "CPU Name" in response.text
-        assert "CPU Cores" in response.text
-        assert "Memory" in response.text
-        assert "GPU" in response.text
-        assert "Storage / HDD" in response.text
-        assert "data_json.hardware.model" in response.text
-        assert "data_json.hardware.cpu.vendor" in response.text
-        assert "data_json.hardware.cpu.name" in response.text
-        assert "data_json.hardware.cpu.cores" in response.text
-        assert "data_json.hardware.memory" in response.text
-        assert "data_json.hardware.gpu" in response.text
-        assert "data_json.hardware.storage" in response.text
+    host_response = client.get("/settings/schema?kind=host")
+    assert host_response.status_code == 200
+    for expected in (
+        "Modell",
+        "CPU Hersteller",
+        "CPU Name",
+        "CPU Cores",
+        "Memory",
+        "GPU",
+        "Storage / HDD",
+        "data_json.hardware.model",
+        "data_json.hardware.cpu.vendor",
+        "data_json.hardware.cpu.name",
+        "data_json.hardware.cpu.cores",
+        "data_json.hardware.memory",
+        "data_json.hardware.gpu",
+        "data_json.hardware.storage",
+    ):
+        assert expected in host_response.text
 
+    system_response = client.get("/settings/schema?kind=system")
+    assert system_response.status_code == 200
+    for expected in (
+        "CPU Cores",
+        "Memory",
+        "GPU",
+        "Storage / HDD",
+        "data_json.hardware.cpu.cores",
+        "data_json.hardware.memory",
+        "data_json.hardware.gpu",
+        "data_json.hardware.storage",
+    ):
+        assert expected in system_response.text
+    for inherited in (
+        "Modell",
+        "CPU Hersteller",
+        "CPU Name",
+        "data_json.hardware.model",
+        "data_json.hardware.cpu.vendor",
+        "data_json.hardware.cpu.name",
+    ):
+        assert inherited not in system_response.text
+
+    for kind, expected_count in (("host", 7), ("system", 4)):
         fields = schema_field_payload(UI_SCHEMAS[kind])
-        hardware_fields = [field for field in fields if str(field["key"]).startswith("hardware_")]
-        assert len(hardware_fields) == 7
+        hardware_fields = [
+            field for field in fields if str(field["key"]).startswith("hardware_")
+        ]
+        assert len(hardware_fields) == expected_count
         assert all(field["visible_in_create"] is False for field in hardware_fields)
         assert all(field["visible_in_detail"] is True for field in hardware_fields)
 
@@ -294,20 +322,18 @@ def test_schema_settings_saves_safe_metadata_overrides(
     assert "hardware_storage" in settings.text
 
 
-@pytest.mark.parametrize("kind", ["host", "system"])
-def test_host_and_system_detail_can_edit_hardware_fields(
+def test_host_detail_can_edit_host_hardware_fields(
     client: TestClient,
     session_factory,
-    kind: str,
 ) -> None:
-    object_id = f"hardware-{kind}"
+    object_id = "hardware-host"
     with session_factory() as session:
         upsert_object(
             session,
             CatalogObjectIn(
                 id=object_id,
-                kind=kind,
-                label=f"Hardware {kind}",
+                kind="host",
+                label="Hardware host",
                 status="active",
                 summary="Hardware test object.",
                 data={"schema_version": 1},
@@ -372,6 +398,77 @@ def test_host_and_system_detail_can_edit_hardware_fields(
         "memory": "64 GB",
         "gpu": "Radeon 780M",
         "storage": "2 TB NVMe",
+    }
+
+
+def test_system_detail_can_edit_resource_hardware_fields(
+    client: TestClient,
+    session_factory,
+) -> None:
+    object_id = "hardware-system"
+    with session_factory() as session:
+        upsert_object(
+            session,
+            CatalogObjectIn(
+                id=object_id,
+                kind="system",
+                label="Hardware system",
+                status="active",
+                summary="Hardware test object.",
+                data={"schema_version": 1},
+            ),
+        )
+
+    detail = client.get(f"/objects/{object_id}")
+    edit = client.get(f"/objects/{object_id}?edit=hardware")
+
+    assert detail.status_code == 200
+    assert "Hardware" in detail.text
+    assert "Modell" not in detail.text
+    assert "CPU Hersteller" not in detail.text
+    assert "CPU Name" not in detail.text
+    assert "CPU Cores" in detail.text
+    assert "Storage / HDD" in detail.text
+    assert edit.status_code == 200
+    assert 'name="hardware_model"' not in edit.text
+    assert 'name="hardware_cpu_vendor"' not in edit.text
+    assert 'name="hardware_cpu_name"' not in edit.text
+    assert 'name="hardware_cpu_cores"' in edit.text
+    assert 'name="hardware_memory"' in edit.text
+    assert 'name="hardware_gpu"' in edit.text
+    assert 'name="hardware_storage"' in edit.text
+
+    response = client.post(
+        f"/objects/{object_id}",
+        data={
+            "hardware_model": "Ignored model",
+            "hardware_cpu_vendor": "Ignored vendor",
+            "hardware_cpu_name": "Ignored CPU",
+            "hardware_cpu_cores": "4",
+            "hardware_memory": "16 GB",
+            "hardware_gpu": "Shared GPU",
+            "hardware_storage": "500 GB",
+        },
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 303
+    updated = client.get(f"/objects/{object_id}")
+    assert "Ignored model" not in updated.text
+    assert "Ignored vendor" not in updated.text
+    assert "Ignored CPU" not in updated.text
+    assert "4" in updated.text
+    assert "16 GB" in updated.text
+    assert "Shared GPU" in updated.text
+    assert "500 GB" in updated.text
+    with session_factory() as session:
+        catalog_object = get_object(session, object_id)
+    assert catalog_object is not None
+    assert catalog_object.data["hardware"] == {
+        "cpu": {"cores": "4"},
+        "memory": "16 GB",
+        "gpu": "Shared GPU",
+        "storage": "500 GB",
     }
 
 

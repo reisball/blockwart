@@ -195,6 +195,7 @@ def object_detail(
     )
     network = _network_summary(object_data)
     hardware = _hardware_summary(object_data)
+    hardware_fields = _hardware_schema_fields(ui_schema, hardware)
     ports = _list_of_mappings(object_data.get("ports"))
     endpoints = _list_of_mappings(object_data.get("endpoints"))
     return templates.TemplateResponse(
@@ -214,6 +215,7 @@ def object_detail(
             "primary_name_value": _primary_name_value(catalog_object),
             "network": network,
             "hardware": hardware,
+            "hardware_fields": hardware_fields,
             "supports_hardware": catalog_object.kind in HARDWARE_OBJECT_KINDS,
             "container": _container_summary(object_data),
             "ports": ports,
@@ -481,15 +483,30 @@ def update_object(
             if container:
                 data["container"] = container
         if target_kind in HARDWARE_OBJECT_KINDS and submitted_hardware:
+            allowed_hardware_fields = {
+                str(field["key"])
+                for field in schema_field_payload(ui_schema)
+                if str(field["key"]).startswith("hardware_")
+            }
             _apply_hardware_fields(
                 data,
-                model=hardware_model,
-                cpu_vendor=hardware_cpu_vendor,
-                cpu_name=hardware_cpu_name,
-                cpu_cores=hardware_cpu_cores,
-                memory=hardware_memory,
-                gpu=hardware_gpu,
-                storage=hardware_storage,
+                model=hardware_model if "hardware_model" in allowed_hardware_fields else None,
+                cpu_vendor=(
+                    hardware_cpu_vendor
+                    if "hardware_cpu_vendor" in allowed_hardware_fields
+                    else None
+                ),
+                cpu_name=(
+                    hardware_cpu_name if "hardware_cpu_name" in allowed_hardware_fields else None
+                ),
+                cpu_cores=(
+                    hardware_cpu_cores
+                    if "hardware_cpu_cores" in allowed_hardware_fields
+                    else None
+                ),
+                memory=hardware_memory if "hardware_memory" in allowed_hardware_fields else None,
+                gpu=hardware_gpu if "hardware_gpu" in allowed_hardware_fields else None,
+                storage=hardware_storage if "hardware_storage" in allowed_hardware_fields else None,
             )
         _reject_secret_shaped_form_data(data)
         payload = CatalogObjectIn(
@@ -512,6 +529,7 @@ def update_object(
         ui_schema = get_ui_schema(catalog_object.kind)
         network = _network_summary(object_data)
         hardware = _hardware_summary(object_data)
+        hardware_fields = _hardware_schema_fields(ui_schema, hardware)
         ports = _list_of_mappings(object_data.get("ports"))
         endpoints = _list_of_mappings(object_data.get("endpoints"))
         relationship_groups = _group_relationships(
@@ -541,6 +559,7 @@ def update_object(
                 "primary_name_value": _primary_name_value(catalog_object),
                 "network": network,
                 "hardware": hardware,
+                "hardware_fields": hardware_fields,
                 "supports_hardware": catalog_object.kind in HARDWARE_OBJECT_KINDS,
                 "container": _container_summary(object_data),
                 "ports": ports,
@@ -1084,6 +1103,28 @@ def _hardware_summary(data: Mapping[str, Any]) -> dict[str, str]:
         "gpu": str(hardware.get("gpu") or ""),
         "storage": str(hardware.get("storage") or ""),
     }
+
+
+def _hardware_schema_fields(ui_schema: Any, hardware: Mapping[str, str]) -> list[dict[str, str]]:
+    hardware_values = {
+        "hardware_model": hardware.get("model", ""),
+        "hardware_cpu_vendor": hardware.get("cpu_vendor", ""),
+        "hardware_cpu_name": hardware.get("cpu_name", ""),
+        "hardware_cpu_cores": hardware.get("cpu_cores", ""),
+        "hardware_memory": hardware.get("memory", ""),
+        "hardware_gpu": hardware.get("gpu", ""),
+        "hardware_storage": hardware.get("storage", ""),
+    }
+    return [
+        {
+            "key": str(field["key"]),
+            "label": str(field["label"]),
+            "placeholder": str(field["placeholder"] or ""),
+            "value": hardware_values.get(str(field["key"]), ""),
+        }
+        for field in schema_field_payload(ui_schema)
+        if str(field["key"]).startswith("hardware_")
+    ]
 
 
 def _apply_hardware_fields(

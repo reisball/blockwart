@@ -249,6 +249,12 @@ HARDWARE_SCHEMA_FIELDS = (
     "hardware_gpu",
     "hardware_storage",
 )
+SYSTEM_HARDWARE_SCHEMA_FIELDS = (
+    "hardware_cpu_cores",
+    "hardware_memory",
+    "hardware_gpu",
+    "hardware_storage",
+)
 
 
 UI_SCHEMAS: dict[str, UiTypeSchema] = {
@@ -266,7 +272,7 @@ UI_SCHEMAS: dict[str, UiTypeSchema] = {
         primary_name_label="Hostname",
         primary_name_storage="network_hostname",
         supports_platform=True,
-        fields=PLATFORM_SCHEMA_FIELDS + HARDWARE_SCHEMA_FIELDS,
+        fields=PLATFORM_SCHEMA_FIELDS + SYSTEM_HARDWARE_SCHEMA_FIELDS,
         create_fields=PLATFORM_CREATE_FIELDS,
         panels=CURRENT_UI_PANELS,
     ),
