@@ -168,8 +168,12 @@ def test_schema_settings_page_shows_selected_type_schema(client: TestClient) -> 
     assert "<code>platform</code>" in response.text
     assert "<code>overview</code>" in response.text
     assert "<code>network</code>" in response.text
-    assert 'method="post"' not in response.text
-    assert "Speichern" not in response.text
+    assert 'method="post"' in response.text
+    assert "Speichern" in response.text
+    assert 'name="field_label_primary_name"' in response.text
+    assert 'name="field_placeholder_summary"' in response.text
+    assert 'name="field_order_kind"' in response.text
+    assert 'name="field_required_kind"' in response.text
 
 
 def test_schema_settings_page_falls_back_to_system_for_invalid_kind(
@@ -205,7 +209,7 @@ def test_schema_settings_type_matrix(
     assert f'<option value="{kind}" selected' in response.text
     assert primary_label in response.text
     assert storage in response.text
-    assert ("<td>Plattform</td>" in response.text) is platform_label
+    assert ('name="field_label_platform"' in response.text) is platform_label
 
 
 def test_ui_schema_payload_matches_public_object_kinds() -> None:
@@ -246,6 +250,42 @@ def test_host_and_system_schema_include_hardware_fields(client: TestClient) -> N
     for kind in ("netzwerk", "service"):
         fields = schema_field_payload(UI_SCHEMAS[kind])
         assert not any(str(field["key"]).startswith("hardware_") for field in fields)
+
+
+def test_schema_settings_saves_safe_metadata_overrides(
+    client: TestClient,
+    tmp_path,
+    monkeypatch,
+) -> None:
+    override_path = tmp_path / "ui_schema_overrides.json"
+    monkeypatch.setenv("BLOCKWART_SCHEMA_OVERRIDES_PATH", str(override_path))
+    fields = schema_field_payload(UI_SCHEMAS["system"])
+    data = {"kind": "system"}
+    for index, field in enumerate(fields, start=1):
+        key = str(field["key"])
+        data[f"field_order_{key}"] = str(index)
+        data[f"field_label_{key}"] = str(field["label"])
+        data[f"field_placeholder_{key}"] = str(field["placeholder"] or "")
+        if field["required"]:
+            data[f"field_required_{key}"] = "1"
+        if field["visible_in_detail"]:
+            data[f"field_visible_in_detail_{key}"] = "1"
+    data["field_label_hardware_storage"] = "Disk"
+    data["field_placeholder_hardware_storage"] = "z.B. 4 TB SSD"
+
+    response = client.post("/settings/schema", data=data, follow_redirects=False)
+
+    assert response.status_code == 303
+    assert response.headers["location"] == "/settings/schema?kind=system&saved=1"
+    settings = client.get("/settings/schema?kind=system")
+    detail = client.get("/objects/fabrik")
+    edit = client.get("/objects/fabrik?edit=hardware")
+    assert "Disk" in settings.text
+    assert "z.B. 4 TB SSD" in settings.text
+    assert "Disk" in detail.text
+    assert "z.B. 4 TB SSD" in edit.text
+    assert "data_json.hardware.storage" in settings.text
+    assert "hardware_storage" in settings.text
 
 
 @pytest.mark.parametrize("kind", ["host", "system"])

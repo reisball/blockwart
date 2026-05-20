@@ -11,8 +11,11 @@ class Settings(BaseSettings):
         default="local-dev-placeholder",
         description="Reference label only; never a secret value.",
     )
+    schema_overrides_path: str = Field(
+        default="",
+        description="Optional JSON file for UI schema metadata overrides.",
+    )
 
 
 def get_settings() -> Settings:
     return Settings()
-

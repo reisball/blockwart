@@ -16,6 +16,8 @@ from blockwart.domain.security import find_secret_violations
 from blockwart.domain.ui_schema import (
     create_field_payload,
     get_ui_schema,
+    load_editable_schema_settings,
+    save_editable_schema_settings,
     schema_field_payload,
     ui_schema_payload,
 )
@@ -82,6 +84,9 @@ def index(
             "platform_types": PLATFORM_TYPES,
             "ui_schemas": ui_schema_payload(),
             "form_ui_schema": get_ui_schema(_empty_form()["kind"]),
+            "create_fields_by_key": _fields_by_key(
+                schema_field_payload(get_ui_schema(_empty_form()["kind"]))
+            ),
             "display_names": display_names,
             "object_counts": object_counts,
             "total_objects": total_objects,
@@ -100,9 +105,11 @@ def index(
 def schema_settings(
     request: Request,
     kind: str = "system",
+    saved: str = "",
 ):
     selected_kind = kind if kind in OBJECT_KINDS else "system"
     schema = get_ui_schema(selected_kind)
+    schema_fields = schema_field_payload(schema)
     return templates.TemplateResponse(
         request,
         "schema_settings.html",
@@ -111,11 +118,55 @@ def schema_settings(
             "object_kinds": OBJECT_KINDS,
             "selected_kind": selected_kind,
             "ui_schema": schema,
-            "schema_fields": schema_field_payload(schema),
+            "schema_fields": schema_fields,
+            "schema_fields_by_key": _fields_by_key(schema_fields),
             "create_fields": create_field_payload(schema),
             "ui_schemas": ui_schema_payload(),
+            "saved": saved == "1",
+            "error": None,
         },
     )
+
+
+@router.post("/settings/schema", response_class=HTMLResponse)
+async def update_schema_settings(
+    request: Request,
+):
+    form = await request.form()
+    selected_kind = str(form.get("kind") or "system")
+    if selected_kind not in OBJECT_KINDS:
+        selected_kind = "system"
+    current = load_editable_schema_settings(selected_kind)
+    field_keys = [str(key) for key in current["field_order"]]
+    try:
+        field_order = _schema_field_order_from_form(form, field_keys)
+        fields = _schema_fields_from_form(form, field_keys)
+        save_editable_schema_settings(
+            selected_kind,
+            field_order=field_order,
+            fields=fields,
+        )
+    except ValueError as exc:
+        schema = get_ui_schema(selected_kind)
+        schema_fields = schema_field_payload(schema)
+        return templates.TemplateResponse(
+            request,
+            "schema_settings.html",
+            context={
+                "title": "Schema Settings - Blockwart",
+                "object_kinds": OBJECT_KINDS,
+                "selected_kind": selected_kind,
+                "ui_schema": schema,
+                "schema_fields": schema_fields,
+                "schema_fields_by_key": _fields_by_key(schema_fields),
+                "create_fields": create_field_payload(schema),
+                "ui_schemas": ui_schema_payload(),
+                "saved": False,
+                "error": _safe_error_message(exc),
+            },
+            status_code=422,
+        )
+    return RedirectResponse(url=f"/settings/schema?kind={selected_kind}&saved=1", status_code=303)
 
 
 @router.get("/objects/{object_id}", response_class=HTMLResponse)
@@ -159,6 +210,7 @@ def object_detail(
             "comment": str(object_data.get("comment") or ""),
             "audit_events": list_audit_events_for_object(session, catalog_object.id),
             "ui_schema": ui_schema,
+            "schema_fields_by_key": _fields_by_key(schema_field_payload(ui_schema)),
             "primary_name_value": _primary_name_value(catalog_object),
             "network": network,
             "hardware": hardware,
@@ -292,6 +344,7 @@ def save_object(
                 "platform_types": PLATFORM_TYPES,
                 "ui_schemas": ui_schema_payload(),
                 "form_ui_schema": get_ui_schema(kind),
+                "create_fields_by_key": _fields_by_key(schema_field_payload(get_ui_schema(kind))),
                 "display_names": {obj.id: _primary_name_value(obj) for obj in all_objects},
                 "object_counts": object_counts,
                 "total_objects": sum(object_counts.values()),
@@ -470,6 +523,7 @@ def update_object(
                 "comment": str(object_data.get("comment") or ""),
                 "audit_events": list_audit_events_for_object(session, catalog_object.id),
                 "ui_schema": ui_schema,
+                "schema_fields_by_key": _fields_by_key(schema_field_payload(ui_schema)),
                 "primary_name_value": _primary_name_value(catalog_object),
                 "network": network,
                 "hardware": hardware,
@@ -1069,6 +1123,40 @@ def _padded_mappings(value: Any, count: int) -> list[dict[str, Any]]:
     while len(items) < count:
         items.append({})
     return items[:count]
+
+
+def _fields_by_key(fields: list[Mapping[str, Any]]) -> dict[str, Mapping[str, Any]]:
+    return {str(field["key"]): field for field in fields}
+
+
+def _schema_field_order_from_form(form: Any, field_keys: list[str]) -> list[str]:
+    order_pairs: list[tuple[int, int, str]] = []
+    for fallback_index, key in enumerate(field_keys, start=1):
+        raw_order = str(form.get(f"field_order_{key}") or fallback_index)
+        try:
+            order = int(raw_order)
+        except ValueError as exc:
+            raise ValueError(f"{key}.order must be a number") from exc
+        order_pairs.append((order, fallback_index, key))
+    return [key for _, _, key in sorted(order_pairs)]
+
+
+def _schema_fields_from_form(
+    form: Any,
+    field_keys: list[str],
+) -> dict[str, dict[str, str | bool]]:
+    fields: dict[str, dict[str, str | bool]] = {}
+    for key in field_keys:
+        label = str(form.get(f"field_label_{key}") or "").strip()
+        if not label:
+            raise ValueError(f"{key}.label must not be empty")
+        fields[key] = {
+            "label": label,
+            "placeholder": str(form.get(f"field_placeholder_{key}") or "").strip(),
+            "required": form.get(f"field_required_{key}") == "1",
+            "visible_in_detail": form.get(f"field_visible_in_detail_{key}") == "1",
+        }
+    return fields
 
 
 def _without_credential_references(value: Any) -> Any:

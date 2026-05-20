@@ -142,17 +142,17 @@
                 <div class="error">{{ error }}</div>
               {% endif %}
               <form class="form-grid" method="post" action="/objects/{{ object.id }}">
-                <label>CPU
-                  <input name="hardware_cpu" value="{{ hardware.cpu }}" autocomplete="off" placeholder="z.B. Ryzen 7 7840U" />
+                <label>{{ schema_fields_by_key.hardware_cpu.label }}
+                  <input name="hardware_cpu" value="{{ hardware.cpu }}" autocomplete="off" placeholder="{{ schema_fields_by_key.hardware_cpu.placeholder }}" />
                 </label>
-                <label>Memory
-                  <input name="hardware_memory" value="{{ hardware.memory }}" autocomplete="off" placeholder="z.B. 64 GB" />
+                <label>{{ schema_fields_by_key.hardware_memory.label }}
+                  <input name="hardware_memory" value="{{ hardware.memory }}" autocomplete="off" placeholder="{{ schema_fields_by_key.hardware_memory.placeholder }}" />
                 </label>
-                <label>GPU
-                  <input name="hardware_gpu" value="{{ hardware.gpu }}" autocomplete="off" placeholder="z.B. Radeon 780M" />
+                <label>{{ schema_fields_by_key.hardware_gpu.label }}
+                  <input name="hardware_gpu" value="{{ hardware.gpu }}" autocomplete="off" placeholder="{{ schema_fields_by_key.hardware_gpu.placeholder }}" />
                 </label>
-                <label>Storage / HDD
-                  <input name="hardware_storage" value="{{ hardware.storage }}" autocomplete="off" placeholder="z.B. 2 TB NVMe" />
+                <label>{{ schema_fields_by_key.hardware_storage.label }}
+                  <input name="hardware_storage" value="{{ hardware.storage }}" autocomplete="off" placeholder="{{ schema_fields_by_key.hardware_storage.placeholder }}" />
                 </label>
                 <div class="button-row">
                   <button type="submit">Speichern</button>
@@ -163,10 +163,10 @@
               <div class="table-wrap">
                 <table class="table">
                   <tbody>
-                    <tr><th>CPU</th><td>{{ hardware.cpu or "-" }}</td></tr>
-                    <tr><th>Memory</th><td>{{ hardware.memory or "-" }}</td></tr>
-                    <tr><th>GPU</th><td>{{ hardware.gpu or "-" }}</td></tr>
-                    <tr><th>Storage / HDD</th><td>{{ hardware.storage or "-" }}</td></tr>
+                    <tr><th>{{ schema_fields_by_key.hardware_cpu.label }}</th><td>{{ hardware.cpu or "-" }}</td></tr>
+                    <tr><th>{{ schema_fields_by_key.hardware_memory.label }}</th><td>{{ hardware.memory or "-" }}</td></tr>
+                    <tr><th>{{ schema_fields_by_key.hardware_gpu.label }}</th><td>{{ hardware.gpu or "-" }}</td></tr>
+                    <tr><th>{{ schema_fields_by_key.hardware_storage.label }}</th><td>{{ hardware.storage or "-" }}</td></tr>
                   </tbody>
                 </table>
               </div>

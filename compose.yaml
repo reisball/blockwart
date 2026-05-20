@@ -5,6 +5,7 @@ services:
       BLOCKWART_ENV: production
       BLOCKWART_DATABASE_URL: sqlite:////data/blockwart.sqlite3
       BLOCKWART_SECRET_REFERENCE: vaultwarden:Blockwart
+      BLOCKWART_SCHEMA_OVERRIDES_PATH: /data/ui_schema_overrides.json
     ports:
       - "8000:8000"
     volumes:

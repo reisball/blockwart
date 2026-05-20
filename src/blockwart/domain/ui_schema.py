@@ -1,5 +1,9 @@
-from dataclasses import dataclass
-from typing import Literal
+import json
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Any, Literal
+
+from blockwart.config import get_settings
 
 PrimaryNameStorage = Literal["label", "network_hostname"]
 
@@ -53,6 +57,7 @@ class UiTypeSchema:
     fields: tuple[str, ...]
     create_fields: tuple[str, ...]
     panels: tuple[UiPanel, ...]
+    field_overrides: dict[str, UiField] = field(default_factory=dict)
 
     def as_dict(self) -> dict[str, object]:
         return {
@@ -263,11 +268,19 @@ UI_SCHEMAS: dict[str, UiTypeSchema] = {
 
 
 def get_ui_schema(kind: str) -> UiTypeSchema:
-    return UI_SCHEMAS.get(kind, UI_SCHEMAS["system"])
+    schema = UI_SCHEMAS.get(kind, UI_SCHEMAS["system"])
+    return _apply_schema_overrides(schema, _load_schema_overrides().get(schema.kind, {}))
 
 
 def ui_schema_payload() -> dict[str, dict[str, object]]:
-    return {kind: schema.as_dict() for kind, schema in UI_SCHEMAS.items()}
+    payload: dict[str, dict[str, object]] = {}
+    for kind in UI_SCHEMAS:
+        schema = get_ui_schema(kind)
+        schema_payload = schema.as_dict()
+        schema_payload["schema_fields"] = schema_field_payload(schema)
+        schema_payload["create_field_definitions"] = create_field_payload(schema)
+        payload[kind] = schema_payload
+    return payload
 
 
 def primary_name_storage_path(schema: UiTypeSchema) -> str:
@@ -292,7 +305,7 @@ def _field_payload(
 ) -> list[dict[str, str | bool]]:
     fields: list[dict[str, str | bool]] = []
     for key in field_keys:
-        field = FIELD_DEFINITIONS[key]
+        field = schema.field_overrides.get(key, FIELD_DEFINITIONS[key])
         payload = field.as_dict()
         if key == "primary_name":
             payload["label"] = schema.primary_name_label
@@ -301,3 +314,152 @@ def _field_payload(
             payload["visible_in_create"] = visible_in_create
         fields.append(payload)
     return fields
+
+
+def load_editable_schema_settings(kind: str) -> dict[str, Any]:
+    schema = get_ui_schema(kind)
+    return {
+        "kind": schema.kind,
+        "field_order": list(schema.fields),
+        "fields": schema_field_payload(schema),
+    }
+
+
+def save_editable_schema_settings(
+    kind: str,
+    *,
+    field_order: list[str],
+    fields: dict[str, dict[str, str | bool]],
+) -> None:
+    base_schema = UI_SCHEMAS.get(kind)
+    if base_schema is None:
+        raise ValueError(f"unknown schema kind: {kind}")
+    _validate_field_order(base_schema, field_order)
+    _validate_field_settings(base_schema, fields)
+    overrides = _load_schema_overrides()
+    overrides[kind] = {
+        "field_order": field_order,
+        "fields": fields,
+    }
+    _write_schema_overrides(overrides)
+
+
+def _apply_schema_overrides(schema: UiTypeSchema, raw_override: object) -> UiTypeSchema:
+    if not isinstance(raw_override, dict):
+        return schema
+    field_order = raw_override.get("field_order")
+    fields_override = raw_override.get("fields")
+    fields = schema.fields
+    create_fields = schema.create_fields
+    if isinstance(field_order, list):
+        candidate_order = [str(key) for key in field_order]
+        if (
+            set(candidate_order) == set(schema.fields)
+            and len(candidate_order) == len(schema.fields)
+        ):
+            fields = tuple(candidate_order)
+            create_fields = tuple(key for key in fields if key in schema.create_fields)
+    field_overrides: dict[str, UiField] = {}
+    if isinstance(fields_override, dict):
+        for key in schema.fields:
+            base_field = FIELD_DEFINITIONS[key]
+            raw_field = fields_override.get(key)
+            if not isinstance(raw_field, dict):
+                continue
+            field_overrides[key] = UiField(
+                key=base_field.key,
+                label=_clean_text(raw_field.get("label"), base_field.label),
+                input_type=base_field.input_type,
+                storage_path=base_field.storage_path,
+                required=_clean_bool(raw_field.get("required"), base_field.required),
+                placeholder=_clean_placeholder(
+                    raw_field.get("placeholder"),
+                    base_field.placeholder,
+                ),
+                visible_in_create=base_field.visible_in_create,
+                visible_in_detail=_clean_bool(
+                    raw_field.get("visible_in_detail"),
+                    base_field.visible_in_detail,
+                ),
+            )
+    primary_name_label = schema.primary_name_label
+    if "primary_name" in field_overrides:
+        primary_name_label = field_overrides["primary_name"].label
+    return UiTypeSchema(
+        kind=schema.kind,
+        primary_name_label=primary_name_label,
+        primary_name_storage=schema.primary_name_storage,
+        supports_platform=schema.supports_platform,
+        fields=fields,
+        create_fields=create_fields,
+        panels=schema.panels,
+        field_overrides=field_overrides,
+    )
+
+
+def _schema_overrides_path() -> Path | None:
+    configured = get_settings().schema_overrides_path.strip()
+    if not configured:
+        return None
+    return Path(configured)
+
+
+def _load_schema_overrides() -> dict[str, Any]:
+    path = _schema_overrides_path()
+    if path is None or not path.exists():
+        return {}
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+    kinds = payload.get("kinds") if isinstance(payload, dict) else None
+    return kinds if isinstance(kinds, dict) else {}
+
+
+def _write_schema_overrides(overrides: dict[str, Any]) -> None:
+    path = _schema_overrides_path()
+    if path is None:
+        raise ValueError("schema overrides path is not configured")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        json.dumps({"version": 1, "kinds": overrides}, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+
+
+def _validate_field_order(schema: UiTypeSchema, field_order: list[str]) -> None:
+    if set(field_order) != set(schema.fields) or len(field_order) != len(schema.fields):
+        raise ValueError("field order must contain exactly the schema fields")
+
+
+def _validate_field_settings(
+    schema: UiTypeSchema,
+    fields: dict[str, dict[str, str | bool]],
+) -> None:
+    if set(fields) != set(schema.fields):
+        raise ValueError("field settings must contain exactly the schema fields")
+    for key, field_settings in fields.items():
+        if not isinstance(field_settings.get("label"), str):
+            raise ValueError(f"{key}.label must be text")
+        if not isinstance(field_settings.get("placeholder"), str):
+            raise ValueError(f"{key}.placeholder must be text")
+        for bool_key in ("required", "visible_in_detail"):
+            if not isinstance(field_settings.get(bool_key), bool):
+                raise ValueError(f"{key}.{bool_key} must be boolean")
+
+
+def _clean_text(value: object, fallback: str) -> str:
+    if not isinstance(value, str):
+        return fallback
+    clean = value.strip()
+    return clean or fallback
+
+
+def _clean_placeholder(value: object, fallback: str) -> str:
+    if not isinstance(value, str):
+        return fallback
+    return value.strip()
+
+
+def _clean_bool(value: object, fallback: bool) -> bool:
+    return value if isinstance(value, bool) else fallback

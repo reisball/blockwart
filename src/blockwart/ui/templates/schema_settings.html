@@ -82,38 +82,54 @@
           <div class="panel-head">
             <h2 class="section-title">Schema-Felder</h2>
           </div>
-          <div class="table-wrap">
-            <table class="table">
-              <thead>
-                <tr>
-                  <th>Reihenfolge</th>
-                  <th>Feld-Key</th>
-                  <th>Label</th>
-                  <th>Input</th>
-                  <th>Storage-Pfad</th>
-                  <th>Create</th>
-                  <th>Required</th>
-                  <th>Detail</th>
-                  <th>Placeholder</th>
-                </tr>
-              </thead>
-              <tbody>
-                {% for field in schema_fields %}
+          {% if saved %}
+            <div class="success">Schema-Metadaten gespeichert.</div>
+          {% endif %}
+          {% if error %}
+            <div class="error">{{ error }}</div>
+          {% endif %}
+          <form method="post" action="/settings/schema">
+            <input type="hidden" name="kind" value="{{ selected_kind }}" />
+            <div class="table-wrap">
+              <table class="table edit-table">
+                <thead>
                   <tr>
-                    <td>{{ loop.index }}</td>
-                    <td><code>{{ field.key }}</code></td>
-                    <td>{{ field.label }}</td>
-                    <td>{{ field.input_type }}</td>
-                    <td><code>{{ field.storage_path }}</code></td>
-                    <td>{{ "ja" if field.visible_in_create else "nein" }}</td>
-                    <td>{{ "ja" if field.required else "nein" }}</td>
-                    <td>{{ "ja" if field.visible_in_detail else "nein" }}</td>
-                    <td>{{ field.placeholder or "-" }}</td>
+                    <th>Reihenfolge</th>
+                    <th>Feld-Key</th>
+                    <th>Label</th>
+                    <th>Input</th>
+                    <th>Storage-Pfad</th>
+                    <th>Create</th>
+                    <th>Required</th>
+                    <th>Detail</th>
+                    <th>Placeholder</th>
                   </tr>
-                {% endfor %}
-              </tbody>
-            </table>
-          </div>
+                </thead>
+                <tbody>
+                  {% for field in schema_fields %}
+                    <tr>
+                      <td><input name="field_order_{{ field.key }}" value="{{ loop.index }}" inputmode="numeric" /></td>
+                      <td><code>{{ field.key }}</code></td>
+                      <td><input name="field_label_{{ field.key }}" value="{{ field.label }}" autocomplete="off" /></td>
+                      <td>{{ field.input_type }}</td>
+                      <td><code>{{ field.storage_path }}</code></td>
+                      <td>{{ "ja" if field.visible_in_create else "nein" }}</td>
+                      <td>
+                        <input type="checkbox" name="field_required_{{ field.key }}" value="1" {% if field.required %}checked{% endif %} />
+                      </td>
+                      <td>
+                        <input type="checkbox" name="field_visible_in_detail_{{ field.key }}" value="1" {% if field.visible_in_detail %}checked{% endif %} />
+                      </td>
+                      <td><input name="field_placeholder_{{ field.key }}" value="{{ field.placeholder }}" autocomplete="off" /></td>
+                    </tr>
+                  {% endfor %}
+                </tbody>
+              </table>
+            </div>
+            <div class="button-row">
+              <button type="submit">Speichern</button>
+            </div>
+          </form>
         </section>
 
         <section class="panel">
@@ -168,7 +184,7 @@
         <section class="panel">
           <h2 class="section-title">Hinweis</h2>
           <p class="meta">
-            Diese Seite ist die Arbeitsansicht für das aktuell führende UI-Schema. Änderungen werden hier noch nicht gespeichert.
+            Editierbar sind nur sichere UI-Metadaten: Label, Placeholder, Required, Detail-Sichtbarkeit und Reihenfolge. Feld-Keys, Input-Typen und Storage-Pfade sind bewusst gesperrt.
           </p>
         </section>
         <section class="panel">

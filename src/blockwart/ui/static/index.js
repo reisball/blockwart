@@ -110,12 +110,29 @@
     }
     const schema = uiSchemas[createKindSelect.value] || {};
     const allowedFields = new Set(schema.create_fields || []);
+    const fieldDefinitions = new Map(
+      (schema.create_field_definitions || []).map((field) => [field.key, field])
+    );
     if (primaryNameLabel && schema.primary_name_label) {
       primaryNameLabel.textContent = schema.primary_name_label;
     }
     for (const field of createFields) {
       const key = field.getAttribute("data-create-field");
       setFieldEnabled(field, !key || allowedFields.has(key));
+      const definition = key ? fieldDefinitions.get(key) : null;
+      const label = key
+        ? field.querySelector('[data-field-label="' + CSS.escape(key) + '"]')
+        : null;
+      const input = key
+        ? field.querySelector('[data-field-input="' + CSS.escape(key) + '"]')
+        : null;
+      if (label && definition?.label) {
+        label.textContent = definition.label;
+      }
+      if (input && definition) {
+        input.placeholder = definition.placeholder || "";
+        input.required = Boolean(definition.required);
+      }
     }
     if (platformField) {
       platformField.hidden = !allowedFields.has("platform");
