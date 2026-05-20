@@ -1056,7 +1056,7 @@ def test_service_network_edit_only_exposes_and_updates_endpoints(
                     "ports": [{"port": 443, "protocol": "tcp", "purpose": "HTTPS"}],
                     "endpoints": [
                         {
-                            "name": "Web UI",
+                            "type": "Web",
                             "url": "https://192.168.50.10",
                             "port": 443,
                         }
@@ -1068,7 +1068,9 @@ def test_service_network_edit_only_exposes_and_updates_endpoints(
     edit_response = client.get("/objects/service-network-scope?edit=network")
 
     assert edit_response.status_code == 200
-    assert 'name="endpoint_name"' in edit_response.text
+    assert "ENDPOINT TYPE" in edit_response.text
+    assert 'name="endpoint_type"' in edit_response.text
+    assert 'name="endpoint_name"' not in edit_response.text
     assert 'name="endpoint_url"' in edit_response.text
     assert 'name="endpoint_port"' in edit_response.text
     assert 'name="address_ip"' not in edit_response.text
@@ -1084,7 +1086,7 @@ def test_service_network_edit_only_exposes_and_updates_endpoints(
             "port_protocol": "tcp",
             "port_purpose": "Injected",
             "port_exposure": "public",
-            "endpoint_name": "API",
+            "endpoint_type": "REST API",
             "endpoint_url": "https://192.168.50.10/api",
             "endpoint_port": "443",
         },
@@ -1099,7 +1101,7 @@ def test_service_network_edit_only_exposes_and_updates_endpoints(
     assert updated.data["network"]["addresses"] == [{"ip": "192.168.50.10", "scope": "lan"}]
     assert updated.data["ports"] == [{"port": 443, "protocol": "tcp", "purpose": "HTTPS"}]
     assert updated.data["endpoints"] == [
-        {"name": "API", "url": "https://192.168.50.10/api", "port": 443}
+        {"type": "REST API", "url": "https://192.168.50.10/api", "port": 443}
     ]
 
 

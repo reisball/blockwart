@@ -277,37 +277,37 @@ objects:
     label: Fabrik Proxmox
     status: active
     summary: Proxmox Web UI and API for CT/VM administration.
-    data: {schema_version: 1, system_id: system:fabrik, protocol: https, endpoints: [{label: Proxmox Web UI, url: "https://192.168.50.20:8006", host: 192.168.50.20, port: 8006, path: /, exposure: lan}], auth: {mode: password, credential_references: [credential_reference:fabrik-proxmox-login]}, dependencies: {upstream: [], downstream: [system:ollama, system:vaultwarden, system:paperless-ngx, system:n8n, system:splunk]}}
+    data: {schema_version: 1, system_id: system:fabrik, protocol: https, endpoints: [{type: Proxmox Web UI, url: "https://192.168.50.20:8006", host: 192.168.50.20, port: 8006, path: /, exposure: lan}], auth: {mode: password, credential_references: [credential_reference:fabrik-proxmox-login]}, dependencies: {upstream: [], downstream: [system:ollama, system:vaultwarden, system:paperless-ngx, system:n8n, system:splunk]}}
   - id: denkstube-openclaw-gateway
     kind: service
     label: Denkstube OpenClaw Gateway
     status: active
     summary: OpenClaw gateway service bound to LAN.
-    data: {schema_version: 1, system_id: system:denkstube, protocol: http, endpoints: [{label: OpenClaw Gateway, url: "http://192.168.50.30:18789", host: 192.168.50.30, port: 18789, path: /, exposure: lan}], auth: {mode: unknown, credential_references: []}, dependencies: {upstream: [service:ollama-api], downstream: []}}
+    data: {schema_version: 1, system_id: system:denkstube, protocol: http, endpoints: [{type: OpenClaw Gateway, url: "http://192.168.50.30:18789", host: 192.168.50.30, port: 18789, path: /, exposure: lan}], auth: {mode: unknown, credential_references: []}, dependencies: {upstream: [service:ollama-api], downstream: []}}
   - id: denkstube-projects-smb
     kind: service
     label: Denkstube Projects SMB
     status: active
     summary: SMB access to the shared project workspace.
-    data: {schema_version: 1, system_id: system:denkstube, protocol: smb, endpoints: [{label: Projects share, url: "smb://denkstube/projects", host: denkstube, port: 445, path: /projects, exposure: lan}], auth: {mode: password, credential_references: [credential_reference:denkstube-projects-smb-kai]}}
+    data: {schema_version: 1, system_id: system:denkstube, protocol: smb, endpoints: [{type: Projects share, url: "smb://denkstube/projects", host: denkstube, port: 445, path: /projects, exposure: lan}], auth: {mode: password, credential_references: [credential_reference:denkstube-projects-smb-kai]}}
   - id: n8n-web-ui
     kind: service
     label: n8n Web UI
     status: active
     summary: n8n user interface, API, and webhook runtime.
-    data: {schema_version: 1, system_id: system:n8n, protocol: http, endpoints: [{label: Web UI, url: "http://192.168.50.83:5678", host: 192.168.50.83, port: 5678, path: /, exposure: lan}], auth: {mode: mixed, credential_references: [credential_reference:n8n-owner-account, credential_reference:n8n-api-credential, credential_reference:n8n-local-env]}, dependencies: {upstream: [service:ollama-api], downstream: [service:n8n-brieftraeger-status-webhook, service:n8n-brieftraeger-process-webhook]}}
+    data: {schema_version: 1, system_id: system:n8n, protocol: http, endpoints: [{type: Web UI, url: "http://192.168.50.83:5678", host: 192.168.50.83, port: 5678, path: /, exposure: lan}], auth: {mode: mixed, credential_references: [credential_reference:n8n-owner-account, credential_reference:n8n-api-credential, credential_reference:n8n-local-env]}, dependencies: {upstream: [service:ollama-api], downstream: [service:n8n-brieftraeger-status-webhook, service:n8n-brieftraeger-process-webhook]}}
   - id: n8n-brieftraeger-status-webhook
     kind: service
     label: n8n Brieftraeger Status Webhook
     status: active
     summary: Read-only status endpoint for Brieftraeger scanner services and queues.
-    data: {schema_version: 1, system_id: system:n8n, protocol: http, endpoints: [{label: Production webhook, url: "http://192.168.50.83:5678/webhook/brieftraeger/status", host: 192.168.50.83, port: 5678, path: /webhook/brieftraeger/status, exposure: lan}], auth: {mode: mixed, credential_references: [credential_reference:n8n-brieftraeger-ssh-credential]}, dependencies: {upstream: [service:n8n-web-ui, system:brieftraeger], downstream: []}}
+    data: {schema_version: 1, system_id: system:n8n, protocol: http, endpoints: [{type: Production webhook, url: "http://192.168.50.83:5678/webhook/brieftraeger/status", host: 192.168.50.83, port: 5678, path: /webhook/brieftraeger/status, exposure: lan}], auth: {mode: mixed, credential_references: [credential_reference:n8n-brieftraeger-ssh-credential]}, dependencies: {upstream: [service:n8n-web-ui, system:brieftraeger], downstream: []}}
   - id: n8n-brieftraeger-process-webhook
     kind: service
     label: n8n Brieftraeger Process Webhook
     status: active
     summary: Read-only process mapping endpoint for the Brieftraeger document pipeline.
-    data: {schema_version: 1, system_id: system:n8n, protocol: http, endpoints: [{label: Production webhook, url: "http://192.168.50.83:5678/webhook/brieftraeger/prozess", host: 192.168.50.83, port: 5678, path: /webhook/brieftraeger/prozess, exposure: lan}], auth: {mode: mixed, credential_references: [credential_reference:n8n-brieftraeger-ssh-credential]}, dependencies: {upstream: [service:n8n-web-ui, system:brieftraeger], downstream: []}}
+    data: {schema_version: 1, system_id: system:n8n, protocol: http, endpoints: [{type: Production webhook, url: "http://192.168.50.83:5678/webhook/brieftraeger/prozess", host: 192.168.50.83, port: 5678, path: /webhook/brieftraeger/prozess, exposure: lan}], auth: {mode: mixed, credential_references: [credential_reference:n8n-brieftraeger-ssh-credential]}, dependencies: {upstream: [service:n8n-web-ui, system:brieftraeger], downstream: []}}
   - id: brieftraeger-samsung-scantopc
     kind: service
     label: Brieftraeger Samsung Scan-to-PC
@@ -331,49 +331,49 @@ objects:
     label: Paperless Web UI
     status: active
     summary: Browser UI for document management.
-    data: {schema_version: 1, system_id: system:paperless-ngx, protocol: http, endpoints: [{label: Web UI, url: "http://192.168.50.62:8000", host: 192.168.50.62, port: 8000, path: /, exposure: lan}], auth: {mode: password, credential_references: [credential_reference:paperless-kai-login]}}
+    data: {schema_version: 1, system_id: system:paperless-ngx, protocol: http, endpoints: [{type: Web UI, url: "http://192.168.50.62:8000", host: 192.168.50.62, port: 8000, path: /, exposure: lan}], auth: {mode: password, credential_references: [credential_reference:paperless-kai-login]}}
   - id: paperless-api
     kind: service
     label: Paperless API
     status: active
     summary: Paperless API used by scanner upload workflows and integrations.
-    data: {schema_version: 1, system_id: system:paperless-ngx, protocol: http, endpoints: [{label: API base, url: "http://192.168.50.62:8000/api/", host: 192.168.50.62, port: 8000, path: /api/, exposure: lan}], auth: {mode: token, credential_references: [credential_reference:paperless-kai-login, credential_reference:brieftraeger-paperless-upload-credential, credential_reference:brieftraeger-paperless-worker-credential]}, dependencies: {upstream: [service:ollama-api], downstream: [system:brieftraeger]}}
+    data: {schema_version: 1, system_id: system:paperless-ngx, protocol: http, endpoints: [{type: API base, url: "http://192.168.50.62:8000/api/", host: 192.168.50.62, port: 8000, path: /api/, exposure: lan}], auth: {mode: token, credential_references: [credential_reference:paperless-kai-login, credential_reference:brieftraeger-paperless-upload-credential, credential_reference:brieftraeger-paperless-worker-credential]}, dependencies: {upstream: [service:ollama-api], downstream: [system:brieftraeger]}}
   - id: vaultwarden-web-ui
     kind: service
     label: Vaultwarden Web UI
     status: active
     summary: Human web access to the credential vault.
-    data: {schema_version: 1, system_id: system:vaultwarden, protocol: https, endpoints: [{label: Web UI, url: "https://192.168.50.60:8443", host: 192.168.50.60, port: 8443, path: /, exposure: lan}], auth: {mode: password, credential_references: [credential_reference:vaultwarden-zoe-account]}}
+    data: {schema_version: 1, system_id: system:vaultwarden, protocol: https, endpoints: [{type: Web UI, url: "https://192.168.50.60:8443", host: 192.168.50.60, port: 8443, path: /, exposure: lan}], auth: {mode: password, credential_references: [credential_reference:vaultwarden-zoe-account]}}
   - id: vaultwarden-cli-api
     kind: service
     label: Vaultwarden CLI/API
     status: active
     summary: API/CLI credential retrieval path used by agents when explicitly allowed.
-    data: {schema_version: 1, system_id: system:vaultwarden, protocol: https, endpoints: [{label: API base, url: "https://192.168.50.60:8443", host: 192.168.50.60, port: 8443, path: /, exposure: lan}], auth: {mode: token, credential_references: [credential_reference:vaultwarden-api-credentials]}}
+    data: {schema_version: 1, system_id: system:vaultwarden, protocol: https, endpoints: [{type: API base, url: "https://192.168.50.60:8443", host: 192.168.50.60, port: 8443, path: /, exposure: lan}], auth: {mode: token, credential_references: [credential_reference:vaultwarden-api-credentials]}}
   - id: ollama-api
     kind: service
     label: Ollama API
     status: active
     summary: Ollama chat, generation, embedding, tags, and model process API.
-    data: {schema_version: 1, system_id: system:ollama, protocol: http, endpoints: [{label: API base, url: "http://192.168.50.50:11434", host: 192.168.50.50, port: 11434, path: /, exposure: lan}], auth: {mode: none, credential_references: []}, health_check: {type: http, target: "http://192.168.50.50:11434/api/tags", expected: HTTP response with installed model list.}, dependencies: {upstream: [system:fabrik], downstream: [service:denkstube-openclaw-gateway, service:n8n-web-ui, service:paperless-api]}}
+    data: {schema_version: 1, system_id: system:ollama, protocol: http, endpoints: [{type: API base, url: "http://192.168.50.50:11434", host: 192.168.50.50, port: 11434, path: /, exposure: lan}], auth: {mode: none, credential_references: []}, health_check: {type: http, target: "http://192.168.50.50:11434/api/tags", expected: HTTP response with installed model list.}, dependencies: {upstream: [system:fabrik], downstream: [service:denkstube-openclaw-gateway, service:n8n-web-ui, service:paperless-api]}}
   - id: splunk-web
     kind: service
     label: Splunk Web
     status: active
     summary: Splunk Enterprise Web UI.
-    data: {schema_version: 1, system_id: system:splunk, protocol: http, endpoints: [{label: LAN Web UI, url: "http://192.168.50.71:8000", host: 192.168.50.71, port: 8000, path: /, exposure: lan}, {label: Public Web UI, url: "https://splunk.hinterhof.dyndns.org", host: splunk.hinterhof.dyndns.org, port: 443, path: /, exposure: public}], auth: {mode: password, credential_references: [credential_reference:splunk-admin-login]}}
+    data: {schema_version: 1, system_id: system:splunk, protocol: http, endpoints: [{type: LAN Web UI, url: "http://192.168.50.71:8000", host: 192.168.50.71, port: 8000, path: /, exposure: lan}, {type: Public Web UI, url: "https://splunk.hinterhof.dyndns.org", host: splunk.hinterhof.dyndns.org, port: 443, path: /, exposure: public}], auth: {mode: password, credential_references: [credential_reference:splunk-admin-login]}}
   - id: splunk-management-api
     kind: service
     label: Splunk Management API
     status: active
     summary: Splunk REST management API.
-    data: {schema_version: 1, system_id: system:splunk, protocol: https, endpoints: [{label: LAN Management API, url: "https://192.168.50.71:8089", host: 192.168.50.71, port: 8089, path: /, exposure: lan}, {label: Public Management API, url: "https://api.splunk.hinterhof.dyndns.org", host: api.splunk.hinterhof.dyndns.org, port: 443, path: /, exposure: public}], auth: {mode: token, credential_references: [credential_reference:splunk-zoe-api-credential]}}
+    data: {schema_version: 1, system_id: system:splunk, protocol: https, endpoints: [{type: LAN Management API, url: "https://192.168.50.71:8089", host: 192.168.50.71, port: 8089, path: /, exposure: lan}, {type: Public Management API, url: "https://api.splunk.hinterhof.dyndns.org", host: api.splunk.hinterhof.dyndns.org, port: 443, path: /, exposure: public}], auth: {mode: token, credential_references: [credential_reference:splunk-zoe-api-credential]}}
   - id: splunk-receiving
     kind: service
     label: Splunk Forwarder Receiving
     status: active
     summary: Default Splunk receiving port for forwarders.
-    data: {schema_version: 1, system_id: system:splunk, protocol: tcp, endpoints: [{label: Receiving port, url: "tcp://192.168.50.71:9997", host: 192.168.50.71, port: 9997, path: "", exposure: lan}], auth: {mode: unknown, credential_references: []}}
+    data: {schema_version: 1, system_id: system:splunk, protocol: tcp, endpoints: [{type: Receiving port, url: "tcp://192.168.50.71:9997", host: 192.168.50.71, port: 9997, path: "", exposure: lan}], auth: {mode: unknown, credential_references: []}}
 
   - id: fabrik-zoe-ssh-key
     kind: credential_reference

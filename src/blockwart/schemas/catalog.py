@@ -169,6 +169,10 @@ def _validate_service_data(data: dict[str, Any]) -> None:
     if "endpoints" in data:
         for index, value in enumerate(_require_list(data["endpoints"], "data.endpoints")):
             endpoint = _require_mapping(value, f"data.endpoints[{index}]")
+            if "type" in endpoint:
+                _require_string(endpoint["type"], f"data.endpoints[{index}].type")
+            if "url" in endpoint:
+                _require_string(endpoint["url"], f"data.endpoints[{index}].url")
             if "port" in endpoint:
                 port = endpoint["port"]
                 if not isinstance(port, int) or isinstance(port, bool) or not 1 <= port <= 65535:

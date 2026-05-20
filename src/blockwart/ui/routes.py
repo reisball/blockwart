@@ -693,20 +693,15 @@ async def update_network(
         ]
     if existing_object.kind in NETWORK_ENDPOINT_EDIT_KINDS:
         data["endpoints"] = [
-            {
-                **endpoint,
-                "name": name,
-                "url": url,
-                "port": int(port_value) if str(port_value).strip() else "",
-            }
-            for endpoint, name, url, port_value in zip(
-                _padded_mappings(data.get("endpoints"), len(form.getlist("endpoint_name"))),
-                form.getlist("endpoint_name"),
+            _endpoint_payload(endpoint, endpoint_type, url, port_value)
+            for endpoint, endpoint_type, url, port_value in zip(
+                _padded_mappings(data.get("endpoints"), len(form.getlist("endpoint_type"))),
+                form.getlist("endpoint_type"),
                 form.getlist("endpoint_url"),
                 form.getlist("endpoint_port"),
                 strict=False,
             )
-            if str(name).strip() or str(url).strip() or str(port_value).strip()
+            if str(endpoint_type).strip() or str(url).strip() or str(port_value).strip()
         ]
     _reject_secret_shaped_form_data(data)
     upsert_object(
@@ -1395,6 +1390,21 @@ def _access_methods(
 
 def _editable_data_copy(data: Mapping[str, Any]) -> dict[str, Any]:
     return json.loads(json.dumps(data))
+
+
+def _endpoint_payload(
+    endpoint: Mapping[str, Any],
+    endpoint_type: object,
+    url: object,
+    port_value: object,
+) -> dict[str, Any]:
+    payload = dict(endpoint)
+    payload.pop("name", None)
+    payload.pop("label", None)
+    payload["type"] = str(endpoint_type).strip()
+    payload["url"] = str(url).strip()
+    payload["port"] = int(port_value) if str(port_value).strip() else ""
+    return payload
 
 
 def _split_multivalue(value: str) -> list[str]:
