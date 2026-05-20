@@ -12,6 +12,7 @@ from blockwart.domain.ui_schema import (
     FIELD_DEFINITIONS,
     UI_SCHEMAS,
     create_field_payload,
+    schema_field_payload,
     ui_schema_payload,
 )
 from blockwart.main import create_app
@@ -156,8 +157,11 @@ def test_schema_settings_page_shows_selected_type_schema(client: TestClient) -> 
     assert "Storage-Pfad" in response.text
     assert "catalog_objects.label" in response.text
     assert "data_json.platform" in response.text
+    assert "Storage-Konvention" in response.text
+    assert "data_json.hardware.*" in response.text
     assert "Sichtbarkeit" in response.text
     assert "Create-Felder" in response.text
+    assert "Schema-Felder" in response.text
     assert "Detail-Panels" in response.text
     assert "<code>kind</code>" in response.text
     assert "<code>primary_name</code>" in response.text
@@ -209,6 +213,8 @@ def test_ui_schema_payload_matches_public_object_kinds() -> None:
     assert set(ui_schema_payload()) == set(PUBLIC_OBJECT_KINDS)
     for schema in UI_SCHEMAS.values():
         assert all(field_key in FIELD_DEFINITIONS for field_key in schema.create_fields)
+        assert all(field_key in FIELD_DEFINITIONS for field_key in schema.fields)
+        assert set(schema.create_fields).issubset(schema.fields)
         fields = create_field_payload(schema)
         assert fields[0]["key"] == "kind"
         assert all(field["visible_in_create"] is True for field in fields)
@@ -216,6 +222,30 @@ def test_ui_schema_payload_matches_public_object_kinds() -> None:
         primary_field = next(field for field in fields if field["key"] == "primary_name")
         assert primary_field["label"] == schema.primary_name_label
         assert primary_field["storage_path"] == schema.as_dict()["primary_name_storage_path"]
+
+
+def test_host_and_system_schema_include_hardware_fields(client: TestClient) -> None:
+    for kind in ("host", "system"):
+        response = client.get(f"/settings/schema?kind={kind}")
+        assert response.status_code == 200
+        assert "CPU" in response.text
+        assert "Memory" in response.text
+        assert "GPU" in response.text
+        assert "Storage / HDD" in response.text
+        assert "data_json.hardware.cpu" in response.text
+        assert "data_json.hardware.memory" in response.text
+        assert "data_json.hardware.gpu" in response.text
+        assert "data_json.hardware.storage" in response.text
+
+        fields = schema_field_payload(UI_SCHEMAS[kind])
+        hardware_fields = [field for field in fields if str(field["key"]).startswith("hardware_")]
+        assert len(hardware_fields) == 4
+        assert all(field["visible_in_create"] is False for field in hardware_fields)
+        assert all(field["visible_in_detail"] is True for field in hardware_fields)
+
+    for kind in ("netzwerk", "service"):
+        fields = schema_field_payload(UI_SCHEMAS[kind])
+        assert not any(str(field["key"]).startswith("hardware_") for field in fields)
 
 
 def test_service_result_keeps_service_on_right_side(client: TestClient) -> None:

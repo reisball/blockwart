@@ -80,7 +80,7 @@
 
         <section class="panel">
           <div class="panel-head">
-            <h2 class="section-title">Create-Felder</h2>
+            <h2 class="section-title">Schema-Felder</h2>
           </div>
           <div class="table-wrap">
             <table class="table">
@@ -91,19 +91,21 @@
                   <th>Label</th>
                   <th>Input</th>
                   <th>Storage-Pfad</th>
+                  <th>Create</th>
                   <th>Required</th>
                   <th>Detail</th>
                   <th>Placeholder</th>
                 </tr>
               </thead>
               <tbody>
-                {% for field in create_fields %}
+                {% for field in schema_fields %}
                   <tr>
                     <td>{{ loop.index }}</td>
                     <td><code>{{ field.key }}</code></td>
                     <td>{{ field.label }}</td>
                     <td>{{ field.input_type }}</td>
                     <td><code>{{ field.storage_path }}</code></td>
+                    <td>{{ "ja" if field.visible_in_create else "nein" }}</td>
                     <td>{{ "ja" if field.required else "nein" }}</td>
                     <td>{{ "ja" if field.visible_in_detail else "nein" }}</td>
                     <td>{{ field.placeholder or "-" }}</td>
@@ -148,6 +150,21 @@
       </section>
 
       <aside class="stack">
+        <section class="panel">
+          <h2 class="section-title">Storage-Konvention</h2>
+          <div class="table-wrap">
+            <table class="table compact-table">
+              <tbody>
+                {% for path, description in ui_schemas[selected_kind].storage_conventions.items() %}
+                  <tr>
+                    <td><code>{{ path }}</code></td>
+                    <td>{{ description }}</td>
+                  </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+        </section>
         <section class="panel">
           <h2 class="section-title">Hinweis</h2>
           <p class="meta">

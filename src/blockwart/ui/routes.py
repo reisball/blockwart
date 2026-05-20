@@ -13,7 +13,12 @@ from sqlalchemy.orm import Session
 
 from blockwart.api.deps import get_session
 from blockwart.domain.security import find_secret_violations
-from blockwart.domain.ui_schema import create_field_payload, get_ui_schema, ui_schema_payload
+from blockwart.domain.ui_schema import (
+    create_field_payload,
+    get_ui_schema,
+    schema_field_payload,
+    ui_schema_payload,
+)
 from blockwart.schemas.catalog import (
     OBJECT_STATUSES,
     PUBLIC_OBJECT_KINDS,
@@ -105,6 +110,7 @@ def schema_settings(
             "object_kinds": OBJECT_KINDS,
             "selected_kind": selected_kind,
             "ui_schema": schema,
+            "schema_fields": schema_field_payload(schema),
             "create_fields": create_field_payload(schema),
             "ui_schemas": ui_schema_payload(),
         },
