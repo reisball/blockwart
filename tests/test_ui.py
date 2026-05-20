@@ -90,13 +90,12 @@ def test_create_object_form_is_hidden_behind_button(client: TestClient) -> None:
     assert 'role="button"' in response.text
     assert 'data-object-toggle' in response.text
     assert 'data-detail-link' in response.text
-    assert 'class="button button-small button-muted relationship-detail"' in response.text
+    assert "relationship-chain" in response.text
+    assert "relationship-pill" in response.text
     assert "<span>hosts</span>" not in response.text
-    assert "Typ: system" in response.text
+    assert "<span>system</span>" in response.text
     assert "Status: active" in response.text
-    assert "Typ: service" in response.text
-    assert "data-relationship-node" in response.text
-    assert "data-relationship-detail-panel" in response.text
+    assert "<span>service</span>" in response.text
     assert "<span>Beschreibung</span>" not in response.text
     assert "/static/index.js" in response.text
     assert create_response.status_code == 200
@@ -512,11 +511,38 @@ def test_service_result_keeps_service_on_right_side(client: TestClient) -> None:
     article = response.text[article_start:article_end]
 
     relationship_start = article.find('class="relationship-map"')
-    relationship_end = article.find('class="relationship-detail-stack"')
-    relationships = article[relationship_start:relationship_end]
+    relationships = article[relationship_start:]
 
+    assert relationships.find('data-ref="system:fabrik"') < relationships.find(
+        'data-ref="system:n8n"'
+    )
     assert relationships.find("system:n8n") < relationships.find("service:n8n-web-ui")
-    assert relationships.find("Typ: system") < relationships.find("Typ: service")
+    assert relationships.find("Systeme") < relationships.find("Services")
+    assert "relationship-detail-stack" not in article
+
+
+def test_host_result_groups_systems_and_services_in_one_relation_row(
+    client: TestClient,
+) -> None:
+    response = client.get("/?q=fabrik")
+
+    assert response.status_code == 200
+    object_marker = '<span class="object-id">fabrik</span>'
+    object_index = response.text.find(object_marker)
+    assert object_index >= 0
+    article_start = response.text.rfind("<article", 0, object_index)
+    article_end = response.text.find("</article>", object_index)
+    article = response.text[article_start:article_end]
+
+    relationship_start = article.find('class="relationship-map"')
+    relationships = article[relationship_start:]
+
+    assert relationships.count('class="relationship-chain"') == 1
+    assert relationships.find("Host") < relationships.find("Systeme")
+    assert relationships.find("Systeme") < relationships.find("Services")
+    assert 'data-ref="system:fabrik"' in relationships
+    assert 'data-ref="system:n8n"' in relationships
+    assert 'data-ref="service:n8n-web-ui"' in relationships
 
 
 def test_object_detail_shows_data_and_relationships(client: TestClient) -> None:

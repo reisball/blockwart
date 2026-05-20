@@ -9,12 +9,12 @@
         document.documentElement.dataset.theme = "light";
       }
     </script>
-    <link rel="stylesheet" href="/static/app.css?v=054" />
+    <link rel="stylesheet" href="/static/app.css?v=055" />
     <script>
       window.BLOCKWART_UI_SCHEMAS = {{ ui_schemas|tojson }};
     </script>
     <script src="/static/theme.js?v=054" defer></script>
-    <script src="/static/index.js?v=054" defer></script>
+    <script src="/static/index.js?v=055" defer></script>
   </head>
   <body>
     <header class="topbar">
@@ -187,84 +187,69 @@
                 </div>
                 <div class="object-expanded" data-object-expanded>
                   <div class="relationship-map">
-                    {% if object_relationships.relationships %}
-                      {% for relationship in object_relationships.relationships %}
-                        <div class="relationship-edge">
-                          <div class="relationship-node {% if relationship.current_side == 'left' %}relationship-node-current{% endif %}" role="button" tabindex="0" data-relationship-node data-detail-target="relationship-detail-{{ object.id }}-{{ loop.index }}-left">
-                            <span class="relationship-type">Typ: {{ relationship.left.kind }}</span>
-                            <strong class="relationship-node-name">
-                              {{ relationship.left.label }}
-                            </strong>
-                            <small>{{ relationship.left.ref }}</small>
-                            {% if relationship.left.ports %}
-                              <div class="relationship-ports">
-                                {% for port in relationship.left.ports %}
-                                  <span class="port-chip port-chip-{{ relationship.left.kind }}">{{ port.label }} {{ port.value }}</span>
-                                {% endfor %}
-                              </div>
-                            {% endif %}
-                          </div>
+                    {% if object_relationships.topology.chains %}
+                      {% for chain in object_relationships.topology.chains %}
+                        <div class="relationship-chain">
+                          <section class="relationship-column">
+                            <span class="relationship-column-title">Host</span>
+                            <div class="relationship-list">
+                              {% for node in chain.hosts %}
+                                <a class="relationship-pill relationship-pill-{{ node.kind }}" href="/objects/{{ node.id }}" data-ref="{{ node.ref }}" data-detail-link>
+                                  <span>{{ node.kind }}</span>
+                                  <strong>{{ node.label }}</strong>
+                                </a>
+                              {% else %}
+                                <span class="relationship-empty-pill">Kein Host</span>
+                              {% endfor %}
+                            </div>
+                          </section>
                           <div class="relationship-line" aria-hidden="true"></div>
-                          <div class="relationship-node relationship-node-with-detail {% if relationship.current_side == 'right' %}relationship-node-current{% endif %}" role="button" tabindex="0" data-relationship-node data-detail-target="relationship-detail-{{ object.id }}-{{ loop.index }}-right">
-                            <span class="relationship-type">Typ: {{ relationship.right.kind }}</span>
-                            <strong class="relationship-node-name">
-                              {{ relationship.right.label }}
-                            </strong>
-                            <small>{{ relationship.right.ref }}</small>
-                            {% if relationship.right.ports %}
-                              <div class="relationship-ports">
-                                {% for port in relationship.right.ports %}
-                                  <span class="port-chip port-chip-{{ relationship.right.kind }}">{{ port.label }} {{ port.value }}</span>
-                                {% endfor %}
-                              </div>
-                            {% endif %}
-                            <a class="button button-small button-muted relationship-detail" href="/objects/{{ relationship.right.id }}" data-detail-link>Details</a>
-                          </div>
+                          <section class="relationship-column">
+                            <span class="relationship-column-title">Systeme</span>
+                            <div class="relationship-list">
+                              {% for node in chain.systems %}
+                                <a class="relationship-pill relationship-pill-{{ node.kind }} {% if node.id == object.id and node.kind == object.kind %}relationship-pill-current{% endif %}" href="/objects/{{ node.id }}" data-ref="{{ node.ref }}" data-detail-link>
+                                  <span>{{ node.kind }}</span>
+                                  <strong>{{ node.label }}</strong>
+                                  {% if node.ports %}
+                                    <small>
+                                      {% for port in node.ports[:2] %}
+                                        {{ port.value }}{% if not loop.last %}, {% endif %}
+                                      {% endfor %}
+                                    </small>
+                                  {% endif %}
+                                </a>
+                              {% else %}
+                                <span class="relationship-empty-pill">Kein System</span>
+                              {% endfor %}
+                            </div>
+                          </section>
+                          <div class="relationship-line" aria-hidden="true"></div>
+                          <section class="relationship-column">
+                            <span class="relationship-column-title">Services</span>
+                            <div class="relationship-list">
+                              {% for node in chain.services %}
+                                <a class="relationship-pill relationship-pill-{{ node.kind }} {% if node.id == object.id and node.kind == object.kind %}relationship-pill-current{% endif %}" href="/objects/{{ node.id }}" data-ref="{{ node.ref }}" data-detail-link>
+                                  <span>{{ node.kind }}</span>
+                                  <strong>{{ node.label }}</strong>
+                                  {% if node.ports %}
+                                    <small>
+                                      {% for port in node.ports[:2] %}
+                                        {{ port.value }}{% if not loop.last %}, {% endif %}
+                                      {% endfor %}
+                                    </small>
+                                  {% endif %}
+                                </a>
+                              {% else %}
+                                <span class="relationship-empty-pill">Kein Service</span>
+                              {% endfor %}
+                            </div>
+                          </section>
                         </div>
                       {% endfor %}
                     {% else %}
                       <div class="empty relationship-empty">Keine Beziehungen erfasst.</div>
                     {% endif %}
-                  </div>
-                  <div class="relationship-detail-stack">
-                    {% for relationship in object_relationships.relationships %}
-                      {% set relationship_index = loop.index %}
-                      {% for node_side, node in (("left", relationship.left), ("right", relationship.right)) %}
-                        <section class="relationship-detail-panel" id="relationship-detail-{{ object.id }}-{{ relationship_index }}-{{ node_side }}" data-relationship-detail-panel>
-                          <div class="relationship-detail-panel-head">
-                            <div>
-                              <span class="relationship-type">Typ: {{ node.kind }}</span>
-                              <strong class="relationship-node-name">
-                                {{ node.label }}
-                              </strong>
-                            </div>
-                            <small>{{ node.ref }}</small>
-                          </div>
-                          <div class="relationship-detail-grid">
-                            {% if node.status %}
-                              <div><span>Status</span><strong>{{ node.status }}</strong></div>
-                            {% endif %}
-                            <div><span>ID</span><strong>{{ node.id }}</strong></div>
-                            {% if node.data.network and node.data.network.addresses %}
-                              <div class="relationship-detail-wide">
-                                <span>Adressen</span>
-                                {% for address in node.data.network.addresses[:3] %}
-                                  <strong>{{ address.ip }}{% if address.scope %} · {{ address.scope }}{% endif %}</strong>
-                                {% endfor %}
-                              </div>
-                            {% endif %}
-                            {% if node.ports %}
-                              <div class="relationship-detail-wide">
-                                <span>Ports</span>
-                                {% for port in node.ports %}
-                                  <strong>{{ port.label }} {{ port.value }}</strong>
-                                {% endfor %}
-                              </div>
-                            {% endif %}
-                          </div>
-                        </section>
-                      {% endfor %}
-                    {% endfor %}
                   </div>
                 </div>
               </article>

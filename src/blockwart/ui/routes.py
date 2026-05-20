@@ -9,6 +9,7 @@ from fastapi import APIRouter, Depends, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 from pydantic import ValidationError
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from blockwart.api.deps import get_session
@@ -21,6 +22,7 @@ from blockwart.domain.ui_schema import (
     schema_field_payload,
     ui_schema_payload,
 )
+from blockwart.models import Relationship
 from blockwart.schemas.catalog import (
     OBJECT_STATUSES,
     PUBLIC_OBJECT_KINDS,
@@ -852,13 +854,147 @@ def _index_relationship_cards(
     object_map: dict[str, CatalogObjectOut],
 ) -> dict[str, dict[str, Any]]:
     cards: dict[str, dict[str, Any]] = {}
+    all_relationships = _all_relationships(session)
     for catalog_object in objects:
         relationships = list_relationships_for_object(session, catalog_object)
         grouped = _group_relationships(catalog_object, relationships, object_map)
         cards[catalog_object.id] = {
             "relationships": _relationship_display_cards(catalog_object, grouped, object_map),
+            "topology": _relationship_topology(catalog_object, all_relationships, object_map),
         }
     return cards
+
+
+def _all_relationships(session: Session) -> list[dict[str, str]]:
+    rows = session.scalars(
+        select(Relationship).order_by(
+            Relationship.relation_type,
+            Relationship.from_ref,
+            Relationship.to_ref,
+        )
+    ).all()
+    return [
+        {
+            "from_ref": row.from_ref,
+            "relation_type": row.relation_type,
+            "to_ref": row.to_ref,
+        }
+        for row in rows
+    ]
+
+
+def _relationship_topology(
+    catalog_object: CatalogObjectOut,
+    relationships: list[dict[str, str]],
+    object_map: dict[str, CatalogObjectOut],
+) -> dict[str, Any]:
+    current_ref = f"{catalog_object.kind}:{catalog_object.id}"
+    systems_by_host: dict[str, list[str]] = {}
+    hosts_by_system: dict[str, list[str]] = {}
+    services_by_system: dict[str, list[str]] = {}
+    systems_by_service: dict[str, list[str]] = {}
+
+    for relationship in relationships:
+        from_ref = relationship["from_ref"]
+        to_ref = relationship["to_ref"]
+        relation_type = relationship["relation_type"]
+        from_object = object_map.get(from_ref)
+        to_object = object_map.get(to_ref)
+        from_kind = from_object.kind if from_object else from_ref.split(":", 1)[0]
+        to_kind = to_object.kind if to_object else to_ref.split(":", 1)[0]
+
+        if relation_type == "hosts" and from_kind in {"host", "system"} and to_kind == "system":
+            if from_ref != to_ref:
+                _append_unique_ref(systems_by_host, from_ref, to_ref)
+                _append_unique_ref(hosts_by_system, to_ref, from_ref)
+        if (
+            relation_type in {"hosts", "provides"}
+            and from_kind == "system"
+            and to_kind == "service"
+        ):
+            _append_unique_ref(services_by_system, from_ref, to_ref)
+            _append_unique_ref(systems_by_service, to_ref, from_ref)
+
+    for ref, obj in object_map.items():
+        if obj.kind != "service":
+            continue
+        system_ref = obj.data.get("system_id")
+        if isinstance(system_ref, str) and system_ref.startswith("system:"):
+            _append_unique_ref(services_by_system, system_ref, ref)
+            _append_unique_ref(systems_by_service, ref, system_ref)
+
+    if catalog_object.kind == "service":
+        system_refs = systems_by_service.get(current_ref, [])
+        host_refs = _unique_refs(
+            host_ref
+            for system_ref in system_refs
+            for host_ref in hosts_by_system.get(system_ref, [])
+        )
+        return {
+            "chains": [
+                {
+                    "hosts": _relationship_nodes(host_refs, object_map),
+                    "systems": _relationship_nodes(system_refs, object_map),
+                    "services": [_relationship_node(current_ref, catalog_object)],
+                }
+            ]
+        }
+
+    if catalog_object.kind in {"host", "system"} and systems_by_host.get(current_ref):
+        system_refs = systems_by_host[current_ref]
+        service_refs = _unique_refs(
+            service_ref
+            for system_ref in system_refs
+            for service_ref in services_by_system.get(system_ref, [])
+        )
+        return {
+            "chains": [
+                {
+                    "hosts": [_relationship_node(current_ref, catalog_object)],
+                    "systems": _relationship_nodes(system_refs, object_map),
+                    "services": _relationship_nodes(service_refs, object_map),
+                }
+            ]
+        }
+
+    if catalog_object.kind == "system":
+        host_refs = hosts_by_system.get(current_ref, [])
+        service_refs = services_by_system.get(current_ref, [])
+        return {
+            "chains": [
+                {
+                    "hosts": _relationship_nodes(host_refs, object_map),
+                    "systems": [_relationship_node(current_ref, catalog_object)],
+                    "services": _relationship_nodes(service_refs, object_map),
+                }
+            ]
+        }
+
+    return {"chains": []}
+
+
+def _append_unique_ref(target: dict[str, list[str]], key: str, value: str) -> None:
+    values = target.setdefault(key, [])
+    if value not in values:
+        values.append(value)
+
+
+def _unique_refs(values: Any) -> list[str]:
+    seen: set[str] = set()
+    unique: list[str] = []
+    for value in values:
+        if value in seen:
+            continue
+        seen.add(value)
+        unique.append(value)
+    return unique
+
+
+def _relationship_nodes(
+    refs: list[str],
+    object_map: dict[str, CatalogObjectOut],
+) -> list[dict[str, Any]]:
+    return [_relationship_node(ref, object_map.get(ref)) for ref in refs]
 
 
 def _relationship_display_sort_key(card: dict[str, Any]) -> tuple[int, str, str]:
