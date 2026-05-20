@@ -9,16 +9,20 @@ class UiField:
     key: str
     label: str
     input_type: str
+    storage_path: str
     required: bool = False
     placeholder: str = ""
+    visible_in_detail: bool = True
 
     def as_dict(self) -> dict[str, str | bool]:
         return {
             "key": self.key,
             "label": self.label,
             "input_type": self.input_type,
+            "storage_path": self.storage_path,
             "required": self.required,
             "placeholder": self.placeholder,
+            "visible_in_detail": self.visible_in_detail,
         }
 
 
@@ -52,6 +56,7 @@ class UiTypeSchema:
             "kind": self.kind,
             "primary_name_label": self.primary_name_label,
             "primary_name_storage": self.primary_name_storage,
+            "primary_name_storage_path": primary_name_storage_path(self),
             "supports_platform": self.supports_platform,
             "create_fields": list(self.create_fields),
             "panels": [panel.as_dict() for panel in self.panels],
@@ -68,11 +73,12 @@ CURRENT_UI_PANELS = (
 )
 
 FIELD_DEFINITIONS: dict[str, UiField] = {
-    "kind": UiField("kind", "Typ", "select", required=True),
+    "kind": UiField("kind", "Typ", "select", "catalog_objects.kind", required=True),
     "object_id": UiField(
         "object_id",
         "ID",
         "text",
+        "catalog_objects.object_id",
         required=True,
         placeholder="n8n",
     ),
@@ -80,18 +86,38 @@ FIELD_DEFINITIONS: dict[str, UiField] = {
         "primary_name",
         "Primärname",
         "text",
+        "kindabhängig",
         required=True,
         placeholder="n8n",
     ),
-    "labels": UiField("labels", "Label", "text", placeholder="infra, docker, intern"),
-    "platform": UiField("platform", "Plattform", "select"),
-    "status": UiField("status", "Status", "select", required=True),
-    "relationship": UiField("relationship", "Relationship", "select"),
-    "relation_type": UiField("relation_type", "Relationstyp", "select"),
+    "labels": UiField(
+        "labels",
+        "Label",
+        "text",
+        "data_json.labels[]",
+        placeholder="infra, docker, intern",
+    ),
+    "platform": UiField("platform", "Plattform", "select", "data_json.platform"),
+    "status": UiField("status", "Status", "select", "catalog_objects.status", required=True),
+    "relationship": UiField(
+        "relationship",
+        "Relationship",
+        "select",
+        "relationships.from_ref/to_ref",
+        visible_in_detail=False,
+    ),
+    "relation_type": UiField(
+        "relation_type",
+        "Relationstyp",
+        "select",
+        "relationships.relation_type",
+        visible_in_detail=False,
+    ),
     "summary": UiField(
         "summary",
         "Kurzbeschreibung",
         "textarea",
+        "catalog_objects.summary",
         placeholder="Wofür ist das Objekt da?",
     ),
 }
@@ -164,6 +190,12 @@ def ui_schema_payload() -> dict[str, dict[str, object]]:
     return {kind: schema.as_dict() for kind, schema in UI_SCHEMAS.items()}
 
 
+def primary_name_storage_path(schema: UiTypeSchema) -> str:
+    if schema.primary_name_storage == "network_hostname":
+        return "data_json.network.hostnames[0]"
+    return "catalog_objects.label"
+
+
 def create_field_payload(schema: UiTypeSchema) -> list[dict[str, str | bool]]:
     fields: list[dict[str, str | bool]] = []
     for key in schema.create_fields:
@@ -171,5 +203,7 @@ def create_field_payload(schema: UiTypeSchema) -> list[dict[str, str | bool]]:
         payload = field.as_dict()
         if key == "primary_name":
             payload["label"] = schema.primary_name_label
+            payload["storage_path"] = primary_name_storage_path(schema)
+        payload["visible_in_create"] = True
         fields.append(payload)
     return fields

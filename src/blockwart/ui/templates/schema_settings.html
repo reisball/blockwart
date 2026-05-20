@@ -55,8 +55,12 @@
             </div>
             <div class="overview-labels">
               <div class="overview-label">
-                <span>Storage</span>
+                <span>Storage-Art</span>
                 <strong>{{ ui_schema.primary_name_storage }}</strong>
+              </div>
+              <div class="overview-label">
+                <span>Storage-Pfad</span>
+                <strong>{{ ui_schemas[selected_kind].primary_name_storage_path }}</strong>
               </div>
               <div class="overview-label">
                 <span>Platform</span>
@@ -86,7 +90,9 @@
                   <th>Feld-Key</th>
                   <th>Label</th>
                   <th>Input</th>
+                  <th>Storage-Pfad</th>
                   <th>Required</th>
+                  <th>Detail</th>
                   <th>Placeholder</th>
                 </tr>
               </thead>
@@ -97,7 +103,9 @@
                     <td><code>{{ field.key }}</code></td>
                     <td>{{ field.label }}</td>
                     <td>{{ field.input_type }}</td>
+                    <td><code>{{ field.storage_path }}</code></td>
                     <td>{{ "ja" if field.required else "nein" }}</td>
+                    <td>{{ "ja" if field.visible_in_detail else "nein" }}</td>
                     <td>{{ field.placeholder or "-" }}</td>
                   </tr>
                 {% endfor %}
@@ -118,6 +126,7 @@
                   <th>Panel-Key</th>
                   <th>Label</th>
                   <th>Route Section</th>
+                  <th>Sichtbarkeit</th>
                   <th>Immer sichtbar</th>
                 </tr>
               </thead>
@@ -128,6 +137,7 @@
                     <td><code>{{ panel.key }}</code></td>
                     <td>{{ panel.label }}</td>
                     <td><code>{{ panel.route_section }}</code></td>
+                    <td>Detail-Ansicht</td>
                     <td>{{ "ja" if panel.always_visible else "nein" }}</td>
                   </tr>
                 {% endfor %}
@@ -141,7 +151,7 @@
         <section class="panel">
           <h2 class="section-title">Hinweis</h2>
           <p class="meta">
-            Diese Seite zeigt das aktuell führende UI-Schema. Änderungen werden hier noch nicht gespeichert.
+            Diese Seite ist die Arbeitsansicht für das aktuell führende UI-Schema. Änderungen werden hier noch nicht gespeichert.
           </p>
         </section>
         <section class="panel">
@@ -152,4 +162,3 @@
     </main>
   </body>
 </html>
-

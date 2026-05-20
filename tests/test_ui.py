@@ -152,6 +152,11 @@ def test_schema_settings_page_shows_selected_type_schema(client: TestClient) -> 
     assert "service Schema" in response.text
     assert "Service-Name" in response.text
     assert "primary_name_storage" in response.text
+    assert "primary_name_storage_path" in response.text
+    assert "Storage-Pfad" in response.text
+    assert "catalog_objects.label" in response.text
+    assert "data_json.platform" in response.text
+    assert "Sichtbarkeit" in response.text
     assert "Create-Felder" in response.text
     assert "Detail-Panels" in response.text
     assert "<code>kind</code>" in response.text
@@ -206,8 +211,11 @@ def test_ui_schema_payload_matches_public_object_kinds() -> None:
         assert all(field_key in FIELD_DEFINITIONS for field_key in schema.create_fields)
         fields = create_field_payload(schema)
         assert fields[0]["key"] == "kind"
+        assert all(field["visible_in_create"] is True for field in fields)
+        assert all(field["storage_path"] for field in fields)
         primary_field = next(field for field in fields if field["key"] == "primary_name")
         assert primary_field["label"] == schema.primary_name_label
+        assert primary_field["storage_path"] == schema.as_dict()["primary_name_storage_path"]
 
 
 def test_service_result_keeps_service_on_right_side(client: TestClient) -> None:
