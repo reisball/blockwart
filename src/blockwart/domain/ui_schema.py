@@ -344,9 +344,9 @@ UI_SCHEMAS: dict[str, UiTypeSchema] = {
         kind="service",
         primary_name_label="Service-Name",
         primary_name_storage="label",
-        supports_platform=True,
-        fields=PLATFORM_SCHEMA_FIELDS + SERVICE_INFORMATION_SCHEMA_FIELDS + ENDPOINT_SCHEMA_FIELDS,
-        create_fields=PLATFORM_CREATE_FIELDS,
+        supports_platform=False,
+        fields=COMMON_SCHEMA_FIELDS + SERVICE_INFORMATION_SCHEMA_FIELDS + ENDPOINT_SCHEMA_FIELDS,
+        create_fields=COMMON_CREATE_FIELDS,
         panels=SERVICE_UI_PANELS,
     ),
 }

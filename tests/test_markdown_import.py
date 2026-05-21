@@ -54,7 +54,7 @@ def test_build_tools_import_plan_parses_infrastructure_rows(tmp_path: Path) -> N
     }
     assert service["id"] == "ct-200_demo-box"
     assert service["kind"] == "service"
-    assert service["data"]["platform"] == "LXC"
+    assert "platform" not in service["data"]
     assert service["data"]["system_id"] == "system:ct-200"
     assert system["data"]["network"]["addresses"][0]["ip"] == "192.168.50.200"
     assert {item["port"] for item in system["data"]["ports"]} == {22}

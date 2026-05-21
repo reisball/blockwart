@@ -152,7 +152,7 @@
                 <div class="object-row" role="button" tabindex="0" aria-expanded="false" data-object-toggle>
                   <div class="kind">
                     <span>Typ: {{ object.kind }}</span>
-                    {% if object.data.platform %}
+                    {% if object.data.platform and ui_schemas[object.kind].supports_platform %}
                       <span>Plattform: {{ object.data.platform }}</span>
                     {% endif %}
                     <span class="status">Status: {{ object.status }}</span>

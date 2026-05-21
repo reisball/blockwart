@@ -134,7 +134,7 @@ def test_create_form_schema_gates_fields_by_type(client: TestClient) -> None:
     assert 'data-create-field="relationship"' in response.text
     assert set(UI_SCHEMAS) == {"host", "system", "netzwerk", "service"}
     assert "platform" in UI_SCHEMAS["system"].create_fields
-    assert "platform" in UI_SCHEMAS["service"].create_fields
+    assert "platform" not in UI_SCHEMAS["service"].create_fields
     assert "platform" not in UI_SCHEMAS["host"].create_fields
     assert "platform" not in UI_SCHEMAS["netzwerk"].create_fields
     for schema in UI_SCHEMAS.values():
@@ -199,7 +199,7 @@ def test_schema_settings_page_falls_back_to_system_for_invalid_kind(
         ("host", "Hostname", "network_hostname", False),
         ("system", "Hostname", "network_hostname", True),
         ("netzwerk", "Name", "label", False),
-        ("service", "Service-Name", "label", True),
+        ("service", "Service-Name", "label", False),
     ],
 )
 def test_schema_settings_type_matrix(
