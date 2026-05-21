@@ -53,6 +53,7 @@ HARDWARE_OBJECT_KINDS = {"host", "system"}
 NETWORK_ADDRESS_EDIT_KINDS = {"host", "system", "netzwerk"}
 NETWORK_PORT_EDIT_KINDS: set[str] = set()
 NETWORK_ENDPOINT_EDIT_KINDS = {"host", "system", "netzwerk", "service"}
+SERVICE_INFORMATION_OBJECT_KINDS = {"service"}
 ENDPOINT_TYPES = ENDPOINT_TYPE_OPTIONS
 
 
@@ -251,6 +252,8 @@ def object_detail(
     hardware_fields = _hardware_schema_fields(ui_schema, hardware)
     ports = _list_of_mappings(object_data.get("ports"))
     endpoints = _list_of_mappings(object_data.get("endpoints"))
+    service_information = _service_information_summary(object_data)
+    service_information_fields = _service_information_schema_fields(ui_schema, service_information)
     return templates.TemplateResponse(
         request,
         "object_detail.html",
@@ -271,6 +274,9 @@ def object_detail(
             "hardware_fields": hardware_fields,
             "supports_hardware": catalog_object.kind in HARDWARE_OBJECT_KINDS,
             "container": _container_summary(object_data),
+            "service_information": service_information,
+            "service_information_fields": service_information_fields,
+            "supports_service_information": catalog_object.kind in SERVICE_INFORMATION_OBJECT_KINDS,
             "ports": ports,
             "endpoints": endpoints,
             "network_address_rows": _padded_mappings(
@@ -502,6 +508,8 @@ def update_object(
     hardware_memory: Annotated[str | None, Form()] = None,
     hardware_gpu: Annotated[str | None, Form()] = None,
     hardware_storage: Annotated[str | None, Form()] = None,
+    service_sources: Annotated[str | None, Form()] = None,
+    service_running_version: Annotated[str | None, Form()] = None,
     data_json: Annotated[str | None, Form()] = None,
 ):
     submitted_hardware = any(
@@ -514,6 +522,13 @@ def update_object(
             hardware_memory,
             hardware_gpu,
             hardware_storage,
+        )
+    )
+    submitted_service_information = any(
+        value is not None
+        for value in (
+            service_sources,
+            service_running_version,
         )
     )
     try:
@@ -565,6 +580,25 @@ def update_object(
                 gpu=hardware_gpu if "hardware_gpu" in allowed_hardware_fields else None,
                 storage=hardware_storage if "hardware_storage" in allowed_hardware_fields else None,
             )
+        if target_kind in SERVICE_INFORMATION_OBJECT_KINDS and submitted_service_information:
+            allowed_service_information_fields = {
+                str(field["key"])
+                for field in schema_field_payload(ui_schema)
+                if str(field["key"]).startswith("service_")
+            }
+            _apply_service_information_fields(
+                data,
+                sources=(
+                    service_sources
+                    if "service_sources" in allowed_service_information_fields
+                    else None
+                ),
+                running_version=(
+                    service_running_version
+                    if "service_running_version" in allowed_service_information_fields
+                    else None
+                ),
+            )
         _reject_secret_shaped_form_data(data)
         payload = CatalogObjectIn(
             id=object_id,
@@ -589,6 +623,10 @@ def update_object(
         hardware_fields = _hardware_schema_fields(ui_schema, hardware)
         ports = _list_of_mappings(object_data.get("ports"))
         endpoints = _list_of_mappings(object_data.get("endpoints"))
+        service_information = _service_information_summary(object_data)
+        service_information_fields = _service_information_schema_fields(
+            ui_schema, service_information
+        )
         relationship_groups = _group_relationships(
             catalog_object,
             relationships,
@@ -619,6 +657,11 @@ def update_object(
                 "hardware_fields": hardware_fields,
                 "supports_hardware": catalog_object.kind in HARDWARE_OBJECT_KINDS,
                 "container": _container_summary(object_data),
+                "service_information": service_information,
+                "service_information_fields": service_information_fields,
+                "supports_service_information": (
+                    catalog_object.kind in SERVICE_INFORMATION_OBJECT_KINDS
+                ),
                 "ports": ports,
                 "endpoints": endpoints,
                 "network_address_rows": _padded_mappings(
@@ -638,7 +681,11 @@ def update_object(
                 "object_kinds": OBJECT_KINDS,
                 "object_statuses": OBJECT_STATUSES_UI,
                 "error": _safe_error_message(exc),
-                "edit_section": "hardware" if submitted_hardware else "overview",
+                "edit_section": (
+                    "service-information"
+                    if submitted_service_information
+                    else "hardware" if submitted_hardware else "overview"
+                ),
             },
             status_code=422,
         )
@@ -1302,6 +1349,48 @@ def _hardware_schema_fields(ui_schema: Any, hardware: Mapping[str, str]) -> list
     ]
 
 
+def _service_information_summary(data: Mapping[str, Any]) -> dict[str, Any]:
+    service_information = data.get("service_information")
+    if not isinstance(service_information, Mapping):
+        return {
+            "sources": [],
+            "sources_text": "",
+            "running_version": "",
+        }
+    raw_sources = service_information.get("sources")
+    if isinstance(raw_sources, list):
+        sources = [str(source) for source in raw_sources if str(source).strip()]
+    elif isinstance(raw_sources, str):
+        sources = _split_multivalue(raw_sources)
+    else:
+        sources = []
+    return {
+        "sources": sources,
+        "sources_text": "\n".join(sources),
+        "running_version": str(service_information.get("running_version") or ""),
+    }
+
+
+def _service_information_schema_fields(
+    ui_schema: Any,
+    service_information: Mapping[str, Any],
+) -> list[dict[str, str]]:
+    service_information_values = {
+        "service_sources": str(service_information.get("sources_text") or ""),
+        "service_running_version": str(service_information.get("running_version") or ""),
+    }
+    return [
+        {
+            "key": str(field["key"]),
+            "label": str(field["label"]),
+            "placeholder": str(field["placeholder"] or ""),
+            "value": service_information_values.get(str(field["key"]), ""),
+        }
+        for field in schema_field_payload(ui_schema)
+        if str(field["key"]).startswith("service_")
+    ]
+
+
 def _apply_hardware_fields(
     data: dict[str, Any],
     *,
@@ -1349,6 +1438,32 @@ def _apply_hardware_fields(
         data["hardware"] = hardware
     else:
         data.pop("hardware", None)
+
+
+def _apply_service_information_fields(
+    data: dict[str, Any],
+    *,
+    sources: str | None,
+    running_version: str | None,
+) -> None:
+    service_information = dict(
+        data.get("service_information")
+        if isinstance(data.get("service_information"), Mapping)
+        else {}
+    )
+    if sources is not None:
+        source_values = _split_multivalue(sources)
+        if source_values:
+            service_information["sources"] = source_values
+        else:
+            service_information.pop("sources", None)
+    if running_version is not None:
+        service_information["running_version"] = running_version.strip()
+    service_information = {key: value for key, value in service_information.items() if value}
+    if service_information:
+        data["service_information"] = service_information
+    else:
+        data.pop("service_information", None)
 
 
 def _access_methods(

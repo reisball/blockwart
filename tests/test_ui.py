@@ -258,6 +258,32 @@ def test_public_schemas_include_endpoint_fields_but_not_create_form(
         assert all(field["visible_in_create"] is False for field in endpoint_fields)
 
 
+def test_service_schema_includes_service_information_fields(client: TestClient) -> None:
+    response = client.get("/settings/schema?kind=service")
+
+    assert response.status_code == 200
+    for expected in (
+        "Service Information",
+        "Sources",
+        "Running Version",
+        "data_json.service_information.sources[]",
+        "data_json.service_information.running_version",
+    ):
+        assert expected in response.text
+
+    fields = schema_field_payload(UI_SCHEMAS["service"])
+    service_fields = [field for field in fields if str(field["key"]).startswith("service_")]
+    assert [field["key"] for field in service_fields] == [
+        "service_sources",
+        "service_running_version",
+    ]
+    assert all(field["visible_in_create"] is False for field in service_fields)
+
+    for kind in ("host", "system", "netzwerk"):
+        fields = schema_field_payload(UI_SCHEMAS[kind])
+        assert not any(str(field["key"]).startswith("service_") for field in fields)
+
+
 def test_host_and_system_schema_include_hardware_fields(client: TestClient) -> None:
     host_response = client.get("/settings/schema?kind=host")
     assert host_response.status_code == 200
@@ -1202,6 +1228,79 @@ def test_service_network_edit_only_exposes_and_updates_endpoints(
 
     assert invalid_response.status_code == 422
     assert "endpoint type must be one of: Web, REST API, MCP, HEC, SSH" in invalid_response.text
+
+
+def test_service_detail_can_edit_service_information_fields(
+    client: TestClient,
+    session_factory,
+) -> None:
+    object_id = "service-information-scope"
+    with session_factory() as session:
+        upsert_object(
+            session,
+            CatalogObjectIn(
+                id=object_id,
+                kind="service",
+                label="Service Information Scope",
+                status="active",
+                summary="Service information edit.",
+                data={
+                    "schema_version": 1,
+                    "service_information": {
+                        "sources": ["https://github.com/example/service"],
+                        "running_version": "0.0.1 beta rc-1",
+                    },
+                    "endpoints": [
+                        {
+                            "type": "Web",
+                            "url": "https://192.168.50.10",
+                            "port": 443,
+                        }
+                    ],
+                },
+            ),
+        )
+
+    detail_response = client.get(f"/objects/{object_id}")
+
+    assert detail_response.status_code == 200
+    service_info_index = detail_response.text.index("Service Information")
+    network_index = detail_response.text.index("Netzwerk")
+    assert service_info_index < network_index
+    assert "https://github.com/example/service" in detail_response.text
+    assert "0.0.1 beta rc-1" in detail_response.text
+
+    edit_response = client.get(f"/objects/{object_id}?edit=service-information")
+
+    assert edit_response.status_code == 200
+    assert 'name="service_sources"' in edit_response.text
+    assert 'name="service_running_version"' in edit_response.text
+    assert 'name="endpoint_url"' not in edit_response.text
+
+    update_response = client.post(
+        f"/objects/{object_id}",
+        data={
+            "service_sources": "https://github.com/example/service\nhttps://vendor.example",
+            "service_running_version": "0.0.1 beta rc-2",
+        },
+        follow_redirects=False,
+    )
+
+    assert update_response.status_code == 303
+    with session_factory() as session:
+        updated = get_object(session, object_id)
+
+    assert updated is not None
+    assert updated.data["service_information"] == {
+        "sources": [
+            "https://github.com/example/service",
+            "https://vendor.example",
+        ],
+        "running_version": "0.0.1 beta rc-2",
+    }
+    assert updated.data["endpoints"] == [
+        {"type": "Web", "url": "https://192.168.50.10", "port": 443}
+    ]
 
 
 @pytest.mark.parametrize("kind", ["host", "system", "netzwerk"])
