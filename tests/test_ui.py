@@ -584,6 +584,45 @@ def test_object_data_updates_write_object_audit_for_public_kinds(
     assert event.summary == f"Feld Kommentar wurde von leer auf {kind} changed geändert"
 
 
+def test_object_detail_renders_multi_change_audit_summary_as_lines(
+    client: TestClient,
+    session_factory,
+) -> None:
+    with session_factory() as session:
+        upsert_object(
+            session,
+            CatalogObjectIn(
+                id="audit-lines",
+                kind="system",
+                label="Audit Lines",
+                status="active",
+                summary="Before",
+                data={"schema_version": 1},
+            ),
+        )
+        upsert_object(
+            session,
+            CatalogObjectIn(
+                id="audit-lines",
+                kind="system",
+                label="Audit Lines",
+                status="active",
+                summary="After",
+                data={"schema_version": 1, "comment": "Readable"},
+            ),
+        )
+
+    response = client.get("/objects/audit-lines")
+
+    assert response.status_code == 200
+    audit_match = re.search(r"<ul class=\"audit-summary-lines\">(.*?)</ul>", response.text, re.S)
+    assert audit_match is not None
+    audit_summary = audit_match.group(1)
+    assert "Feld Kurzbeschreibung wurde von Before auf After geändert" in audit_summary
+    assert "Feld Kommentar wurde von leer auf Readable geändert" in audit_summary
+    assert "</li>" in audit_summary
+
+
 @pytest.mark.parametrize("kind", ["netzwerk", "service"])
 def test_network_and_service_detail_do_not_show_hardware_panel(
     client: TestClient,

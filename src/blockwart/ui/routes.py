@@ -66,6 +66,12 @@ def _metadata_timestamp(value: str | None) -> str:
     return f"{exact} - {_relative_timestamp(parsed)}"
 
 
+def _audit_summary_lines(value: str | None) -> list[str]:
+    if not value:
+        return []
+    return [line.strip() for line in value.split("; ") if line.strip()]
+
+
 def _parse_timestamp(value: str) -> datetime | None:
     normalized = value.strip()
     if normalized.endswith("Z"):
@@ -100,6 +106,7 @@ def _relative_timestamp(value: datetime) -> str:
 
 
 templates.env.filters["metadata_timestamp"] = _metadata_timestamp
+templates.env.filters["audit_summary_lines"] = _audit_summary_lines
 
 
 @router.get("/", response_class=HTMLResponse)

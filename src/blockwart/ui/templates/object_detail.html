@@ -9,7 +9,7 @@
         document.documentElement.dataset.theme = "light";
       }
     </script>
-    <link rel="stylesheet" href="/static/app.css?v=057" />
+    <link rel="stylesheet" href="/static/app.css?v=058" />
     <script src="/static/theme.js?v=054" defer></script>
   </head>
   <body>
@@ -414,7 +414,11 @@
               {% for event in audit_events %}
                 <li>
                   <time class="audit-time">{{ event.created_at }}</time>
-                  <div class="audit-summary">{{ event.summary }}</div>
+                  <ul class="audit-summary-lines">
+                    {% for line in event.summary|audit_summary_lines %}
+                      <li>{{ line }}</li>
+                    {% endfor %}
+                  </ul>
                   <div class="meta">{{ event.action }} · {{ event.actor }}</div>
                 </li>
               {% endfor %}
