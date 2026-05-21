@@ -34,7 +34,8 @@ REFERENCE_TARGETS = {
 DEPENDENCY_TARGETS = {"host", "system", "netzwerk", "service"}
 CREDENTIAL_PROVIDERS = {"vaultwarden", "secrets_json", "env_file", "local_file", "external"}
 CREDENTIAL_ACCESS_TYPES = {"ssh", "web", "api", "database", "smb", "sudo", "token", "other"}
-SERVICE_ENDPOINT_TYPES = {"Web", "REST API", "MCP", "HEC"}
+ENDPOINT_TYPE_OPTIONS = ("Web", "REST API", "MCP", "HEC", "SSH")
+ENDPOINT_TYPES = set(ENDPOINT_TYPE_OPTIONS)
 RUNBOOK_RISK_LEVELS = {"read-only", "safe-change", "disruptive", "destructive"}
 FORBIDDEN_CREDENTIAL_REFERENCE_KEYS = {
     "credential",
@@ -153,9 +154,30 @@ def _validate_access_methods(data: dict[str, Any]) -> None:
             )
 
 
+def _validate_endpoints(data: dict[str, Any]) -> None:
+    if "endpoints" not in data:
+        return
+    for index, value in enumerate(_require_list(data["endpoints"], "data.endpoints")):
+        endpoint = _require_mapping(value, f"data.endpoints[{index}]")
+        if "type" in endpoint:
+            endpoint_type = _require_string(endpoint["type"], f"data.endpoints[{index}].type")
+            if endpoint_type not in ENDPOINT_TYPES:
+                allowed = ", ".join(ENDPOINT_TYPE_OPTIONS)
+                raise ValueError(f"data.endpoints[{index}].type must be one of: {allowed}")
+        if "url" in endpoint:
+            _require_string(endpoint["url"], f"data.endpoints[{index}].url")
+        if "port" in endpoint:
+            port = endpoint["port"]
+            if not isinstance(port, int) or isinstance(port, bool) or not 1 <= port <= 65535:
+                raise ValueError(
+                    f"data.endpoints[{index}].port must be an integer from 1 to 65535"
+                )
+
+
 def _validate_system_data(data: dict[str, Any]) -> None:
     _validate_network(data)
     _validate_ports(data)
+    _validate_endpoints(data)
     _validate_access_methods(data)
     _validate_dependencies(data)
     for field, allowed_kinds in REFERENCE_TARGETS.items():
@@ -167,24 +189,7 @@ def _validate_service_data(data: dict[str, Any]) -> None:
         _validate_reference(data["system_id"], {"system"}, "data.system_id")
     if "owner" in data:
         _require_string(data["owner"], "data.owner")
-    if "endpoints" in data:
-        for index, value in enumerate(_require_list(data["endpoints"], "data.endpoints")):
-            endpoint = _require_mapping(value, f"data.endpoints[{index}]")
-            if "type" in endpoint:
-                endpoint_type = _require_string(endpoint["type"], f"data.endpoints[{index}].type")
-                if endpoint_type not in SERVICE_ENDPOINT_TYPES:
-                    allowed = ", ".join(sorted(SERVICE_ENDPOINT_TYPES))
-                    raise ValueError(
-                        f"data.endpoints[{index}].type must be one of: {allowed}"
-                    )
-            if "url" in endpoint:
-                _require_string(endpoint["url"], f"data.endpoints[{index}].url")
-            if "port" in endpoint:
-                port = endpoint["port"]
-                if not isinstance(port, int) or isinstance(port, bool) or not 1 <= port <= 65535:
-                    raise ValueError(
-                        f"data.endpoints[{index}].port must be an integer from 1 to 65535"
-                    )
+    _validate_endpoints(data)
     if "auth" in data:
         auth = _require_mapping(data["auth"], "data.auth")
         if "credential_references" in auth:
@@ -299,6 +304,7 @@ class CatalogObjectIn(BaseModel):
             _validate_system_data(self.data)
         elif self.kind == "netzwerk":
             _validate_network(self.data)
+            _validate_endpoints(self.data)
         elif self.kind == "service":
             _validate_service_data(self.data)
         elif self.kind == "credential_reference":

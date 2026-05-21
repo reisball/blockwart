@@ -25,6 +25,7 @@ from blockwart.domain.ui_schema import (
 )
 from blockwart.models import Relationship
 from blockwart.schemas.catalog import (
+    ENDPOINT_TYPE_OPTIONS,
     OBJECT_STATUSES,
     PUBLIC_OBJECT_KINDS,
     CatalogObjectIn,
@@ -52,8 +53,8 @@ SAFE_DATA_JSON_FALLBACK = "{\n  \"schema_version\": 1\n}"
 HARDWARE_OBJECT_KINDS = {"host", "system"}
 NETWORK_ADDRESS_EDIT_KINDS = {"host", "system", "netzwerk"}
 NETWORK_PORT_EDIT_KINDS = {"host", "system"}
-NETWORK_ENDPOINT_EDIT_KINDS = {"service"}
-ENDPOINT_TYPES = ("Web", "REST API", "MCP", "HEC")
+NETWORK_ENDPOINT_EDIT_KINDS = {"host", "system", "netzwerk", "service"}
+ENDPOINT_TYPES = ENDPOINT_TYPE_OPTIONS
 
 
 def _metadata_timestamp(value: str | None) -> str:
@@ -1444,6 +1445,7 @@ def _normalize_endpoint_type(value: object) -> str:
         "publicmanagementapi": "REST API",
         "mcp": "MCP",
         "hec": "HEC",
+        "ssh": "SSH",
     }
     return aliases.get(compact, raw if raw in ENDPOINT_TYPES else "")
 

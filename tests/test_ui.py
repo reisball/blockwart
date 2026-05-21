@@ -234,27 +234,28 @@ def test_ui_schema_payload_matches_public_object_kinds() -> None:
         assert primary_field["storage_path"] == schema.as_dict()["primary_name_storage_path"]
 
 
-def test_service_schema_includes_endpoint_fields_but_not_create_form(
+def test_public_schemas_include_endpoint_fields_but_not_create_form(
     client: TestClient,
 ) -> None:
-    response = client.get("/settings/schema?kind=service")
+    for kind in PUBLIC_OBJECT_KINDS:
+        response = client.get(f"/settings/schema?kind={kind}")
 
-    assert response.status_code == 200
-    for key in ("endpoint_type", "endpoint_url", "endpoint_port"):
-        assert f"<code>{key}</code>" in response.text
-        assert f'name="field_label_{key}"' in response.text
-    assert "data_json.endpoints[].type" in response.text
-    assert "data_json.endpoints[].url" in response.text
-    assert "data_json.endpoints[].port" in response.text
+        assert response.status_code == 200
+        for key in ("endpoint_type", "endpoint_url", "endpoint_port"):
+            assert f"<code>{key}</code>" in response.text
+            assert f'name="field_label_{key}"' in response.text
+        assert "data_json.endpoints[].type" in response.text
+        assert "data_json.endpoints[].url" in response.text
+        assert "data_json.endpoints[].port" in response.text
 
-    fields = schema_field_payload(UI_SCHEMAS["service"])
-    endpoint_fields = [field for field in fields if str(field["key"]).startswith("endpoint_")]
-    assert [field["key"] for field in endpoint_fields] == [
-        "endpoint_type",
-        "endpoint_url",
-        "endpoint_port",
-    ]
-    assert all(field["visible_in_create"] is False for field in endpoint_fields)
+        fields = schema_field_payload(UI_SCHEMAS[kind])
+        endpoint_fields = [field for field in fields if str(field["key"]).startswith("endpoint_")]
+        assert [field["key"] for field in endpoint_fields] == [
+            "endpoint_type",
+            "endpoint_url",
+            "endpoint_port",
+        ]
+        assert all(field["visible_in_create"] is False for field in endpoint_fields)
 
 
 def test_host_and_system_schema_include_hardware_fields(client: TestClient) -> None:
@@ -1133,7 +1134,7 @@ def test_service_network_edit_only_exposes_and_updates_endpoints(
     assert edit_response.status_code == 200
     assert "ENDPOINT TYPE" in edit_response.text
     assert '<select name="endpoint_type">' in edit_response.text
-    for endpoint_type in ("Web", "REST API", "MCP", "HEC"):
+    for endpoint_type in ("Web", "REST API", "MCP", "HEC", "SSH"):
         assert f'<option value="{endpoint_type}"' in edit_response.text
     assert 'name="endpoint_type"' in edit_response.text
     assert 'value="Web" selected' in edit_response.text
@@ -1174,15 +1175,99 @@ def test_service_network_edit_only_exposes_and_updates_endpoints(
     invalid_response = client.post(
         "/objects/service-network-scope/network",
         data={
-            "endpoint_type": "SSH",
-            "endpoint_url": "ssh://192.168.50.10:22",
-            "endpoint_port": "22",
+            "endpoint_type": "SMTP",
+            "endpoint_url": "smtp://192.168.50.10:25",
+            "endpoint_port": "25",
         },
         follow_redirects=False,
     )
 
     assert invalid_response.status_code == 422
-    assert "endpoint type must be one of: Web, REST API, MCP, HEC" in invalid_response.text
+    assert "endpoint type must be one of: Web, REST API, MCP, HEC, SSH" in invalid_response.text
+
+
+@pytest.mark.parametrize("kind", ["host", "system", "netzwerk"])
+def test_public_network_edit_exposes_and_updates_endpoints(
+    client: TestClient,
+    session_factory,
+    kind: str,
+) -> None:
+    object_id = f"{kind}-endpoint-scope"
+    data = {
+        "schema_version": 1,
+        "network": {"addresses": [{"ip": "192.168.50.20", "scope": "lan"}]},
+        "endpoints": [{"type": "Web", "url": "https://192.168.50.20", "port": 443}],
+    }
+    if kind in {"host", "system"}:
+        data["ports"] = [{"port": 443, "protocol": "tcp", "purpose": "HTTPS"}]
+    with session_factory() as session:
+        upsert_object(
+            session,
+            CatalogObjectIn(
+                id=object_id,
+                kind=kind,
+                label=f"{kind} endpoint scope",
+                status="active",
+                summary="Network endpoint edit.",
+                data=data,
+            ),
+        )
+
+    edit_response = client.get(f"/objects/{object_id}?edit=network")
+
+    assert edit_response.status_code == 200
+    assert "ENDPOINT TYPE" in edit_response.text
+    assert '<select name="endpoint_type">' in edit_response.text
+    assert '<option value="SSH"' in edit_response.text
+    assert 'value="Web" selected' in edit_response.text
+    assert 'name="endpoint_name"' not in edit_response.text
+    assert 'name="address_ip"' in edit_response.text
+    assert ('name="port_value"' in edit_response.text) is (kind in {"host", "system"})
+
+    form_data = {
+        "address_ip": "192.168.50.20",
+        "address_interface": "eth0",
+        "address_scope": "lan",
+        "endpoint_type": "SSH",
+        "endpoint_url": "ssh://192.168.50.20:22",
+        "endpoint_port": "22",
+    }
+    if kind in {"host", "system"}:
+        form_data.update(
+            {
+                "port_value": "443",
+                "port_protocol": "tcp",
+                "port_purpose": "HTTPS",
+                "port_exposure": "private",
+            }
+        )
+
+    update_response = client.post(
+        f"/objects/{object_id}/network",
+        data=form_data,
+        follow_redirects=False,
+    )
+
+    assert update_response.status_code == 303
+    with session_factory() as session:
+        updated = get_object(session, object_id)
+
+    assert updated is not None
+    assert updated.data["network"]["addresses"] == [
+        {"ip": "192.168.50.20", "scope": "lan", "interface": "eth0"}
+    ]
+    if kind in {"host", "system"}:
+        assert updated.data["ports"] == [
+            {
+                "port": 443,
+                "protocol": "tcp",
+                "purpose": "HTTPS",
+                "exposure": "private",
+            }
+        ]
+    assert updated.data["endpoints"] == [
+        {"type": "SSH", "url": "ssh://192.168.50.20:22", "port": 22}
+    ]
 
 
 def test_update_object_form_does_not_echo_rejected_secret_values(client: TestClient) -> None:

@@ -218,7 +218,7 @@ FIELD_DEFINITIONS: dict[str, UiField] = {
         "ENDPOINT TYPE",
         "select",
         "data_json.endpoints[].type",
-        placeholder="Web, REST API, MCP, HEC",
+        placeholder="Web, REST API, MCP, HEC, SSH",
     ),
     "endpoint_url": UiField(
         "endpoint_url",
@@ -276,7 +276,7 @@ SYSTEM_HARDWARE_SCHEMA_FIELDS = (
     "hardware_gpu",
     "hardware_storage",
 )
-SERVICE_ENDPOINT_SCHEMA_FIELDS = (
+ENDPOINT_SCHEMA_FIELDS = (
     "endpoint_type",
     "endpoint_url",
     "endpoint_port",
@@ -289,7 +289,7 @@ UI_SCHEMAS: dict[str, UiTypeSchema] = {
         primary_name_label="Hostname",
         primary_name_storage="network_hostname",
         supports_platform=False,
-        fields=COMMON_SCHEMA_FIELDS + HARDWARE_SCHEMA_FIELDS,
+        fields=COMMON_SCHEMA_FIELDS + HARDWARE_SCHEMA_FIELDS + ENDPOINT_SCHEMA_FIELDS,
         create_fields=COMMON_CREATE_FIELDS,
         panels=CURRENT_UI_PANELS,
     ),
@@ -298,7 +298,7 @@ UI_SCHEMAS: dict[str, UiTypeSchema] = {
         primary_name_label="Hostname",
         primary_name_storage="network_hostname",
         supports_platform=True,
-        fields=PLATFORM_SCHEMA_FIELDS + SYSTEM_HARDWARE_SCHEMA_FIELDS,
+        fields=PLATFORM_SCHEMA_FIELDS + SYSTEM_HARDWARE_SCHEMA_FIELDS + ENDPOINT_SCHEMA_FIELDS,
         create_fields=PLATFORM_CREATE_FIELDS,
         panels=CURRENT_UI_PANELS,
     ),
@@ -307,7 +307,7 @@ UI_SCHEMAS: dict[str, UiTypeSchema] = {
         primary_name_label="Name",
         primary_name_storage="label",
         supports_platform=False,
-        fields=COMMON_SCHEMA_FIELDS,
+        fields=COMMON_SCHEMA_FIELDS + ENDPOINT_SCHEMA_FIELDS,
         create_fields=COMMON_CREATE_FIELDS,
         panels=CURRENT_UI_PANELS,
     ),
@@ -316,7 +316,7 @@ UI_SCHEMAS: dict[str, UiTypeSchema] = {
         primary_name_label="Service-Name",
         primary_name_storage="label",
         supports_platform=True,
-        fields=PLATFORM_SCHEMA_FIELDS + SERVICE_ENDPOINT_SCHEMA_FIELDS,
+        fields=PLATFORM_SCHEMA_FIELDS + ENDPOINT_SCHEMA_FIELDS,
         create_fields=PLATFORM_CREATE_FIELDS,
         panels=CURRENT_UI_PANELS,
     ),
