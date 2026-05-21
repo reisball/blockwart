@@ -168,11 +168,6 @@
                           <span class="badge">{{ address.ip }}</span>
                         {% endfor %}
                       {% endif %}
-                      {% if object.data.ports %}
-                        {% for port in object.data.ports[:2] %}
-                          <span class="badge">{{ port.port }}/{{ port.protocol or "tcp" }}</span>
-                        {% endfor %}
-                      {% endif %}
                       {% if object.data.labels %}
                         {% for label in object.data.labels[:3] %}
                           <span class="badge">{{ label }}</span>

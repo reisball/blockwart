@@ -176,7 +176,6 @@ def _validate_endpoints(data: dict[str, Any]) -> None:
 
 def _validate_system_data(data: dict[str, Any]) -> None:
     _validate_network(data)
-    _validate_ports(data)
     _validate_endpoints(data)
     _validate_access_methods(data)
     _validate_dependencies(data)

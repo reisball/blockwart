@@ -262,7 +262,7 @@
                   </table>
                 </div>
               {% endif %}
-              {% if ports %}
+              {% if ports and can_edit_network_ports %}
                 <h3>Ports</h3>
                 <div class="table-wrap">
                   <table class="table">
@@ -302,7 +302,7 @@
                   </table>
                 </div>
               {% endif %}
-              {% if not network.addresses and not ports and not endpoints %}
+              {% if not network.addresses and (not ports or not can_edit_network_ports) and not endpoints %}
                 <div class="meta">Keine Netzwerkdaten erfasst.</div>
               {% endif %}
             {% endif %}

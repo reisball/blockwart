@@ -1062,6 +1062,7 @@ def test_panel_edit_forms_update_existing_network_and_access(
 
     assert network_edit.status_code == 200
     assert 'name="address_ip"' in network_edit.text
+    assert 'name="port_value"' not in network_edit.text
     assert access_edit.status_code == 200
     assert 'name="method_endpoint"' in access_edit.text
 
@@ -1097,7 +1098,7 @@ def test_panel_edit_forms_update_existing_network_and_access(
     assert "edit-demo" in detail.text
     assert "Hostnames" not in detail.text
     assert "192.168.50.221" in detail.text
-    assert "SSH admin" in detail.text
+    assert "SSH admin" not in detail.text
     assert "key-only" in detail.text
 
 
@@ -1199,7 +1200,7 @@ def test_public_network_edit_exposes_and_updates_endpoints(
         "endpoints": [{"type": "Web", "url": "https://192.168.50.20", "port": 443}],
     }
     if kind in {"host", "system"}:
-        data["ports"] = [{"port": 443, "protocol": "tcp", "purpose": "HTTPS"}]
+        data["ports"] = [{"port": 443, "protocol": "tcp", "purpose": "Legacy HTTPS"}]
     with session_factory() as session:
         upsert_object(
             session,
@@ -1222,7 +1223,7 @@ def test_public_network_edit_exposes_and_updates_endpoints(
     assert 'value="Web" selected' in edit_response.text
     assert 'name="endpoint_name"' not in edit_response.text
     assert 'name="address_ip"' in edit_response.text
-    assert ('name="port_value"' in edit_response.text) is (kind in {"host", "system"})
+    assert 'name="port_value"' not in edit_response.text
 
     form_data = {
         "address_ip": "192.168.50.20",
@@ -1231,16 +1232,11 @@ def test_public_network_edit_exposes_and_updates_endpoints(
         "endpoint_type": "SSH",
         "endpoint_url": "ssh://192.168.50.20:22",
         "endpoint_port": "22",
+        "port_value": "8443",
+        "port_protocol": "tcp",
+        "port_purpose": "Ignored",
+        "port_exposure": "private",
     }
-    if kind in {"host", "system"}:
-        form_data.update(
-            {
-                "port_value": "443",
-                "port_protocol": "tcp",
-                "port_purpose": "HTTPS",
-                "port_exposure": "private",
-            }
-        )
 
     update_response = client.post(
         f"/objects/{object_id}/network",
@@ -1261,8 +1257,7 @@ def test_public_network_edit_exposes_and_updates_endpoints(
             {
                 "port": 443,
                 "protocol": "tcp",
-                "purpose": "HTTPS",
-                "exposure": "private",
+                "purpose": "Legacy HTTPS",
             }
         ]
     assert updated.data["endpoints"] == [

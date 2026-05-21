@@ -4,7 +4,6 @@ from collections import Counter
 from collections.abc import Mapping
 from datetime import UTC, datetime
 from typing import Annotated, Any
-from urllib.parse import urlparse
 
 from fastapi import APIRouter, Depends, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
@@ -52,7 +51,7 @@ UI_KIND_PRIORITY = {kind: index for index, kind in enumerate(OBJECT_KINDS)}
 SAFE_DATA_JSON_FALLBACK = "{\n  \"schema_version\": 1\n}"
 HARDWARE_OBJECT_KINDS = {"host", "system"}
 NETWORK_ADDRESS_EDIT_KINDS = {"host", "system", "netzwerk"}
-NETWORK_PORT_EDIT_KINDS = {"host", "system"}
+NETWORK_PORT_EDIT_KINDS: set[str] = set()
 NETWORK_ENDPOINT_EDIT_KINDS = {"host", "system", "netzwerk", "service"}
 ENDPOINT_TYPES = ENDPOINT_TYPE_OPTIONS
 
@@ -1178,28 +1177,7 @@ def _relationship_node_ports(catalog_object: CatalogObjectOut | None) -> list[di
 def _relationship_system_ports(catalog_object: CatalogObjectOut) -> list[dict[str, str]]:
     if catalog_object.kind == "service":
         return _relationship_service_ports(catalog_object, None)
-    ports: list[dict[str, str]] = []
-    seen: set[str] = set()
-    for port_data in _list_of_mappings(catalog_object.data.get("ports")):
-        port = port_data.get("port")
-        if port is None:
-            continue
-        protocol = str(port_data.get("protocol") or "tcp")
-        value = f"{port}/{protocol}"
-        ports.append({"label": "system", "value": value})
-        seen.add(value)
-    for access_method in _list_of_mappings(catalog_object.data.get("access_methods")):
-        endpoint = str(access_method.get("endpoint") or "")
-        parsed = urlparse(endpoint)
-        if parsed.port is None:
-            continue
-        protocol = "tcp"
-        value = f"{parsed.port}/{protocol}"
-        if value in seen:
-            continue
-        ports.append({"label": "system", "value": value})
-        seen.add(value)
-    return ports
+    return []
 
 
 def _relationship_service_ports(
