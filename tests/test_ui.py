@@ -821,7 +821,7 @@ def test_create_object_form_redirects_to_detail(
         ("host", "Hostname", True, False),
         ("system", "Hostname", True, True),
         ("netzwerk", "Name", False, False),
-        ("service", "Service-Name", False, True),
+        ("service", "Service-Name", False, False),
     ],
 )
 def test_ui_schema_drives_primary_name_storage_by_kind(
@@ -946,6 +946,7 @@ def test_overview_edit_updates_object_metadata(client: TestClient, session_facto
     assert 'name="label"' not in edit_response.text
     assert 'name="primary_name"' in edit_response.text
     assert "Container ID" not in edit_response.text
+    assert 'name="platform"' in edit_response.text
     assert "CREATED AT" in edit_response.text
     assert "LAST CHANGED" in edit_response.text
     assert "Bearbeiten" not in edit_response.text
@@ -956,6 +957,7 @@ def test_overview_edit_updates_object_metadata(client: TestClient, session_facto
             "primary_name": "n8n-main",
             "kind": "system",
             "status": "inactive",
+            "platform": "Docker",
             "summary": "Updated through overview.",
         },
         follow_redirects=False,
@@ -970,7 +972,43 @@ def test_overview_edit_updates_object_metadata(client: TestClient, session_facto
         catalog_object = get_object(session, "n8n")
     assert catalog_object is not None
     assert catalog_object.label == "n8n-main"
+    assert catalog_object.data["platform"] == "Docker"
     assert catalog_object.data["network"]["hostnames"][0] == "n8n-main"
+
+
+def test_overview_edit_hides_platform_for_service(client: TestClient, session_factory) -> None:
+    with session_factory() as session:
+        upsert_object(
+            session,
+            CatalogObjectIn(
+                id="service-overview-platform",
+                kind="service",
+                label="Service Overview Platform",
+                status="active",
+                data={"schema_version": 1, "platform": "Legacy"},
+            ),
+        )
+
+    response = client.post(
+        "/objects/service-overview-platform",
+        data={
+            "primary_name": "Service Without Platform",
+            "kind": "service",
+            "status": "active",
+            "platform": "Docker",
+            "summary": "Service overview update.",
+        },
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 303
+    edit_response = client.get("/objects/service-overview-platform?edit=overview")
+    assert edit_response.status_code == 200
+    assert 'name="platform"' not in edit_response.text
+    with session_factory() as session:
+        catalog_object = get_object(session, "service-overview-platform")
+    assert catalog_object is not None
+    assert "platform" not in catalog_object.data
 
 
 def test_detail_form_can_create_relationship(client: TestClient, session_factory) -> None:

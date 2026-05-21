@@ -61,6 +61,16 @@
                   {% endfor %}
                 </select>
               </label>
+              {% if ui_schema.supports_platform %}
+                <label>Plattform
+                  <select name="platform">
+                    <option value="">Keine Plattform</option>
+                    {% for platform_type in platform_types %}
+                      <option value="{{ platform_type }}" {% if platform_type == object.data.platform %}selected{% endif %}>{{ platform_type }}</option>
+                    {% endfor %}
+                  </select>
+                </label>
+              {% endif %}
               <label>Kurzbeschreibung
                 <textarea class="summary-input" name="summary" placeholder="Kurzbeschreibung">{{ object.summary or "" }}</textarea>
               </label>
@@ -98,6 +108,12 @@
                   <span>Status</span>
                   <strong>{{ object.status }}</strong>
                 </div>
+                {% if ui_schema.supports_platform %}
+                  <div class="overview-label">
+                    <span>Plattform</span>
+                    <strong>{{ object.data.platform or "-" }}</strong>
+                  </div>
+                {% endif %}
                 <div class="overview-label">
                   <span>Relationships</span>
                   <strong>{{ relationships|length }}</strong>

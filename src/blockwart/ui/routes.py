@@ -299,6 +299,7 @@ def object_detail(
             ),
             "object_kinds": OBJECT_KINDS,
             "object_statuses": OBJECT_STATUSES_UI,
+            "platform_types": PLATFORM_TYPES,
             "error": None,
             "edit_section": edit,
         },
@@ -497,6 +498,7 @@ def update_object(
     primary_name: Annotated[str | None, Form()] = None,
     kind: Annotated[str | None, Form()] = None,
     status: Annotated[str | None, Form()] = None,
+    platform: Annotated[str | None, Form()] = None,
     summary: Annotated[str | None, Form()] = None,
     hostname: Annotated[str | None, Form()] = None,
     container_id: Annotated[str | None, Form()] = None,
@@ -544,6 +546,14 @@ def update_object(
         if primary_name is not None or hostname is not None or label is not None:
             primary_value = (primary_name or hostname or label or "").strip()
             _apply_primary_name(data, ui_schema, primary_value)
+        if platform is not None:
+            cleaned_platform = platform.strip()
+            if cleaned_platform and cleaned_platform not in PLATFORM_TYPES:
+                raise ValueError("Unsupported platform")
+            if ui_schema.supports_platform and cleaned_platform:
+                data["platform"] = cleaned_platform
+            else:
+                data.pop("platform", None)
         if container_id is not None or container_label is not None:
             container = dict(
                 data.get("container") if isinstance(data.get("container"), Mapping) else {}
@@ -680,6 +690,7 @@ def update_object(
                 "data_json": SAFE_DATA_JSON_FALLBACK,
                 "object_kinds": OBJECT_KINDS,
                 "object_statuses": OBJECT_STATUSES_UI,
+                "platform_types": PLATFORM_TYPES,
                 "error": _safe_error_message(exc),
                 "edit_section": (
                     "service-information"
