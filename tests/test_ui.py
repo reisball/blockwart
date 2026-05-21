@@ -446,7 +446,6 @@ def test_host_detail_can_edit_host_hardware_fields(
     assert "64 GB" in updated.text
     assert "Radeon 780M" in updated.text
     assert "2 TB NVMe" in updated.text
-    assert "Hardware test object." in updated.text
     assert "Feld Modell wurde von leer auf Beelink SER5 geändert" in updated.text
     assert "Feld CPU Hersteller wurde von leer auf AMD geändert" in updated.text
     assert "Feld CPU Name wurde von leer auf Ryzen 7 7840U geändert" in updated.text
@@ -694,6 +693,24 @@ def test_object_detail_shows_data_and_relationships(client: TestClient) -> None:
     assert 'data-theme-value="dark"' in response.text
     assert 'data-theme-value="light"' in response.text
     assert "/static/theme.js" in response.text
+
+
+def test_object_detail_header_only_shows_navigation_and_theme(
+    client: TestClient,
+) -> None:
+    response = client.get("/objects/n8n")
+
+    assert response.status_code == 200
+    header_match = re.search(r"<header class=\"topbar\">(.*?)</header>", response.text, re.S)
+    assert header_match is not None
+    header = header_match.group(1)
+
+    assert "Zur Suche" in header
+    assert 'data-theme-value="dark"' in header
+    assert 'data-theme-value="light"' in header
+    assert "n8n Web UI" not in header
+    assert "system:n8n" not in header
+    assert "active" not in header
 
 
 def test_comment_form_updates_object_and_audit(

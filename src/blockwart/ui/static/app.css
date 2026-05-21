@@ -100,6 +100,12 @@ a:hover {
   gap: 14px;
 }
 
+.detail-topbar-inner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
 .breadcrumb {
   color: var(--muted);
   font-size: 14px;
@@ -1148,6 +1154,11 @@ pre {
   .top-actions {
     width: 100%;
     justify-content: flex-start;
+  }
+
+  .detail-topbar-inner .top-actions {
+    width: auto;
+    justify-content: flex-end;
   }
 
   .theme-toggle {
