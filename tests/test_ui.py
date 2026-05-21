@@ -90,6 +90,8 @@ def test_create_object_form_is_hidden_behind_button(client: TestClient) -> None:
     assert 'name="object_id"' not in response.text
     assert 'role="button"' in response.text
     assert 'data-object-toggle' in response.text
+    assert 'class="object-visual"' in response.text
+    assert 'class="object-visual-placeholder"' in response.text
     assert 'data-detail-link' in response.text
     assert "relationship-chain" in response.text
     assert "relationship-pill" in response.text
