@@ -468,17 +468,10 @@ button:hover,
 }
 
 .list-cols-2 .kind,
-.list-cols-3 .kind,
-.list-cols-2 .object-visual,
-.list-cols-3 .object-visual {
+.list-cols-3 .kind {
   display: flex;
   flex-wrap: wrap;
   gap: 5px;
-}
-
-.list-cols-2 .object-visual,
-.list-cols-3 .object-visual {
-  justify-content: flex-start;
 }
 
 .list-cols-2 .kind span,
@@ -525,7 +518,7 @@ button:hover,
 
 .list-cols-2 .object-card.is-expanded .object-row,
 .list-cols-3 .object-card.is-expanded .object-row {
-  grid-template-columns: 150px 56px minmax(0, 1fr) minmax(92px, auto);
+  grid-template-columns: 150px minmax(0, 1fr) minmax(92px, auto);
   gap: 12px;
   padding: 12px;
 }
@@ -533,12 +526,6 @@ button:hover,
 .list-cols-2 .object-card.is-expanded .kind,
 .list-cols-3 .object-card.is-expanded .kind {
   display: block;
-}
-
-.list-cols-2 .object-card.is-expanded .object-visual,
-.list-cols-3 .object-card.is-expanded .object-visual {
-  display: flex;
-  justify-content: center;
 }
 
 .list-cols-2 .object-card.is-expanded .kind span,
@@ -568,7 +555,7 @@ button:hover,
 
 .object-row {
   display: grid;
-  grid-template-columns: 150px 56px minmax(0, 1fr) minmax(92px, auto);
+  grid-template-columns: 150px minmax(0, 1fr) minmax(92px, auto);
   gap: 12px;
   align-items: start;
   width: 100%;
@@ -606,26 +593,6 @@ button:hover,
   line-height: 1.25;
 }
 
-.object-visual {
-  display: flex;
-  justify-content: center;
-}
-
-.object-visual-placeholder {
-  display: inline-flex;
-  width: 44px;
-  height: 44px;
-  align-items: center;
-  justify-content: center;
-  border: 1px solid var(--border);
-  border-radius: 7px;
-  background: var(--surface-muted);
-  color: var(--muted);
-  font-size: 18px;
-  font-weight: 750;
-  line-height: 1;
-  text-transform: uppercase;
-}
 
 .object-actions {
   display: grid;
@@ -1144,10 +1111,6 @@ pre {
 
   .overview-card {
     grid-template-columns: 1fr;
-  }
-
-  .object-visual {
-    justify-content: flex-start;
   }
 
   .relationship-chain {
