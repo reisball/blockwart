@@ -212,7 +212,13 @@
                   <h3>Endpoints</h3>
                   <div class="table-wrap">
                     <table class="table edit-table">
-                      <thead><tr><th>ENDPOINT TYPE</th><th>URL</th><th>PORT</th></tr></thead>
+                      <thead>
+                        <tr>
+                          <th>{{ schema_fields_by_key.endpoint_type.label }}</th>
+                          <th>{{ schema_fields_by_key.endpoint_url.label }}</th>
+                          <th>{{ schema_fields_by_key.endpoint_port.label }}</th>
+                        </tr>
+                      </thead>
                       <tbody>
                         {% for endpoint in endpoint_rows %}
                           <tr>
@@ -225,8 +231,8 @@
                                 {% endfor %}
                               </select>
                             </td>
-                            <td><input name="endpoint_url" value="{{ endpoint.url or endpoint.endpoint or endpoint.host or '' }}" autocomplete="off" /></td>
-                            <td><input name="endpoint_port" value="{{ endpoint.port or '' }}" inputmode="numeric" /></td>
+                            <td><input name="endpoint_url" value="{{ endpoint.url or endpoint.endpoint or endpoint.host or '' }}" autocomplete="off" placeholder="{{ schema_fields_by_key.endpoint_url.placeholder }}" /></td>
+                            <td><input name="endpoint_port" value="{{ endpoint.port or '' }}" inputmode="numeric" placeholder="{{ schema_fields_by_key.endpoint_port.placeholder }}" /></td>
                           </tr>
                         {% endfor %}
                       </tbody>
@@ -277,7 +283,13 @@
                 <h3>Endpoints</h3>
                 <div class="table-wrap">
                   <table class="table">
-                    <thead><tr><th>ENDPOINT TYPE</th><th>URL</th><th>PORT</th></tr></thead>
+                    <thead>
+                      <tr>
+                        <th>{{ schema_fields_by_key.endpoint_type.label }}</th>
+                        <th>{{ schema_fields_by_key.endpoint_url.label }}</th>
+                        <th>{{ schema_fields_by_key.endpoint_port.label }}</th>
+                      </tr>
+                    </thead>
                     <tbody>
                       {% for endpoint in endpoints %}
                         <tr>

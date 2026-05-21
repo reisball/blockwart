@@ -166,6 +166,12 @@ def test_schema_settings_page_shows_selected_type_schema(client: TestClient) -> 
     assert "<code>kind</code>" in response.text
     assert "<code>primary_name</code>" in response.text
     assert "<code>platform</code>" in response.text
+    assert "<code>endpoint_type</code>" in response.text
+    assert "<code>endpoint_url</code>" in response.text
+    assert "<code>endpoint_port</code>" in response.text
+    assert "data_json.endpoints[].type" in response.text
+    assert "data_json.endpoints[].url" in response.text
+    assert "data_json.endpoints[].port" in response.text
     assert "<code>overview</code>" in response.text
     assert "<code>network</code>" in response.text
     assert 'method="post"' in response.text
@@ -226,6 +232,29 @@ def test_ui_schema_payload_matches_public_object_kinds() -> None:
         primary_field = next(field for field in fields if field["key"] == "primary_name")
         assert primary_field["label"] == schema.primary_name_label
         assert primary_field["storage_path"] == schema.as_dict()["primary_name_storage_path"]
+
+
+def test_service_schema_includes_endpoint_fields_but_not_create_form(
+    client: TestClient,
+) -> None:
+    response = client.get("/settings/schema?kind=service")
+
+    assert response.status_code == 200
+    for key in ("endpoint_type", "endpoint_url", "endpoint_port"):
+        assert f"<code>{key}</code>" in response.text
+        assert f'name="field_label_{key}"' in response.text
+    assert "data_json.endpoints[].type" in response.text
+    assert "data_json.endpoints[].url" in response.text
+    assert "data_json.endpoints[].port" in response.text
+
+    fields = schema_field_payload(UI_SCHEMAS["service"])
+    endpoint_fields = [field for field in fields if str(field["key"]).startswith("endpoint_")]
+    assert [field["key"] for field in endpoint_fields] == [
+        "endpoint_type",
+        "endpoint_url",
+        "endpoint_port",
+    ]
+    assert all(field["visible_in_create"] is False for field in endpoint_fields)
 
 
 def test_host_and_system_schema_include_hardware_fields(client: TestClient) -> None:
@@ -320,6 +349,40 @@ def test_schema_settings_saves_safe_metadata_overrides(
     assert "z.B. 4 TB SSD" in edit.text
     assert "data_json.hardware.storage" in settings.text
     assert "hardware_storage" in settings.text
+
+
+def test_service_endpoint_schema_metadata_drives_endpoint_table(
+    client: TestClient,
+    tmp_path,
+    monkeypatch,
+) -> None:
+    override_path = tmp_path / "ui_schema_overrides.json"
+    monkeypatch.setenv("BLOCKWART_SCHEMA_OVERRIDES_PATH", str(override_path))
+    fields = schema_field_payload(UI_SCHEMAS["service"])
+    data = {"kind": "service"}
+    for index, field in enumerate(fields, start=1):
+        key = str(field["key"])
+        data[f"field_order_{key}"] = str(index)
+        data[f"field_label_{key}"] = str(field["label"])
+        data[f"field_placeholder_{key}"] = str(field["placeholder"] or "")
+        if field["required"]:
+            data[f"field_required_{key}"] = "1"
+        if field["visible_in_detail"]:
+            data[f"field_visible_in_detail_{key}"] = "1"
+    data["field_label_endpoint_url"] = "Endpoint URL"
+    data["field_placeholder_endpoint_url"] = "https://service.local/api"
+
+    response = client.post("/settings/schema", data=data, follow_redirects=False)
+
+    assert response.status_code == 303
+    settings = client.get("/settings/schema?kind=service")
+    edit = client.get("/objects/n8n-web-ui?edit=network")
+    detail = client.get("/objects/n8n-web-ui")
+    assert "Endpoint URL" in settings.text
+    assert "https://service.local/api" in settings.text
+    assert "Endpoint URL" in edit.text
+    assert "https://service.local/api" in edit.text
+    assert "Endpoint URL" in detail.text
 
 
 def test_host_detail_can_edit_host_hardware_fields(

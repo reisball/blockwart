@@ -213,6 +213,27 @@ FIELD_DEFINITIONS: dict[str, UiField] = {
         "data_json.hardware.storage",
         placeholder="z.B. 2 TB NVMe",
     ),
+    "endpoint_type": UiField(
+        "endpoint_type",
+        "ENDPOINT TYPE",
+        "select",
+        "data_json.endpoints[].type",
+        placeholder="Web, REST API, MCP, HEC",
+    ),
+    "endpoint_url": UiField(
+        "endpoint_url",
+        "URL",
+        "url",
+        "data_json.endpoints[].url",
+        placeholder="https://example.local/api",
+    ),
+    "endpoint_port": UiField(
+        "endpoint_port",
+        "PORT",
+        "number",
+        "data_json.endpoints[].port",
+        placeholder="443",
+    ),
 }
 
 COMMON_CREATE_FIELDS = (
@@ -255,6 +276,11 @@ SYSTEM_HARDWARE_SCHEMA_FIELDS = (
     "hardware_gpu",
     "hardware_storage",
 )
+SERVICE_ENDPOINT_SCHEMA_FIELDS = (
+    "endpoint_type",
+    "endpoint_url",
+    "endpoint_port",
+)
 
 
 UI_SCHEMAS: dict[str, UiTypeSchema] = {
@@ -290,7 +316,7 @@ UI_SCHEMAS: dict[str, UiTypeSchema] = {
         primary_name_label="Service-Name",
         primary_name_storage="label",
         supports_platform=True,
-        fields=PLATFORM_SCHEMA_FIELDS,
+        fields=PLATFORM_SCHEMA_FIELDS + SERVICE_ENDPOINT_SCHEMA_FIELDS,
         create_fields=PLATFORM_CREATE_FIELDS,
         panels=CURRENT_UI_PANELS,
     ),
