@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from blockwart.api.deps import get_session
-from blockwart.schemas.catalog import CatalogObjectIn, CatalogObjectOut
+from blockwart.schemas.catalog import PUBLIC_OBJECT_KINDS, CatalogObjectIn, CatalogObjectOut
 from blockwart.services.catalog import delete_object, get_object, list_objects, upsert_object
 
 router = APIRouter(prefix="/objects", tags=["catalog"])
@@ -34,6 +34,11 @@ def put_object(
 ) -> CatalogObjectOut:
     if payload.id != object_id:
         raise HTTPException(status_code=400, detail="Path object_id must match payload.id")
+    if payload.kind in PUBLIC_OBJECT_KINDS and "ports" in payload.data:
+        raise HTTPException(
+            status_code=422,
+            detail="data.ports is not supported for public objects; use data.endpoints",
+        )
     return upsert_object(session, payload)
 
 

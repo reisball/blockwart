@@ -2,13 +2,14 @@
 
 Blockwart ships a local MCP-compatible stdio wrapper named blockwart-mcp.
 
-It wraps only the read-only Agent API:
+It wraps only the read-only Agent API. MCP can read `host`, `system`, `netzwerk`, and `service`
+objects, including the current `data.endpoints[]` shape:
 
 - blockwart.search -> GET /api/agent/search
 - blockwart.get_object_context -> GET /api/agent/objects/{object_id}
 - blockwart.get_context -> GET /api/agent/context
 
-There are no writable MCP tools.
+There are no writable MCP tools. Endpoint writes go through REST (`PUT /api/v1/objects/{id}/endpoints`).
 
 ## Local Usage
 

@@ -46,7 +46,9 @@ def test_create_get_update_and_list_catalog_object(client: TestClient, session_f
                 "hostnames": ["n8n.local"],
                 "addresses": [{"ip": "192.168.50.83", "family": "ipv4"}],
             },
-            "ports": [{"port": 5678, "protocol": "tcp", "exposure": "lan"}],
+            "endpoints": [
+                {"type": "Web", "url": "http://192.168.50.83:5678", "port": 5678}
+            ],
         },
     }
 
@@ -98,6 +100,25 @@ def test_rejects_unsupported_status(client: TestClient) -> None:
     )
 
     assert response.status_code == 422
+
+
+def test_rejects_public_object_ports(client: TestClient) -> None:
+    response = client.put(
+        "/api/objects/n8n",
+        json={
+            "id": "n8n",
+            "kind": "system",
+            "label": "n8n",
+            "status": "active",
+            "data": {
+                "schema_version": 1,
+                "ports": [{"port": 5678, "protocol": "tcp"}],
+            },
+        },
+    )
+
+    assert response.status_code == 422
+    assert "use data.endpoints" in response.json()["detail"]
 
 
 def test_delete_catalog_object_writes_audit_event(client: TestClient, session_factory) -> None:

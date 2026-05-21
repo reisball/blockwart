@@ -24,7 +24,7 @@ TOOLS: list[JSON] = [
                 "q": {"type": "string", "description": "Search term"},
                 "kind": {
                     "type": "string",
-                    "enum": ["system", "netzwerk", "service"],
+                    "enum": ["host", "system", "netzwerk", "service"],
                 },
                 "limit": {"type": "integer", "minimum": 1, "maximum": 50, "default": 10},
             },
@@ -52,7 +52,7 @@ TOOLS: list[JSON] = [
                 "q": {"type": "string", "description": "Search term"},
                 "kind": {
                     "type": "string",
-                    "enum": ["system", "netzwerk", "service"],
+                    "enum": ["host", "system", "netzwerk", "service"],
                 },
                 "limit": {"type": "integer", "minimum": 1, "maximum": 20, "default": 5},
             },

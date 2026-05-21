@@ -57,7 +57,8 @@ def test_build_tools_import_plan_parses_infrastructure_rows(tmp_path: Path) -> N
     assert service["data"]["platform"] == "LXC"
     assert service["data"]["system_id"] == "system:ct-200"
     assert system["data"]["network"]["addresses"][0]["ip"] == "192.168.50.200"
-    assert {item["port"] for item in system["data"]["ports"]} == {22}
+    assert {item["port"] for item in system["data"]["endpoints"]} == {22}
+    assert "ports" not in system["data"]
     assert {item["port"] for item in service["data"]["endpoints"]} == {8080}
     assert "credential_references" not in system["data"]
     assert {method["type"] for method in system["data"]["access_methods"]} == {"ssh"}

@@ -3,7 +3,7 @@ from pathlib import Path
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 
-from blockwart.api.routes import agent, catalog, health
+from blockwart.api.routes import agent, catalog, health, v1
 from blockwart.ui.routes import router as ui_router
 
 PACKAGE_STATIC_DIR = Path(__file__).resolve().parent / "ui" / "static"
@@ -17,6 +17,7 @@ def create_app() -> FastAPI:
     app.include_router(health.router, prefix="/api")
     app.include_router(catalog.router, prefix="/api")
     app.include_router(agent.router, prefix="/api")
+    app.include_router(v1.router, prefix="/api")
     app.include_router(ui_router)
     return app
 

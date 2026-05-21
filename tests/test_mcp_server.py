@@ -12,6 +12,13 @@ def test_mcp_tools_are_read_only() -> None:
         "blockwart.get_context",
     }
     assert not any("write" in name or "delete" in name or "update" in name for name in names)
+    search_tool = next(tool for tool in TOOLS if tool["name"] == "blockwart.search")
+    assert search_tool["inputSchema"]["properties"]["kind"]["enum"] == [
+        "host",
+        "system",
+        "netzwerk",
+        "service",
+    ]
 
 
 def test_mcp_tools_list_request() -> None:

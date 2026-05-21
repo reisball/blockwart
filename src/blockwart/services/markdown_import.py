@@ -104,7 +104,7 @@ def build_tools_import_plan(
                 "hostnames": [_slugify(_plain_text(label))],
                 "addresses": addresses,
             },
-            "ports": system_ports,
+            "endpoints": _endpoints_from_network(display_label, addresses, system_ports),
             "access_methods": _access_methods(
                 _system_access_text(access) if is_hosted_service else access,
                 addresses,
@@ -563,7 +563,7 @@ def _endpoints_from_network(
         scheme = "https" if port_number in {443, 8443, 8006} else "http"
         endpoints.append(
             {
-                "type": "Web",
+                "type": _endpoint_type_for_port(port_number),
                 "url": f"{scheme}://{ip}:{port_number}",
                 "port": port_number,
                 "protocol": port.get("protocol", "tcp"),
@@ -578,6 +578,16 @@ def _plain_text(value: str) -> str:
     text = re.sub(r"\[([^\]]+)\]\(([^)]+)\)", r"\1", value)
     text = text.replace(chr(96), "")
     return re.sub(r"\s+", " ", text).strip()
+
+
+def _endpoint_type_for_port(port: int) -> str:
+    if port == 22:
+        return "SSH"
+    if port == 8088:
+        return "HEC"
+    if port in {8089, 11434}:
+        return "REST API"
+    return "Web"
 
 
 def _slugify(value: str) -> str:
