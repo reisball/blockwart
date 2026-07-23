@@ -27,6 +27,11 @@ markdown_import_dry_run apply=false
 Use blockwart-import-markdown with database-url, apply, tools, and references-root. The deployed
 SQLite database is under /opt/blockwart-data/blockwart.sqlite3.
 
+The parsed plan is built before destructive work begins. Apply, including `--replace`, uses one
+database transaction for old-row cleanup, all imported objects and relationships, and audit data.
+Any validation, constraint, lock, or unexpected import failure rolls the entire operation back;
+`--replace` cannot leave an empty or partially replaced catalog.
+
 ## Notes
 
 This importer is a bridge from the current Markdown operations index into Blockwart. It does not

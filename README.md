@@ -79,6 +79,14 @@ Database writes require the explicit apply flag. The importer creates system obj
 credential-reference pointers only; it does not resolve or store secret values. See
 docs/markdown-import.md.
 
+## Transaction Ownership
+
+Application boundaries own database transactions. One authenticated UI request or one complete
+seed/Markdown import runs inside `blockwart.db.session.transaction()` and commits exactly once.
+Catalog and import service helpers only flush; calling them without an owning transaction does not
+persist changes. Object, relationship, cleanup, and audit changes therefore commit together or
+roll back together. Markdown `--replace` uses the same transaction for deletion and replacement.
+
 ## Deployment Readiness
 
 Blockwart includes a Dockerfile, a localhost-only compose example, and deployment notes. They are

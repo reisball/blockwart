@@ -283,7 +283,7 @@ def _remove_stale_workspace_services(session: Session, objects: list[dict[str, A
             )
         )
         session.delete(row)
-    session.commit()
+    session.flush()
 
 
 def _remove_stale_workspace_host_relationships(
@@ -319,7 +319,7 @@ def _remove_stale_workspace_host_relationships(
         )
         if remaining_relationship is None:
             session.execute(delete(CatalogObject).where(CatalogObject.id == stale_object_id))
-    session.commit()
+    session.flush()
 
 
 def _merge_existing_object(existing: CatalogObject, imported: CatalogObjectIn) -> CatalogObjectIn:

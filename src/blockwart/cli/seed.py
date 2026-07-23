@@ -8,7 +8,7 @@ from pathlib import Path
 from sqlalchemy.orm import sessionmaker
 
 from blockwart.db.base import Base
-from blockwart.db.session import build_engine
+from blockwart.db.session import DatabaseTransactionError, build_engine, transaction
 from blockwart.models import AuditEvent, CatalogObject, Relationship
 from blockwart.services.seeds import import_seed_file
 
@@ -61,7 +61,12 @@ def main(argv: Sequence[str] | None = None) -> int:
             print(f"seed_error=missing_file path={seed_path}", file=sys.stderr)
             return 2
 
-        result = import_seed_file(session, seed_path)
+        try:
+            with transaction(session):
+                result = import_seed_file(session, seed_path)
+        except DatabaseTransactionError:
+            print("seed_error=database_transaction_failed", file=sys.stderr)
+            return 1
         print(
             "seed_imported "
             f"objects={result.objects_imported} "
