@@ -1,11 +1,10 @@
 from logging.config import fileConfig
 from os import environ
 
-from sqlalchemy import engine_from_config, pool
-
 from alembic import context
 from blockwart import models  # noqa: F401
 from blockwart.db.base import Base
+from blockwart.db.session import build_engine
 
 config = context.config
 
@@ -37,20 +36,19 @@ def run_migrations_offline() -> None:
 
 
 def run_migrations_online() -> None:
-    connectable = engine_from_config(
-        config.get_section(config.config_ini_section, {}),
-        prefix="sqlalchemy.",
-        poolclass=pool.NullPool,
-    )
+    connectable = build_engine(_effective_database_url())
 
-    with connectable.connect() as connection:
-        context.configure(
-            connection=connection,
-            target_metadata=target_metadata,
-            compare_type=True,
-        )
-        with context.begin_transaction():
-            context.run_migrations()
+    try:
+        with connectable.connect() as connection:
+            context.configure(
+                connection=connection,
+                target_metadata=target_metadata,
+                compare_type=True,
+            )
+            with context.begin_transaction():
+                context.run_migrations()
+    finally:
+        connectable.dispose()
 
 
 if context.is_offline_mode():

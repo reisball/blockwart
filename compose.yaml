@@ -1,6 +1,9 @@
 services:
   blockwart:
-    build: .
+    build:
+      context: .
+      args:
+        BLOCKWART_BUILD_REVISION: ${BLOCKWART_BUILD_REVISION:-unknown}
     environment:
       BLOCKWART_ENV: production
       BLOCKWART_DATABASE_URL: sqlite:////data/blockwart.sqlite3
@@ -9,6 +12,8 @@ services:
       BLOCKWART_ADMIN_TOKEN: ${BLOCKWART_ADMIN_TOKEN:-}
       BLOCKWART_ADMIN_SESSION_TTL_SECONDS: ${BLOCKWART_ADMIN_SESSION_TTL_SECONDS:-3600}
       BLOCKWART_ADMIN_COOKIE_SECURE: ${BLOCKWART_ADMIN_COOKIE_SECURE:-false}
+      BLOCKWART_SQLITE_BUSY_TIMEOUT_MS: ${BLOCKWART_SQLITE_BUSY_TIMEOUT_MS:-5000}
+      BLOCKWART_SQLITE_WAL_ENABLED: ${BLOCKWART_SQLITE_WAL_ENABLED:-true}
     ports:
       - "8000:8000"
     volumes:
