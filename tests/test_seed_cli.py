@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker
 
 from blockwart.cli.seed import main
@@ -32,6 +32,9 @@ def test_seed_cli_creates_schema_and_imports_seed(tmp_path, capsys):
         assert session.query(CatalogObject).count() == 52
         assert session.query(Relationship).count() == 33
         assert session.query(AuditEvent).count() == 85
+        assert session.execute(text("SELECT version_num FROM alembic_version")).scalar_one() == (
+            "20260723_0002"
+        )
 
 
 def test_seed_cli_summary_only_reads_existing_database(tmp_path, capsys):

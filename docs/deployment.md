@@ -38,6 +38,8 @@ Run the app:
 
 ```bash
 BLOCKWART_DATABASE_URL=sqlite:////tmp/blockwart.sqlite3 \
+  blockwart-db upgrade
+BLOCKWART_DATABASE_URL=sqlite:////tmp/blockwart.sqlite3 \
   uvicorn blockwart.main:app --host 127.0.0.1 --port 8000
 ```
 
@@ -45,6 +47,8 @@ This starts in fail-closed read-only mode. UI writes require an admin token of a
 characters supplied through the protected runtime environment:
 
 ```bash
+BLOCKWART_DATABASE_URL=sqlite:////tmp/blockwart.sqlite3 \
+  blockwart-db upgrade
 BLOCKWART_DATABASE_URL=sqlite:////tmp/blockwart.sqlite3 \
 BLOCKWART_ADMIN_TOKEN="$BLOCKWART_RUNTIME_ADMIN_TOKEN" \
   uvicorn blockwart.main:app --host 127.0.0.1 --port 8000
@@ -68,6 +72,43 @@ docker compose -f compose.example.yaml up
 This is an example only. It does not set up TLS, backups, monitoring, or service registration.
 Leave `BLOCKWART_ADMIN_TOKEN` unset for read-only use, or inject it through the deployment secret
 store before using the UI write paths.
+
+The image command is `blockwart-start`. It runs the packaged Alembic upgrade against the effective
+`BLOCKWART_DATABASE_URL`, verifies that the resulting revision equals the packaged head, and only
+then replaces itself with Uvicorn. A migration, schema-adoption, connection, or revision error
+stops startup with a redacted `startup_error=database_migration_failed`; the application is never
+served against an unchecked schema.
+
+## SQLite Migration And Rollback
+
+Treat application code and its database revision as one release. Before updating the live image:
+
+1. Record the current application commit and image ID.
+2. Create a SQLite online backup outside `/opt/blockwart-data`.
+3. Run `PRAGMA integrity_check` against the backup and record the catalog, relationship, and audit
+   counts.
+4. Keep the previous image under a release-specific rollback tag.
+5. Start the new image and require `blockwart-db check` plus the normal application smoke tests.
+
+Example host-side backup:
+
+```bash
+install -d -m 0750 /opt/blockwart-backups
+sqlite3 /opt/blockwart-data/blockwart.sqlite3 \
+  ".backup '/opt/blockwart-backups/blockwart-before-upgrade.sqlite3'"
+sqlite3 /opt/blockwart-backups/blockwart-before-upgrade.sqlite3 \
+  "PRAGMA integrity_check;"
+```
+
+For rollback, stop Blockwart first, preserve the failed database for diagnosis, restore the
+verified pre-upgrade backup, select the matching previous image, and start the service again. Do
+not run an automatic Alembic downgrade on live data.
+
+An existing unversioned Blockwart database is adopted only if Alembic finds no model/schema
+differences. The adopter stamps the known initial revision and then applies later revisions
+normally. Unknown JSON fields are data and remain untouched. Missing tables, columns or indexes,
+extra schema objects, an unknown revision, and unwritable targets all abort startup instead of
+being guessed or repaired.
 
 ## Runtime Configuration
 

@@ -33,6 +33,7 @@ python -m pip install -e ".[dev]"
 Run the app:
 
 ```bash
+blockwart-db upgrade
 uvicorn blockwart.main:app --reload
 ```
 
@@ -47,6 +48,12 @@ Initialize or refresh a local pilot database:
 ```bash
 blockwart-seed --create-schema --seed seeds/pilot_objects.yaml
 ```
+
+`--create-schema` is retained as a compatibility flag, but it now performs a real
+`alembic upgrade head`; it never calls SQLAlchemy `create_all()` in a production path.
+Container startup uses `blockwart-start`, which completes the same upgrade and verifies the
+database revision before Uvicorn starts. An unversioned legacy Blockwart database is adopted only
+when its schema exactly matches the known initial catalog schema.
 
 Run checks:
 
@@ -86,6 +93,20 @@ seed/Markdown import runs inside `blockwart.db.session.transaction()` and commit
 Catalog and import service helpers only flush; calling them without an owning transaction does not
 persist changes. Object, relationship, cleanup, and audit changes therefore commit together or
 roll back together. Markdown `--replace` uses the same transaction for deletion and replacement.
+
+## Database Schema Lifecycle
+
+Alembic is the only application and container schema lifecycle. Useful commands:
+
+```bash
+blockwart-db upgrade
+blockwart-db check
+```
+
+Both use an explicitly supplied `--database-url` first, then `BLOCKWART_DATABASE_URL`, then the
+local development default. Schema or revision mismatches fail closed. Blockwart never performs an
+automatic downgrade; restore the matching pre-upgrade database backup when rolling application
+code back. See `docs/deployment.md`.
 
 ## Deployment Readiness
 

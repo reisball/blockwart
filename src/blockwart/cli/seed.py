@@ -7,7 +7,7 @@ from pathlib import Path
 
 from sqlalchemy.orm import sessionmaker
 
-from blockwart.db.base import Base
+from blockwart.db.migrations import DatabaseMigrationError, upgrade_database
 from blockwart.db.session import DatabaseTransactionError, build_engine, transaction
 from blockwart.models import AuditEvent, CatalogObject, Relationship
 from blockwart.services.seeds import import_seed_file
@@ -32,7 +32,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--create-schema",
         action="store_true",
-        help="Create database tables before importing the seed.",
+        help="Upgrade the database schema to the current Alembic revision before importing.",
     )
     parser.add_argument(
         "--summary-only",
@@ -46,10 +46,14 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
 
-    engine = build_engine(args.database_url)
     if args.create_schema:
-        Base.metadata.create_all(bind=engine)
+        try:
+            upgrade_database(args.database_url)
+        except DatabaseMigrationError:
+            print("seed_error=database_migration_failed", file=sys.stderr)
+            return 1
 
+    engine = build_engine(args.database_url)
     session_factory = sessionmaker(bind=engine, autoflush=False, autocommit=False)
     with session_factory() as session:
         if args.summary_only:
