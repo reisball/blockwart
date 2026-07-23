@@ -1,17 +1,48 @@
 from __future__ import annotations
 
+import asyncio
 import json
+import logging
 import os
-import sys
 from collections.abc import Callable
 from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.parse import quote, urlencode
 from urllib.request import Request, urlopen
 
+import mcp.server.stdio
+import mcp.types as types
+from mcp.server.lowlevel import NotificationOptions, Server
+
 DEFAULT_BASE_URL = "http://127.0.0.1:8000"
+SERVER_NAME = "blockwart-mcp"
+SERVER_VERSION = "0.1.0"
 JSON = dict[str, Any]
 Fetcher = Callable[[str, dict[str, Any]], JSON]
+logger = logging.getLogger(__name__)
+
+
+class ToolInputError(ValueError):
+    pass
+
+
+class UnknownToolError(ToolInputError):
+    pass
+
+
+class UpstreamError(RuntimeError):
+    def __init__(self, code: str, public_message: str) -> None:
+        super().__init__(public_message)
+        self.code = code
+        self.public_message = public_message
+
+
+READ_ONLY_ANNOTATIONS: JSON = {
+    "readOnlyHint": True,
+    "destructiveHint": False,
+    "idempotentHint": True,
+    "openWorldHint": True,
+}
 
 QUERY_FILTER_PROPERTIES: JSON = {
     "q": {"type": "string", "description": "Search term"},
@@ -39,6 +70,7 @@ TOOLS: list[JSON] = [
             },
             "additionalProperties": False,
         },
+        "annotations": READ_ONLY_ANNOTATIONS,
     },
     {
         "name": "blockwart.get_object_context",
@@ -51,6 +83,7 @@ TOOLS: list[JSON] = [
             "required": ["object_id"],
             "additionalProperties": False,
         },
+        "annotations": READ_ONLY_ANNOTATIONS,
     },
     {
         "name": "blockwart.get_context",
@@ -63,6 +96,7 @@ TOOLS: list[JSON] = [
             },
             "additionalProperties": False,
         },
+        "annotations": READ_ONLY_ANNOTATIONS,
     },
 ]
 
@@ -85,7 +119,7 @@ def call_tool(
     elif name == "blockwart.get_context":
         payload = fetch("/api/agent/context", _clean_params(args, default_limit=5))
     else:
-        raise ValueError(f"Unknown tool: {name}")
+        raise UnknownToolError(f"Unknown tool: {name}")
 
     return {
         "content": [
@@ -107,47 +141,63 @@ def fetch_json(path: str, params: JSON, *, base_url: str | None = None) -> JSON:
     request = Request(url, method="GET")
     try:
         with urlopen(request, timeout=10) as response:
-            return json.loads(response.read().decode("utf-8"))
+            try:
+                return json.loads(response.read().decode("utf-8"))
+            except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+                raise UpstreamError(
+                    "upstream_invalid_response",
+                    "Blockwart Agent API returned an invalid response.",
+                ) from exc
     except HTTPError as exc:
-        detail = exc.read().decode("utf-8", errors="replace")
-        raise RuntimeError(f"Blockwart API returned HTTP {exc.code}: {detail}") from exc
+        raise UpstreamError(
+            "upstream_http_error",
+            "Blockwart Agent API returned an error.",
+        ) from exc
     except URLError as exc:
-        raise RuntimeError(f"Blockwart API unavailable: {exc.reason}") from exc
+        raise UpstreamError(
+            "upstream_unavailable",
+            "Blockwart Agent API is unavailable.",
+        ) from exc
 
 
-def handle_request(request: JSON) -> JSON | None:
-    request_id = request.get("id")
-    method = request.get("method")
-    params = request.get("params") or {}
+server = Server(SERVER_NAME, version=SERVER_VERSION)
 
+
+@server.list_tools()
+async def list_tools() -> list[types.Tool]:
+    return [types.Tool.model_validate(tool) for tool in TOOLS]
+
+
+@server.call_tool(validate_input=False)
+async def handle_call_tool(name: str, arguments: JSON) -> types.CallToolResult:
     try:
-        if method == "initialize":
-            result = {
-                "protocolVersion": "2024-11-05",
-                "capabilities": {"tools": {}},
-                "serverInfo": {"name": "blockwart-mcp", "version": "0.1.0"},
-            }
-        elif method == "notifications/initialized":
-            return None
-        elif method == "tools/list":
-            result = {"tools": TOOLS}
-        elif method == "tools/call":
-            result = call_tool(params.get("name", ""), params.get("arguments") or {})
-        else:
-            return _error_response(request_id, -32601, f"Unknown method: {method}")
-        return {"jsonrpc": "2.0", "id": request_id, "result": result}
-    except Exception as exc:
-        return _error_response(request_id, -32000, str(exc))
+        result = await asyncio.to_thread(call_tool, name, arguments)
+        return types.CallToolResult.model_validate(result)
+    except UnknownToolError:
+        return _tool_error_result("tool_not_found", "Unknown Blockwart tool.")
+    except ToolInputError:
+        return _tool_error_result("invalid_arguments", "Tool arguments are invalid.")
+    except UpstreamError as exc:
+        return _tool_error_result(exc.code, exc.public_message)
+    except Exception:
+        logger.exception("Unexpected MCP tool failure for %s", name)
+        return _tool_error_result("internal_error", "Blockwart tool execution failed.")
+
+
+async def run_server() -> None:
+    async with mcp.server.stdio.stdio_server() as (read_stream, write_stream):
+        await server.run(
+            read_stream,
+            write_stream,
+            server.create_initialization_options(
+                notification_options=NotificationOptions(),
+                experimental_capabilities={},
+            ),
+        )
 
 
 def main() -> None:
-    while True:
-        message = _read_message(sys.stdin.buffer)
-        if message is None:
-            return
-        response = handle_request(message)
-        if response is not None:
-            _write_message(sys.stdout.buffer, response)
+    asyncio.run(run_server())
 
 
 def _clean_params(args: JSON, *, default_limit: int) -> JSON:
@@ -165,40 +215,21 @@ def _clean_params(args: JSON, *, default_limit: int) -> JSON:
 def _required_string(args: JSON, key: str) -> str:
     value = args.get(key)
     if not isinstance(value, str) or not value:
-        raise ValueError(f"{key} is required")
+        raise ToolInputError(f"{key} is required")
     return value
 
 
-def _read_message(stream) -> JSON | None:
-    headers: dict[str, str] = {}
-    while True:
-        line = stream.readline()
-        if not line:
-            return None
-        if line in {b"\r\n", b"\n"}:
-            break
-        key, _, value = line.decode("ascii").partition(":")
-        headers[key.lower()] = value.strip()
-
-    length = int(headers.get("content-length", "0"))
-    if length <= 0:
-        return None
-    return json.loads(stream.read(length).decode("utf-8"))
-
-
-def _write_message(stream, payload: JSON) -> None:
-    body = json.dumps(payload, separators=(",", ":")).encode("utf-8")
-    stream.write(f"Content-Length: {len(body)}\r\n\r\n".encode("ascii"))
-    stream.write(body)
-    stream.flush()
-
-
-def _error_response(request_id: Any, code: int, message: str) -> JSON:
-    return {
-        "jsonrpc": "2.0",
-        "id": request_id,
-        "error": {"code": code, "message": message},
-    }
+def _tool_error_result(code: str, message: str) -> types.CallToolResult:
+    payload = {"error": {"code": code, "message": message}}
+    return types.CallToolResult(
+        content=[
+            types.TextContent(
+                type="text",
+                text=json.dumps(payload, separators=(",", ":"), sort_keys=True),
+            )
+        ],
+        isError=True,
+    )
 
 
 if __name__ == "__main__":
