@@ -29,6 +29,8 @@ dev = [
 ]
 
 [project.scripts]
+blockwart-db = "blockwart.cli.database:main"
+blockwart-start = "blockwart.cli.start:main"
 blockwart-mcp = "blockwart.mcp.server:main"
 blockwart-import-markdown = "blockwart.cli.import_markdown:main"
 blockwart-seed = "blockwart.cli.seed:main"
@@ -37,7 +39,13 @@ blockwart-seed = "blockwart.cli.seed:main"
 where = ["src"]
 
 [tool.setuptools.package-data]
-blockwart = ["ui/templates/*.html", "ui/static/*.css", "ui/static/*.js"]
+blockwart = [
+  "migrations/env.py",
+  "migrations/versions/*.py",
+  "ui/templates/*.html",
+  "ui/static/*.css",
+  "ui/static/*.js",
+]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

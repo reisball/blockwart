@@ -8,7 +8,6 @@ WORKDIR /app
 
 COPY pyproject.toml README.md ./
 COPY alembic.ini ./alembic.ini
-COPY alembic ./alembic
 COPY docs ./docs
 COPY seeds ./seeds
 COPY src ./src
@@ -18,4 +17,4 @@ RUN python -m pip install --no-cache-dir .
 VOLUME ["/data"]
 EXPOSE 8000
 
-CMD ["uvicorn", "blockwart.main:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["blockwart-start"]
