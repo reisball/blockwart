@@ -81,8 +81,18 @@ STORAGE_CONVENTIONS: dict[str, str] = {
     "relationships.*": "Beziehungen zwischen Objekten, nicht im Objekt selbst gespeichert.",
 }
 
-CURRENT_UI_PANELS = (
+BASE_UI_PANELS = (
     UiPanel("overview", "Überblick", "overview"),
+    UiPanel("network", "Netzwerk", "network"),
+    UiPanel("access", "Zugriff", "access"),
+    UiPanel("relationships", "Relationships", "relationship-add"),
+    UiPanel("comment", "Kommentar", "comment"),
+    UiPanel("audit", "Audit", "audit"),
+)
+
+SERVICE_UI_PANELS = (
+    UiPanel("overview", "Überblick", "overview"),
+    UiPanel("service_information", "Service Information", "service-information"),
     UiPanel("network", "Netzwerk", "network"),
     UiPanel("access", "Zugriff", "access"),
     UiPanel("relationships", "Relationships", "relationship-add"),
@@ -234,6 +244,20 @@ FIELD_DEFINITIONS: dict[str, UiField] = {
         "data_json.endpoints[].port",
         placeholder="443",
     ),
+    "service_sources": UiField(
+        "service_sources",
+        "Sources",
+        "textarea",
+        "data_json.service_information.sources[]",
+        placeholder="GitHub Repo, Hersteller Webseite",
+    ),
+    "service_running_version": UiField(
+        "service_running_version",
+        "Running Version",
+        "text",
+        "data_json.service_information.running_version",
+        placeholder="0.0.1 beta rc-2",
+    ),
 }
 
 COMMON_CREATE_FIELDS = (
@@ -282,6 +306,11 @@ ENDPOINT_SCHEMA_FIELDS = (
     "endpoint_port",
 )
 
+SERVICE_INFORMATION_SCHEMA_FIELDS = (
+    "service_sources",
+    "service_running_version",
+)
+
 
 UI_SCHEMAS: dict[str, UiTypeSchema] = {
     "host": UiTypeSchema(
@@ -291,7 +320,7 @@ UI_SCHEMAS: dict[str, UiTypeSchema] = {
         supports_platform=False,
         fields=COMMON_SCHEMA_FIELDS + HARDWARE_SCHEMA_FIELDS + ENDPOINT_SCHEMA_FIELDS,
         create_fields=COMMON_CREATE_FIELDS,
-        panels=CURRENT_UI_PANELS,
+        panels=BASE_UI_PANELS,
     ),
     "system": UiTypeSchema(
         kind="system",
@@ -300,7 +329,7 @@ UI_SCHEMAS: dict[str, UiTypeSchema] = {
         supports_platform=True,
         fields=PLATFORM_SCHEMA_FIELDS + SYSTEM_HARDWARE_SCHEMA_FIELDS + ENDPOINT_SCHEMA_FIELDS,
         create_fields=PLATFORM_CREATE_FIELDS,
-        panels=CURRENT_UI_PANELS,
+        panels=BASE_UI_PANELS,
     ),
     "netzwerk": UiTypeSchema(
         kind="netzwerk",
@@ -309,16 +338,16 @@ UI_SCHEMAS: dict[str, UiTypeSchema] = {
         supports_platform=False,
         fields=COMMON_SCHEMA_FIELDS + ENDPOINT_SCHEMA_FIELDS,
         create_fields=COMMON_CREATE_FIELDS,
-        panels=CURRENT_UI_PANELS,
+        panels=BASE_UI_PANELS,
     ),
     "service": UiTypeSchema(
         kind="service",
         primary_name_label="Service-Name",
         primary_name_storage="label",
-        supports_platform=True,
-        fields=PLATFORM_SCHEMA_FIELDS + ENDPOINT_SCHEMA_FIELDS,
-        create_fields=PLATFORM_CREATE_FIELDS,
-        panels=CURRENT_UI_PANELS,
+        supports_platform=False,
+        fields=COMMON_SCHEMA_FIELDS + SERVICE_INFORMATION_SCHEMA_FIELDS + ENDPOINT_SCHEMA_FIELDS,
+        create_fields=COMMON_CREATE_FIELDS,
+        panels=SERVICE_UI_PANELS,
     ),
 }
 

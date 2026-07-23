@@ -64,6 +64,16 @@
                   {% endfor %}
                 </select>
               </label>
+              {% if ui_schema.supports_platform %}
+                <label>Plattform
+                  <select name="platform">
+                    <option value="">Keine Plattform</option>
+                    {% for platform_type in platform_types %}
+                      <option value="{{ platform_type }}" {% if platform_type == object.data.platform %}selected{% endif %}>{{ platform_type }}</option>
+                    {% endfor %}
+                  </select>
+                </label>
+              {% endif %}
               <label>Kurzbeschreibung
                 <textarea class="summary-input" name="summary" placeholder="Kurzbeschreibung">{{ object.summary or "" }}</textarea>
               </label>
@@ -101,6 +111,12 @@
                   <span>Status</span>
                   <strong>{{ object.status }}</strong>
                 </div>
+                {% if ui_schema.supports_platform %}
+                  <div class="overview-label">
+                    <span>Plattform</span>
+                    <strong>{{ object.data.platform or "-" }}</strong>
+                  </div>
+                {% endif %}
                 <div class="overview-label">
                   <span>Relationships</span>
                   <strong>{{ relationships|length }}</strong>
@@ -153,6 +169,60 @@
                   <tbody>
                     {% for field in hardware_fields %}
                       <tr><th>{{ field.label }}</th><td>{{ field.value or "-" }}</td></tr>
+                    {% endfor %}
+                  </tbody>
+                </table>
+              </div>
+            {% endif %}
+          </section>
+        {% endif %}
+
+        {% if supports_service_information %}
+          <section class="panel">
+            <div class="panel-head">
+              <h2 class="section-title">Service Information</h2>
+              {% if edit_section == "service-information" %}
+                <a class="button button-small button-muted" href="/objects/{{ object.id }}">Abbrechen</a>
+              {% else %}
+                <a class="button button-small button-muted" href="/objects/{{ object.id }}?edit=service-information">Edit</a>
+              {% endif %}
+            </div>
+            {% if edit_section == "service-information" %}
+              {% if error %}
+                <div class="error">{{ error }}</div>
+              {% endif %}
+              <form class="form-grid" method="post" action="/objects/{{ object.id }}">
+                {% for field in service_information_fields %}
+                  <label>{{ field.label }}
+                    {% if field.key == "service_sources" %}
+                      <textarea name="{{ field.key }}" autocomplete="off" placeholder="{{ field.placeholder }}">{{ field.value }}</textarea>
+                    {% else %}
+                      <input name="{{ field.key }}" value="{{ field.value }}" autocomplete="off" placeholder="{{ field.placeholder }}" />
+                    {% endif %}
+                  </label>
+                {% endfor %}
+                <div class="button-row">
+                  <button type="submit">Speichern</button>
+                  <a class="button button-muted" href="/objects/{{ object.id }}">Abbrechen</a>
+                </div>
+              </form>
+            {% else %}
+              <div class="table-wrap">
+                <table class="table">
+                  <tbody>
+                    {% for field in service_information_fields %}
+                      <tr>
+                        <th>{{ field.label }}</th>
+                        <td>
+                          {% if field.key == "service_sources" and service_information.sources %}
+                            {% for source in service_information.sources %}
+                              <div>{{ source }}</div>
+                            {% endfor %}
+                          {% else %}
+                            {{ field.value or "-" }}
+                          {% endif %}
+                        </td>
+                      </tr>
                     {% endfor %}
                   </tbody>
                 </table>

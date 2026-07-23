@@ -158,7 +158,6 @@ def build_tools_import_plan(
                         usage=usage,
                         typ=typ,
                         system_ref=system_ref,
-                        platform=platform,
                         addresses=addresses,
                         ports=service_ports,
                         source_references=source_references,
@@ -493,7 +492,6 @@ def _service_data(
     usage: str,
     typ: str,
     system_ref: str,
-    platform: str,
     addresses: list[dict[str, str]],
     ports: list[dict[str, Any]],
     source_references: list[dict[str, str]],
@@ -524,8 +522,6 @@ def _service_data(
             "auth_reference_summary": _plain_text(auth),
         },
     }
-    if platform:
-        data["platform"] = platform
     return data
 
 
