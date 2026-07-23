@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from blockwart.api.deps import get_session
 from blockwart.db.base import Base
 from blockwart.main import create_app
-from blockwart.models import CatalogObject
+from blockwart.models import CatalogObject, Relationship
 from blockwart.services.seeds import import_seed_file
 
 SEED_PATH = Path(__file__).resolve().parents[1] / "seeds" / "pilot_objects.yaml"
@@ -39,6 +39,91 @@ def client(session_factory) -> Generator[TestClient, None, None]:
     app.dependency_overrides[get_session] = override_get_session
     with TestClient(app) as test_client:
         yield test_client
+
+
+@pytest.fixture
+def resolved_asset_graph(session_factory) -> None:
+    objects = [
+        CatalogObject(
+            id="baremetal-01",
+            kind="host",
+            label="Bare Metal 01",
+            status="active",
+            summary="Physical host.",
+            data_json=(
+                '{"schema_version": 1, "network": {'
+                '"hostnames": ["baremetal-01"], '
+                '"addresses": [{"ip": "10.20.0.10"}]}, '
+                '"source_references": [{"label": "CMDB", "uri": "cmdb://baremetal-01"}]}'
+            ),
+        ),
+        CatalogObject(
+            id="runtime-01",
+            kind="system",
+            label="Runtime 01",
+            status="active",
+            summary="Runtime hosted on bare metal.",
+            data_json=(
+                '{"schema_version": 1, "lifecycle": "production", "health": "healthy", '
+                '"network": {"hostnames": ["runtime-01"], '
+                '"addresses": [{"ip": "10.20.0.20"}]}}'
+            ),
+        ),
+        CatalogObject(
+            id="runtime-api",
+            kind="service",
+            label="Runtime API",
+            status="active",
+            summary="Service on the runtime.",
+            data_json=(
+                '{"schema_version": 1, "system_id": "system:runtime-01", '
+                '"lifecycle": "production", "health": "healthy", '
+                '"endpoints": [{"type": "REST API", "url": "https://10.20.0.20:8443/api", '
+                '"host": "10.20.0.20", "port": 8443, "protocol": "https"}], '
+                '"dependencies": {"upstream": ["service:auth"], "downstream": []}}'
+            ),
+        ),
+        CatalogObject(
+            id="hardware-console",
+            kind="service",
+            label="Hardware Console",
+            status="active",
+            summary="Service running directly on hardware.",
+            data_json=(
+                '{"schema_version": 1, '
+                '"endpoints": [{"type": "Web", "url": "https://10.20.0.10:9443", '
+                '"host": "10.20.0.10", "port": 9443}]}'
+            ),
+        ),
+        CatalogObject(
+            id="unassigned-host",
+            kind="host",
+            label="Unassigned Host",
+            status="inactive",
+            summary="Inventory item without placement.",
+            data_json='{"schema_version": 1}',
+        ),
+    ]
+    relationships = [
+        Relationship(
+            from_ref="host:baremetal-01",
+            relation_type="hosts",
+            to_ref="system:runtime-01",
+        ),
+        Relationship(
+            from_ref="system:runtime-01",
+            relation_type="provides",
+            to_ref="service:runtime-api",
+        ),
+        Relationship(
+            from_ref="host:baremetal-01",
+            relation_type="hosts",
+            to_ref="service:hardware-console",
+        ),
+    ]
+    with session_factory() as session:
+        session.add_all([*objects, *relationships])
+        session.commit()
 
 
 def test_agent_search_returns_summaries_only(client: TestClient) -> None:
@@ -106,3 +191,148 @@ def test_agent_output_redacts_secret_shaped_data(client: TestClient, session_fac
     text = response.text
     assert "super-secret-value" not in text
     assert "[redacted-secret-field]" in text
+
+
+def test_agent_context_resolves_host_system_service_path(
+    client: TestClient,
+    resolved_asset_graph: None,
+) -> None:
+    response = client.get("/api/agent/objects/runtime-api")
+
+    assert response.status_code == 200
+    obj = response.json()["objects"][0]
+    assert obj["parent"]["ref"] == "system:runtime-01"
+    assert [node["ref"] for node in obj["parent_path"]] == [
+        "host:baremetal-01",
+        "system:runtime-01",
+    ]
+    assert obj["ips"] == ["10.20.0.20"]
+    assert obj["primary_endpoint"]["port"] == 8443
+    assert obj["lifecycle"] == "production"
+    assert obj["health"] == "healthy"
+    assert obj["dependencies"] == {
+        "upstream": ["service:auth"],
+        "downstream": [],
+    }
+    assert obj["updated_at"]
+
+
+def test_agent_context_preserves_current_system_provides_topology(client: TestClient) -> None:
+    response = client.get("/api/agent/objects/n8n-web-ui")
+
+    assert response.status_code == 200
+    obj = response.json()["objects"][0]
+    assert obj["parent"]["ref"] == "system:n8n"
+    assert [node["ref"] for node in obj["parent_path"]] == [
+        "system:fabrik",
+        "system:n8n",
+    ]
+
+
+def test_agent_context_resolves_direct_hardware_service_and_children(
+    client: TestClient,
+    resolved_asset_graph: None,
+) -> None:
+    service_response = client.get("/api/agent/objects/hardware-console")
+    host_response = client.get("/api/agent/objects/baremetal-01")
+
+    assert service_response.status_code == 200
+    service = service_response.json()["objects"][0]
+    assert service["parent"]["ref"] == "host:baremetal-01"
+    assert [node["ref"] for node in service["parent_path"]] == ["host:baremetal-01"]
+
+    assert host_response.status_code == 200
+    host = host_response.json()["objects"][0]
+    child_refs = {child["ref"] for child in host["children"]}
+    assert child_refs == {"system:runtime-01", "service:hardware-console"}
+    assert host["source_references"] == [
+        {"label": "CMDB", "uri": "cmdb://baremetal-01"}
+    ]
+
+
+def test_agent_context_keeps_unassigned_asset_explicit(
+    client: TestClient,
+    resolved_asset_graph: None,
+) -> None:
+    response = client.get("/api/agent/objects/unassigned-host")
+
+    assert response.status_code == 200
+    obj = response.json()["objects"][0]
+    assert obj["parent"] is None
+    assert obj["parent_path"] == []
+    assert obj["children"] == []
+    assert obj["ips"] == []
+    assert obj["primary_endpoint"] is None
+
+
+def test_agent_search_summaries_include_parent_ip_and_primary_endpoint(
+    client: TestClient,
+    resolved_asset_graph: None,
+) -> None:
+    response = client.get("/api/agent/search?q=runtime-api&kind=service")
+
+    assert response.status_code == 200
+    result = response.json()["results"][0]
+    assert result["parent"]["ref"] == "system:runtime-01"
+    assert result["ips"] == ["10.20.0.20"]
+    assert result["primary_endpoint"]["url"] == "https://10.20.0.20:8443/api"
+
+
+def test_agent_search_supports_structured_asset_filters(
+    client: TestClient,
+    resolved_asset_graph: None,
+) -> None:
+    response = client.get(
+        "/api/agent/search",
+        params={
+            "kind": "service",
+            "parent": "host:baremetal-01",
+            "ip": "10.20.0.20",
+            "port": 8443,
+            "status": "active",
+            "lifecycle": "production",
+            "health": "healthy",
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["filters"] == {
+        "parent": "host:baremetal-01",
+        "ip": "10.20.0.20",
+        "port": 8443,
+        "status": "active",
+        "lifecycle": "production",
+        "health": "healthy",
+    }
+    assert [result["ref"] for result in payload["results"]] == ["service:runtime-api"]
+
+
+def test_agent_context_query_uses_the_same_structured_filters(
+    client: TestClient,
+    resolved_asset_graph: None,
+) -> None:
+    response = client.get(
+        "/api/agent/context",
+        params={"kind": "host", "ip": "10.20.0.10", "status": "active"},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["filters"]["ip"] == "10.20.0.10"
+    assert [obj["ref"] for obj in payload["objects"]] == ["host:baremetal-01"]
+
+
+def test_agent_routes_remain_get_only(
+    client: TestClient,
+    resolved_asset_graph: None,
+) -> None:
+    openapi = client.get("/openapi.json").json()
+    agent_paths = {
+        path: methods for path, methods in openapi["paths"].items() if path.startswith("/api/agent")
+    }
+
+    assert agent_paths
+    assert all(set(methods) == {"get"} for methods in agent_paths.values())
+    assert client.put("/api/agent/objects/runtime-api", json={}).status_code == 405
+    assert client.delete("/api/agent/objects/runtime-api").status_code == 405

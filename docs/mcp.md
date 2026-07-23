@@ -10,6 +10,11 @@ It wraps only the read-only Agent API:
 
 There are no writable MCP tools.
 
+`blockwart.search` and `blockwart.get_context` accept `host`, `system`, `netzwerk`, and `service`
+as kinds. Both tools also forward the Agent API's structured `parent`, `ip`, `port`, `status`,
+`lifecycle`, and `health` filters. Resolved context comes from the same service implementation used
+by REST.
+
 ## Local Usage
 
 Start Blockwart separately, then run:

@@ -23,10 +23,36 @@ def agent_search(
         Query(description="Search term for id, label, summary, or data"),
     ] = None,
     kind: ObjectKind | None = None,
+    parent: Annotated[str | None, Query(description="Typed parent reference")] = None,
+    ip: Annotated[str | None, Query(description="Resolved exact IP address")] = None,
+    port: Annotated[int | None, Query(ge=1, le=65535)] = None,
+    status: str | None = None,
+    lifecycle: str | None = None,
+    health: str | None = None,
     limit: Annotated[int, Query(ge=1, le=50)] = 10,
 ) -> AgentSearchOut:
-    results = search_agent_objects(session, query=q, kind=kind, limit=limit)
-    return AgentSearchOut(query=q, kind=kind, count=len(results), results=results)
+    filters = _active_filters(
+        parent=parent,
+        ip=ip,
+        port=port,
+        status=status,
+        lifecycle=lifecycle,
+        health=health,
+    )
+    results = search_agent_objects(
+        session,
+        query=q,
+        kind=kind,
+        **filters,
+        limit=limit,
+    )
+    return AgentSearchOut(
+        query=q,
+        kind=kind,
+        filters=filters,
+        count=len(results),
+        results=results,
+    )
 
 
 @router.get("/objects/{object_id}", response_model=AgentContextOut)
@@ -45,7 +71,53 @@ def agent_context(
     session: Annotated[Session, Depends(get_session)],
     q: Annotated[str | None, Query(description="Search term for context retrieval")] = None,
     kind: ObjectKind | None = None,
+    parent: Annotated[str | None, Query(description="Typed parent reference")] = None,
+    ip: Annotated[str | None, Query(description="Resolved exact IP address")] = None,
+    port: Annotated[int | None, Query(ge=1, le=65535)] = None,
+    status: str | None = None,
+    lifecycle: str | None = None,
+    health: str | None = None,
     limit: Annotated[int, Query(ge=1, le=20)] = 5,
 ) -> AgentContextOut:
-    objects = build_agent_context(session, query=q, kind=kind, limit=limit)
-    return AgentContextOut(query=q, kind=kind, count=len(objects), objects=objects)
+    filters = _active_filters(
+        parent=parent,
+        ip=ip,
+        port=port,
+        status=status,
+        lifecycle=lifecycle,
+        health=health,
+    )
+    objects = build_agent_context(
+        session,
+        query=q,
+        kind=kind,
+        **filters,
+        limit=limit,
+    )
+    return AgentContextOut(
+        query=q,
+        kind=kind,
+        filters=filters,
+        count=len(objects),
+        objects=objects,
+    )
+
+
+def _active_filters(
+    *,
+    parent: str | None,
+    ip: str | None,
+    port: int | None,
+    status: str | None,
+    lifecycle: str | None,
+    health: str | None,
+) -> dict[str, str | int]:
+    filters: dict[str, str | int | None] = {
+        "parent": parent,
+        "ip": ip,
+        "port": port,
+        "status": status,
+        "lifecycle": lifecycle,
+        "health": health,
+    }
+    return {key: value for key, value in filters.items() if value is not None}

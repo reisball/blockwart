@@ -10,13 +10,24 @@ resolve credential values. Catalog changes are restricted to authenticated UI fo
 
 ### GET /api/agent/search
 
-Returns compact object summaries.
+Returns compact object summaries with canonical parent, resolved IPs/hostnames, primary endpoint,
+lifecycle, and health where those values are available.
 
 Query parameters:
 
 - q: optional search term
 - kind: optional object kind filter
+- parent: optional typed ancestor reference such as `host:fabrik-01`
+- ip: optional exact resolved IP address
+- port: optional exact endpoint or declared port
+- status: optional catalog status
+- lifecycle: optional exact lifecycle value
+- health: optional exact health value
 - limit: optional result limit, 1..50, default 10
+
+The parent filter matches the complete canonical parent path, not only the immediate parent.
+Lifecycle and health currently reflect the object's own data fields; their final vocabulary belongs
+to the domain contracts tracked separately from this read API.
 
 ### GET /api/agent/objects/{object_id}
 
@@ -24,8 +35,16 @@ Returns one object as agent context:
 
 - summary fields
 - sanitized data
-- relationships
+- raw direct relationships
+- canonical root-to-parent path and immediate parent
+- direct placement children
+- normalized endpoints and resolved IPs/hostnames
+- source references, last update timestamp, and structured upstream/downstream dependencies
 - extracted credential-reference IDs
+
+Placement resolution understands both the current `provides` relationships and `hosts`
+relationships. It supports `host -> system -> service` as well as a service placed directly on a
+host. A service's `data.system_id` remains a compatibility fallback.
 
 ### GET /api/agent/context
 
@@ -35,7 +54,10 @@ Query parameters:
 
 - q: optional search term
 - kind: optional object kind filter
+- parent, ip, port, status, lifecycle, health: same structured filters as search
 - limit: optional object limit, 1..20, default 5
+
+Search and context use the same resolver and filter semantics. All Agent API routes remain GET-only.
 
 ## Secret Handling
 

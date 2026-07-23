@@ -21,6 +21,25 @@ def test_mcp_tools_list_request() -> None:
     assert response["result"]["tools"] == TOOLS
 
 
+def test_mcp_search_and_context_support_host_and_structured_filters() -> None:
+    tools_by_name = {tool["name"]: tool for tool in TOOLS}
+
+    for name in ("blockwart.search", "blockwart.get_context"):
+        properties = tools_by_name[name]["inputSchema"]["properties"]
+        assert "host" in properties["kind"]["enum"]
+        assert set(properties) >= {
+            "q",
+            "kind",
+            "parent",
+            "ip",
+            "port",
+            "status",
+            "lifecycle",
+            "health",
+            "limit",
+        }
+
+
 def test_mcp_search_calls_read_only_agent_search_endpoint() -> None:
     calls = []
 
@@ -73,6 +92,49 @@ def test_mcp_context_calls_read_only_agent_context_endpoint() -> None:
 
     assert calls == [("/api/agent/context", {"q": "paperless", "kind": "service", "limit": 2})]
     assert json.loads(response["content"][0]["text"])["count"] == 2
+
+
+def test_mcp_forwards_structured_filters_to_the_read_only_agent_api() -> None:
+    calls = []
+
+    def fake_fetch(path, params):
+        calls.append((path, params))
+        return {"count": 1, "objects": [{"ref": "host:baremetal-01"}]}
+
+    response = call_tool(
+        "blockwart.get_context",
+        {
+            "kind": "host",
+            "parent": "host:rack-01",
+            "ip": "10.20.0.10",
+            "port": 8443,
+            "status": "active",
+            "lifecycle": "production",
+            "health": "healthy",
+            "limit": 4,
+        },
+        fetcher=fake_fetch,
+    )
+
+    assert calls == [
+        (
+            "/api/agent/context",
+            {
+                "q": None,
+                "kind": "host",
+                "parent": "host:rack-01",
+                "ip": "10.20.0.10",
+                "port": 8443,
+                "status": "active",
+                "lifecycle": "production",
+                "health": "healthy",
+                "limit": 4,
+            },
+        )
+    ]
+    assert json.loads(response["content"][0]["text"])["objects"][0]["ref"] == (
+        "host:baremetal-01"
+    )
 
 
 def test_mcp_rejects_unknown_tools_without_fetching() -> None:

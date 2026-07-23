@@ -13,6 +13,19 @@ DEFAULT_BASE_URL = "http://127.0.0.1:8000"
 JSON = dict[str, Any]
 Fetcher = Callable[[str, dict[str, Any]], JSON]
 
+QUERY_FILTER_PROPERTIES: JSON = {
+    "q": {"type": "string", "description": "Search term"},
+    "kind": {
+        "type": "string",
+        "enum": ["host", "system", "netzwerk", "service"],
+    },
+    "parent": {"type": "string", "description": "Typed parent reference"},
+    "ip": {"type": "string", "description": "Resolved exact IP address"},
+    "port": {"type": "integer", "minimum": 1, "maximum": 65535},
+    "status": {"type": "string", "enum": ["active", "inactive", "deleted"]},
+    "lifecycle": {"type": "string"},
+    "health": {"type": "string"},
+}
 
 TOOLS: list[JSON] = [
     {
@@ -21,11 +34,7 @@ TOOLS: list[JSON] = [
         "inputSchema": {
             "type": "object",
             "properties": {
-                "q": {"type": "string", "description": "Search term"},
-                "kind": {
-                    "type": "string",
-                    "enum": ["system", "netzwerk", "service"],
-                },
+                **QUERY_FILTER_PROPERTIES,
                 "limit": {"type": "integer", "minimum": 1, "maximum": 50, "default": 10},
             },
             "additionalProperties": False,
@@ -49,11 +58,7 @@ TOOLS: list[JSON] = [
         "inputSchema": {
             "type": "object",
             "properties": {
-                "q": {"type": "string", "description": "Search term"},
-                "kind": {
-                    "type": "string",
-                    "enum": ["system", "netzwerk", "service"],
-                },
+                **QUERY_FILTER_PROPERTIES,
                 "limit": {"type": "integer", "minimum": 1, "maximum": 20, "default": 5},
             },
             "additionalProperties": False,
@@ -146,11 +151,15 @@ def main() -> None:
 
 
 def _clean_params(args: JSON, *, default_limit: int) -> JSON:
-    return {
+    params = {
         "q": args.get("q"),
         "kind": args.get("kind"),
         "limit": args.get("limit", default_limit),
     }
+    for name in ("parent", "ip", "port", "status", "lifecycle", "health"):
+        if name in args:
+            params[name] = args[name]
+    return params
 
 
 def _required_string(args: JSON, key: str) -> str:
