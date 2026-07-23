@@ -91,7 +91,8 @@ The health endpoints have separate operational meanings:
   answer HTTP. They deliberately do not touch the database.
 - `GET /api/health/ready` returns `200` only when `SELECT 1` succeeds, the current Alembic revision
   exactly matches the packaged head, SQLite has the expected connection settings, and a
-  `BEGIN IMMEDIATE`/`ROLLBACK` write-lock probe succeeds without changing data.
+  rolled-back write against the Alembic revision succeeds without changing data. The probe first
+  acquires a write lock, changes the revision only inside that transaction, and rolls it back.
 
 Readiness failures return `503` with a stable `error_code`, check statuses, package version, build
 revision, and current schema revision where available. The public response never includes database
@@ -108,6 +109,10 @@ curl -fsS http://127.0.0.1:8000/api/health/ready
 
 These endpoints provide probes, not a monitoring system. Alerting, dashboards, and external
 service registration remain deployment concerns.
+
+The default SQLite lock wait is five seconds. The image's HTTP probe waits seven seconds and
+Docker allows eight seconds for the complete healthcheck, so readiness can return its stable
+`200`/`503` result before either client deadline expires.
 
 ## SQLite Migration And Rollback
 

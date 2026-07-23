@@ -5,9 +5,9 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
+from alembic import command
 from sqlalchemy import text
 
-from alembic import command
 from blockwart.config import Settings
 from blockwart.db.migrations import BASELINE_REVISION, build_alembic_config, upgrade_database
 from blockwart.db.readiness import check_database_readiness

@@ -76,6 +76,19 @@ def check_database_readiness(settings: Settings) -> DatabaseReadiness:
             connection.rollback()
             try:
                 connection.exec_driver_sql("BEGIN IMMEDIATE")
+                write_probe = connection.execute(
+                    text(
+                        "UPDATE alembic_version "
+                        "SET version_num = :probe_revision "
+                        "WHERE version_num = :current_revision"
+                    ),
+                    {
+                        "probe_revision": "__blockwart_readiness_probe__",
+                        "current_revision": revision,
+                    },
+                )
+                if write_probe.rowcount != 1:
+                    raise RuntimeError("Database write probe did not update the schema revision")
                 connection.exec_driver_sql("ROLLBACK")
             except Exception as exc:
                 connection.rollback()

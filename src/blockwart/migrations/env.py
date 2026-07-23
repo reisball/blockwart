@@ -2,6 +2,7 @@ from logging.config import fileConfig
 from os import environ
 
 from alembic import context
+
 from blockwart import models  # noqa: F401
 from blockwart.db.base import Base
 from blockwart.db.session import build_engine

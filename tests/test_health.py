@@ -1,10 +1,12 @@
+import re
+import sqlite3
 from pathlib import Path
 
+from alembic import command
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
-from alembic import command
 from blockwart.api.deps import get_session
 from blockwart.config import Settings
 from blockwart.db.base import Base
@@ -43,8 +45,16 @@ def test_liveness_endpoints_do_not_depend_on_database(tmp_path: Path) -> None:
 
 
 def test_readiness_checks_database_revision_and_sqlite_runtime(tmp_path: Path) -> None:
-    database_url = _database_url(tmp_path / "ready.sqlite3")
+    database_path = tmp_path / "ready.sqlite3"
+    database_url = _database_url(database_path)
     upgrade_database(database_url)
+    with sqlite3.connect(database_path) as connection:
+        before = {
+            "revision": connection.execute("SELECT version_num FROM alembic_version").fetchall(),
+            "catalog": connection.execute("SELECT count(*) FROM catalog_objects").fetchone()[0],
+            "relationships": connection.execute("SELECT count(*) FROM relationships").fetchone()[0],
+            "audits": connection.execute("SELECT count(*) FROM audit_events").fetchone()[0],
+        }
     client = TestClient(
         create_app(
             settings=Settings(
@@ -56,6 +66,14 @@ def test_readiness_checks_database_revision_and_sqlite_runtime(tmp_path: Path) -
     )
 
     response = client.get("/api/health/ready")
+    with sqlite3.connect(database_path) as connection:
+        after = {
+            "revision": connection.execute("SELECT version_num FROM alembic_version").fetchall(),
+            "catalog": connection.execute("SELECT count(*) FROM catalog_objects").fetchone()[0],
+            "relationships": connection.execute("SELECT count(*) FROM relationships").fetchone()[0],
+            "audits": connection.execute("SELECT count(*) FROM audit_events").fetchone()[0],
+        }
+        integrity = connection.execute("PRAGMA integrity_check").fetchone()[0]
 
     assert response.status_code == 200
     assert response.json() == {
@@ -73,6 +91,8 @@ def test_readiness_checks_database_revision_and_sqlite_runtime(tmp_path: Path) -
         "revision": "20260723_0002",
         "error_code": None,
     }
+    assert after == before
+    assert integrity == "ok"
 
 
 def test_readiness_rejects_missing_database_without_creating_it(tmp_path: Path) -> None:
@@ -135,6 +155,57 @@ def test_readiness_rejects_locked_database_with_safe_error(tmp_path: Path) -> No
     assert response.json()["error_code"] == "database_not_writable"
     assert response.json()["checks"]["writable"] == "error"
     assert str(tmp_path) not in response.text
+
+
+def test_readiness_rejects_files_that_allow_lock_but_not_write(tmp_path: Path) -> None:
+    database_path = tmp_path / "read-only.sqlite3"
+    database_url = _database_url(database_path)
+    upgrade_database(database_url)
+    keeper = sqlite3.connect(database_path)
+    keeper.execute("SELECT version_num FROM alembic_version").fetchall()
+    sqlite_files = (
+        database_path,
+        Path(f"{database_path}-wal"),
+        Path(f"{database_path}-shm"),
+    )
+    assert all(path.exists() for path in sqlite_files)
+    for path in sqlite_files:
+        path.chmod(0o444)
+
+    try:
+        client = TestClient(
+            create_app(
+                settings=Settings(
+                    database_url=database_url,
+                    sqlite_busy_timeout_ms=100,
+                )
+            )
+        )
+        response = client.get("/api/health/ready")
+    finally:
+        for path in sqlite_files:
+            if path.exists():
+                path.chmod(0o644)
+        keeper.close()
+
+    assert response.status_code == 503
+    assert response.json()["error_code"] == "database_not_writable"
+    assert response.json()["checks"]["writable"] == "error"
+    assert str(tmp_path) not in response.text
+
+
+def test_container_healthcheck_deadlines_exceed_default_sqlite_lock_wait() -> None:
+    dockerfile = (Path(__file__).resolve().parents[1] / "Dockerfile").read_text()
+    docker_timeout_match = re.search(r"HEALTHCHECK .*--timeout=(\d+)s", dockerfile)
+    http_timeout_match = re.search(r"urlopen\(.*timeout=(\d+)\)", dockerfile)
+    assert docker_timeout_match is not None
+    assert http_timeout_match is not None
+
+    sqlite_wait_seconds = Settings.model_fields["sqlite_busy_timeout_ms"].default / 1000
+    http_timeout_seconds = int(http_timeout_match.group(1))
+    docker_timeout_seconds = int(docker_timeout_match.group(1))
+
+    assert sqlite_wait_seconds < http_timeout_seconds < docker_timeout_seconds
 
 
 def test_index_page(tmp_path) -> None:
