@@ -1,6 +1,7 @@
-# MCP Wrapper
+# MCP Server
 
-Blockwart ships a local MCP-compatible stdio wrapper named blockwart-mcp.
+Blockwart ships a local MCP stdio server named `blockwart-mcp`. Transport and protocol lifecycle
+are implemented by the official Python MCP SDK.
 
 It wraps only the read-only Agent API:
 
@@ -23,7 +24,14 @@ Start Blockwart separately, then run:
 BLOCKWART_API_BASE_URL=http://127.0.0.1:8000 blockwart-mcp
 ```
 
-The wrapper speaks MCP over stdio using JSON-RPC messages with Content-Length framing.
+The server speaks MCP over stdio. Each compact JSON-RPC message occupies exactly one UTF-8 line;
+`Content-Length` headers are not used. Standard output is reserved for MCP messages. Library and
+application logs go to standard error.
+
+Protocol versions are negotiated during `initialize`. The minimum supported SDK version
+(`mcp` 1.28.1) supports `2024-11-05`, `2025-03-26`, `2025-06-18`, and `2025-11-25`; its current
+client and server default is `2025-11-25`. The server also handles the standard initialized
+notification and ping request through the SDK protocol implementation.
 
 ## Configuration
 
