@@ -63,8 +63,9 @@ The first agent-facing surface is read-only and lives under /api/agent:
 - GET /api/agent/objects/{object_id}
 - GET /api/agent/context
 
-It returns sanitized object context, relationships, and credential-reference IDs only. It never
-resolves credential values. See docs/agent-api.md.
+It returns sanitized object context, resolved parent paths, children, network/endpoint summaries,
+and credential-reference IDs only. Structured read filters are available for placement, IP, port,
+status, lifecycle, and health. It never resolves credential values. See docs/agent-api.md.
 
 The catalog REST API is also read-only. Object changes are available only through authenticated
 UI form routes.
