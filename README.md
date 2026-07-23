@@ -110,9 +110,16 @@ code back. See `docs/deployment.md`.
 
 ## Deployment Readiness
 
-Blockwart includes a Dockerfile, a localhost-only compose example, and deployment notes. They are
-for controlled rollout preparation only; no persistent service or gateway registration is created
-by this repository. See docs/deployment.md.
+Blockwart exposes process liveness at `/api/health` and `/api/health/live`. Operational readiness
+at `/api/health/ready` additionally requires a readable and writable database, the exact packaged
+Alembic head, and the expected SQLite runtime settings. Persistent SQLite databases use foreign-key
+enforcement, a bounded lock wait, and WAL mode so readers can continue while a writer commits. The
+container healthcheck uses readiness rather than liveness.
+
+The health responses include the package version and `BLOCKWART_BUILD_REVISION`; pass the deployed
+Git commit as a build argument instead of relying on the `unknown` fallback. The Dockerfile,
+localhost-only compose example, endpoint contract, and backup/restore procedure are documented in
+`docs/deployment.md`.
 
 ## Secret Policy
 

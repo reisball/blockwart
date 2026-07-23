@@ -321,5 +321,18 @@ class CatalogObjectOut(CatalogObjectIn):
 
 class HealthOut(BaseModel):
     ok: bool
+    status: Literal["alive"]
     service: str
     version: str
+    build_revision: str
+
+
+class ReadinessOut(BaseModel):
+    ok: bool
+    status: Literal["ready", "not_ready"]
+    service: str
+    version: str
+    build_revision: str
+    checks: dict[str, Literal["ok", "error", "unknown", "not_applicable"]]
+    revision: str | None = None
+    error_code: str | None = None

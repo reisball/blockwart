@@ -6,7 +6,24 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="BLOCKWART_", env_file=".env", extra="ignore")
 
     env: str = "dev"
+    build_revision: str = Field(
+        default="unknown",
+        min_length=1,
+        max_length=128,
+        pattern=r"^[A-Za-z0-9._+-]+$",
+        description="Build or Git revision exposed by health endpoints.",
+    )
     database_url: str = "sqlite:///./blockwart.sqlite3"
+    sqlite_busy_timeout_ms: int = Field(
+        default=5000,
+        ge=100,
+        le=60000,
+        description="Maximum SQLite lock wait in milliseconds.",
+    )
+    sqlite_wal_enabled: bool = Field(
+        default=True,
+        description="Enable WAL journal mode for persistent SQLite databases.",
+    )
     secret_reference: str = Field(
         default="local-dev-placeholder",
         description="Reference label only; never a secret value.",

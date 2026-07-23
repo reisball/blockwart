@@ -63,7 +63,8 @@ Blockwart database.
 The example compose file binds only to localhost:
 
 ```bash
-docker compose -f compose.example.yaml build
+BLOCKWART_BUILD_REVISION="$(git rev-parse HEAD)" \
+  docker compose -f compose.example.yaml build
 docker compose -f compose.example.yaml run --rm blockwart \
   blockwart-seed --create-schema --seed seeds/pilot_objects.yaml
 docker compose -f compose.example.yaml up
@@ -78,6 +79,40 @@ The image command is `blockwart-start`. It runs the packaged Alembic upgrade aga
 then replaces itself with Uvicorn. A migration, schema-adoption, connection, or revision error
 stops startup with a redacted `startup_error=database_migration_failed`; the application is never
 served against an unchecked schema.
+
+The image healthcheck calls `/api/health/ready`. An unhealthy result therefore means the process
+may still be alive but must not receive normal traffic.
+
+## Liveness And Readiness
+
+The health endpoints have separate operational meanings:
+
+- `GET /api/health` and `GET /api/health/live` return `200` when the application process can
+  answer HTTP. They deliberately do not touch the database.
+- `GET /api/health/ready` returns `200` only when `SELECT 1` succeeds, the current Alembic revision
+  exactly matches the packaged head, SQLite has the expected connection settings, and a
+  rolled-back write against the Alembic revision succeeds without changing data. The probe first
+  acquires a write lock, changes the revision only inside that transaction, and rolls it back.
+
+Readiness failures return `503` with a stable `error_code`, check statuses, package version, build
+revision, and current schema revision where available. The public response never includes database
+paths, SQL text, driver exceptions, or credentials. Expected codes are
+`database_missing`, `database_unavailable`, `schema_revision_mismatch`,
+`sqlite_configuration_invalid`, and `database_not_writable`.
+
+Example:
+
+```bash
+curl -fsS http://127.0.0.1:8000/api/health/live
+curl -fsS http://127.0.0.1:8000/api/health/ready
+```
+
+These endpoints provide probes, not a monitoring system. Alerting, dashboards, and external
+service registration remain deployment concerns.
+
+The default SQLite lock wait is five seconds. The image's HTTP probe waits seven seconds and
+Docker allows eight seconds for the complete healthcheck, so readiness can return its stable
+`200`/`503` result before either client deadline expires.
 
 ## SQLite Migration And Rollback
 
@@ -100,6 +135,10 @@ sqlite3 /opt/blockwart-backups/blockwart-before-upgrade.sqlite3 \
   "PRAGMA integrity_check;"
 ```
 
+Also run `blockwart-db upgrade` and `/api/health/ready` against a disposable restored copy before
+depending on a backup. This proves that the backup is readable, migratable, and compatible with
+the current image without mutating the live database.
+
 For rollback, stop Blockwart first, preserve the failed database for diagnosis, restore the
 verified pre-upgrade backup, select the matching previous image, and start the service again. Do
 not run an automatic Alembic downgrade on live data.
@@ -119,10 +158,20 @@ Required:
 Optional:
 
 - `BLOCKWART_ENV`
+- `BLOCKWART_BUILD_REVISION` (default `unknown`; inject the deployed Git commit at image build)
 - `BLOCKWART_SECRET_REFERENCE`
 - `BLOCKWART_ADMIN_TOKEN`
 - `BLOCKWART_ADMIN_SESSION_TTL_SECONDS` (default `3600`, allowed `300..86400`)
 - `BLOCKWART_ADMIN_COOKIE_SECURE` (default `false`; set `true` behind HTTPS)
+- `BLOCKWART_SQLITE_BUSY_TIMEOUT_MS` (default `5000`, allowed `100..60000`)
+- `BLOCKWART_SQLITE_WAL_ENABLED` (default `true`)
+
+Every SQLite connection enables foreign-key enforcement and applies the configured busy timeout.
+The five-second default absorbs short UI/import lock contention while still failing a stuck writer
+within a bounded interval. Persistent database files use WAL by default so readers can proceed
+during a write transaction. In-memory SQLite retains its compatible `memory` journal mode.
+Disabling WAL selects SQLite's `DELETE` journal for an explicitly incompatible filesystem, but
+reduces concurrency and must be documented in the deployment configuration.
 
 `BLOCKWART_SECRET_REFERENCE` is a reference label only. It must not contain a raw token, password,
 private key, cookie, or `.env` body.
