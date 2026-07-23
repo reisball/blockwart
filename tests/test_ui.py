@@ -8,6 +8,7 @@ from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session, sessionmaker
 
 from blockwart.api.deps import get_session
+from blockwart.config import Settings
 from blockwart.db.base import Base
 from blockwart.domain.ui_schema import (
     FIELD_DEFINITIONS,
@@ -23,6 +24,7 @@ from blockwart.services.catalog import get_object, upsert_object
 from blockwart.services.seeds import import_seed_file
 
 SEED_PATH = Path(__file__).resolve().parents[1] / "seeds" / "pilot_objects.yaml"
+TEST_ADMIN_TOKEN = "test-admin-token-with-at-least-32-characters"
 
 
 @pytest.fixture
@@ -40,7 +42,7 @@ def session_factory(tmp_path):
 
 @pytest.fixture
 def client(session_factory) -> Generator[TestClient, None, None]:
-    app = create_app()
+    app = create_app(settings=Settings(admin_token=TEST_ADMIN_TOKEN))
 
     def override_get_session() -> Generator[Session, None, None]:
         with session_factory() as session:
@@ -48,6 +50,12 @@ def client(session_factory) -> Generator[TestClient, None, None]:
 
     app.dependency_overrides[get_session] = override_get_session
     with TestClient(app) as test_client:
+        unlock = test_client.post(
+            "/admin/unlock",
+            data={"admin_token": TEST_ADMIN_TOKEN},
+            follow_redirects=False,
+        )
+        assert unlock.status_code == 303
         yield test_client
 
 

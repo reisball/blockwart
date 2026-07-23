@@ -26,6 +26,7 @@
               <button class="theme-option" type="button" data-theme-value="dark">Dark</button>
               <button class="theme-option" type="button" data-theme-value="light">Light</button>
             </div>
+            {% include "_admin_controls.html" %}
           </div>
         </div>
         <form class="toolbar" method="get" action="/settings/schema">
@@ -88,8 +89,10 @@
           {% if error %}
             <div class="error">{{ error }}</div>
           {% endif %}
-          <form method="post" action="/settings/schema">
-            <input type="hidden" name="kind" value="{{ selected_kind }}" />
+          {% if can_write %}
+            <form method="post" action="/settings/schema">
+              <input type="hidden" name="kind" value="{{ selected_kind }}" />
+          {% endif %}
             <div class="table-wrap">
               <table class="table edit-table">
                 <thead>
@@ -108,28 +111,56 @@
                 <tbody>
                   {% for field in schema_fields %}
                     <tr>
-                      <td><input name="field_order_{{ field.key }}" value="{{ loop.index }}" inputmode="numeric" /></td>
+                      <td>
+                        {% if can_write %}
+                          <input name="field_order_{{ field.key }}" value="{{ loop.index }}" inputmode="numeric" />
+                        {% else %}
+                          {{ loop.index }}
+                        {% endif %}
+                      </td>
                       <td><code>{{ field.key }}</code></td>
-                      <td><input name="field_label_{{ field.key }}" value="{{ field.label }}" autocomplete="off" /></td>
+                      <td>
+                        {% if can_write %}
+                          <input name="field_label_{{ field.key }}" value="{{ field.label }}" autocomplete="off" />
+                        {% else %}
+                          {{ field.label }}
+                        {% endif %}
+                      </td>
                       <td>{{ field.input_type }}</td>
                       <td><code>{{ field.storage_path }}</code></td>
                       <td>{{ "ja" if field.visible_in_create else "nein" }}</td>
                       <td>
-                        <input type="checkbox" name="field_required_{{ field.key }}" value="1" {% if field.required %}checked{% endif %} />
+                        {% if can_write %}
+                          <input type="checkbox" name="field_required_{{ field.key }}" value="1" {% if field.required %}checked{% endif %} />
+                        {% else %}
+                          {{ "ja" if field.required else "nein" }}
+                        {% endif %}
                       </td>
                       <td>
-                        <input type="checkbox" name="field_visible_in_detail_{{ field.key }}" value="1" {% if field.visible_in_detail %}checked{% endif %} />
+                        {% if can_write %}
+                          <input type="checkbox" name="field_visible_in_detail_{{ field.key }}" value="1" {% if field.visible_in_detail %}checked{% endif %} />
+                        {% else %}
+                          {{ "ja" if field.visible_in_detail else "nein" }}
+                        {% endif %}
                       </td>
-                      <td><input name="field_placeholder_{{ field.key }}" value="{{ field.placeholder }}" autocomplete="off" /></td>
+                      <td>
+                        {% if can_write %}
+                          <input name="field_placeholder_{{ field.key }}" value="{{ field.placeholder }}" autocomplete="off" />
+                        {% else %}
+                          {{ field.placeholder or "-" }}
+                        {% endif %}
+                      </td>
                     </tr>
                   {% endfor %}
                 </tbody>
               </table>
             </div>
-            <div class="button-row">
-              <button type="submit">Speichern</button>
-            </div>
-          </form>
+            {% if can_write %}
+              <div class="button-row">
+                <button type="submit">Speichern</button>
+              </div>
+            </form>
+            {% endif %}
         </section>
 
         <section class="panel">

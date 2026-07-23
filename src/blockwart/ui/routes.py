@@ -39,9 +39,10 @@ from blockwart.services.catalog import (
     search_objects,
     upsert_object,
 )
+from blockwart.ui.admin_auth import can_write, require_admin_write
 
 templates = Jinja2Templates(directory="src/blockwart/ui/templates")
-router = APIRouter(tags=["ui"])
+router = APIRouter(tags=["ui"], include_in_schema=False)
 
 OBJECT_KINDS = PUBLIC_OBJECT_KINDS
 OBJECT_STATUSES_UI = OBJECT_STATUSES
@@ -118,6 +119,7 @@ def index(
     create: str = "",
     cols: str = "1",
 ):
+    write_enabled = can_write(request)
     normalized_kind = kind if kind in OBJECT_KINDS else ""
     layout_cols = cols if cols in {"1", "2", "3"} else "1"
     objects = _visible_objects(
@@ -155,8 +157,9 @@ def index(
             "systems": systems,
             "relation_targets": relation_targets,
             "relation_types": RELATION_TYPES,
-            "show_create_form": create == "1",
+            "show_create_form": write_enabled and create == "1",
             "index_relationships": _index_relationship_cards(session, objects, object_map),
+            "can_write": write_enabled,
         },
     )
 
@@ -167,6 +170,7 @@ def schema_settings(
     kind: str = "system",
     saved: str = "",
 ):
+    write_enabled = can_write(request)
     selected_kind = kind if kind in OBJECT_KINDS else "system"
     schema = get_ui_schema(selected_kind)
     schema_fields = schema_field_payload(schema)
@@ -184,11 +188,16 @@ def schema_settings(
             "ui_schemas": ui_schema_payload(),
             "saved": saved == "1",
             "error": None,
+            "can_write": write_enabled,
         },
     )
 
 
-@router.post("/settings/schema", response_class=HTMLResponse)
+@router.post(
+    "/settings/schema",
+    response_class=HTMLResponse,
+    dependencies=[Depends(require_admin_write)],
+)
 async def update_schema_settings(
     request: Request,
 ):
@@ -223,6 +232,7 @@ async def update_schema_settings(
                 "ui_schemas": ui_schema_payload(),
                 "saved": False,
                 "error": _safe_error_message(exc),
+                "can_write": True,
             },
             status_code=422,
         )
@@ -236,6 +246,7 @@ def object_detail(
     session: Annotated[Session, Depends(get_session)],
     edit: str = "",
 ):
+    write_enabled = can_write(request)
     catalog_object = get_object(session, object_id)
     if catalog_object is None:
         raise HTTPException(status_code=404, detail="Catalog object not found")
@@ -301,12 +312,17 @@ def object_detail(
             "object_kinds": OBJECT_KINDS,
             "object_statuses": OBJECT_STATUSES_UI,
             "error": None,
-            "edit_section": edit,
+            "edit_section": edit if write_enabled else "",
+            "can_write": write_enabled,
         },
     )
 
 
-@router.post("/objects", response_class=HTMLResponse)
+@router.post(
+    "/objects",
+    response_class=HTMLResponse,
+    dependencies=[Depends(require_admin_write)],
+)
 def save_object(
     request: Request,
     session: Annotated[Session, Depends(get_session)],
@@ -425,13 +441,18 @@ def save_object(
                     objects,
                     object_map,
                 ),
+                "can_write": True,
             },
             status_code=422,
         )
     return RedirectResponse(url=f"/objects/{payload.id}", status_code=303)
 
 
-@router.post("/objects/{object_id}/relationships", response_class=HTMLResponse)
+@router.post(
+    "/objects/{object_id}/relationships",
+    response_class=HTMLResponse,
+    dependencies=[Depends(require_admin_write)],
+)
 def save_relationship(
     object_id: str,
     session: Annotated[Session, Depends(get_session)],
@@ -459,7 +480,11 @@ def save_relationship(
     return RedirectResponse(url=f"/objects/{object_id}", status_code=303)
 
 
-@router.post("/objects/{object_id}/comment", response_class=HTMLResponse)
+@router.post(
+    "/objects/{object_id}/comment",
+    response_class=HTMLResponse,
+    dependencies=[Depends(require_admin_write)],
+)
 def update_comment(
     object_id: str,
     session: Annotated[Session, Depends(get_session)],
@@ -489,7 +514,11 @@ def update_comment(
     return RedirectResponse(url=f"/objects/{object_id}", status_code=303)
 
 
-@router.post("/objects/{object_id}", response_class=HTMLResponse)
+@router.post(
+    "/objects/{object_id}",
+    response_class=HTMLResponse,
+    dependencies=[Depends(require_admin_write)],
+)
 def update_object(
     request: Request,
     object_id: str,
@@ -646,13 +675,18 @@ def update_object(
                 "object_statuses": OBJECT_STATUSES_UI,
                 "error": _safe_error_message(exc),
                 "edit_section": "hardware" if submitted_hardware else "overview",
+                "can_write": True,
             },
             status_code=422,
         )
     return RedirectResponse(url=f"/objects/{payload.id}", status_code=303)
 
 
-@router.post("/objects/{object_id}/network", response_class=HTMLResponse)
+@router.post(
+    "/objects/{object_id}/network",
+    response_class=HTMLResponse,
+    dependencies=[Depends(require_admin_write)],
+)
 async def update_network(
     request: Request,
     object_id: str,
@@ -731,7 +765,11 @@ async def update_network(
     return RedirectResponse(url=f"/objects/{object_id}", status_code=303)
 
 
-@router.post("/objects/{object_id}/access", response_class=HTMLResponse)
+@router.post(
+    "/objects/{object_id}/access",
+    response_class=HTMLResponse,
+    dependencies=[Depends(require_admin_write)],
+)
 async def update_access(
     request: Request,
     object_id: str,
