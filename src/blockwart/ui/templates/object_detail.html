@@ -21,6 +21,7 @@
             <button class="theme-option" type="button" data-theme-value="dark">Dark</button>
             <button class="theme-option" type="button" data-theme-value="light">Light</button>
           </div>
+          {% include "_admin_controls.html" %}
         </div>
       </div>
     </header>
@@ -29,10 +30,12 @@
         <section class="panel">
           <div class="panel-head">
             <h2 class="section-title">Überblick</h2>
-            {% if edit_section == "overview" %}
-              <a class="button button-small button-muted" href="/objects/{{ object.id }}">Abbrechen</a>
-            {% else %}
-              <a class="button button-small button-muted" href="/objects/{{ object.id }}?edit=overview">Edit</a>
+            {% if can_write %}
+              {% if edit_section == "overview" %}
+                <a class="button button-small button-muted" href="/objects/{{ object.id }}">Abbrechen</a>
+              {% else %}
+                <a class="button button-small button-muted" href="/objects/{{ object.id }}?edit=overview">Edit</a>
+              {% endif %}
             {% endif %}
           </div>
           {% if edit_section == "overview" %}
@@ -61,6 +64,16 @@
                   {% endfor %}
                 </select>
               </label>
+              {% if ui_schema.supports_platform %}
+                <label>Plattform
+                  <select name="platform">
+                    <option value="">Keine Plattform</option>
+                    {% for platform_type in platform_types %}
+                      <option value="{{ platform_type }}" {% if platform_type == object.data.platform %}selected{% endif %}>{{ platform_type }}</option>
+                    {% endfor %}
+                  </select>
+                </label>
+              {% endif %}
               <label>Kurzbeschreibung
                 <textarea class="summary-input" name="summary" placeholder="Kurzbeschreibung">{{ object.summary or "" }}</textarea>
               </label>
@@ -98,6 +111,12 @@
                   <span>Status</span>
                   <strong>{{ object.status }}</strong>
                 </div>
+                {% if ui_schema.supports_platform %}
+                  <div class="overview-label">
+                    <span>Plattform</span>
+                    <strong>{{ object.data.platform or "-" }}</strong>
+                  </div>
+                {% endif %}
                 <div class="overview-label">
                   <span>Relationships</span>
                   <strong>{{ relationships|length }}</strong>
@@ -121,10 +140,12 @@
           <section class="panel">
             <div class="panel-head">
               <h2 class="section-title">Hardware</h2>
-              {% if edit_section == "hardware" %}
-                <a class="button button-small button-muted" href="/objects/{{ object.id }}">Abbrechen</a>
-              {% else %}
-                <a class="button button-small button-muted" href="/objects/{{ object.id }}?edit=hardware">Edit</a>
+              {% if can_write %}
+                {% if edit_section == "hardware" %}
+                  <a class="button button-small button-muted" href="/objects/{{ object.id }}">Abbrechen</a>
+                {% else %}
+                  <a class="button button-small button-muted" href="/objects/{{ object.id }}?edit=hardware">Edit</a>
+                {% endif %}
               {% endif %}
             </div>
             {% if edit_section == "hardware" %}
@@ -156,10 +177,66 @@
           </section>
         {% endif %}
 
+        {% if supports_service_information %}
+          <section class="panel">
+            <div class="panel-head">
+              <h2 class="section-title">Service Information</h2>
+              {% if edit_section == "service-information" %}
+                <a class="button button-small button-muted" href="/objects/{{ object.id }}">Abbrechen</a>
+              {% else %}
+                <a class="button button-small button-muted" href="/objects/{{ object.id }}?edit=service-information">Edit</a>
+              {% endif %}
+            </div>
+            {% if edit_section == "service-information" %}
+              {% if error %}
+                <div class="error">{{ error }}</div>
+              {% endif %}
+              <form class="form-grid" method="post" action="/objects/{{ object.id }}">
+                {% for field in service_information_fields %}
+                  <label>{{ field.label }}
+                    {% if field.key == "service_sources" %}
+                      <textarea name="{{ field.key }}" autocomplete="off" placeholder="{{ field.placeholder }}">{{ field.value }}</textarea>
+                    {% else %}
+                      <input name="{{ field.key }}" value="{{ field.value }}" autocomplete="off" placeholder="{{ field.placeholder }}" />
+                    {% endif %}
+                  </label>
+                {% endfor %}
+                <div class="button-row">
+                  <button type="submit">Speichern</button>
+                  <a class="button button-muted" href="/objects/{{ object.id }}">Abbrechen</a>
+                </div>
+              </form>
+            {% else %}
+              <div class="table-wrap">
+                <table class="table">
+                  <tbody>
+                    {% for field in service_information_fields %}
+                      <tr>
+                        <th>{{ field.label }}</th>
+                        <td>
+                          {% if field.key == "service_sources" and service_information.sources %}
+                            {% for source in service_information.sources %}
+                              <div>{{ source }}</div>
+                            {% endfor %}
+                          {% else %}
+                            {{ field.value or "-" }}
+                          {% endif %}
+                        </td>
+                      </tr>
+                    {% endfor %}
+                  </tbody>
+                </table>
+              </div>
+            {% endif %}
+          </section>
+        {% endif %}
+
         <section class="panel">
             <div class="panel-head">
               <h2 class="section-title">Netzwerk</h2>
-              <a class="button button-small button-muted" href="/objects/{{ object.id }}?edit=network">Edit</a>
+              {% if can_write %}
+                <a class="button button-small button-muted" href="/objects/{{ object.id }}?edit=network">Edit</a>
+              {% endif %}
             </div>
             {% if edit_section == "network" %}
               <form class="form-grid" method="post" action="/objects/{{ object.id }}/network">
@@ -301,7 +378,9 @@
         <section class="panel">
             <div class="panel-head">
               <h2 class="section-title">Zugriff</h2>
-              <a class="button button-small button-muted" href="/objects/{{ object.id }}?edit=access">Edit</a>
+              {% if can_write %}
+                <a class="button button-small button-muted" href="/objects/{{ object.id }}?edit=access">Edit</a>
+              {% endif %}
             </div>
             {% if edit_section == "access" %}
               <form class="form-grid" method="post" action="/objects/{{ object.id }}/access">
@@ -354,7 +433,9 @@
         <section class="panel">
           <div class="panel-head">
             <h2 class="section-title">Relationships</h2>
-            <a class="button button-small" href="/objects/{{ object.id }}?edit=relationship-add">Add</a>
+            {% if can_write %}
+              <a class="button button-small" href="/objects/{{ object.id }}?edit=relationship-add">Add</a>
+            {% endif %}
           </div>
           {% if relationships %}
             {% for direction, items in relationship_groups.items() %}
@@ -397,14 +478,18 @@
 
         <section class="panel">
           <h2 class="section-title">Kommentar</h2>
-          <form class="form-grid comment-form" method="post" action="/objects/{{ object.id }}/comment">
-            <label>Kommentar
-              <textarea name="comment" placeholder="Kommentar zum Objekt">{{ comment }}</textarea>
-            </label>
-            <div class="button-row">
-              <button type="submit">Kommentar speichern</button>
-            </div>
-          </form>
+          {% if can_write %}
+            <form class="form-grid comment-form" method="post" action="/objects/{{ object.id }}/comment">
+              <label>Kommentar
+                <textarea name="comment" placeholder="Kommentar zum Objekt">{{ comment }}</textarea>
+              </label>
+              <div class="button-row">
+                <button type="submit">Kommentar speichern</button>
+              </div>
+            </form>
+          {% else %}
+            <p class="meta">{{ comment or "Kein Kommentar erfasst." }}</p>
+          {% endif %}
         </section>
 
         <section class="panel">

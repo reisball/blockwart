@@ -30,6 +30,7 @@
               <button class="theme-option" type="button" data-theme-value="light">Light</button>
             </div>
             <a class="button button-small button-muted" href="/settings/schema">Settings</a>
+            {% include "_admin_controls.html" %}
           </div>
         </div>
         <form class="toolbar" method="get" action="/">
@@ -67,10 +68,12 @@
                 <a class="view-option" href="/?q={{ q|urlencode }}&kind={{ kind }}&cols={{ col_value }}" {% if layout_cols == col_value %}aria-current="page"{% endif %}>{{ col_value }}</a>
               {% endfor %}
             </div>
-            {% if not q and not kind and layout_cols == "1" %}
-              <a class="button button-small" href="/?create=1">Neues Objekt anlegen</a>
-            {% else %}
-              <a class="button button-small" href="/?q={{ q|urlencode }}&kind={{ kind }}&cols={{ layout_cols }}&create=1">Neues Objekt anlegen</a>
+            {% if can_write %}
+              {% if not q and not kind and layout_cols == "1" %}
+                <a class="button button-small" href="/?create=1">Neues Objekt anlegen</a>
+              {% else %}
+                <a class="button button-small" href="/?q={{ q|urlencode }}&kind={{ kind }}&cols={{ layout_cols }}&create=1">Neues Objekt anlegen</a>
+              {% endif %}
             {% endif %}
           </div>
         </div>
@@ -152,7 +155,7 @@
                 <div class="object-row" role="button" tabindex="0" aria-expanded="false" data-object-toggle>
                   <div class="kind">
                     <span>Typ: {{ object.kind }}</span>
-                    {% if object.data.platform %}
+                    {% if object.data.platform and ui_schemas[object.kind].supports_platform %}
                       <span>Plattform: {{ object.data.platform }}</span>
                     {% endif %}
                     <span class="status">Status: {{ object.status }}</span>

@@ -10,7 +10,8 @@ Before a real deployment, decide and document:
 - target host or container
 - bind address and port
 - backup location and retention
-- authentication boundary
+- source for `BLOCKWART_ADMIN_TOKEN`
+- whether TLS is required and `BLOCKWART_ADMIN_COOKIE_SECURE` can be enabled
 - whether agents reach Blockwart through REST, MCP, or both
 - credential reference name for runtime configuration
 
@@ -40,6 +41,19 @@ BLOCKWART_DATABASE_URL=sqlite:////tmp/blockwart.sqlite3 \
   uvicorn blockwart.main:app --host 127.0.0.1 --port 8000
 ```
 
+This starts in fail-closed read-only mode. UI writes require an admin token of at least 32
+characters supplied through the protected runtime environment:
+
+```bash
+BLOCKWART_DATABASE_URL=sqlite:////tmp/blockwart.sqlite3 \
+BLOCKWART_ADMIN_TOKEN="$BLOCKWART_RUNTIME_ADMIN_TOKEN" \
+  uvicorn blockwart.main:app --host 127.0.0.1 --port 8000
+```
+
+`BLOCKWART_RUNTIME_ADMIN_TOKEN` in this example must itself come from the runtime secret store. Do
+not put its value into Git, compose files, documentation, issue comments, shell history, or the
+Blockwart database.
+
 ## Container Example
 
 The example compose file binds only to localhost:
@@ -51,8 +65,9 @@ docker compose -f compose.example.yaml run --rm blockwart \
 docker compose -f compose.example.yaml up
 ```
 
-This is an example only. It does not set up TLS, backups, authentication, monitoring, or service
-registration.
+This is an example only. It does not set up TLS, backups, monitoring, or service registration.
+Leave `BLOCKWART_ADMIN_TOKEN` unset for read-only use, or inject it through the deployment secret
+store before using the UI write paths.
 
 ## Runtime Configuration
 
@@ -64,9 +79,23 @@ Optional:
 
 - `BLOCKWART_ENV`
 - `BLOCKWART_SECRET_REFERENCE`
+- `BLOCKWART_ADMIN_TOKEN`
+- `BLOCKWART_ADMIN_SESSION_TTL_SECONDS` (default `3600`, allowed `300..86400`)
+- `BLOCKWART_ADMIN_COOKIE_SECURE` (default `false`; set `true` behind HTTPS)
 
 `BLOCKWART_SECRET_REFERENCE` is a reference label only. It must not contain a raw token, password,
 private key, cookie, or `.env` body.
+
+`BLOCKWART_ADMIN_TOKEN` is the one runtime secret. It is not written to the database, logs, HTML,
+URLs, or the session cookie. Missing or empty configuration disables every UI write. A successful
+unlock at `/admin` creates a time-limited HMAC-signed cookie with `HttpOnly` and `SameSite=Strict`;
+rotating the token invalidates existing sessions. Logout deletes the cookie.
+
+The catalog and agent APIs remain read-only even while the UI is unlocked. Their OpenAPI contract
+contains no catalog mutation operation.
+
+The token and session cookie still traverse the network during browser use. On an untrusted network,
+serve Blockwart through HTTPS and set `BLOCKWART_ADMIN_COOKIE_SECURE=true`.
 
 ## Agent Access
 

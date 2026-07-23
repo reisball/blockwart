@@ -39,9 +39,10 @@ from blockwart.services.catalog import (
     search_objects,
     upsert_object,
 )
+from blockwart.ui.admin_auth import can_write, require_admin_write
 
 templates = Jinja2Templates(directory="src/blockwart/ui/templates")
-router = APIRouter(tags=["ui"])
+router = APIRouter(tags=["ui"], include_in_schema=False)
 
 OBJECT_KINDS = PUBLIC_OBJECT_KINDS
 OBJECT_STATUSES_UI = OBJECT_STATUSES
@@ -53,6 +54,7 @@ HARDWARE_OBJECT_KINDS = {"host", "system"}
 NETWORK_ADDRESS_EDIT_KINDS = {"host", "system", "netzwerk"}
 NETWORK_PORT_EDIT_KINDS: set[str] = set()
 NETWORK_ENDPOINT_EDIT_KINDS = {"host", "system", "netzwerk", "service"}
+SERVICE_INFORMATION_OBJECT_KINDS = {"service"}
 ENDPOINT_TYPES = ENDPOINT_TYPE_OPTIONS
 
 
@@ -118,6 +120,7 @@ def index(
     create: str = "",
     cols: str = "1",
 ):
+    write_enabled = can_write(request)
     normalized_kind = kind if kind in OBJECT_KINDS else ""
     layout_cols = cols if cols in {"1", "2", "3"} else "1"
     objects = _visible_objects(
@@ -155,8 +158,9 @@ def index(
             "systems": systems,
             "relation_targets": relation_targets,
             "relation_types": RELATION_TYPES,
-            "show_create_form": create == "1",
+            "show_create_form": write_enabled and create == "1",
             "index_relationships": _index_relationship_cards(session, objects, object_map),
+            "can_write": write_enabled,
         },
     )
 
@@ -167,6 +171,7 @@ def schema_settings(
     kind: str = "system",
     saved: str = "",
 ):
+    write_enabled = can_write(request)
     selected_kind = kind if kind in OBJECT_KINDS else "system"
     schema = get_ui_schema(selected_kind)
     schema_fields = schema_field_payload(schema)
@@ -184,11 +189,16 @@ def schema_settings(
             "ui_schemas": ui_schema_payload(),
             "saved": saved == "1",
             "error": None,
+            "can_write": write_enabled,
         },
     )
 
 
-@router.post("/settings/schema", response_class=HTMLResponse)
+@router.post(
+    "/settings/schema",
+    response_class=HTMLResponse,
+    dependencies=[Depends(require_admin_write)],
+)
 async def update_schema_settings(
     request: Request,
 ):
@@ -223,6 +233,7 @@ async def update_schema_settings(
                 "ui_schemas": ui_schema_payload(),
                 "saved": False,
                 "error": _safe_error_message(exc),
+                "can_write": True,
             },
             status_code=422,
         )
@@ -236,6 +247,7 @@ def object_detail(
     session: Annotated[Session, Depends(get_session)],
     edit: str = "",
 ):
+    write_enabled = can_write(request)
     catalog_object = get_object(session, object_id)
     if catalog_object is None:
         raise HTTPException(status_code=404, detail="Catalog object not found")
@@ -258,6 +270,8 @@ def object_detail(
     hardware_fields = _hardware_schema_fields(ui_schema, hardware)
     ports = _list_of_mappings(object_data.get("ports"))
     endpoints = _list_of_mappings(object_data.get("endpoints"))
+    service_information = _service_information_summary(object_data)
+    service_information_fields = _service_information_schema_fields(ui_schema, service_information)
     return templates.TemplateResponse(
         request,
         "object_detail.html",
@@ -278,6 +292,9 @@ def object_detail(
             "hardware_fields": hardware_fields,
             "supports_hardware": catalog_object.kind in HARDWARE_OBJECT_KINDS,
             "container": _container_summary(object_data),
+            "service_information": service_information,
+            "service_information_fields": service_information_fields,
+            "supports_service_information": catalog_object.kind in SERVICE_INFORMATION_OBJECT_KINDS,
             "ports": ports,
             "endpoints": endpoints,
             "network_address_rows": _padded_mappings(
@@ -300,13 +317,19 @@ def object_detail(
             ),
             "object_kinds": OBJECT_KINDS,
             "object_statuses": OBJECT_STATUSES_UI,
+            "platform_types": PLATFORM_TYPES,
             "error": None,
-            "edit_section": edit,
+            "edit_section": edit if write_enabled else "",
+            "can_write": write_enabled,
         },
     )
 
 
-@router.post("/objects", response_class=HTMLResponse)
+@router.post(
+    "/objects",
+    response_class=HTMLResponse,
+    dependencies=[Depends(require_admin_write)],
+)
 def save_object(
     request: Request,
     session: Annotated[Session, Depends(get_session)],
@@ -343,15 +366,18 @@ def save_object(
         data = json.loads(data_json or "{}")
         _reject_secret_shaped_form_data(data)
         ui_schema = get_ui_schema(kind)
-        if platform and platform not in PLATFORM_TYPES:
-            raise ValueError("Unsupported platform")
         label_values = _split_label_values(labels)
         if label_values:
             data["labels"] = label_values
         else:
             data.pop("labels", None)
-        if ui_schema.supports_platform and platform:
-            data["platform"] = platform
+        if ui_schema.supports_platform:
+            if platform and platform not in PLATFORM_TYPES:
+                raise ValueError("Unsupported platform")
+            if platform:
+                data["platform"] = platform
+            else:
+                data.pop("platform", None)
         else:
             data.pop("platform", None)
         primary_value = (primary_name or hostname or label or object_id).strip()
@@ -425,13 +451,18 @@ def save_object(
                     objects,
                     object_map,
                 ),
+                "can_write": True,
             },
             status_code=422,
         )
     return RedirectResponse(url=f"/objects/{payload.id}", status_code=303)
 
 
-@router.post("/objects/{object_id}/relationships", response_class=HTMLResponse)
+@router.post(
+    "/objects/{object_id}/relationships",
+    response_class=HTMLResponse,
+    dependencies=[Depends(require_admin_write)],
+)
 def save_relationship(
     object_id: str,
     session: Annotated[Session, Depends(get_session)],
@@ -459,7 +490,11 @@ def save_relationship(
     return RedirectResponse(url=f"/objects/{object_id}", status_code=303)
 
 
-@router.post("/objects/{object_id}/comment", response_class=HTMLResponse)
+@router.post(
+    "/objects/{object_id}/comment",
+    response_class=HTMLResponse,
+    dependencies=[Depends(require_admin_write)],
+)
 def update_comment(
     object_id: str,
     session: Annotated[Session, Depends(get_session)],
@@ -489,7 +524,11 @@ def update_comment(
     return RedirectResponse(url=f"/objects/{object_id}", status_code=303)
 
 
-@router.post("/objects/{object_id}", response_class=HTMLResponse)
+@router.post(
+    "/objects/{object_id}",
+    response_class=HTMLResponse,
+    dependencies=[Depends(require_admin_write)],
+)
 def update_object(
     request: Request,
     object_id: str,
@@ -498,6 +537,7 @@ def update_object(
     primary_name: Annotated[str | None, Form()] = None,
     kind: Annotated[str | None, Form()] = None,
     status: Annotated[str | None, Form()] = None,
+    platform: Annotated[str | None, Form()] = None,
     summary: Annotated[str | None, Form()] = None,
     hostname: Annotated[str | None, Form()] = None,
     container_id: Annotated[str | None, Form()] = None,
@@ -509,6 +549,8 @@ def update_object(
     hardware_memory: Annotated[str | None, Form()] = None,
     hardware_gpu: Annotated[str | None, Form()] = None,
     hardware_storage: Annotated[str | None, Form()] = None,
+    service_sources: Annotated[str | None, Form()] = None,
+    service_running_version: Annotated[str | None, Form()] = None,
     data_json: Annotated[str | None, Form()] = None,
 ):
     submitted_hardware = any(
@@ -521,6 +563,13 @@ def update_object(
             hardware_memory,
             hardware_gpu,
             hardware_storage,
+        )
+    )
+    submitted_service_information = any(
+        value is not None
+        for value in (
+            service_sources,
+            service_running_version,
         )
     )
     try:
@@ -536,6 +585,17 @@ def update_object(
         if primary_name is not None or hostname is not None or label is not None:
             primary_value = (primary_name or hostname or label or "").strip()
             _apply_primary_name(data, ui_schema, primary_value)
+        if platform is not None:
+            cleaned_platform = platform.strip()
+            if ui_schema.supports_platform:
+                if cleaned_platform and cleaned_platform not in PLATFORM_TYPES:
+                    raise ValueError("Unsupported platform")
+                if cleaned_platform:
+                    data["platform"] = cleaned_platform
+                else:
+                    data.pop("platform", None)
+            else:
+                data.pop("platform", None)
         if container_id is not None or container_label is not None:
             container = dict(
                 data.get("container") if isinstance(data.get("container"), Mapping) else {}
@@ -572,6 +632,25 @@ def update_object(
                 gpu=hardware_gpu if "hardware_gpu" in allowed_hardware_fields else None,
                 storage=hardware_storage if "hardware_storage" in allowed_hardware_fields else None,
             )
+        if target_kind in SERVICE_INFORMATION_OBJECT_KINDS and submitted_service_information:
+            allowed_service_information_fields = {
+                str(field["key"])
+                for field in schema_field_payload(ui_schema)
+                if str(field["key"]).startswith("service_")
+            }
+            _apply_service_information_fields(
+                data,
+                sources=(
+                    service_sources
+                    if "service_sources" in allowed_service_information_fields
+                    else None
+                ),
+                running_version=(
+                    service_running_version
+                    if "service_running_version" in allowed_service_information_fields
+                    else None
+                ),
+            )
         _reject_secret_shaped_form_data(data)
         payload = CatalogObjectIn(
             id=object_id,
@@ -596,6 +675,10 @@ def update_object(
         hardware_fields = _hardware_schema_fields(ui_schema, hardware)
         ports = _list_of_mappings(object_data.get("ports"))
         endpoints = _list_of_mappings(object_data.get("endpoints"))
+        service_information = _service_information_summary(object_data)
+        service_information_fields = _service_information_schema_fields(
+            ui_schema, service_information
+        )
         relationship_groups = _group_relationships(
             catalog_object,
             relationships,
@@ -626,6 +709,11 @@ def update_object(
                 "hardware_fields": hardware_fields,
                 "supports_hardware": catalog_object.kind in HARDWARE_OBJECT_KINDS,
                 "container": _container_summary(object_data),
+                "service_information": service_information,
+                "service_information_fields": service_information_fields,
+                "supports_service_information": (
+                    catalog_object.kind in SERVICE_INFORMATION_OBJECT_KINDS
+                ),
                 "ports": ports,
                 "endpoints": endpoints,
                 "network_address_rows": _padded_mappings(
@@ -644,15 +732,25 @@ def update_object(
                 "data_json": SAFE_DATA_JSON_FALLBACK,
                 "object_kinds": OBJECT_KINDS,
                 "object_statuses": OBJECT_STATUSES_UI,
+                "platform_types": PLATFORM_TYPES,
                 "error": _safe_error_message(exc),
-                "edit_section": "hardware" if submitted_hardware else "overview",
+                "edit_section": (
+                    "service-information"
+                    if submitted_service_information
+                    else "hardware" if submitted_hardware else "overview"
+                ),
+                "can_write": True,
             },
             status_code=422,
         )
     return RedirectResponse(url=f"/objects/{payload.id}", status_code=303)
 
 
-@router.post("/objects/{object_id}/network", response_class=HTMLResponse)
+@router.post(
+    "/objects/{object_id}/network",
+    response_class=HTMLResponse,
+    dependencies=[Depends(require_admin_write)],
+)
 async def update_network(
     request: Request,
     object_id: str,
@@ -731,7 +829,11 @@ async def update_network(
     return RedirectResponse(url=f"/objects/{object_id}", status_code=303)
 
 
-@router.post("/objects/{object_id}/access", response_class=HTMLResponse)
+@router.post(
+    "/objects/{object_id}/access",
+    response_class=HTMLResponse,
+    dependencies=[Depends(require_admin_write)],
+)
 async def update_access(
     request: Request,
     object_id: str,
@@ -1309,6 +1411,48 @@ def _hardware_schema_fields(ui_schema: Any, hardware: Mapping[str, str]) -> list
     ]
 
 
+def _service_information_summary(data: Mapping[str, Any]) -> dict[str, Any]:
+    service_information = data.get("service_information")
+    if not isinstance(service_information, Mapping):
+        return {
+            "sources": [],
+            "sources_text": "",
+            "running_version": "",
+        }
+    raw_sources = service_information.get("sources")
+    if isinstance(raw_sources, list):
+        sources = [str(source) for source in raw_sources if str(source).strip()]
+    elif isinstance(raw_sources, str):
+        sources = _split_multivalue(raw_sources)
+    else:
+        sources = []
+    return {
+        "sources": sources,
+        "sources_text": "\n".join(sources),
+        "running_version": str(service_information.get("running_version") or ""),
+    }
+
+
+def _service_information_schema_fields(
+    ui_schema: Any,
+    service_information: Mapping[str, Any],
+) -> list[dict[str, str]]:
+    service_information_values = {
+        "service_sources": str(service_information.get("sources_text") or ""),
+        "service_running_version": str(service_information.get("running_version") or ""),
+    }
+    return [
+        {
+            "key": str(field["key"]),
+            "label": str(field["label"]),
+            "placeholder": str(field["placeholder"] or ""),
+            "value": service_information_values.get(str(field["key"]), ""),
+        }
+        for field in schema_field_payload(ui_schema)
+        if str(field["key"]).startswith("service_")
+    ]
+
+
 def _apply_hardware_fields(
     data: dict[str, Any],
     *,
@@ -1356,6 +1500,32 @@ def _apply_hardware_fields(
         data["hardware"] = hardware
     else:
         data.pop("hardware", None)
+
+
+def _apply_service_information_fields(
+    data: dict[str, Any],
+    *,
+    sources: str | None,
+    running_version: str | None,
+) -> None:
+    service_information = dict(
+        data.get("service_information")
+        if isinstance(data.get("service_information"), Mapping)
+        else {}
+    )
+    if sources is not None:
+        source_values = _split_multivalue(sources)
+        if source_values:
+            service_information["sources"] = source_values
+        else:
+            service_information.pop("sources", None)
+    if running_version is not None:
+        service_information["running_version"] = running_version.strip()
+    service_information = {key: value for key, value in service_information.items() if value}
+    if service_information:
+        data["service_information"] = service_information
+    else:
+        data.pop("service_information", None)
 
 
 def _access_methods(

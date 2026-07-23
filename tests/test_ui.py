@@ -8,6 +8,7 @@ from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session, sessionmaker
 
 from blockwart.api.deps import get_session
+from blockwart.config import Settings
 from blockwart.db.base import Base
 from blockwart.domain.ui_schema import (
     FIELD_DEFINITIONS,
@@ -23,6 +24,7 @@ from blockwart.services.catalog import get_object, upsert_object
 from blockwart.services.seeds import import_seed_file
 
 SEED_PATH = Path(__file__).resolve().parents[1] / "seeds" / "pilot_objects.yaml"
+TEST_ADMIN_TOKEN = "test-admin-token-with-at-least-32-characters"
 
 
 @pytest.fixture
@@ -40,7 +42,7 @@ def session_factory(tmp_path):
 
 @pytest.fixture
 def client(session_factory) -> Generator[TestClient, None, None]:
-    app = create_app()
+    app = create_app(settings=Settings(admin_token=TEST_ADMIN_TOKEN))
 
     def override_get_session() -> Generator[Session, None, None]:
         with session_factory() as session:
@@ -48,6 +50,12 @@ def client(session_factory) -> Generator[TestClient, None, None]:
 
     app.dependency_overrides[get_session] = override_get_session
     with TestClient(app) as test_client:
+        unlock = test_client.post(
+            "/admin/unlock",
+            data={"admin_token": TEST_ADMIN_TOKEN},
+            follow_redirects=False,
+        )
+        assert unlock.status_code == 303
         yield test_client
 
 
@@ -134,7 +142,7 @@ def test_create_form_schema_gates_fields_by_type(client: TestClient) -> None:
     assert 'data-create-field="relationship"' in response.text
     assert set(UI_SCHEMAS) == {"host", "system", "netzwerk", "service"}
     assert "platform" in UI_SCHEMAS["system"].create_fields
-    assert "platform" in UI_SCHEMAS["service"].create_fields
+    assert "platform" not in UI_SCHEMAS["service"].create_fields
     assert "platform" not in UI_SCHEMAS["host"].create_fields
     assert "platform" not in UI_SCHEMAS["netzwerk"].create_fields
     for schema in UI_SCHEMAS.values():
@@ -156,7 +164,7 @@ def test_schema_settings_page_shows_selected_type_schema(client: TestClient) -> 
     assert "primary_name_storage_path" in response.text
     assert "Storage-Pfad" in response.text
     assert "catalog_objects.label" in response.text
-    assert "data_json.platform" in response.text
+    assert "data_json.platform" not in response.text
     assert "Storage-Konvention" in response.text
     assert "data_json.hardware.*" in response.text
     assert "Sichtbarkeit" in response.text
@@ -165,7 +173,7 @@ def test_schema_settings_page_shows_selected_type_schema(client: TestClient) -> 
     assert "Detail-Panels" in response.text
     assert "<code>kind</code>" in response.text
     assert "<code>primary_name</code>" in response.text
-    assert "<code>platform</code>" in response.text
+    assert "<code>platform</code>" not in response.text
     assert "<code>endpoint_type</code>" in response.text
     assert "<code>endpoint_url</code>" in response.text
     assert "<code>endpoint_port</code>" in response.text
@@ -199,7 +207,7 @@ def test_schema_settings_page_falls_back_to_system_for_invalid_kind(
         ("host", "Hostname", "network_hostname", False),
         ("system", "Hostname", "network_hostname", True),
         ("netzwerk", "Name", "label", False),
-        ("service", "Service-Name", "label", True),
+        ("service", "Service-Name", "label", False),
     ],
 )
 def test_schema_settings_type_matrix(
@@ -256,6 +264,32 @@ def test_public_schemas_include_endpoint_fields_but_not_create_form(
             "endpoint_port",
         ]
         assert all(field["visible_in_create"] is False for field in endpoint_fields)
+
+
+def test_service_schema_includes_service_information_fields(client: TestClient) -> None:
+    response = client.get("/settings/schema?kind=service")
+
+    assert response.status_code == 200
+    for expected in (
+        "Service Information",
+        "Sources",
+        "Running Version",
+        "data_json.service_information.sources[]",
+        "data_json.service_information.running_version",
+    ):
+        assert expected in response.text
+
+    fields = schema_field_payload(UI_SCHEMAS["service"])
+    service_fields = [field for field in fields if str(field["key"]).startswith("service_")]
+    assert [field["key"] for field in service_fields] == [
+        "service_sources",
+        "service_running_version",
+    ]
+    assert all(field["visible_in_create"] is False for field in service_fields)
+
+    for kind in ("host", "system", "netzwerk"):
+        fields = schema_field_payload(UI_SCHEMAS[kind])
+        assert not any(str(field["key"]).startswith("service_") for field in fields)
 
 
 def test_host_and_system_schema_include_hardware_fields(client: TestClient) -> None:
@@ -834,7 +868,7 @@ def test_create_object_form_redirects_to_detail(
         ("host", "Hostname", True, False),
         ("system", "Hostname", True, True),
         ("netzwerk", "Name", False, False),
-        ("service", "Service-Name", False, True),
+        ("service", "Service-Name", False, False),
     ],
 )
 def test_ui_schema_drives_primary_name_storage_by_kind(
@@ -910,7 +944,7 @@ def test_create_service_form_can_set_host_system(
             to_ref="service:test-service",
         ).one_or_none()
     assert catalog_object is not None
-    assert catalog_object.data["platform"] == "VM"
+    assert "platform" not in catalog_object.data
     assert catalog_object.label == "Test Service"
     assert catalog_object.data.get("network", {}).get("hostnames") is None
     assert relationship is not None
@@ -959,6 +993,7 @@ def test_overview_edit_updates_object_metadata(client: TestClient, session_facto
     assert 'name="label"' not in edit_response.text
     assert 'name="primary_name"' in edit_response.text
     assert "Container ID" not in edit_response.text
+    assert 'name="platform"' in edit_response.text
     assert "CREATED AT" in edit_response.text
     assert "LAST CHANGED" in edit_response.text
     assert "Bearbeiten" not in edit_response.text
@@ -969,6 +1004,7 @@ def test_overview_edit_updates_object_metadata(client: TestClient, session_facto
             "primary_name": "n8n-main",
             "kind": "system",
             "status": "inactive",
+            "platform": "LXC",
             "summary": "Updated through overview.",
         },
         follow_redirects=False,
@@ -983,7 +1019,43 @@ def test_overview_edit_updates_object_metadata(client: TestClient, session_facto
         catalog_object = get_object(session, "n8n")
     assert catalog_object is not None
     assert catalog_object.label == "n8n-main"
+    assert catalog_object.data["platform"] == "LXC"
     assert catalog_object.data["network"]["hostnames"][0] == "n8n-main"
+
+
+def test_overview_edit_hides_platform_for_service(client: TestClient, session_factory) -> None:
+    with session_factory() as session:
+        upsert_object(
+            session,
+            CatalogObjectIn(
+                id="service-overview-platform",
+                kind="service",
+                label="Service Overview Platform",
+                status="active",
+                data={"schema_version": 1, "platform": "Legacy"},
+            ),
+        )
+
+    response = client.post(
+        "/objects/service-overview-platform",
+        data={
+            "primary_name": "Service Without Platform",
+            "kind": "service",
+            "status": "active",
+            "platform": "Docker",
+            "summary": "Service overview update.",
+        },
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 303
+    edit_response = client.get("/objects/service-overview-platform?edit=overview")
+    assert edit_response.status_code == 200
+    assert 'name="platform"' not in edit_response.text
+    with session_factory() as session:
+        catalog_object = get_object(session, "service-overview-platform")
+    assert catalog_object is not None
+    assert "platform" not in catalog_object.data
 
 
 def test_detail_form_can_create_relationship(client: TestClient, session_factory) -> None:
@@ -1241,6 +1313,79 @@ def test_service_network_edit_only_exposes_and_updates_endpoints(
 
     assert invalid_response.status_code == 422
     assert "endpoint type must be one of: Web, REST API, MCP, HEC, SSH" in invalid_response.text
+
+
+def test_service_detail_can_edit_service_information_fields(
+    client: TestClient,
+    session_factory,
+) -> None:
+    object_id = "service-information-scope"
+    with session_factory() as session:
+        upsert_object(
+            session,
+            CatalogObjectIn(
+                id=object_id,
+                kind="service",
+                label="Service Information Scope",
+                status="active",
+                summary="Service information edit.",
+                data={
+                    "schema_version": 1,
+                    "service_information": {
+                        "sources": ["https://github.com/example/service"],
+                        "running_version": "0.0.1 beta rc-1",
+                    },
+                    "endpoints": [
+                        {
+                            "type": "Web",
+                            "url": "https://192.168.50.10",
+                            "port": 443,
+                        }
+                    ],
+                },
+            ),
+        )
+
+    detail_response = client.get(f"/objects/{object_id}")
+
+    assert detail_response.status_code == 200
+    service_info_index = detail_response.text.index("Service Information")
+    network_index = detail_response.text.index("Netzwerk")
+    assert service_info_index < network_index
+    assert "https://github.com/example/service" in detail_response.text
+    assert "0.0.1 beta rc-1" in detail_response.text
+
+    edit_response = client.get(f"/objects/{object_id}?edit=service-information")
+
+    assert edit_response.status_code == 200
+    assert 'name="service_sources"' in edit_response.text
+    assert 'name="service_running_version"' in edit_response.text
+    assert 'name="endpoint_url"' not in edit_response.text
+
+    update_response = client.post(
+        f"/objects/{object_id}",
+        data={
+            "service_sources": "https://github.com/example/service\nhttps://vendor.example",
+            "service_running_version": "0.0.1 beta rc-2",
+        },
+        follow_redirects=False,
+    )
+
+    assert update_response.status_code == 303
+    with session_factory() as session:
+        updated = get_object(session, object_id)
+
+    assert updated is not None
+    assert updated.data["service_information"] == {
+        "sources": [
+            "https://github.com/example/service",
+            "https://vendor.example",
+        ],
+        "running_version": "0.0.1 beta rc-2",
+    }
+    assert updated.data["endpoints"] == [
+        {"type": "Web", "url": "https://192.168.50.10", "port": 443}
+    ]
 
 
 @pytest.mark.parametrize("kind", ["host", "system", "netzwerk"])

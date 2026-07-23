@@ -1,0 +1,7 @@
+{% if can_write %}
+  <form class="admin-control" method="post" action="/admin/lock">
+    <button class="button button-small button-muted" type="submit">Admin sperren</button>
+  </form>
+{% else %}
+  <a class="button button-small button-muted" href="/admin">Admin freigeben</a>
+{% endif %}

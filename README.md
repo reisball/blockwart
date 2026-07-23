@@ -7,7 +7,7 @@ The MVP goal is narrow:
 - structured systems, services, credential references, and runbooks
 - DB-backed canonical storage
 - search-first human UI
-- REST API for humans and integrations
+- read-only REST API for humans and integrations
 - read-only MCP surface for agents
 - Markdown/YAML export as generated output
 - no secret values in database records, fixtures, exports, logs, docs, or issues
@@ -36,6 +36,12 @@ Run the app:
 uvicorn blockwart.main:app --reload
 ```
 
+Without `BLOCKWART_ADMIN_TOKEN`, Blockwart is fail-closed and the UI is read-only. To enable
+short-lived UI write sessions, inject an admin token with at least 32 characters through the
+protected runtime environment and unlock the UI at `/admin`. The token is never stored in the
+database or returned to the browser; the browser receives only an HMAC-signed `HttpOnly` session
+cookie.
+
 Initialize or refresh a local pilot database:
 
 ```bash
@@ -59,6 +65,9 @@ The first agent-facing surface is read-only and lives under /api/agent:
 
 It returns sanitized object context, relationships, and credential-reference IDs only. It never
 resolves credential values. See docs/agent-api.md.
+
+The catalog REST API is also read-only. Object changes are available only through authenticated
+UI form routes.
 
 A local MCP-compatible stdio wrapper is available as blockwart-mcp. See docs/mcp.md.
 

@@ -2,8 +2,9 @@
 
 Blockwart exposes a read-only agent namespace under /api/agent.
 
-The namespace is intentionally separate from the mutable catalog API. Agents can search and retrieve
-context, but they cannot create, update, delete, or resolve credential values.
+The namespace is intentionally separate from the catalog read API. Both API surfaces are read-only:
+agents and integrations can search and retrieve context, but they cannot create, update, delete, or
+resolve credential values. Catalog changes are restricted to authenticated UI form routes.
 
 ## Endpoints
 
