@@ -155,7 +155,7 @@ def create_relationship(
             f"Create relationship {from_ref} {relation_type} {to_ref}",
         )
         _touch_objects_for_refs(session, [from_ref, to_ref], changed_at)
-        session.commit()
+        session.flush()
     return {"from_ref": from_ref, "relation_type": relation_type, "to_ref": to_ref}
 
 
@@ -188,7 +188,7 @@ def upsert_object(session: Session, payload: CatalogObjectIn) -> CatalogObjectOu
         row.updated_at = changed_at
 
     _write_audit(session, payload.id, action, audit_summary)
-    session.commit()
+    session.flush()
     session.refresh(row)
     return _to_schema(row)
 
@@ -325,7 +325,7 @@ def delete_object(session: Session, object_id: str) -> bool:
     )
     session.delete(row)
     _write_audit(session, object_id, "delete", f"Objekt gelöscht: {object_ref}")
-    session.commit()
+    session.flush()
     return True
 
 

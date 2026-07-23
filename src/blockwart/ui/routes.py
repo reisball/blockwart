@@ -13,6 +13,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from blockwart.api.deps import get_session
+from blockwart.db.session import transaction
 from blockwart.domain.security import find_secret_violations
 from blockwart.domain.ui_schema import (
     create_field_payload,
@@ -408,14 +409,15 @@ def save_object(
             summary=summary or None,
             data=data,
         )
-        upsert_object(session, payload)
-        if relation_target_ref:
-            create_relationship(
-                session,
-                from_ref=relation_target_ref,
-                relation_type=relation_type,
-                to_ref=f"{payload.kind}:{payload.id}",
-            )
+        with transaction(session):
+            upsert_object(session, payload)
+            if relation_target_ref:
+                create_relationship(
+                    session,
+                    from_ref=relation_target_ref,
+                    relation_type=relation_type,
+                    to_ref=f"{payload.kind}:{payload.id}",
+                )
     except (json.JSONDecodeError, ValidationError, ValueError) as exc:
         form["data_json"] = SAFE_DATA_JSON_FALLBACK
         objects = _visible_objects(search_objects(session))
@@ -481,12 +483,13 @@ def save_relationship(
         from_ref, to_ref = target_ref, object_ref
     else:
         from_ref, to_ref = object_ref, target_ref
-    create_relationship(
-        session,
-        from_ref=from_ref,
-        relation_type=relation_type,
-        to_ref=to_ref,
-    )
+    with transaction(session):
+        create_relationship(
+            session,
+            from_ref=from_ref,
+            relation_type=relation_type,
+            to_ref=to_ref,
+        )
     return RedirectResponse(url=f"/objects/{object_id}", status_code=303)
 
 
@@ -510,17 +513,18 @@ def update_comment(
     else:
         data.pop("comment", None)
     _reject_secret_shaped_form_data(data)
-    upsert_object(
-        session,
-        CatalogObjectIn(
-            id=existing_object.id,
-            kind=existing_object.kind,
-            label=existing_object.label,
-            status=existing_object.status,
-            summary=existing_object.summary,
-            data=data,
-        ),
-    )
+    with transaction(session):
+        upsert_object(
+            session,
+            CatalogObjectIn(
+                id=existing_object.id,
+                kind=existing_object.kind,
+                label=existing_object.label,
+                status=existing_object.status,
+                summary=existing_object.summary,
+                data=data,
+            ),
+        )
     return RedirectResponse(url=f"/objects/{object_id}", status_code=303)
 
 
@@ -660,7 +664,8 @@ def update_object(
             summary=existing_object.summary if summary is None else summary or None,
             data=data,
         )
-        upsert_object(session, payload)
+        with transaction(session):
+            upsert_object(session, payload)
     except (json.JSONDecodeError, ValidationError, ValueError) as exc:
         catalog_object = get_object(session, object_id)
         if catalog_object is None:
@@ -815,17 +820,18 @@ async def update_network(
         except ValueError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
     _reject_secret_shaped_form_data(data)
-    upsert_object(
-        session,
-        CatalogObjectIn(
-            id=existing_object.id,
-            kind=existing_object.kind,
-            label=existing_object.label,
-            status=existing_object.status,
-            summary=existing_object.summary,
-            data=data,
-        ),
-    )
+    with transaction(session):
+        upsert_object(
+            session,
+            CatalogObjectIn(
+                id=existing_object.id,
+                kind=existing_object.kind,
+                label=existing_object.label,
+                status=existing_object.status,
+                summary=existing_object.summary,
+                data=data,
+            ),
+        )
     return RedirectResponse(url=f"/objects/{object_id}", status_code=303)
 
 
@@ -887,20 +893,21 @@ async def update_access(
             "endpoint": endpoint,
             "auth_mode": auth_mode,
         }
-    for ref, data in changed_data.items():
-        _reject_secret_shaped_form_data(data)
-        target = changed_objects[ref]
-        upsert_object(
-            session,
-            CatalogObjectIn(
-                id=target.id,
-                kind=target.kind,
-                label=target.label,
-                status=target.status,
-                summary=target.summary,
-                data=data,
-            ),
-        )
+    with transaction(session):
+        for ref, data in changed_data.items():
+            _reject_secret_shaped_form_data(data)
+            target = changed_objects[ref]
+            upsert_object(
+                session,
+                CatalogObjectIn(
+                    id=target.id,
+                    kind=target.kind,
+                    label=target.label,
+                    status=target.status,
+                    summary=target.summary,
+                    data=data,
+                ),
+            )
     return RedirectResponse(url=f"/objects/{object_id}", status_code=303)
 
 

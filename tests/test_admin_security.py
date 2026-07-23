@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from blockwart.api.deps import get_session
 from blockwart.config import Settings
 from blockwart.db.base import Base
+from blockwart.db.session import transaction
 from blockwart.main import create_app
 from blockwart.models import AuditEvent, CatalogObject
 from blockwart.schemas.catalog import CatalogObjectIn
@@ -32,27 +33,28 @@ def session_factory(tmp_path):
     Base.metadata.create_all(engine)
     factory = sessionmaker(bind=engine, autoflush=False, autocommit=False)
     with factory() as session:
-        upsert_object(
-            session,
-            CatalogObjectIn(
-                id="protected-object",
-                kind="system",
-                label="Protected Object",
-                status="active",
-                summary="Must not change without admin access.",
-                data={"schema_version": 1},
-            ),
-        )
-        upsert_object(
-            session,
-            CatalogObjectIn(
-                id="relationship-target",
-                kind="host",
-                label="Relationship Target",
-                status="active",
-                data={"schema_version": 1},
-            ),
-        )
+        with transaction(session):
+            upsert_object(
+                session,
+                CatalogObjectIn(
+                    id="protected-object",
+                    kind="system",
+                    label="Protected Object",
+                    status="active",
+                    summary="Must not change without admin access.",
+                    data={"schema_version": 1},
+                ),
+            )
+            upsert_object(
+                session,
+                CatalogObjectIn(
+                    id="relationship-target",
+                    kind="host",
+                    label="Relationship Target",
+                    status="active",
+                    data={"schema_version": 1},
+                ),
+            )
     return factory
 
 

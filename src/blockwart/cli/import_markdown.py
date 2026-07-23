@@ -8,7 +8,7 @@ from pathlib import Path
 from sqlalchemy.orm import sessionmaker
 
 from blockwart.db.base import Base
-from blockwart.db.session import build_engine
+from blockwart.db.session import DatabaseTransactionError, build_engine, transaction
 from blockwart.models import AuditEvent, CatalogObject, Relationship
 from blockwart.services.markdown_import import build_tools_import_plan, import_tools_markdown
 
@@ -82,26 +82,31 @@ def main(argv: Sequence[str] | None = None) -> int:
         Base.metadata.create_all(bind=engine)
 
     session_factory = sessionmaker(bind=engine, autoflush=False, autocommit=False)
-    with session_factory() as session:
-        if args.replace:
-            session.query(AuditEvent).delete()
-            session.query(Relationship).delete()
-            session.query(CatalogObject).delete()
-            session.commit()
-        result = import_tools_markdown(
-            session,
-            tools_path,
-            references_root=Path(args.references_root),
-        )
-        object_count = session.query(CatalogObject).count()
-        relationship_count = session.query(Relationship).count()
-        print(
-            "markdown_import_applied "
-            f"objects={result.objects_imported} "
-            f"relationships={result.relationships_imported} "
-            f"catalog_objects={object_count} "
-            f"catalog_relationships={relationship_count}"
-        )
+    try:
+        with session_factory() as session:
+            with transaction(session):
+                if args.replace:
+                    session.query(AuditEvent).delete()
+                    session.query(Relationship).delete()
+                    session.query(CatalogObject).delete()
+                result = import_tools_markdown(
+                    session,
+                    tools_path,
+                    references_root=Path(args.references_root),
+                )
+                object_count = session.query(CatalogObject).count()
+                relationship_count = session.query(Relationship).count()
+    except DatabaseTransactionError:
+        print("markdown_import_error=database_transaction_failed", file=sys.stderr)
+        return 1
+
+    print(
+        "markdown_import_applied "
+        f"objects={result.objects_imported} "
+        f"relationships={result.relationships_imported} "
+        f"catalog_objects={object_count} "
+        f"catalog_relationships={relationship_count}"
+    )
     return 0
 
 

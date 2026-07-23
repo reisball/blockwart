@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from blockwart.api.deps import get_session
 from blockwart.db.base import Base
+from blockwart.db.session import transaction
 from blockwart.main import create_app
 from blockwart.models import AuditEvent, Relationship
 from blockwart.schemas.catalog import CatalogObjectIn
@@ -39,23 +40,24 @@ def client(session_factory) -> Generator[TestClient, None, None]:
 
 def test_get_and_list_catalog_objects_are_read_only(client: TestClient, session_factory) -> None:
     with session_factory() as session:
-        created = upsert_object(
-            session,
-            CatalogObjectIn(
-                id="n8n",
-                kind="system",
-                label="n8n",
-                status="active",
-                data={
-                    "schema_version": 1,
-                    "network": {
-                        "hostnames": ["n8n.local"],
-                        "addresses": [{"ip": "192.168.50.83", "family": "ipv4"}],
+        with transaction(session):
+            created = upsert_object(
+                session,
+                CatalogObjectIn(
+                    id="n8n",
+                    kind="system",
+                    label="n8n",
+                    status="active",
+                    data={
+                        "schema_version": 1,
+                        "network": {
+                            "hostnames": ["n8n.local"],
+                            "addresses": [{"ip": "192.168.50.83", "family": "ipv4"}],
+                        },
+                        "ports": [{"port": 5678, "protocol": "tcp", "exposure": "lan"}],
                     },
-                    "ports": [{"port": 5678, "protocol": "tcp", "exposure": "lan"}],
-                },
-            ),
-        )
+                ),
+            )
     get_response = client.get("/api/objects/n8n")
     assert get_response.status_code == 200
     assert get_response.json()["created_at"] == created.created_at
@@ -87,24 +89,25 @@ def test_catalog_input_rejects_unsupported_status() -> None:
 
 def test_delete_catalog_object_writes_audit_event(session_factory) -> None:
     with session_factory() as session:
-        upsert_object(
-            session,
-            CatalogObjectIn(
-                id="rotate-vaultwarden",
-                kind="runbook",
-                label="Rotate Vaultwarden",
-                status="active",
-                summary="Credential rotation procedure.",
-                data={
-                    "schema_version": 1,
-                    "risk_level": "safe-change",
-                    "approval_required": False,
-                    "steps": [{"order": 1, "title": "Open referenced vault item"}],
-                    "credential_references": ["credential_reference:vaultwarden-api"],
-                },
-            ),
-        )
-        assert delete_object(session, "rotate-vaultwarden")
+        with transaction(session):
+            upsert_object(
+                session,
+                CatalogObjectIn(
+                    id="rotate-vaultwarden",
+                    kind="runbook",
+                    label="Rotate Vaultwarden",
+                    status="active",
+                    summary="Credential rotation procedure.",
+                    data={
+                        "schema_version": 1,
+                        "risk_level": "safe-change",
+                        "approval_required": False,
+                        "steps": [{"order": 1, "title": "Open referenced vault item"}],
+                        "credential_references": ["credential_reference:vaultwarden-api"],
+                    },
+                ),
+            )
+            assert delete_object(session, "rotate-vaultwarden")
         events = session.scalars(select(AuditEvent).order_by(AuditEvent.id)).all()
     assert [event.action for event in events] == ["create", "delete"]
     assert events[-1].object_id == "rotate-vaultwarden"
@@ -115,35 +118,36 @@ def test_delete_catalog_object_removes_relationship_edges(
     session_factory,
 ) -> None:
     with session_factory() as session:
-        upsert_object(
-            session,
-            CatalogObjectIn(
-                id="n8n",
-                kind="system",
-                label="n8n",
-                status="active",
-                data={"schema_version": 1},
-            ),
-        )
-        upsert_object(
-            session,
-            CatalogObjectIn(
-                id="n8n-web-ui",
-                kind="service",
-                label="n8n Web UI",
-                status="active",
-                data={"schema_version": 1, "system_id": "system:n8n"},
-            ),
-        )
-        session.add(
-            Relationship(
-                from_ref="system:n8n",
-                relation_type="hosts",
-                to_ref="service:n8n-web-ui",
+        with transaction(session):
+            upsert_object(
+                session,
+                CatalogObjectIn(
+                    id="n8n",
+                    kind="system",
+                    label="n8n",
+                    status="active",
+                    data={"schema_version": 1},
+                ),
             )
-        )
-        session.commit()
-        assert delete_object(session, "n8n-web-ui")
+            upsert_object(
+                session,
+                CatalogObjectIn(
+                    id="n8n-web-ui",
+                    kind="service",
+                    label="n8n Web UI",
+                    status="active",
+                    data={"schema_version": 1, "system_id": "system:n8n"},
+                ),
+            )
+            session.add(
+                Relationship(
+                    from_ref="system:n8n",
+                    relation_type="hosts",
+                    to_ref="service:n8n-web-ui",
+                )
+            )
+        with transaction(session):
+            assert delete_object(session, "n8n-web-ui")
         assert session.scalars(select(Relationship)).all() == []
         events = session.scalars(select(AuditEvent).order_by(AuditEvent.id)).all()
     assert [event.action for event in events] == ["create", "create", "delete"]

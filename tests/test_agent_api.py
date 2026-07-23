@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from blockwart.api.deps import get_session
 from blockwart.db.base import Base
+from blockwart.db.session import transaction
 from blockwart.main import create_app
 from blockwart.models import CatalogObject, Relationship
 from blockwart.services.seeds import import_seed_file
@@ -24,7 +25,8 @@ def session_factory(tmp_path):
     Base.metadata.create_all(engine)
     factory = sessionmaker(bind=engine, autoflush=False, autocommit=False)
     with factory() as session:
-        import_seed_file(session, SEED_PATH)
+        with transaction(session):
+            import_seed_file(session, SEED_PATH)
     return factory
 
 

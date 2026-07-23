@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from blockwart.api.deps import get_session
 from blockwart.config import Settings
 from blockwart.db.base import Base
+from blockwart.db.session import transaction
 from blockwart.domain.ui_schema import (
     FIELD_DEFINITIONS,
     UI_SCHEMAS,
@@ -20,11 +21,19 @@ from blockwart.domain.ui_schema import (
 from blockwart.main import create_app
 from blockwart.models import AuditEvent, Relationship
 from blockwart.schemas.catalog import PUBLIC_OBJECT_KINDS, CatalogObjectIn
-from blockwart.services.catalog import get_object, upsert_object
+from blockwart.services.catalog import get_object
+from blockwart.services.catalog import upsert_object as flush_object
 from blockwart.services.seeds import import_seed_file
 
 SEED_PATH = Path(__file__).resolve().parents[1] / "seeds" / "pilot_objects.yaml"
 TEST_ADMIN_TOKEN = "test-admin-token-with-at-least-32-characters"
+
+
+def upsert_object(session: Session, payload: CatalogObjectIn):
+    """Persist test setup explicitly; production helpers only flush."""
+
+    with transaction(session):
+        return flush_object(session, payload)
 
 
 @pytest.fixture
@@ -36,7 +45,8 @@ def session_factory(tmp_path):
     Base.metadata.create_all(engine)
     factory = sessionmaker(bind=engine, autoflush=False, autocommit=False)
     with factory() as session:
-        import_seed_file(session, SEED_PATH)
+        with transaction(session):
+            import_seed_file(session, SEED_PATH)
     return factory
 
 

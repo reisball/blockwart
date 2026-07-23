@@ -91,7 +91,7 @@ def import_seed_payload(session: Session, payload: dict[str, Any]) -> SeedImport
                 f"Seed relationship {relationship_summary}",
             )
 
-    session.commit()
+    session.flush()
     return SeedImportResult(
         objects_imported=len(objects),
         relationships_imported=inserted_relationships,
