@@ -13,10 +13,11 @@ from pathlib import Path
 from urllib.parse import parse_qs, urlsplit
 
 import mcp.types as mcp_types
+import pytest
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 
-from blockwart.mcp.server import TOOLS, call_tool
+from blockwart.mcp.server import TOOLS, ToolInputError, call_tool
 
 
 def _installed_entrypoint() -> Path:
@@ -173,6 +174,24 @@ def test_mcp_client_completes_handshake_and_calls_every_read_only_tool() -> None
                         "blockwart.get_object_context",
                         {},
                     )
+                    schema_invalid_arguments = {
+                        "invalid_kind": await session.call_tool(
+                            "blockwart.search",
+                            {"kind": "definitely-not-valid"},
+                        ),
+                        "limit_zero": await session.call_tool(
+                            "blockwart.search",
+                            {"limit": 0},
+                        ),
+                        "limit_above_maximum": await session.call_tool(
+                            "blockwart.search",
+                            {"limit": 51},
+                        ),
+                        "unknown_field": await session.call_tool(
+                            "blockwart.search",
+                            {"unexpected": "ignored"},
+                        ),
+                    }
                     unknown_tool = await session.call_tool("blockwart.delete", {})
             stderr.seek(0)
             error_output = stderr.read()
@@ -182,6 +201,7 @@ def test_mcp_client_completes_handshake_and_calls_every_read_only_tool() -> None
             results,
             upstream_error,
             invalid_arguments,
+            schema_invalid_arguments,
             unknown_tool,
             error_output,
         )
@@ -193,6 +213,7 @@ def test_mcp_client_completes_handshake_and_calls_every_read_only_tool() -> None
             results,
             upstream_error,
             invalid_arguments,
+            schema_invalid_arguments,
             unknown_tool,
             stderr,
         ) = asyncio.run(exercise_client(base_url))
@@ -235,6 +256,17 @@ def test_mcp_client_completes_handshake_and_calls_every_read_only_tool() -> None
     assert invalid_arguments.isError is True
     assert json.loads(invalid_content.text)["error"]["code"] == "invalid_arguments"
 
+    for result in schema_invalid_arguments.values():
+        content = result.content[0]
+        assert isinstance(content, mcp_types.TextContent)
+        assert result.isError is True
+        assert json.loads(content.text) == {
+            "error": {
+                "code": "invalid_arguments",
+                "message": "Tool arguments are invalid.",
+            }
+        }
+
     unknown_content = unknown_tool.content[0]
     assert isinstance(unknown_content, mcp_types.TextContent)
     assert unknown_tool.isError is True
@@ -249,6 +281,30 @@ def test_mcp_client_completes_handshake_and_calls_every_read_only_tool() -> None
     ]
     assert "Content-Length:" not in stderr
     assert "sensitive-upstream-detail" not in stderr
+
+
+@pytest.mark.parametrize(
+    ("name", "arguments"),
+    [
+        ("blockwart.search", {"kind": "definitely-not-valid"}),
+        ("blockwart.search", {"limit": 0}),
+        ("blockwart.search", {"limit": 51}),
+        ("blockwart.search", {"unexpected": "ignored"}),
+        ("blockwart.get_context", {"port": 0}),
+        ("blockwart.get_object_context", {"object_id": 123}),
+    ],
+)
+def test_mcp_rejects_schema_invalid_arguments_without_fetching(name, arguments) -> None:
+    calls = []
+
+    def fake_fetch(path, params):
+        calls.append((path, params))
+        return {}
+
+    with pytest.raises(ToolInputError):
+        call_tool(name, arguments, fetcher=fake_fetch)
+
+    assert calls == []
 
 
 def test_mcp_tools_are_read_only() -> None:

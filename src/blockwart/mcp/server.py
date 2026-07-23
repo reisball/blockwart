@@ -12,6 +12,9 @@ from urllib.request import Request, urlopen
 
 import mcp.server.stdio
 import mcp.types as types
+from jsonschema.exceptions import ValidationError
+from jsonschema.protocols import Validator
+from jsonschema.validators import validator_for
 from mcp.server.lowlevel import NotificationOptions, Server
 
 DEFAULT_BASE_URL = "http://127.0.0.1:8000"
@@ -99,6 +102,19 @@ TOOLS: list[JSON] = [
         "annotations": READ_ONLY_ANNOTATIONS,
     },
 ]
+TOOL_DEFINITIONS: dict[str, JSON] = {tool["name"]: tool for tool in TOOLS}
+
+
+def _compile_input_validator(schema: JSON) -> Validator:
+    validator_class = validator_for(schema)
+    validator_class.check_schema(schema)
+    return validator_class(schema)
+
+
+TOOL_INPUT_VALIDATORS: dict[str, Validator] = {
+    name: _compile_input_validator(tool["inputSchema"])
+    for name, tool in TOOL_DEFINITIONS.items()
+}
 
 
 def call_tool(
@@ -108,7 +124,15 @@ def call_tool(
     base_url: str | None = None,
     fetcher: Fetcher | None = None,
 ) -> JSON:
-    args = arguments or {}
+    if name not in TOOL_DEFINITIONS:
+        raise UnknownToolError(f"Unknown tool: {name}")
+
+    args = {} if arguments is None else arguments
+    try:
+        TOOL_INPUT_VALIDATORS[name].validate(args)
+    except ValidationError as exc:
+        raise ToolInputError("Tool arguments are invalid") from exc
+
     fetch = fetcher or (lambda path, params: fetch_json(path, params, base_url=base_url))
 
     if name == "blockwart.search":
@@ -168,6 +192,8 @@ async def list_tools() -> list[types.Tool]:
     return [types.Tool.model_validate(tool) for tool in TOOLS]
 
 
+# The SDK's validation response bypasses Blockwart's stable error envelope, so
+# call_tool validates the exact published schemas before any upstream request.
 @server.call_tool(validate_input=False)
 async def handle_call_tool(name: str, arguments: JSON) -> types.CallToolResult:
     try:
