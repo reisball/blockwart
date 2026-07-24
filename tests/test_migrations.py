@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+import sqlite3
 from pathlib import Path
 from shutil import copytree
 
@@ -22,6 +24,7 @@ from blockwart.db.migrations import (
 
 HEAD_REVISION = "20260723_0002"
 PROJECT_ALEMBIC_CONFIG = Path(__file__).resolve().parents[1] / "alembic.ini"
+LEGACY_SNAPSHOT = Path(__file__).resolve().parent / "fixtures" / "legacy_snapshot.sql"
 
 
 def _database_url(path: Path) -> str:
@@ -46,6 +49,40 @@ def _create_unversioned_baseline(database_url: str) -> None:
             connection.execute(text("DROP TABLE alembic_version"))
     finally:
         engine.dispose()
+
+
+def _existing_data_snapshot(database_path: Path) -> dict[str, list[dict[str, object]]]:
+    connection = sqlite3.connect(database_path)
+    connection.row_factory = sqlite3.Row
+    try:
+        objects = []
+        for row in connection.execute(
+            "SELECT id, kind, label, status, summary, data_json, created_at, updated_at "
+            "FROM catalog_objects ORDER BY id"
+        ):
+            payload = dict(row)
+            payload["data_json"] = json.loads(str(payload["data_json"]))
+            objects.append(payload)
+        relationships = [
+            dict(row)
+            for row in connection.execute(
+                "SELECT id, from_ref, relation_type, to_ref FROM relationships ORDER BY id"
+            )
+        ]
+        audit_events = [
+            dict(row)
+            for row in connection.execute(
+                "SELECT id, object_id, action, actor, summary, created_at "
+                "FROM audit_events ORDER BY id"
+            )
+        ]
+        return {
+            "catalog_objects": objects,
+            "relationships": relationships,
+            "audit_events": audit_events,
+        }
+    finally:
+        connection.close()
 
 
 def test_real_alembic_upgrade_uses_runtime_database_url(
@@ -110,50 +147,41 @@ def test_real_alembic_upgrade_creates_fresh_database_and_has_no_drift(
 def test_upgrade_from_previous_real_revision_preserves_rows_and_json(
     tmp_path: Path,
 ) -> None:
-    database_url = _database_url(tmp_path / "previous.sqlite3")
+    database_path = tmp_path / "previous.sqlite3"
+    database_url = _database_url(database_path)
     config = build_alembic_config(database_url)
     command.upgrade(config, BASELINE_REVISION)
 
-    engine = create_engine(database_url)
-    unknown_json = '{"schema_version": 1, "future_field": {"keep": true}}'
-    with engine.begin() as connection:
-        connection.execute(
-            text(
-                "INSERT INTO catalog_objects "
-                "(id, kind, label, status, summary, data_json) "
-                "VALUES (:id, :kind, :label, :status, :summary, :data_json)"
-            ),
-            {
-                "id": "legacy-system",
-                "kind": "system",
-                "label": "Legacy System",
-                "status": "active",
-                "summary": "Must survive.",
-                "data_json": unknown_json,
-            },
-        )
-        connection.execute(
-            text(
-                "INSERT INTO relationships (from_ref, relation_type, to_ref) "
-                "VALUES ('system:legacy-system', 'depends_on', 'system:legacy-system')"
-            )
-        )
-        connection.execute(
-            text(
-                "INSERT INTO audit_events (object_id, action, actor, summary) "
-                "VALUES ('legacy-system', 'create', 'legacy', 'Must survive.')"
-            )
-        )
+    connection = sqlite3.connect(database_path)
+    try:
+        connection.executescript(LEGACY_SNAPSHOT.read_text(encoding="utf-8"))
+        connection.commit()
+    finally:
+        connection.close()
+    before = _existing_data_snapshot(database_path)
+    assert {row["kind"] for row in before["catalog_objects"]} == {
+        "host",
+        "system",
+        "netzwerk",
+        "service",
+        "credential_reference",
+        "runbook",
+        "decision",
+        "project",
+    }
+    system_before = next(
+        row for row in before["catalog_objects"] if row["id"] == "legacy-system"
+    )
+    assert system_before["data_json"] == {
+        "schema_version": 1,
+        "future_field": {"keep": True},
+        "tags": ["legacy", "future"],
+    }
 
     command.upgrade(config, "head")
 
-    with engine.connect() as connection:
-        assert connection.execute(
-            text("SELECT data_json FROM catalog_objects WHERE id = 'legacy-system'")
-        ).scalar_one() == unknown_json
-        assert connection.execute(text("SELECT count(*) FROM relationships")).scalar_one() == 1
-        assert connection.execute(text("SELECT count(*) FROM audit_events")).scalar_one() == 1
-    engine.dispose()
+    assert _existing_data_snapshot(database_path) == before
+    command.check(config)
     assert check_database_revision(database_url) == HEAD_REVISION
 
 
