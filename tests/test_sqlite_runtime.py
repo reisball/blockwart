@@ -141,7 +141,7 @@ def test_backup_restore_remains_readable_and_migratable(tmp_path: Path) -> None:
     ):
         source_connection.backup(restored_connection)
 
-    assert upgrade_database(restored_url) == "20260723_0002"
+    assert upgrade_database(restored_url) == "20260724_0003"
     readiness = check_database_readiness(Settings(database_url=restored_url))
     restored_engine = build_engine(restored_url)
     try:
@@ -152,5 +152,5 @@ def test_backup_restore_remains_readable_and_migratable(tmp_path: Path) -> None:
     finally:
         restored_engine.dispose()
 
-    assert readiness.revision == "20260723_0002"
+    assert readiness.revision == "20260724_0003"
     assert set(readiness.checks.values()) == {"ok"}

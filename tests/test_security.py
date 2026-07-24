@@ -53,7 +53,6 @@ def test_credential_references_reject_raw_value_fields(forbidden_key: str) -> No
 @pytest.mark.parametrize(
     "data",
     [
-        {"system_id": "service:wrong-kind"},
         {"dependencies": {"upstream": ["credential_reference:wrong-kind"]}},
         {
             "access_methods": [
@@ -66,7 +65,20 @@ def test_typed_reference_kind_mismatches_are_rejected(data: dict) -> None:
     with pytest.raises(ValidationError, match="must reference one of"):
         CatalogObjectIn(
             id="wrong-reference",
-            kind="service" if "system_id" in data else "system",
+            kind="system",
             label="Wrong Reference",
             data=data,
+        )
+
+
+def test_service_system_id_is_rejected_as_obsolete_placement_storage() -> None:
+    with pytest.raises(
+        ValidationError,
+        match="data.system_id is obsolete; use a hosts relationship",
+    ):
+        CatalogObjectIn(
+            id="legacy-placement",
+            kind="service",
+            label="Legacy placement",
+            data={"schema_version": 1, "system_id": "system:runtime"},
         )

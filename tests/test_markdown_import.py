@@ -50,7 +50,7 @@ def test_build_tools_import_plan_parses_infrastructure_rows(tmp_path: Path) -> N
     assert service["id"] == "ct-200_demo-box"
     assert service["kind"] == "service"
     assert "platform" not in service["data"]
-    assert service["data"]["system_id"] == "system:ct-200"
+    assert "system_id" not in service["data"]
     assert system["data"]["network"]["addresses"][0]["ip"] == "192.168.50.200"
     assert {item["port"] for item in system["data"]["ports"]} == {22}
     assert {item["port"] for item in service["data"]["endpoints"]} == {8080}
@@ -154,7 +154,7 @@ def test_import_tools_markdown_creates_hosted_service_relationship(
     assert '"platform": "LXC"' in objects["ct-121"].data_json
     assert objects["ct-121_agent-zero"].kind == "service"
     assert '"platform": "LXC"' not in objects["ct-121_agent-zero"].data_json
-    assert objects["ct-121_agent-zero"].data_json.count("system:ct-121") == 1
+    assert "system:ct-121" not in objects["ct-121_agent-zero"].data_json
     assert [
         {
             "from_ref": relationship.from_ref,
@@ -192,26 +192,25 @@ def test_import_tools_markdown_updates_previous_workspace_import_shape(
     )
 
     with _session(alembic_session_factory) as session:
-        upsert_object(
-            session,
-            CatalogObjectIn(
+        session.add(
+            CatalogObject(
                 id="agent-zero",
                 kind="service",
                 label="Agent Zero",
                 status="active",
                 summary="Old import.",
-                data={
-                    "schema_version": 1,
-                    "source": "workspace_markdown_import",
-                    "system_id": "system:agent-zero-lxc",
-                },
-            ),
+                data_json=(
+                    '{"schema_version":1,"source":"workspace_markdown_import",'
+                    '"system_id":"system:agent-zero-lxc"}'
+                ),
+            )
         )
+        session.flush()
         import_tools_markdown(session, tools_path, references_root=tmp_path)
         row = session.get(CatalogObject, "ct-121_agent-zero")
 
     assert row is not None
-    assert "system:ct-121" in row.data_json
+    assert "system:ct-121" not in row.data_json
     assert "system:agent-zero-lxc" not in row.data_json
 
 

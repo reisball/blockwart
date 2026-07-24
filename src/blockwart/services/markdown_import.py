@@ -157,7 +157,6 @@ def build_tools_import_plan(
                         label=display_label,
                         usage=usage,
                         typ=typ,
-                        system_ref=system_ref,
                         addresses=addresses,
                         ports=service_ports,
                         source_references=source_references,
@@ -491,7 +490,6 @@ def _service_data(
     label: str,
     usage: str,
     typ: str,
-    system_ref: str,
     addresses: list[dict[str, str]],
     ports: list[dict[str, Any]],
     source_references: list[dict[str, str]],
@@ -502,7 +500,6 @@ def _service_data(
         "schema_version": 1,
         "type": "application",
         "source": "workspace_markdown_import",
-        "system_id": system_ref,
         "purpose": usage,
         "endpoints": _endpoints_from_network(label, addresses, ports),
         "access_methods": _access_methods(

@@ -732,11 +732,50 @@ def test_service_result_keeps_service_on_right_side(client: TestClient) -> None:
 
 def test_host_result_groups_systems_and_services_in_one_relation_row(
     client: TestClient,
+    session_factory,
 ) -> None:
-    response = client.get("/?q=fabrik")
+    with session_factory() as session:
+        with transaction(session):
+            for payload in (
+                CatalogObjectIn(
+                    id="hardware-ui",
+                    kind="host",
+                    label="Hardware UI",
+                    data={"schema_version": 1},
+                ),
+                CatalogObjectIn(
+                    id="runtime-ui",
+                    kind="system",
+                    label="Runtime UI",
+                    data={"schema_version": 1},
+                ),
+                CatalogObjectIn(
+                    id="service-ui",
+                    kind="service",
+                    label="Service UI",
+                    data={"schema_version": 1},
+                ),
+            ):
+                flush_object(session, payload)
+            session.add_all(
+                [
+                    Relationship(
+                        from_ref="host:hardware-ui",
+                        relation_type="hosts",
+                        to_ref="system:runtime-ui",
+                    ),
+                    Relationship(
+                        from_ref="system:runtime-ui",
+                        relation_type="hosts",
+                        to_ref="service:service-ui",
+                    ),
+                ]
+            )
+
+    response = client.get("/?q=hardware-ui")
 
     assert response.status_code == 200
-    object_marker = '<span class="object-id">fabrik</span>'
+    object_marker = '<span class="object-id">hardware-ui</span>'
     object_index = response.text.find(object_marker)
     assert object_index >= 0
     article_start = response.text.rfind("<article", 0, object_index)
@@ -749,9 +788,9 @@ def test_host_result_groups_systems_and_services_in_one_relation_row(
     assert relationships.count('class="relationship-chain"') == 1
     assert relationships.find("Host") < relationships.find("Systeme")
     assert relationships.find("Systeme") < relationships.find("Services")
-    assert 'data-ref="system:fabrik"' in relationships
-    assert 'data-ref="system:n8n"' in relationships
-    assert 'data-ref="service:n8n-web-ui"' in relationships
+    assert 'data-ref="host:hardware-ui"' in relationships
+    assert 'data-ref="system:runtime-ui"' in relationships
+    assert 'data-ref="service:service-ui"' in relationships
 
 
 def test_object_detail_shows_data_and_relationships(client: TestClient) -> None:
@@ -1078,6 +1117,51 @@ def test_overview_edit_hides_platform_for_service(client: TestClient, session_fa
 
 
 def test_detail_form_can_create_relationship(client: TestClient, session_factory) -> None:
+    with session_factory() as session:
+        with transaction(session):
+            flush_object(
+                session,
+                CatalogObjectIn(
+                    id="detail-hardware",
+                    kind="host",
+                    label="Detail Hardware",
+                    data={"schema_version": 1},
+                ),
+            )
+            flush_object(
+                session,
+                CatalogObjectIn(
+                    id="detail-service",
+                    kind="service",
+                    label="Detail Service",
+                    data={"schema_version": 1},
+                ),
+            )
+
+    response = client.post(
+        "/objects/detail-service/relationships",
+        data={
+            "direction": "inbound",
+            "relation_type": "hosts",
+            "target_ref": "host:detail-hardware",
+        },
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 303
+    with session_factory() as session:
+        relationship = session.query(Relationship).filter_by(
+            from_ref="host:detail-hardware",
+            relation_type="hosts",
+            to_ref="service:detail-service",
+        ).one_or_none()
+    assert relationship is not None
+
+
+def test_detail_form_rejects_second_placement_parent(
+    client: TestClient,
+    session_factory,
+) -> None:
     response = client.post(
         "/objects/n8n-web-ui/relationships",
         data={
@@ -1088,14 +1172,18 @@ def test_detail_form_can_create_relationship(client: TestClient, session_factory
         follow_redirects=False,
     )
 
-    assert response.status_code == 303
+    assert response.status_code == 422
+    assert "already has placement parent system:n8n" in response.json()["detail"]
     with session_factory() as session:
-        relationship = session.query(Relationship).filter_by(
-            from_ref="system:fabrik",
-            relation_type="hosts",
-            to_ref="service:n8n-web-ui",
-        ).one_or_none()
-    assert relationship is not None
+        parents = session.scalars(
+            select(Relationship).where(
+                Relationship.relation_type == "hosts",
+                Relationship.to_ref == "service:n8n-web-ui",
+            )
+        ).all()
+    assert [(row.from_ref, row.to_ref) for row in parents] == [
+        ("system:n8n", "service:n8n-web-ui")
+    ]
 
 
 def test_system_detail_labels_inherited_service_access(
@@ -1134,7 +1222,6 @@ def test_system_detail_labels_inherited_service_access(
                 summary="Service.",
                 data={
                     "schema_version": 1,
-                    "system_id": "system:demo-host",
                     "access_methods": [
                         {
                             "type": "web",

@@ -17,10 +17,10 @@ def test_database_cli_upgrades_then_checks_database(tmp_path: Path, capsys) -> N
     database_url = f"sqlite:///{tmp_path / 'cli.sqlite3'}"
 
     assert database_cli.main(["--database-url", database_url, "upgrade"]) == 0
-    assert "database_upgrade_ok revision=20260723_0002" in capsys.readouterr().out
+    assert "database_upgrade_ok revision=20260724_0003" in capsys.readouterr().out
 
     assert database_cli.main(["--database-url", database_url, "check"]) == 0
-    assert "database_check_ok revision=20260723_0002" in capsys.readouterr().out
+    assert "database_check_ok revision=20260724_0003" in capsys.readouterr().out
 
 
 def test_database_cli_redacts_migration_failure(
@@ -75,7 +75,7 @@ def test_markdown_create_schema_uses_alembic(
     engine = create_engine(database_url)
     with engine.connect() as connection:
         assert connection.execute(text("SELECT version_num FROM alembic_version")).scalar_one() == (
-            "20260723_0002"
+            "20260724_0003"
         )
     engine.dispose()
 
@@ -146,7 +146,7 @@ def test_startup_upgrades_before_exec(monkeypatch: pytest.MonkeyPatch) -> None:
 
     def record_upgrade() -> str:
         calls.append(("upgrade", None))
-        return "20260723_0002"
+        return "20260724_0003"
 
     def record_exec(file: str, args: list[str]) -> None:
         calls.append(("exec", (file, args)))

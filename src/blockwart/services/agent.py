@@ -7,6 +7,7 @@ from urllib.parse import urlsplit
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from blockwart.domain.placement import PlacementGraph
 from blockwart.domain.security import FORBIDDEN_SECRET_KEYS, looks_like_secret
 from blockwart.models import CatalogObject, Relationship
 from blockwart.schemas.agent import (
@@ -18,7 +19,6 @@ from blockwart.schemas.agent import (
 from blockwart.schemas.catalog import ObjectKind
 
 REDACTED = "[redacted-secret-field]"
-PLACEMENT_RELATION_TYPES = {"hosts", "provides"}
 
 
 def search_agent_objects(
@@ -106,9 +106,7 @@ class _AgentCatalogResolver:
                 )
             ).all()
         )
-        self.parents_by_ref: dict[str, list[str]] = {}
-        self.children_by_ref: dict[str, list[str]] = {}
-        self._index_placements()
+        self.placements = PlacementGraph(self.objects, self.relationships)
 
     def search(
         self,
@@ -190,7 +188,7 @@ class _AgentCatalogResolver:
             ],
             children=[
                 node
-                for child_ref in self.children_by_ref.get(object_ref, [])
+                for child_ref in self.placements.children_refs(object_ref)
                 if (node := self.node(child_ref)) is not None
             ],
             endpoints=self.endpoints(obj),
@@ -215,29 +213,10 @@ class _AgentCatalogResolver:
         )
 
     def canonical_parent_ref(self, obj: CatalogObject) -> str | None:
-        parents = self.parents_by_ref.get(_object_ref(obj), [])
-        if not parents:
-            return None
-        preference = {"system": 0, "host": 1} if obj.kind == "service" else {"host": 0}
-        return min(
-            parents,
-            key=lambda ref: (
-                preference.get(_ref_kind(ref), 2),
-                ref,
-            ),
-        )
+        return self.placements.parent_ref(_object_ref(obj))
 
     def parent_path_refs(self, obj: CatalogObject) -> list[str]:
-        path: list[str] = []
-        seen = {_object_ref(obj)}
-        parent_ref = self.canonical_parent_ref(obj)
-        while parent_ref and parent_ref not in seen:
-            path.append(parent_ref)
-            seen.add(parent_ref)
-            parent = self.object_by_ref.get(parent_ref)
-            parent_ref = self.canonical_parent_ref(parent) if parent is not None else None
-        path.reverse()
-        return path
+        return self.placements.parent_path_refs(_object_ref(obj))
 
     def endpoints(self, obj: CatalogObject) -> list[dict[str, Any]]:
         data = _safe_object_data(obj)
@@ -300,33 +279,6 @@ class _AgentCatalogResolver:
                 ports.add(port_value)
         return ports
 
-    def _index_placements(self) -> None:
-        for relationship in self.relationships:
-            if relationship.relation_type not in PLACEMENT_RELATION_TYPES:
-                continue
-            self._add_placement(relationship.from_ref, relationship.to_ref)
-
-        for obj in self.objects:
-            if obj.kind != "service":
-                continue
-            system_ref = _safe_object_data(obj).get("system_id")
-            if isinstance(system_ref, str):
-                self._add_placement(system_ref, _object_ref(obj))
-
-        for refs in (*self.parents_by_ref.values(), *self.children_by_ref.values()):
-            refs.sort()
-
-    def _add_placement(self, parent_ref: str, child_ref: str) -> None:
-        parent = self.object_by_ref.get(parent_ref)
-        child = self.object_by_ref.get(child_ref)
-        if parent is None or child is None or parent_ref == child_ref:
-            return
-        if parent.kind not in {"host", "system"} or child.kind not in {"system", "service"}:
-            return
-        _append_unique(self.parents_by_ref, child_ref, parent_ref)
-        _append_unique(self.children_by_ref, parent_ref, child_ref)
-
-
 def _safe_object_data(obj: CatalogObject) -> dict[str, Any]:
     try:
         data = json.loads(obj.data_json)
@@ -348,10 +300,6 @@ def _matches_data_value(data: Mapping[str, Any], key: str, expected: str) -> boo
 
 def _object_ref(obj: CatalogObject) -> str:
     return f"{obj.kind}:{obj.id}"
-
-
-def _ref_kind(value: str) -> str:
-    return value.split(":", 1)[0]
 
 
 def _optional_text(value: Any) -> str | None:
@@ -454,10 +402,6 @@ def _unique_strings(values: Any) -> list[str]:
     return unique
 
 
-def _append_unique(target: dict[str, list[str]], key: str, value: str) -> None:
-    values = target.setdefault(key, [])
-    if value not in values:
-        values.append(value)
 
 
 def _sanitize_for_agent(value: Any) -> Any:

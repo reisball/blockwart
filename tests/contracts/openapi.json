@@ -495,6 +495,49 @@
         "title": "AgentSearchOut",
         "type": "object"
       },
+      "CatalogAssetNode": {
+        "properties": {
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "host",
+              "system",
+              "netzwerk",
+              "service",
+              "credential_reference",
+              "runbook",
+              "decision",
+              "project"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "ref": {
+            "title": "Ref",
+            "type": "string"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "ref",
+          "id",
+          "kind",
+          "label",
+          "status"
+        ],
+        "title": "CatalogAssetNode",
+        "type": "object"
+      },
       "CatalogObjectOut": {
         "properties": {
           "created_at": {
@@ -546,6 +589,13 @@
               }
             ],
             "title": "Last Changed"
+          },
+          "parent_path": {
+            "items": {
+              "$ref": "#/components/schemas/CatalogAssetNode"
+            },
+            "title": "Parent Path",
+            "type": "array"
           },
           "status": {
             "default": "active",

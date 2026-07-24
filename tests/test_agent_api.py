@@ -70,8 +70,7 @@ def resolved_asset_graph(session_factory) -> None:
             status="active",
             summary="Service on the runtime.",
             data_json=(
-                '{"schema_version": 1, "system_id": "system:runtime-01", '
-                '"lifecycle": "production", "health": "healthy", '
+                '{"schema_version": 1, "lifecycle": "production", "health": "healthy", '
                 '"endpoints": [{"type": "REST API", "url": "https://10.20.0.20:8443/api", '
                 '"host": "10.20.0.20", "port": 8443, "protocol": "https"}], '
                 '"dependencies": {"upstream": ["service:auth"], "downstream": []}}'
@@ -106,7 +105,7 @@ def resolved_asset_graph(session_factory) -> None:
         ),
         Relationship(
             from_ref="system:runtime-01",
-            relation_type="provides",
+            relation_type="hosts",
             to_ref="service:runtime-api",
         ),
         Relationship(
@@ -211,16 +210,44 @@ def test_agent_context_resolves_host_system_service_path(
     assert obj["updated_at"]
 
 
-def test_agent_context_preserves_current_system_provides_topology(client: TestClient) -> None:
+def test_catalog_rest_and_agent_api_return_the_same_canonical_parent_path(
+    client: TestClient,
+    resolved_asset_graph: None,
+) -> None:
+    catalog_response = client.get("/api/objects/runtime-api")
+    agent_response = client.get("/api/agent/objects/runtime-api")
+
+    assert catalog_response.status_code == 200
+    assert agent_response.status_code == 200
+    catalog_path = [
+        node["ref"] for node in catalog_response.json()["parent_path"]
+    ]
+    agent_path = [
+        node["ref"]
+        for node in agent_response.json()["objects"][0]["parent_path"]
+    ]
+    assert catalog_path == agent_path == [
+        "host:baremetal-01",
+        "system:runtime-01",
+    ]
+
+
+def test_agent_context_uses_canonical_seed_service_placement(client: TestClient) -> None:
     response = client.get("/api/agent/objects/n8n-web-ui")
 
     assert response.status_code == 200
     obj = response.json()["objects"][0]
     assert obj["parent"]["ref"] == "system:n8n"
-    assert [node["ref"] for node in obj["parent_path"]] == [
-        "system:fabrik",
-        "system:n8n",
-    ]
+    assert [node["ref"] for node in obj["parent_path"]] == ["system:n8n"]
+    assert "system_id" not in obj["data"]
+    assert any(
+        relationship == {
+            "from_ref": "system:n8n",
+            "relation_type": "hosts",
+            "to_ref": "service:n8n-web-ui",
+        }
+        for relationship in obj["relationships"]
+    )
 
 
 def test_agent_context_resolves_direct_hardware_service_and_children(

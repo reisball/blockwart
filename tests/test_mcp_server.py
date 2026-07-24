@@ -359,7 +359,18 @@ def test_mcp_get_object_context_calls_read_only_agent_object_endpoint() -> None:
 
     def fake_fetch(path, params):
         calls.append((path, params))
-        return {"count": 1, "objects": [{"ref": "system:n8n"}]}
+        return {
+            "count": 1,
+            "objects": [
+                {
+                    "ref": "service:n8n-web-ui",
+                    "parent_path": [
+                        {"ref": "host:fabrik"},
+                        {"ref": "system:n8n"},
+                    ],
+                }
+            ],
+        }
 
     response = call_tool(
         "blockwart.get_object_context",
@@ -369,7 +380,11 @@ def test_mcp_get_object_context_calls_read_only_agent_object_endpoint() -> None:
 
     assert calls == [("/api/agent/objects/n8n", {})]
     payload = json.loads(response["content"][0]["text"])
-    assert payload["objects"][0]["ref"] == "system:n8n"
+    assert payload["objects"][0]["ref"] == "service:n8n-web-ui"
+    assert [node["ref"] for node in payload["objects"][0]["parent_path"]] == [
+        "host:fabrik",
+        "system:n8n",
+    ]
 
 
 def test_mcp_context_calls_read_only_agent_context_endpoint() -> None:

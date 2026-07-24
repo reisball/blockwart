@@ -4,12 +4,28 @@ from datetime import UTC, datetime
 from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
+from blockwart.domain.placement import (
+    CANONICAL_PLACEMENT_RELATION_TYPE,
+    PlacementError,
+    PlacementGraph,
+    validate_placement_pair,
+)
+from blockwart.domain.references import TypedReference
 from blockwart.models import AuditEvent, CatalogObject, Relationship
-from blockwart.schemas.catalog import CatalogObjectIn, CatalogObjectOut
+from blockwart.schemas.catalog import CatalogAssetNode, CatalogObjectIn, CatalogObjectOut
 
 
-def _to_schema(row: CatalogObject) -> CatalogObjectOut:
+def _to_schema(
+    row: CatalogObject,
+    placement_graph: PlacementGraph | None = None,
+) -> CatalogObjectOut:
     updated_at = _format_timestamp(row.updated_at)
+    parent_path = []
+    if placement_graph is not None:
+        parent_path = [
+            _placement_node(placement_graph, parent_ref)
+            for parent_ref in placement_graph.parent_path_refs(_object_ref(row))
+        ]
     return CatalogObjectOut(
         id=row.id,
         kind=row.kind,  # type: ignore[arg-type]
@@ -20,7 +36,48 @@ def _to_schema(row: CatalogObject) -> CatalogObjectOut:
         created_at=_format_timestamp(row.created_at),
         updated_at=updated_at,
         last_changed=updated_at,
+        parent_path=parent_path,
     )
+
+
+def _placement_node(
+    placement_graph: PlacementGraph,
+    object_ref: str,
+) -> CatalogAssetNode:
+    row = placement_graph.object_by_ref[object_ref]
+    return CatalogAssetNode(
+        ref=object_ref,
+        id=row.id,
+        kind=row.kind,  # type: ignore[arg-type]
+        label=row.label,
+        status=row.status,
+    )
+
+
+def _object_ref(row: CatalogObject) -> str:
+    return f"{row.kind}:{row.id}"
+
+
+def _schemas_with_placement(
+    session: Session,
+    rows: list[CatalogObject],
+) -> list[CatalogObjectOut]:
+    all_objects = list(
+        session.scalars(
+            select(CatalogObject).order_by(CatalogObject.kind, CatalogObject.label)
+        ).all()
+    )
+    relationships = list(
+        session.scalars(
+            select(Relationship).order_by(
+                Relationship.relation_type,
+                Relationship.from_ref,
+                Relationship.to_ref,
+            )
+        ).all()
+    )
+    placement_graph = PlacementGraph(all_objects, relationships)
+    return [_to_schema(row, placement_graph) for row in rows]
 
 
 def _normalize_status(status: str | None) -> str:
@@ -71,8 +128,8 @@ def list_audit_events_for_object(session: Session, object_id: str) -> list[dict[
 
 def list_objects(session: Session) -> list[CatalogObjectOut]:
     statement = select(CatalogObject).order_by(CatalogObject.kind, CatalogObject.label)
-    rows = session.scalars(statement).all()
-    return [_to_schema(row) for row in rows]
+    rows = list(session.scalars(statement).all())
+    return _schemas_with_placement(session, rows)
 
 
 def search_objects(
@@ -93,15 +150,15 @@ def search_objects(
             | CatalogObject.data_json.ilike(term)
         )
     statement = statement.order_by(CatalogObject.kind, CatalogObject.label)
-    rows = session.scalars(statement).all()
-    return [_to_schema(row) for row in rows]
+    rows = list(session.scalars(statement).all())
+    return _schemas_with_placement(session, rows)
 
 
 def get_object(session: Session, object_id: str) -> CatalogObjectOut | None:
     row = session.get(CatalogObject, object_id)
     if row is None:
         return None
-    return _to_schema(row)
+    return _schemas_with_placement(session, [row])[0]
 
 
 def list_relationships_for_object(
@@ -139,24 +196,63 @@ def create_relationship(
             Relationship.to_ref == to_ref,
         )
     )
-    if existing is None:
-        changed_at = _now()
-        session.add(
-            Relationship(
-                from_ref=from_ref,
-                relation_type=relation_type,
-                to_ref=to_ref,
-            )
-        )
-        _write_audit(
+    if existing is not None:
+        return {"from_ref": from_ref, "relation_type": relation_type, "to_ref": to_ref}
+    if relation_type == "provides":
+        raise PlacementError("provides is obsolete; use a hosts relationship")
+    if relation_type == CANONICAL_PLACEMENT_RELATION_TYPE:
+        _validate_placement_relationship(
             session,
-            None,
-            "relationship_create",
-            f"Create relationship {from_ref} {relation_type} {to_ref}",
+            parent_ref=from_ref,
+            child_ref=to_ref,
         )
-        _touch_objects_for_refs(session, [from_ref, to_ref], changed_at)
-        session.flush()
+    changed_at = _now()
+    session.add(
+        Relationship(
+            from_ref=from_ref,
+            relation_type=relation_type,
+            to_ref=to_ref,
+        )
+    )
+    _write_audit(
+        session,
+        None,
+        "relationship_create",
+        f"Create relationship {from_ref} {relation_type} {to_ref}",
+    )
+    _touch_objects_for_refs(session, [from_ref, to_ref], changed_at)
+    session.flush()
     return {"from_ref": from_ref, "relation_type": relation_type, "to_ref": to_ref}
+
+
+def _validate_placement_relationship(
+    session: Session,
+    *,
+    parent_ref: str,
+    child_ref: str,
+) -> None:
+    parent = _catalog_object_for_ref(session, parent_ref)
+    child = _catalog_object_for_ref(session, child_ref)
+    validate_placement_pair(parent.kind, child.kind)
+    existing_parent = session.scalar(
+        select(Relationship).where(
+            Relationship.relation_type == CANONICAL_PLACEMENT_RELATION_TYPE,
+            Relationship.to_ref == child_ref,
+            Relationship.from_ref != parent_ref,
+        )
+    )
+    if existing_parent is not None:
+        raise PlacementError(
+            f"{child_ref} already has placement parent {existing_parent.from_ref}"
+        )
+
+
+def _catalog_object_for_ref(session: Session, object_ref: str) -> CatalogObject:
+    parsed = TypedReference.parse(object_ref)
+    row = session.get(CatalogObject, parsed.object_id)
+    if row is None or row.kind != parsed.kind:
+        raise PlacementError(f"placement reference does not exist: {object_ref}")
+    return row
 
 
 def upsert_object(session: Session, payload: CatalogObjectIn) -> CatalogObjectOut:
@@ -291,7 +387,6 @@ def _data_field_label(path: str) -> str:
         "network.interfaces": "Netzwerkinterfaces",
         "platform": "Plattform",
         "ports": "Ports",
-        "system_id": "System",
     }
     return labels.get(path, path or "Daten")
 

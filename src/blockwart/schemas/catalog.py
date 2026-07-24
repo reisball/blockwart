@@ -185,7 +185,7 @@ def _validate_system_data(data: dict[str, Any]) -> None:
 
 def _validate_service_data(data: dict[str, Any]) -> None:
     if "system_id" in data:
-        _validate_reference(data["system_id"], {"system"}, "data.system_id")
+        raise ValueError("data.system_id is obsolete; use a hosts relationship")
     if "owner" in data:
         _require_string(data["owner"], "data.owner")
     _validate_endpoints(data)
@@ -313,10 +313,19 @@ class CatalogObjectIn(BaseModel):
         return self
 
 
+class CatalogAssetNode(BaseModel):
+    ref: str
+    id: str
+    kind: ObjectKind
+    label: str
+    status: str
+
+
 class CatalogObjectOut(CatalogObjectIn):
     created_at: str | None = None
     updated_at: str | None = None
     last_changed: str | None = None
+    parent_path: list[CatalogAssetNode] = Field(default_factory=list)
 
 
 class HealthOut(BaseModel):
