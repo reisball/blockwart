@@ -1,4 +1,6 @@
 import json
+import os
+import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Literal
@@ -6,6 +8,10 @@ from typing import Any, Literal
 from blockwart.config import get_settings
 
 PrimaryNameStorage = Literal["label", "network_hostname"]
+
+
+class SchemaOverridesError(ValueError):
+    """The configured schema override document is unreadable or invalid."""
 
 
 @dataclass(frozen=True)
@@ -494,11 +500,10 @@ def _load_schema_overrides() -> dict[str, Any]:
     if path is None or not path.exists():
         return {}
     try:
-        payload = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return {}
-    kinds = payload.get("kinds") if isinstance(payload, dict) else None
-    return kinds if isinstance(kinds, dict) else {}
+        document = path.read_text(encoding="utf-8")
+    except OSError as exc:
+        raise SchemaOverridesError("schema override file could not be read") from exc
+    return _parse_schema_overrides_document(document)
 
 
 def _write_schema_overrides(overrides: dict[str, Any]) -> None:
@@ -506,10 +511,81 @@ def _write_schema_overrides(overrides: dict[str, Any]) -> None:
     if path is None:
         raise ValueError("schema overrides path is not configured")
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(
-        json.dumps({"version": 1, "kinds": overrides}, indent=2, sort_keys=True) + "\n",
-        encoding="utf-8",
-    )
+    document = json.dumps(
+        {"version": 1, "kinds": overrides},
+        indent=2,
+        sort_keys=True,
+    ) + "\n"
+    temporary_path: Path | None = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="w",
+            encoding="utf-8",
+            dir=path.parent,
+            prefix=f".{path.name}.",
+            suffix=".tmp",
+            delete=False,
+        ) as temporary_file:
+            temporary_path = Path(temporary_file.name)
+            temporary_file.write(document)
+            temporary_file.flush()
+            os.fsync(temporary_file.fileno())
+        persisted = _parse_schema_overrides_document(
+            temporary_path.read_text(encoding="utf-8")
+        )
+        if persisted != overrides:
+            raise SchemaOverridesError("schema override serialization changed its meaning")
+        os.replace(temporary_path, path)
+        temporary_path = None
+    finally:
+        if temporary_path is not None:
+            temporary_path.unlink(missing_ok=True)
+
+
+def _parse_schema_overrides_document(document: str) -> dict[str, Any]:
+    try:
+        payload = json.loads(document)
+    except json.JSONDecodeError as exc:
+        raise SchemaOverridesError("schema override file contains invalid JSON") from exc
+    if not isinstance(payload, dict):
+        raise SchemaOverridesError("schema override document must be an object")
+    if set(payload) != {"version", "kinds"}:
+        raise SchemaOverridesError(
+            "schema override document must contain exactly version and kinds"
+        )
+    if payload["version"] != 1:
+        raise SchemaOverridesError("schema override file uses an unsupported version")
+    kinds = payload["kinds"]
+    if not isinstance(kinds, dict):
+        raise SchemaOverridesError("schema override kinds must be an object")
+    for kind, raw_override in kinds.items():
+        schema = UI_SCHEMAS.get(kind)
+        if schema is None:
+            raise SchemaOverridesError(f"unknown schema kind: {kind}")
+        if not isinstance(raw_override, dict) or set(raw_override) != {
+            "field_order",
+            "fields",
+        }:
+            raise SchemaOverridesError(
+                f"schema override for {kind} must contain field_order and fields"
+            )
+        field_order = raw_override["field_order"]
+        fields = raw_override["fields"]
+        if not isinstance(field_order, list) or not all(
+            isinstance(key, str) for key in field_order
+        ):
+            raise SchemaOverridesError(f"schema override for {kind} has invalid field_order")
+        if not isinstance(fields, dict) or not all(
+            isinstance(key, str) and isinstance(settings, dict)
+            for key, settings in fields.items()
+        ):
+            raise SchemaOverridesError(f"schema override for {kind} has invalid fields")
+        try:
+            _validate_field_order(schema, field_order)
+            _validate_field_settings(schema, fields)
+        except ValueError as exc:
+            raise SchemaOverridesError(f"schema override for {kind} is invalid: {exc}") from exc
+    return kinds
 
 
 def _validate_field_order(schema: UiTypeSchema, field_order: list[str]) -> None:

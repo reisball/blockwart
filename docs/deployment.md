@@ -176,6 +176,12 @@ reduces concurrency and must be documented in the deployment configuration.
 `BLOCKWART_SECRET_REFERENCE` is a reference label only. It must not contain a raw token, password,
 private key, cookie, or `.env` body.
 
+When `BLOCKWART_SCHEMA_OVERRIDES_PATH` is configured, Blockwart persists the versioned UI metadata
+document through a temporary file in the same directory and atomically replaces the previous
+document only after the written JSON and its complete structure validate. A malformed, unsupported,
+or unreadable existing document fails diagnostically instead of silently falling back to defaults.
+The configured directory must therefore be writable by the application process.
+
 `BLOCKWART_ADMIN_TOKEN` is the one runtime secret. It is not written to the database, logs, HTML,
 URLs, or the session cookie. Missing or empty configuration disables every UI write. A successful
 unlock at `/admin` creates a time-limited HMAC-signed cookie with `HttpOnly` and `SameSite=Strict`;
