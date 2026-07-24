@@ -29,10 +29,7 @@ def _installed_entrypoint() -> Path:
 
 def _server_environment(*, base_url: str | None = None) -> dict[str, str]:
     env = os.environ.copy()
-    source_root = Path(__file__).resolve().parents[1] / "src"
-    env["PYTHONPATH"] = os.pathsep.join(
-        value for value in (str(source_root), env.get("PYTHONPATH")) if value
-    )
+    env.pop("PYTHONPATH", None)
     if base_url:
         env["BLOCKWART_API_BASE_URL"] = base_url
     return env

@@ -153,14 +153,14 @@ def test_startup_upgrades_before_exec(monkeypatch: pytest.MonkeyPatch) -> None:
         raise RuntimeError("stop after proof")
 
     monkeypatch.setattr(start_cli, "upgrade_database", record_upgrade)
-    monkeypatch.setattr(os, "execvp", record_exec)
+    monkeypatch.setattr(os, "execv", record_exec)
 
     with pytest.raises(RuntimeError, match="stop after proof"):
         start_cli.main()
 
     assert calls == [
         ("upgrade", None),
-        ("exec", ("uvicorn", start_cli.UVICORN_COMMAND)),
+        ("exec", (start_cli.UVICORN_COMMAND[0], start_cli.UVICORN_COMMAND)),
     ]
 
 
@@ -175,7 +175,7 @@ def test_startup_aborts_before_exec_on_migration_failure(
         raise AssertionError("uvicorn must not start")
 
     monkeypatch.setattr(start_cli, "upgrade_database", fail_upgrade)
-    monkeypatch.setattr(os, "execvp", forbidden_exec)
+    monkeypatch.setattr(os, "execv", forbidden_exec)
 
     assert start_cli.main() == 1
     captured = capsys.readouterr()

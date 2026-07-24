@@ -6,6 +6,8 @@ import sys
 from blockwart.db.migrations import DatabaseMigrationError, upgrade_database
 
 UVICORN_COMMAND = [
+    sys.executable,
+    "-m",
     "uvicorn",
     "blockwart.main:app",
     "--host",
@@ -22,7 +24,7 @@ def main() -> int:
         print("startup_error=database_migration_failed", file=sys.stderr)
         return 1
 
-    os.execvp(UVICORN_COMMAND[0], UVICORN_COMMAND)
+    os.execv(UVICORN_COMMAND[0], UVICORN_COMMAND)
     return 0
 
 

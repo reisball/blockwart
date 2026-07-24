@@ -14,7 +14,6 @@ from blockwart.db import migrations as migration_module
 from blockwart.db.base import Base
 from blockwart.db.migrations import (
     BASELINE_REVISION,
-    PROJECT_ALEMBIC_CONFIG,
     DatabaseMigrationError,
     build_alembic_config,
     check_database_revision,
@@ -22,6 +21,7 @@ from blockwart.db.migrations import (
 )
 
 HEAD_REVISION = "20260723_0002"
+PROJECT_ALEMBIC_CONFIG = Path(__file__).resolve().parents[1] / "alembic.ini"
 
 
 def _database_url(path: Path) -> str:

@@ -27,7 +27,7 @@ Create a virtual environment and install development dependencies:
 ```bash
 python3 -m venv .venv
 . .venv/bin/activate
-python -m pip install -e ".[dev]"
+python -m pip install --constraint requirements/dev.txt ".[dev]"
 ```
 
 Run the app:
@@ -59,8 +59,12 @@ Run checks:
 
 ```bash
 pytest
-python -m compileall src
+ruff check --no-cache .
+python -m compileall -q src tests scripts
 ```
+
+The dependency update process, reviewed OpenAPI snapshot, installed-wheel smoke, container smoke,
+and Gitea Actions contract are documented in `docs/ci.md`.
 
 ## Agent Read API
 
