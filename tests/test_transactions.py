@@ -4,15 +4,14 @@ from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine, select
+from sqlalchemy import select
 from sqlalchemy.exc import OperationalError
-from sqlalchemy.orm import Session, sessionmaker
+from sqlalchemy.orm import Session
 
 from blockwart.api.deps import get_session
 from blockwart.cli import import_markdown as import_markdown_cli
 from blockwart.cli import seed as seed_cli
 from blockwart.config import Settings
-from blockwart.db.base import Base
 from blockwart.db.session import transaction
 from blockwart.main import create_app
 from blockwart.models import AuditEvent, CatalogObject, Relationship
@@ -43,13 +42,8 @@ class CommitCountingSession(Session):
 
 
 @pytest.fixture
-def session_factory(tmp_path):
-    engine = create_engine(
-        f"sqlite:///{tmp_path / 'transactions.db'}",
-        connect_args={"check_same_thread": False},
-    )
-    Base.metadata.create_all(engine)
-    return sessionmaker(bind=engine, autoflush=False, autocommit=False)
+def session_factory(alembic_session_factory):
+    return alembic_session_factory
 
 
 def _add_object(
@@ -90,15 +84,11 @@ def _unlocked_client(session_factory) -> Generator[TestClient, None, None]:
         yield client
 
 
-def test_catalog_helpers_flush_without_committing(tmp_path) -> None:
-    engine = create_engine(f"sqlite:///{tmp_path / 'helper-commits.db'}")
-    Base.metadata.create_all(engine)
-    factory = sessionmaker(
-        bind=engine,
-        class_=CommitCountingSession,
-        autoflush=False,
-        autocommit=False,
-    )
+def test_catalog_helpers_flush_without_committing(alembic_database_factory) -> None:
+    factory = alembic_database_factory(
+        "helper-commits.db",
+        session_class=CommitCountingSession,
+    ).sessions
 
     with factory() as session:
         upsert_object(
@@ -283,15 +273,14 @@ def test_multi_object_access_update_rolls_back_first_object(
         ).all() == []
 
 
-def test_import_services_flush_without_committing(tmp_path) -> None:
-    engine = create_engine(f"sqlite:///{tmp_path / 'import-commits.db'}")
-    Base.metadata.create_all(engine)
-    factory = sessionmaker(
-        bind=engine,
-        class_=CommitCountingSession,
-        autoflush=False,
-        autocommit=False,
-    )
+def test_import_services_flush_without_committing(
+    tmp_path,
+    alembic_database_factory,
+) -> None:
+    factory = alembic_database_factory(
+        "import-commits.db",
+        session_class=CommitCountingSession,
+    ).sessions
     tools_path = tmp_path / "TOOLS.md"
     tools_path.write_text(
         "\n".join(
@@ -334,12 +323,11 @@ def test_markdown_replace_rolls_back_on_database_error(
     tmp_path,
     monkeypatch,
     capsys,
+    alembic_database_factory,
 ) -> None:
-    database_path = tmp_path / "replace.db"
-    database_url = f"sqlite:///{database_path}"
-    engine = create_engine(database_url)
-    Base.metadata.create_all(engine)
-    factory = sessionmaker(bind=engine, autoflush=False, autocommit=False)
+    database = alembic_database_factory("replace.db")
+    database_url = database.database_url
+    factory = database.sessions
     with factory() as session:
         _add_object(session, object_id="must-survive")
         session.commit()
@@ -387,12 +375,11 @@ def test_seed_cli_rolls_back_and_redacts_database_error(
     tmp_path,
     monkeypatch,
     capsys,
+    alembic_database_factory,
 ) -> None:
-    database_path = tmp_path / "seed-error.db"
-    database_url = f"sqlite:///{database_path}"
-    engine = create_engine(database_url)
-    Base.metadata.create_all(engine)
-    factory = sessionmaker(bind=engine, autoflush=False, autocommit=False)
+    database = alembic_database_factory("seed-error.db")
+    database_url = database.database_url
+    factory = database.sessions
     with factory() as session:
         _add_object(session, object_id="seed-survivor")
         session.commit()

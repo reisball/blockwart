@@ -3,11 +3,9 @@ from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine
-from sqlalchemy.orm import Session, sessionmaker
+from sqlalchemy.orm import Session
 
 from blockwart.api.deps import get_session
-from blockwart.db.base import Base
 from blockwart.db.session import transaction
 from blockwart.main import create_app
 from blockwart.models import CatalogObject, Relationship
@@ -17,17 +15,11 @@ SEED_PATH = Path(__file__).resolve().parents[1] / "seeds" / "pilot_objects.yaml"
 
 
 @pytest.fixture
-def session_factory(tmp_path):
-    engine = create_engine(
-        f"sqlite:///{tmp_path / 'agent.db'}",
-        connect_args={"check_same_thread": False},
-    )
-    Base.metadata.create_all(engine)
-    factory = sessionmaker(bind=engine, autoflush=False, autocommit=False)
-    with factory() as session:
+def session_factory(alembic_session_factory):
+    with alembic_session_factory() as session:
         with transaction(session):
             import_seed_file(session, SEED_PATH)
-    return factory
+    return alembic_session_factory
 
 
 @pytest.fixture
