@@ -72,9 +72,16 @@ def resolved_asset_graph(session_factory) -> None:
             data_json=(
                 '{"schema_version": 1, "lifecycle": "production", "health": "healthy", '
                 '"endpoints": [{"type": "REST API", "url": "https://10.20.0.20:8443/api", '
-                '"host": "10.20.0.20", "port": 8443, "protocol": "https"}], '
-                '"dependencies": {"upstream": ["service:auth"], "downstream": []}}'
+                '"host": "10.20.0.20", "port": 8443, "protocol": "https"}]}'
             ),
+        ),
+        CatalogObject(
+            id="auth",
+            kind="service",
+            label="Auth",
+            status="active",
+            summary="Authentication dependency.",
+            data_json='{"schema_version": 1}',
         ),
         CatalogObject(
             id="hardware-console",
@@ -112,6 +119,11 @@ def resolved_asset_graph(session_factory) -> None:
             from_ref="host:baremetal-01",
             relation_type="hosts",
             to_ref="service:hardware-console",
+        ),
+        Relationship(
+            from_ref="service:runtime-api",
+            relation_type="depends_on",
+            to_ref="service:auth",
         ),
     ]
     with session_factory() as session:

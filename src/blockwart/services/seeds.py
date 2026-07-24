@@ -1,4 +1,5 @@
 import json
+from copy import deepcopy
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -7,9 +8,15 @@ import yaml
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from blockwart.domain.references import VALID_REFERENCE_KINDS, TypedReference
+from blockwart.domain.relationships import (
+    dependency_relationships_from_data,
+    validate_data_references,
+    validate_relationship,
+    validate_relationship_collection,
+)
 from blockwart.models import AuditEvent, CatalogObject, Relationship
 from blockwart.schemas.catalog import CatalogObjectIn
+from blockwart.services.catalog import ensure_kind_change_allowed
 
 
 @dataclass(frozen=True)
@@ -34,17 +41,22 @@ def import_seed_payload(session: Session, payload: dict[str, Any]) -> SeedImport
     if not isinstance(raw_objects, list):
         raise ValueError("Seed payload must contain an objects list")
 
-    objects = [_validate_object(raw_object) for raw_object in raw_objects]
+    normalized_objects, dependency_relationships = _normalize_legacy_dependencies(raw_objects)
+    objects = [_validate_object(raw_object) for raw_object in normalized_objects]
     object_ids = [obj.id for obj in objects]
     if len(object_ids) != len(set(object_ids)):
         raise ValueError("Seed object ids must be globally unique across kinds")
-    object_refs = {f"{obj.kind}:{obj.id}" for obj in objects}
-    _validate_typed_references(objects, object_refs)
+    object_kinds = {obj.id: obj.kind for obj in objects}
+    _validate_typed_references(objects, object_kinds)
 
     raw_relationships = payload.get("relationships", [])
     if not isinstance(raw_relationships, list):
         raise ValueError("Seed relationships must be a list")
-    relationships = [_validate_relationship(item, object_refs) for item in raw_relationships]
+    relationships = [
+        _validate_relationship(item, object_kinds)
+        for item in [*raw_relationships, *_deduplicate_relationships(dependency_relationships)]
+    ]
+    validate_relationship_collection(relationships, object_kinds)
 
     for obj in objects:
         row = session.get(CatalogObject, obj.id)
@@ -63,6 +75,7 @@ def import_seed_payload(session: Session, payload: dict[str, Any]) -> SeedImport
             _write_seed_audit(session, obj.id, "seed_create", f"Seed create {obj.kind}:{obj.id}")
             continue
 
+        ensure_kind_change_allowed(session, row, obj.kind)
         row.kind = obj.kind
         row.label = obj.label
         row.status = obj.status
@@ -118,7 +131,10 @@ def _validate_object(raw_object: Any) -> CatalogObjectIn:
     return CatalogObjectIn.model_validate(raw_object)
 
 
-def _validate_relationship(raw_relationship: Any, object_refs: set[str]) -> dict[str, str]:
+def _validate_relationship(
+    raw_relationship: Any,
+    object_kinds: dict[str, str],
+) -> dict[str, str]:
     if not isinstance(raw_relationship, dict):
         raise ValueError("Seed relationship must be a mapping")
 
@@ -128,37 +144,67 @@ def _validate_relationship(raw_relationship: Any, object_refs: set[str]) -> dict
     if not all(isinstance(value, str) and value for value in (from_ref, relation_type, to_ref)):
         raise ValueError("Seed relationship requires from_ref, relation_type, and to_ref")
 
-    parsed_from = TypedReference.parse(from_ref)
-    parsed_to = TypedReference.parse(to_ref)
-    for ref in (str(parsed_from), str(parsed_to)):
-        if ref not in object_refs:
-            raise ValueError(f"Seed relationship references missing object: {ref}")
+    validate_relationship(
+        from_ref=from_ref,
+        relation_type=relation_type,
+        to_ref=to_ref,
+        object_kinds=object_kinds,
+    )
 
     return {"from_ref": from_ref, "relation_type": relation_type, "to_ref": to_ref}
 
 
-def _validate_typed_references(objects: list[CatalogObjectIn], object_refs: set[str]) -> None:
+def _validate_typed_references(
+    objects: list[CatalogObjectIn],
+    object_kinds: dict[str, str],
+) -> None:
     for obj in objects:
-        for ref in _iter_typed_reference_strings(obj.model_dump()):
-            TypedReference.parse(ref)
-            if ref not in object_refs:
-                raise ValueError(f"Seed object {obj.id!r} references missing object: {ref}")
+        validate_data_references(obj.data, object_kinds, object_id=obj.id)
 
 
-def _iter_typed_reference_strings(value: Any) -> list[str]:
-    refs: list[str] = []
-    if isinstance(value, dict):
-        for child in value.values():
-            refs.extend(_iter_typed_reference_strings(child))
-        return refs
+def _normalize_legacy_dependencies(
+    raw_objects: list[Any],
+) -> tuple[list[Any], list[dict[str, str]]]:
+    normalized_objects: list[Any] = []
+    relationships: list[dict[str, str]] = []
+    for raw_object in raw_objects:
+        if not isinstance(raw_object, dict):
+            normalized_objects.append(raw_object)
+            continue
+        normalized = deepcopy(raw_object)
+        data = normalized.get("data")
+        object_id = normalized.get("id")
+        kind = normalized.get("kind")
+        if (
+            isinstance(data, dict)
+            and isinstance(object_id, str)
+            and isinstance(kind, str)
+            and "dependencies" in data
+        ):
+            relationships.extend(
+                dependency_relationships_from_data(
+                    owner_ref=f"{kind}:{object_id}",
+                    data=data,
+                )
+            )
+            data.pop("dependencies", None)
+        normalized_objects.append(normalized)
+    return normalized_objects, relationships
 
-    if isinstance(value, list):
-        for child in value:
-            refs.extend(_iter_typed_reference_strings(child))
-        return refs
 
-    if isinstance(value, str) and any(
-        value.startswith(f"{kind}:") for kind in VALID_REFERENCE_KINDS
-    ):
-        refs.append(value)
-    return refs
+def _deduplicate_relationships(
+    relationships: list[dict[str, str]],
+) -> list[dict[str, str]]:
+    unique: list[dict[str, str]] = []
+    seen: set[tuple[str, str, str]] = set()
+    for relationship in relationships:
+        triplet = (
+            relationship["from_ref"],
+            relationship["relation_type"],
+            relationship["to_ref"],
+        )
+        if triplet in seen:
+            continue
+        seen.add(triplet)
+        unique.append(relationship)
+    return unique

@@ -1,6 +1,16 @@
 from datetime import datetime
 
-from sqlalchemy import DateTime, Integer, String, Text, func
+from sqlalchemy import (
+    CheckConstraint,
+    DateTime,
+    Index,
+    Integer,
+    String,
+    Text,
+    UniqueConstraint,
+    func,
+    text,
+)
 from sqlalchemy.orm import Mapped, mapped_column
 
 from blockwart.db.base import Base
@@ -25,6 +35,29 @@ class CatalogObject(Base):
 
 class Relationship(Base):
     __tablename__ = "relationships"
+    __table_args__ = (
+        UniqueConstraint(
+            "from_ref",
+            "relation_type",
+            "to_ref",
+            name="uq_relationships_triplet",
+        ),
+        CheckConstraint(
+            "from_ref <> to_ref",
+            name="ck_relationships_no_self_reference",
+        ),
+        CheckConstraint(
+            "relation_type IN "
+            "('hosts','depends_on','supports','feeds','exposes','documents','uses','related_to')",
+            name="ck_relationships_known_type",
+        ),
+        Index(
+            "uq_relationships_placement_parent",
+            "to_ref",
+            unique=True,
+            sqlite_where=text("relation_type = 'hosts'"),
+        ),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     from_ref: Mapped[str] = mapped_column(String(192), index=True)

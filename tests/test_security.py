@@ -53,7 +53,6 @@ def test_credential_references_reject_raw_value_fields(forbidden_key: str) -> No
 @pytest.mark.parametrize(
     "data",
     [
-        {"dependencies": {"upstream": ["credential_reference:wrong-kind"]}},
         {
             "access_methods": [
                 {"credential_references": ["service:wrong-kind"]},
@@ -68,6 +67,19 @@ def test_typed_reference_kind_mismatches_are_rejected(data: dict) -> None:
             kind="system",
             label="Wrong Reference",
             data=data,
+        )
+
+
+def test_data_dependencies_are_rejected_as_obsolete_storage() -> None:
+    with pytest.raises(
+        ValidationError,
+        match="data.dependencies is obsolete; use depends_on relationships",
+    ):
+        CatalogObjectIn(
+            id="legacy-dependencies",
+            kind="service",
+            label="Legacy dependencies",
+            data={"dependencies": {"upstream": ["service:api"], "downstream": []}},
         )
 
 

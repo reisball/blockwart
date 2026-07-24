@@ -451,7 +451,7 @@ def test_ui_database_error_is_redacted_and_rolled_back(
         ).all() == []
 
 
-def test_delete_failure_restores_object_relationship_and_audit(session_factory) -> None:
+def test_delete_blocks_referenced_object_without_changing_data(session_factory) -> None:
     with session_factory() as session:
         _add_object(session, object_id="delete-parent", kind="host")
         _add_object(session, object_id="delete-child", kind="service")
@@ -464,11 +464,10 @@ def test_delete_failure_restores_object_relationship_and_audit(session_factory) 
         )
         session.commit()
 
-    with pytest.raises(RuntimeError, match="forced post-delete failure"):
+    with pytest.raises(ValueError, match="cannot delete service:delete-child"):
         with session_factory() as session:
             with transaction(session):
-                assert delete_object(session, "delete-child")
-                raise RuntimeError("forced post-delete failure")
+                delete_object(session, "delete-child")
 
     with session_factory() as session:
         assert session.get(CatalogObject, "delete-child") is not None
@@ -477,4 +476,24 @@ def test_delete_failure_restores_object_relationship_and_audit(session_factory) 
         ) is not None
         assert session.scalars(
             select(AuditEvent).where(AuditEvent.object_id == "delete-child")
+        ).all() == []
+
+
+def test_unreferenced_delete_rolls_back_with_audit_on_later_failure(
+    session_factory,
+) -> None:
+    with session_factory() as session:
+        _add_object(session, object_id="delete-unreferenced", kind="service")
+        session.commit()
+
+    with pytest.raises(RuntimeError, match="forced post-delete failure"):
+        with session_factory() as session:
+            with transaction(session):
+                assert delete_object(session, "delete-unreferenced")
+                raise RuntimeError("forced post-delete failure")
+
+    with session_factory() as session:
+        assert session.get(CatalogObject, "delete-unreferenced") is not None
+        assert session.scalars(
+            select(AuditEvent).where(AuditEvent.object_id == "delete-unreferenced")
         ).all() == []

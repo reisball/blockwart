@@ -23,7 +23,8 @@ from blockwart.db.migrations import (
 )
 
 PREVIOUS_HEAD_REVISION = "20260723_0002"
-HEAD_REVISION = "20260724_0003"
+PLACEMENT_REVISION = "20260724_0003"
+HEAD_REVISION = "20260724_0004"
 PROJECT_ALEMBIC_CONFIG = Path(__file__).resolve().parents[1] / "alembic.ini"
 LEGACY_SNAPSHOT = Path(__file__).resolve().parent / "fixtures" / "legacy_snapshot.sql"
 
@@ -331,6 +332,173 @@ def test_canonical_placement_migration_rejects_conflicts_before_writing(
 
     assert _existing_data_snapshot(database_path) == before
     assert _revision(database_url) == PREVIOUS_HEAD_REVISION
+
+
+def test_relationship_integrity_migration_canonicalizes_dependencies_losslessly(
+    tmp_path: Path,
+) -> None:
+    database_path = tmp_path / "legacy-dependencies.sqlite3"
+    database_url = _database_url(database_path)
+    config = build_alembic_config(database_url)
+    command.upgrade(config, PLACEMENT_REVISION)
+
+    connection = sqlite3.connect(database_path)
+    try:
+        connection.executemany(
+            "INSERT INTO catalog_objects "
+            "(id, kind, label, status, summary, data_json, created_at, updated_at) "
+            "VALUES (?, ?, ?, 'active', ?, ?, ?, ?)",
+            [
+                (
+                    "api",
+                    "service",
+                    "API",
+                    "consumer",
+                    '{"schema_version":1,"dependencies":'
+                    '{"upstream":["service:database"],'
+                    '"downstream":["service:worker"]},'
+                    '"future":{"keep":["all","values"]}}',
+                    "2026-01-01 01:02:03",
+                    "2026-02-02 02:03:04",
+                ),
+                (
+                    "database",
+                    "service",
+                    "Database",
+                    "provider",
+                    '{"schema_version":1}',
+                    "2026-01-01 01:02:03",
+                    "2026-02-02 02:03:04",
+                ),
+                (
+                    "worker",
+                    "service",
+                    "Worker",
+                    "consumer",
+                    '{"schema_version":1,"dependencies":'
+                    '{"upstream":["service:api"],"downstream":[]}}',
+                    "2026-01-01 01:02:03",
+                    "2026-02-02 02:03:04",
+                ),
+            ],
+        )
+        connection.execute(
+            "INSERT INTO relationships (from_ref, relation_type, to_ref) "
+            "VALUES ('service:api', 'depends_on', 'service:database')"
+        )
+        connection.commit()
+    finally:
+        connection.close()
+
+    before = _existing_data_snapshot(database_path)
+    command.upgrade(config, "head")
+    after = _existing_data_snapshot(database_path)
+
+    assert {
+        (row["from_ref"], row["relation_type"], row["to_ref"])
+        for row in after["relationships"]
+    } == {
+        ("service:api", "depends_on", "service:database"),
+        ("service:worker", "depends_on", "service:api"),
+    }
+    before_by_id = {row["id"]: row for row in before["catalog_objects"]}
+    after_by_id = {row["id"]: row for row in after["catalog_objects"]}
+    for object_id, before_row in before_by_id.items():
+        after_row = after_by_id[object_id]
+        assert {
+            key: value for key, value in after_row.items() if key != "data_json"
+        } == {
+            key: value for key, value in before_row.items() if key != "data_json"
+        }
+        expected_data = dict(before_row["data_json"])
+        expected_data.pop("dependencies", None)
+        assert after_row["data_json"] == expected_data
+    assert after["audit_events"] == before["audit_events"]
+    assert _revision(database_url) == HEAD_REVISION
+
+
+def test_relationship_integrity_migration_rejects_invalid_data_before_writing(
+    tmp_path: Path,
+) -> None:
+    database_path = tmp_path / "invalid-relationship.sqlite3"
+    database_url = _database_url(database_path)
+    config = build_alembic_config(database_url)
+    command.upgrade(config, PLACEMENT_REVISION)
+
+    connection = sqlite3.connect(database_path)
+    try:
+        connection.executemany(
+            "INSERT INTO catalog_objects "
+            "(id, kind, label, status, data_json) "
+            "VALUES (?, 'system', ?, 'active', '{\"schema_version\":1}')",
+            [("runtime-a", "Runtime A"), ("runtime-b", "Runtime B")],
+        )
+        connection.execute(
+            "INSERT INTO relationships (from_ref, relation_type, to_ref) "
+            "VALUES ('system:runtime-a', 'hosts', 'system:runtime-b')"
+        )
+        connection.commit()
+    finally:
+        connection.close()
+    before = _existing_data_snapshot(database_path)
+
+    with pytest.raises(RuntimeError, match="invalid relationship direction"):
+        command.upgrade(config, "head")
+
+    assert _existing_data_snapshot(database_path) == before
+    assert _revision(database_url) == PLACEMENT_REVISION
+
+
+def test_relationship_database_constraints_reject_bypass_writes(
+    tmp_path: Path,
+) -> None:
+    database_path = tmp_path / "relationship-constraints.sqlite3"
+    database_url = _database_url(database_path)
+    config = build_alembic_config(database_url)
+    command.upgrade(config, "head")
+
+    connection = sqlite3.connect(database_path)
+    try:
+        connection.executemany(
+            "INSERT INTO catalog_objects "
+            "(id, kind, label, status, data_json) VALUES (?, ?, ?, 'active', '{}')",
+            [
+                ("hardware-a", "host", "Hardware A"),
+                ("hardware-b", "host", "Hardware B"),
+                ("api", "service", "API"),
+                ("worker", "service", "Worker"),
+            ],
+        )
+        connection.execute(
+            "INSERT INTO relationships (from_ref, relation_type, to_ref) "
+            "VALUES ('host:hardware-a', 'hosts', 'service:api')"
+        )
+        connection.commit()
+
+        invalid_statements = [
+            (
+                "INSERT INTO relationships (from_ref, relation_type, to_ref) "
+                "VALUES ('host:hardware-a', 'hosts', 'service:api')"
+            ),
+            (
+                "INSERT INTO relationships (from_ref, relation_type, to_ref) "
+                "VALUES ('service:api', 'depends_on', 'service:api')"
+            ),
+            (
+                "INSERT INTO relationships (from_ref, relation_type, to_ref) "
+                "VALUES ('service:api', 'unknown', 'service:worker')"
+            ),
+            (
+                "INSERT INTO relationships (from_ref, relation_type, to_ref) "
+                "VALUES ('host:hardware-b', 'hosts', 'service:api')"
+            ),
+        ]
+        for statement in invalid_statements:
+            with pytest.raises(sqlite3.IntegrityError):
+                connection.execute(statement)
+            connection.rollback()
+    finally:
+        connection.close()
 
 
 def test_upgrade_adopts_only_matching_unversioned_legacy_database(

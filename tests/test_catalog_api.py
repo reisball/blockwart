@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 from blockwart.api.deps import get_session
 from blockwart.db.session import transaction
 from blockwart.main import create_app
-from blockwart.models import AuditEvent, Relationship
+from blockwart.models import AuditEvent, CatalogObject, Relationship
 from blockwart.schemas.catalog import CatalogObjectIn
 from blockwart.services.catalog import delete_object, upsert_object
 
@@ -87,6 +87,16 @@ def test_delete_catalog_object_writes_audit_event(session_factory) -> None:
             upsert_object(
                 session,
                 CatalogObjectIn(
+                    id="vaultwarden-api",
+                    kind="credential_reference",
+                    label="Vaultwarden API",
+                    status="active",
+                    data={"schema_version": 1},
+                ),
+            )
+            upsert_object(
+                session,
+                CatalogObjectIn(
                     id="rotate-vaultwarden",
                     kind="runbook",
                     label="Rotate Vaultwarden",
@@ -103,12 +113,12 @@ def test_delete_catalog_object_writes_audit_event(session_factory) -> None:
             )
             assert delete_object(session, "rotate-vaultwarden")
         events = session.scalars(select(AuditEvent).order_by(AuditEvent.id)).all()
-    assert [event.action for event in events] == ["create", "delete"]
+    assert [event.action for event in events] == ["create", "create", "delete"]
     assert events[-1].object_id == "rotate-vaultwarden"
     assert "runbook:rotate-vaultwarden" in events[-1].summary
 
 
-def test_delete_catalog_object_removes_relationship_edges(
+def test_delete_catalog_object_blocks_existing_relationship_edges(
     session_factory,
 ) -> None:
     with session_factory() as session:
@@ -140,13 +150,14 @@ def test_delete_catalog_object_removes_relationship_edges(
                     to_ref="service:n8n-web-ui",
                 )
             )
-        with transaction(session):
-            assert delete_object(session, "n8n-web-ui")
-        assert session.scalars(select(Relationship)).all() == []
+        with pytest.raises(ValueError, match="cannot delete service:n8n-web-ui"):
+            with transaction(session):
+                delete_object(session, "n8n-web-ui")
+        assert len(session.scalars(select(Relationship)).all()) == 1
+        assert session.get(CatalogObject, "n8n-web-ui") is not None
         events = session.scalars(select(AuditEvent).order_by(AuditEvent.id)).all()
-    assert [event.action for event in events] == ["create", "create", "delete"]
+    assert [event.action for event in events] == ["create", "create"]
     assert events[1].object_id == "n8n-web-ui"
-    assert events[-1].object_id == "n8n-web-ui"
 
 
 def test_delete_missing_catalog_object_returns_false(session_factory) -> None:
