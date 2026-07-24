@@ -1,4 +1,3 @@
-from pathlib import Path
 from typing import Annotated
 
 from fastapi import APIRouter, Form, Request
@@ -13,8 +12,9 @@ from blockwart.ui.admin_auth import (
     create_admin_session,
     settings_for_request,
 )
+from blockwart.ui.paths import TEMPLATE_DIR
 
-templates = Jinja2Templates(directory=Path(__file__).resolve().parent / "templates")
+templates = Jinja2Templates(directory=TEMPLATE_DIR)
 router = APIRouter(prefix="/admin", tags=["ui"], include_in_schema=False)
 
 

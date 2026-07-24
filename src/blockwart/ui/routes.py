@@ -41,8 +41,9 @@ from blockwart.services.catalog import (
     upsert_object,
 )
 from blockwart.ui.admin_auth import can_write, require_admin_write
+from blockwart.ui.paths import TEMPLATE_DIR
 
-templates = Jinja2Templates(directory="src/blockwart/ui/templates")
+templates = Jinja2Templates(directory=TEMPLATE_DIR)
 router = APIRouter(tags=["ui"], include_in_schema=False)
 
 OBJECT_KINDS = PUBLIC_OBJECT_KINDS

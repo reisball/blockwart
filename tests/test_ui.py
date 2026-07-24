@@ -71,6 +71,22 @@ def test_index_lists_seeded_objects_and_filters_search(client: TestClient) -> No
     assert "brieftraeger-ocr-worker" in response.text
 
 
+def test_ui_assets_resolve_from_package_outside_repo_root(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.chdir(tmp_path)
+
+    index_response = client.get("/")
+    static_response = client.get("/static/app.css")
+
+    assert index_response.status_code == 200
+    assert "Blockwart" in index_response.text
+    assert static_response.status_code == 200
+    assert "text/css" in static_response.headers["content-type"]
+
+
 def test_index_shows_kind_counts(client: TestClient) -> None:
     response = client.get("/")
 
