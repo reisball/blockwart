@@ -1,5 +1,11 @@
+import json
+import os
+import pwd
 import re
 import sqlite3
+import subprocess
+import sys
+import tempfile
 from pathlib import Path
 
 from alembic import command
@@ -154,41 +160,84 @@ def test_readiness_rejects_locked_database_with_safe_error(tmp_path: Path) -> No
     assert str(tmp_path) not in response.text
 
 
-def test_readiness_rejects_files_that_allow_lock_but_not_write(tmp_path: Path) -> None:
-    database_path = tmp_path / "read-only.sqlite3"
-    database_url = _database_url(database_path)
-    upgrade_database(database_url)
-    keeper = sqlite3.connect(database_path)
-    keeper.execute("SELECT version_num FROM alembic_version").fetchall()
-    sqlite_files = (
-        database_path,
-        Path(f"{database_path}-wal"),
-        Path(f"{database_path}-shm"),
-    )
-    assert all(path.exists() for path in sqlite_files)
-    for path in sqlite_files:
-        path.chmod(0o444)
+def test_readiness_rejects_files_that_allow_lock_but_not_write() -> None:
+    with tempfile.TemporaryDirectory(prefix="blockwart-read-only-") as directory:
+        database_directory = Path(directory)
+        database_directory.chmod(0o755)
+        database_path = database_directory / "read-only.sqlite3"
+        database_url = _database_url(database_path)
+        upgrade_database(database_url)
+        keeper = sqlite3.connect(database_path)
+        keeper.execute("SELECT version_num FROM alembic_version").fetchall()
+        sqlite_files = (
+            database_path,
+            Path(f"{database_path}-wal"),
+            Path(f"{database_path}-shm"),
+        )
+        assert all(path.exists() for path in sqlite_files)
+        for path in sqlite_files:
+            path.chmod(0o444)
+        database_directory.chmod(0o555)
 
-    try:
-        client = TestClient(
+        try:
+            status_code, payload = _readiness_response_for_read_only_database(database_url)
+        finally:
+            database_directory.chmod(0o755)
+            for path in sqlite_files:
+                if path.exists():
+                    path.chmod(0o644)
+            keeper.close()
+
+        assert status_code == 503
+        assert payload["error_code"] == "database_not_writable"
+        assert payload["checks"]["writable"] == "error"
+        assert str(database_directory) not in json.dumps(payload)
+
+
+def _readiness_response_for_read_only_database(database_url: str) -> tuple[int, dict]:
+    if os.geteuid() != 0:
+        response = TestClient(
             create_app(
                 settings=Settings(
                     database_url=database_url,
                     sqlite_busy_timeout_ms=100,
                 )
             )
-        )
-        response = client.get("/api/health/ready")
-    finally:
-        for path in sqlite_files:
-            if path.exists():
-                path.chmod(0o644)
-        keeper.close()
+        ).get("/api/health/ready")
+        return response.status_code, response.json()
 
-    assert response.status_code == 503
-    assert response.json()["error_code"] == "database_not_writable"
-    assert response.json()["checks"]["writable"] == "error"
-    assert str(tmp_path) not in response.text
+    script = """
+import json
+import sys
+from fastapi.testclient import TestClient
+from blockwart.config import Settings
+from blockwart.main import create_app
+
+response = TestClient(
+    create_app(
+        settings=Settings(
+            database_url=sys.argv[1],
+            sqlite_busy_timeout_ms=100,
+        )
+    )
+).get("/api/health/ready")
+print(json.dumps({"status_code": response.status_code, "payload": response.json()}))
+"""
+    nobody = pwd.getpwnam("nobody")
+    environment = os.environ.copy()
+    environment.pop("PYTHONPATH", None)
+    completed = subprocess.run(
+        [sys.executable, "-c", script, database_url],
+        capture_output=True,
+        check=True,
+        cwd="/",
+        env=environment,
+        group=nobody.pw_gid,
+        text=True,
+        user=nobody.pw_uid,
+    )
+    result = json.loads(completed.stdout)
+    return int(result["status_code"]), result["payload"]
 
 
 def test_container_healthcheck_deadlines_exceed_default_sqlite_lock_wait() -> None:

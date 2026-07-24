@@ -16,7 +16,6 @@ from blockwart.db.session import build_engine
 
 BASELINE_REVISION = "20260516_0001"
 MIGRATIONS_DIR = Path(__file__).resolve().parents[1] / "migrations"
-PROJECT_ALEMBIC_CONFIG = Path(__file__).resolve().parents[3] / "alembic.ini"
 
 
 class DatabaseMigrationError(RuntimeError):
