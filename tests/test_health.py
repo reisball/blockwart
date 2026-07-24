@@ -4,12 +4,9 @@ from pathlib import Path
 
 from alembic import command
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
 
 from blockwart.api.deps import get_session
 from blockwart.config import Settings
-from blockwart.db.base import Base
 from blockwart.db.migrations import BASELINE_REVISION, build_alembic_config, upgrade_database
 from blockwart.db.session import build_engine
 from blockwart.main import create_app
@@ -208,17 +205,11 @@ def test_container_healthcheck_deadlines_exceed_default_sqlite_lock_wait() -> No
     assert sqlite_wait_seconds < http_timeout_seconds < docker_timeout_seconds
 
 
-def test_index_page(tmp_path) -> None:
-    engine = create_engine(
-        f"sqlite:///{tmp_path / 'health.db'}",
-        connect_args={"check_same_thread": False},
-    )
-    Base.metadata.create_all(engine)
-    factory = sessionmaker(bind=engine, autoflush=False, autocommit=False)
+def test_index_page(alembic_session_factory) -> None:
     app = create_app()
 
     def override_get_session():
-        with factory() as session:
+        with alembic_session_factory() as session:
             yield session
 
     app.dependency_overrides[get_session] = override_get_session

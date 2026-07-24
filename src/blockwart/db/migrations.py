@@ -1,17 +1,17 @@
 from __future__ import annotations
 
+from functools import cache
 from pathlib import Path
+from tempfile import TemporaryDirectory
 
 from alembic import command
 from alembic.autogenerate import compare_metadata
 from alembic.config import Config
 from alembic.migration import MigrationContext
 from alembic.script import ScriptDirectory
-from sqlalchemy import inspect
+from sqlalchemy import MetaData, inspect
 
-from blockwart import models  # noqa: F401
 from blockwart.config import get_settings
-from blockwart.db.base import Base
 from blockwart.db.session import build_engine
 
 BASELINE_REVISION = "20260516_0001"
@@ -25,7 +25,7 @@ class DatabaseMigrationError(RuntimeError):
 
 def build_alembic_config(database_url: str | None = None) -> Config:
     effective_url = database_url or get_settings().database_url
-    config = Config(str(PROJECT_ALEMBIC_CONFIG) if PROJECT_ALEMBIC_CONFIG.exists() else None)
+    config = Config()
     config.set_main_option("script_location", str(MIGRATIONS_DIR))
     config.set_main_option("sqlalchemy.url", effective_url.replace("%", "%%"))
     config.attributes["database_url"] = effective_url
@@ -82,12 +82,15 @@ def check_database_revision(database_url: str | None = None) -> str:
 
 
 def _adopt_unversioned_baseline(engine, config: Config) -> None:
+    baseline_metadata = _historical_baseline_metadata(
+        config.get_main_option("script_location")
+    )
     with engine.connect() as connection:
         migration_context = MigrationContext.configure(
             connection,
             opts={"compare_type": True},
         )
-        schema_differences = compare_metadata(migration_context, Base.metadata)
+        schema_differences = compare_metadata(migration_context, baseline_metadata)
 
     if schema_differences:
         raise DatabaseMigrationError(
@@ -95,3 +98,27 @@ def _adopt_unversioned_baseline(engine, config: Config) -> None:
         )
 
     command.stamp(config, BASELINE_REVISION)
+
+
+@cache
+def _historical_baseline_metadata(script_location: str) -> MetaData:
+    with TemporaryDirectory(prefix="blockwart-baseline-") as directory:
+        reference_url = f"sqlite:///{Path(directory) / 'baseline.sqlite3'}"
+        reference_config = build_alembic_config(reference_url)
+        reference_config.set_main_option("script_location", script_location)
+        command.upgrade(reference_config, BASELINE_REVISION)
+
+        reference_engine = build_engine(reference_url)
+        try:
+            table_names = set(inspect(reference_engine).get_table_names()) - {
+                "alembic_version"
+            }
+            baseline_metadata = MetaData()
+            baseline_metadata.reflect(
+                bind=reference_engine,
+                only=sorted(table_names),
+            )
+        finally:
+            reference_engine.dispose()
+
+    return baseline_metadata

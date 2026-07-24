@@ -3,12 +3,11 @@ from collections.abc import Generator
 import pytest
 from fastapi.testclient import TestClient
 from pydantic import ValidationError
-from sqlalchemy import create_engine, select
-from sqlalchemy.orm import Session, sessionmaker
+from sqlalchemy import select
+from sqlalchemy.orm import Session
 
 from blockwart.api.deps import get_session
 from blockwart.config import Settings
-from blockwart.db.base import Base
 from blockwart.db.session import transaction
 from blockwart.main import create_app
 from blockwart.models import AuditEvent, CatalogObject
@@ -25,14 +24,8 @@ ROTATED_ADMIN_TOKEN = "rotated-admin-token-with-at-least-32-characters"
 
 
 @pytest.fixture
-def session_factory(tmp_path):
-    engine = create_engine(
-        f"sqlite:///{tmp_path / 'admin-security.db'}",
-        connect_args={"check_same_thread": False},
-    )
-    Base.metadata.create_all(engine)
-    factory = sessionmaker(bind=engine, autoflush=False, autocommit=False)
-    with factory() as session:
+def session_factory(alembic_session_factory):
+    with alembic_session_factory() as session:
         with transaction(session):
             upsert_object(
                 session,
@@ -55,7 +48,7 @@ def session_factory(tmp_path):
                     data={"schema_version": 1},
                 ),
             )
-    return factory
+    return alembic_session_factory
 
 
 @pytest.fixture

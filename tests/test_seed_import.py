@@ -2,10 +2,8 @@ from pathlib import Path
 
 import pytest
 from sqlalchemy import func, select
-from sqlalchemy.orm import Session, sessionmaker
+from sqlalchemy.orm import Session
 
-from blockwart.db.base import Base
-from blockwart.db.session import build_engine
 from blockwart.models import AuditEvent, CatalogObject, Relationship
 from blockwart.services.seeds import import_seed_file
 
@@ -13,11 +11,8 @@ SEED_PATH = Path(__file__).resolve().parents[1] / "seeds" / "pilot_objects.yaml"
 
 
 @pytest.fixture()
-def session() -> Session:
-    engine = build_engine("sqlite:///:memory:")
-    Base.metadata.create_all(engine)
-    session_factory = sessionmaker(bind=engine, autoflush=False, autocommit=False)
-    with session_factory() as db_session:
+def session(alembic_session_factory) -> Session:
+    with alembic_session_factory() as db_session:
         yield db_session
 
 

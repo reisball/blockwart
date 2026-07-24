@@ -1,21 +1,16 @@
 from pathlib import Path
 
 from sqlalchemy import select
-from sqlalchemy.orm import Session, sessionmaker
+from sqlalchemy.orm import Session
 
-from blockwart.db.base import Base
-from blockwart.db.session import build_engine
 from blockwart.models import CatalogObject, Relationship
 from blockwart.schemas.catalog import CatalogObjectIn
 from blockwart.services.catalog import upsert_object
 from blockwart.services.markdown_import import build_tools_import_plan, import_tools_markdown
 
 
-def _session() -> Session:
-    engine = build_engine("sqlite:///:memory:")
-    Base.metadata.create_all(engine)
-    session_factory = sessionmaker(bind=engine, autoflush=False, autocommit=False)
-    return session_factory()
+def _session(alembic_session_factory) -> Session:
+    return alembic_session_factory()
 
 
 def test_build_tools_import_plan_parses_infrastructure_rows(tmp_path: Path) -> None:
@@ -75,7 +70,10 @@ def test_build_tools_import_plan_parses_infrastructure_rows(tmp_path: Path) -> N
     ]
 
 
-def test_import_tools_markdown_writes_valid_objects(tmp_path: Path) -> None:
+def test_import_tools_markdown_writes_valid_objects(
+    tmp_path: Path,
+    alembic_session_factory,
+) -> None:
     tools_path = tmp_path / "TOOLS.md"
     tools_path.write_text(
         "\n".join(
@@ -91,7 +89,7 @@ def test_import_tools_markdown_writes_valid_objects(tmp_path: Path) -> None:
         encoding="utf-8",
     )
 
-    with _session() as session:
+    with _session(alembic_session_factory) as session:
         result = import_tools_markdown(session, tools_path, references_root=tmp_path)
         rows = session.scalars(select(CatalogObject)).all()
 
@@ -123,7 +121,10 @@ def test_build_tools_import_plan_sets_wsl_platform(tmp_path: Path) -> None:
     assert system["data"]["platform"] == "WSL"
 
 
-def test_import_tools_markdown_creates_hosted_service_relationship(tmp_path: Path) -> None:
+def test_import_tools_markdown_creates_hosted_service_relationship(
+    tmp_path: Path,
+    alembic_session_factory,
+) -> None:
     tools_path = tmp_path / "TOOLS.md"
     tools_path.write_text(
         "\n".join(
@@ -141,7 +142,7 @@ def test_import_tools_markdown_creates_hosted_service_relationship(tmp_path: Pat
         encoding="utf-8",
     )
 
-    with _session() as session:
+    with _session(alembic_session_factory) as session:
         result = import_tools_markdown(session, tools_path, references_root=tmp_path)
         objects = {row.id: row for row in session.scalars(select(CatalogObject)).all()}
         relationships = session.scalars(select(Relationship)).all()
@@ -170,7 +171,10 @@ def test_import_tools_markdown_creates_hosted_service_relationship(tmp_path: Pat
     ]
 
 
-def test_import_tools_markdown_updates_previous_workspace_import_shape(tmp_path: Path) -> None:
+def test_import_tools_markdown_updates_previous_workspace_import_shape(
+    tmp_path: Path,
+    alembic_session_factory,
+) -> None:
     tools_path = tmp_path / "TOOLS.md"
     tools_path.write_text(
         "\n".join(
@@ -187,7 +191,7 @@ def test_import_tools_markdown_updates_previous_workspace_import_shape(tmp_path:
         encoding="utf-8",
     )
 
-    with _session() as session:
+    with _session(alembic_session_factory) as session:
         upsert_object(
             session,
             CatalogObjectIn(
@@ -213,6 +217,7 @@ def test_import_tools_markdown_updates_previous_workspace_import_shape(tmp_path:
 
 def test_import_tools_markdown_removes_stale_workspace_host_relationship(
     tmp_path: Path,
+    alembic_session_factory,
 ) -> None:
     tools_path = tmp_path / "TOOLS.md"
     tools_path.write_text(
@@ -230,7 +235,7 @@ def test_import_tools_markdown_removes_stale_workspace_host_relationship(
         encoding="utf-8",
     )
 
-    with _session() as session:
+    with _session(alembic_session_factory) as session:
         upsert_object(
             session,
             CatalogObjectIn(
@@ -271,7 +276,10 @@ def test_import_tools_markdown_removes_stale_workspace_host_relationship(
     ] == [("system:ct-121", "hosts", "service:ct-121_agent-zero")]
 
 
-def test_import_tools_markdown_merges_canonical_existing_objects(tmp_path: Path) -> None:
+def test_import_tools_markdown_merges_canonical_existing_objects(
+    tmp_path: Path,
+    alembic_session_factory,
+) -> None:
     tools_path = tmp_path / "TOOLS.md"
     tools_path.write_text(
         "\n".join(
@@ -288,7 +296,7 @@ def test_import_tools_markdown_merges_canonical_existing_objects(tmp_path: Path)
         encoding="utf-8",
     )
 
-    with _session() as session:
+    with _session(alembic_session_factory) as session:
         upsert_object(
             session,
             CatalogObjectIn(

@@ -3,11 +3,10 @@ from collections.abc import Generator
 import pytest
 from fastapi.testclient import TestClient
 from pydantic import ValidationError
-from sqlalchemy import create_engine, select
-from sqlalchemy.orm import Session, sessionmaker
+from sqlalchemy import select
+from sqlalchemy.orm import Session
 
 from blockwart.api.deps import get_session
-from blockwart.db.base import Base
 from blockwart.db.session import transaction
 from blockwart.main import create_app
 from blockwart.models import AuditEvent, Relationship
@@ -16,13 +15,8 @@ from blockwart.services.catalog import delete_object, upsert_object
 
 
 @pytest.fixture
-def session_factory(tmp_path):
-    engine = create_engine(
-        f"sqlite:///{tmp_path / 'catalog.db'}",
-        connect_args={"check_same_thread": False},
-    )
-    Base.metadata.create_all(engine)
-    return sessionmaker(bind=engine, autoflush=False, autocommit=False)
+def session_factory(alembic_session_factory):
+    return alembic_session_factory
 
 
 @pytest.fixture
