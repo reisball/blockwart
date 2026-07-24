@@ -78,6 +78,11 @@ It returns sanitized object context, resolved parent paths, children, network/en
 and credential-reference IDs only. Structured read filters are available for placement, IP, port,
 status, lifecycle, and health. It never resolves credential values. See docs/agent-api.md.
 
+The canonical asset hierarchy is `host → system → service`, with direct
+`host → service` placement also supported. Placement is stored only as a
+parent-to-child `hosts` relationship; object IDs are globally unique. See
+`docs/domain-model.md`.
+
 The catalog REST API is also read-only. Object changes are available only through authenticated
 UI form routes.
 

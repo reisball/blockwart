@@ -22,7 +22,8 @@ from blockwart.db.migrations import (
     upgrade_database,
 )
 
-HEAD_REVISION = "20260723_0002"
+PREVIOUS_HEAD_REVISION = "20260723_0002"
+HEAD_REVISION = "20260724_0003"
 PROJECT_ALEMBIC_CONFIG = Path(__file__).resolve().parents[1] / "alembic.ini"
 LEGACY_SNAPSHOT = Path(__file__).resolve().parent / "fixtures" / "legacy_snapshot.sql"
 
@@ -180,9 +181,156 @@ def test_upgrade_from_previous_real_revision_preserves_rows_and_json(
 
     command.upgrade(config, "head")
 
-    assert _existing_data_snapshot(database_path) == before
+    after = _existing_data_snapshot(database_path)
+    expected = json.loads(json.dumps(before))
+    legacy_service = next(
+        row for row in expected["catalog_objects"] if row["id"] == "legacy-service"
+    )
+    assert legacy_service["data_json"].pop("system_id") == "system:legacy-system"
+    assert after == expected
     command.check(config)
     assert check_database_revision(database_url) == HEAD_REVISION
+
+
+def test_canonical_placement_migration_converts_legacy_sources_losslessly(
+    tmp_path: Path,
+) -> None:
+    database_path = tmp_path / "legacy-placement.sqlite3"
+    database_url = _database_url(database_path)
+    config = build_alembic_config(database_url)
+    command.upgrade(config, PREVIOUS_HEAD_REVISION)
+
+    connection = sqlite3.connect(database_path)
+    try:
+        connection.executemany(
+            "INSERT INTO catalog_objects "
+            "(id, kind, label, status, summary, data_json, created_at, updated_at) "
+            "VALUES (?, ?, ?, 'active', ?, ?, ?, ?)",
+            [
+                (
+                    "hardware",
+                    "host",
+                    "Hardware",
+                    "physical",
+                    '{"schema_version":1,"future":{"keep":true}}',
+                    "2026-01-01 01:02:03",
+                    "2026-02-02 02:03:04",
+                ),
+                (
+                    "runtime",
+                    "system",
+                    "Runtime",
+                    "runtime",
+                    '{"schema_version":1,"runtime_type":"lxc"}',
+                    "2026-01-01 01:02:03",
+                    "2026-02-02 02:03:04",
+                ),
+                (
+                    "runtime-api",
+                    "service",
+                    "Runtime API",
+                    "service",
+                    '{"schema_version":1,"system_id":"system:runtime",'
+                    '"future":{"keep":["all","values"]}}',
+                    "2026-01-01 01:02:03",
+                    "2026-02-02 02:03:04",
+                ),
+                (
+                    "hardware-console",
+                    "service",
+                    "Hardware Console",
+                    "direct service",
+                    '{"schema_version":1,"future":{"keep":"direct"}}',
+                    "2026-01-01 01:02:03",
+                    "2026-02-02 02:03:04",
+                ),
+            ],
+        )
+        connection.executemany(
+            "INSERT INTO relationships (from_ref, relation_type, to_ref) "
+            "VALUES (?, ?, ?)",
+            [
+                ("host:hardware", "hosts", "system:runtime"),
+                ("system:runtime", "provides", "service:runtime-api"),
+                ("host:hardware", "provides", "service:hardware-console"),
+            ],
+        )
+        connection.commit()
+    finally:
+        connection.close()
+
+    before = _existing_data_snapshot(database_path)
+    command.upgrade(config, "head")
+    after = _existing_data_snapshot(database_path)
+
+    before_by_id = {row["id"]: row for row in before["catalog_objects"]}
+    after_by_id = {row["id"]: row for row in after["catalog_objects"]}
+    assert set(after_by_id) == set(before_by_id)
+    for object_id, before_row in before_by_id.items():
+        after_row = after_by_id[object_id]
+        assert {
+            key: value for key, value in after_row.items() if key != "data_json"
+        } == {
+            key: value for key, value in before_row.items() if key != "data_json"
+        }
+    assert after_by_id["runtime-api"]["data_json"] == {
+        "schema_version": 1,
+        "future": {"keep": ["all", "values"]},
+    }
+    assert after_by_id["hardware-console"]["data_json"] == {
+        "schema_version": 1,
+        "future": {"keep": "direct"},
+    }
+    assert [
+        (row["from_ref"], row["relation_type"], row["to_ref"])
+        for row in after["relationships"]
+    ] == [
+        ("host:hardware", "hosts", "system:runtime"),
+        ("system:runtime", "hosts", "service:runtime-api"),
+        ("host:hardware", "hosts", "service:hardware-console"),
+    ]
+    assert after["audit_events"] == before["audit_events"]
+    assert _revision(database_url) == HEAD_REVISION
+
+
+def test_canonical_placement_migration_rejects_conflicts_before_writing(
+    tmp_path: Path,
+) -> None:
+    database_path = tmp_path / "conflicting-placement.sqlite3"
+    database_url = _database_url(database_path)
+    config = build_alembic_config(database_url)
+    command.upgrade(config, PREVIOUS_HEAD_REVISION)
+    connection = sqlite3.connect(database_path)
+    try:
+        connection.executemany(
+            "INSERT INTO catalog_objects "
+            "(id, kind, label, status, data_json) "
+            "VALUES (?, ?, ?, 'active', ?)",
+            [
+                ("hardware", "host", "Hardware", '{"schema_version":1}'),
+                ("runtime", "system", "Runtime", '{"schema_version":1}'),
+                (
+                    "api",
+                    "service",
+                    "API",
+                    '{"schema_version":1,"system_id":"system:runtime"}',
+                ),
+            ],
+        )
+        connection.execute(
+            "INSERT INTO relationships (from_ref, relation_type, to_ref) "
+            "VALUES ('host:hardware', 'provides', 'service:api')"
+        )
+        connection.commit()
+    finally:
+        connection.close()
+    before = _existing_data_snapshot(database_path)
+
+    with pytest.raises(RuntimeError, match="multiple parents for service:api"):
+        command.upgrade(config, "head")
+
+    assert _existing_data_snapshot(database_path) == before
+    assert _revision(database_url) == PREVIOUS_HEAD_REVISION
 
 
 def test_upgrade_adopts_only_matching_unversioned_legacy_database(

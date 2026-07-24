@@ -5,7 +5,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from blockwart.models import AuditEvent, CatalogObject, Relationship
-from blockwart.services.seeds import import_seed_file
+from blockwart.services.seeds import import_seed_file, import_seed_payload
 
 SEED_PATH = Path(__file__).resolve().parents[1] / "seeds" / "pilot_objects.yaml"
 
@@ -150,3 +150,30 @@ relationships:
 
     with pytest.raises(ValueError):
         import_seed_file(session, forbidden_seed)
+
+
+def test_seed_object_ids_are_globally_unique_across_kinds(session: Session) -> None:
+    payload = {
+        "schema_version": 1,
+        "objects": [
+            {
+                "id": "shared-id",
+                "kind": "host",
+                "label": "Hardware",
+                "data": {},
+            },
+            {
+                "id": "shared-id",
+                "kind": "system",
+                "label": "Runtime",
+                "data": {},
+            },
+        ],
+        "relationships": [],
+    }
+
+    with pytest.raises(
+        ValueError,
+        match="Seed object ids must be globally unique across kinds",
+    ):
+        import_seed_payload(session, payload)

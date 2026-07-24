@@ -14,6 +14,7 @@ from sqlalchemy.orm import Session
 
 from blockwart.api.deps import get_session
 from blockwart.db.session import transaction
+from blockwart.domain.placement import PlacementError, PlacementGraph
 from blockwart.domain.security import find_secret_violations
 from blockwart.domain.ui_schema import (
     create_field_payload,
@@ -393,15 +394,6 @@ def save_object(
             if relation_type not in RELATION_TYPES:
                 raise ValueError("Unsupported relation type")
             _require_existing_ref(session, relation_target_ref)
-        if kind == "service" and hosted_on_system_id:
-            _require_existing_ref(session, f"system:{hosted_on_system_id}")
-            data["system_id"] = f"system:{hosted_on_system_id}"
-        elif (
-            kind == "service"
-            and relation_type == "hosts"
-            and relation_target_ref.startswith("system:")
-        ):
-            data["system_id"] = relation_target_ref
         payload = CatalogObjectIn(
             id=object_id,
             kind=kind,
@@ -484,13 +476,16 @@ def save_relationship(
         from_ref, to_ref = target_ref, object_ref
     else:
         from_ref, to_ref = object_ref, target_ref
-    with transaction(session):
-        create_relationship(
-            session,
-            from_ref=from_ref,
-            relation_type=relation_type,
-            to_ref=to_ref,
-        )
+    try:
+        with transaction(session):
+            create_relationship(
+                session,
+                from_ref=from_ref,
+                relation_type=relation_type,
+                to_ref=to_ref,
+            )
+    except PlacementError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     return RedirectResponse(url=f"/objects/{object_id}", status_code=303)
 
 
@@ -1066,47 +1061,12 @@ def _relationship_topology(
     object_map: dict[str, CatalogObjectOut],
 ) -> dict[str, Any]:
     current_ref = f"{catalog_object.kind}:{catalog_object.id}"
-    systems_by_host: dict[str, list[str]] = {}
-    hosts_by_system: dict[str, list[str]] = {}
-    services_by_system: dict[str, list[str]] = {}
-    systems_by_service: dict[str, list[str]] = {}
-
-    for relationship in relationships:
-        from_ref = relationship["from_ref"]
-        to_ref = relationship["to_ref"]
-        relation_type = relationship["relation_type"]
-        from_object = object_map.get(from_ref)
-        to_object = object_map.get(to_ref)
-        from_kind = from_object.kind if from_object else from_ref.split(":", 1)[0]
-        to_kind = to_object.kind if to_object else to_ref.split(":", 1)[0]
-
-        if relation_type == "hosts" and from_kind in {"host", "system"} and to_kind == "system":
-            if from_ref != to_ref:
-                _append_unique_ref(systems_by_host, from_ref, to_ref)
-                _append_unique_ref(hosts_by_system, to_ref, from_ref)
-        if (
-            relation_type in {"hosts", "provides"}
-            and from_kind == "system"
-            and to_kind == "service"
-        ):
-            _append_unique_ref(services_by_system, from_ref, to_ref)
-            _append_unique_ref(systems_by_service, to_ref, from_ref)
-
-    for ref, obj in object_map.items():
-        if obj.kind != "service":
-            continue
-        system_ref = obj.data.get("system_id")
-        if isinstance(system_ref, str) and system_ref.startswith("system:"):
-            _append_unique_ref(services_by_system, system_ref, ref)
-            _append_unique_ref(systems_by_service, ref, system_ref)
+    placement_graph = PlacementGraph(object_map.values(), relationships)
 
     if catalog_object.kind == "service":
-        system_refs = systems_by_service.get(current_ref, [])
-        host_refs = _unique_refs(
-            host_ref
-            for system_ref in system_refs
-            for host_ref in hosts_by_system.get(system_ref, [])
-        )
+        parent_path = placement_graph.parent_path_refs(current_ref)
+        host_refs = [ref for ref in parent_path if ref.startswith("host:")]
+        system_refs = [ref for ref in parent_path if ref.startswith("system:")]
         return {
             "chains": [
                 {
@@ -1117,12 +1077,22 @@ def _relationship_topology(
             ]
         }
 
-    if catalog_object.kind in {"host", "system"} and systems_by_host.get(current_ref):
-        system_refs = systems_by_host[current_ref]
+    if catalog_object.kind == "host":
+        child_refs = placement_graph.children_refs(current_ref)
+        system_refs = [ref for ref in child_refs if ref.startswith("system:")]
+        direct_service_refs = [
+            ref for ref in child_refs if ref.startswith("service:")
+        ]
         service_refs = _unique_refs(
-            service_ref
-            for system_ref in system_refs
-            for service_ref in services_by_system.get(system_ref, [])
+            [
+                *direct_service_refs,
+                *[
+                    service_ref
+                    for system_ref in system_refs
+                    for service_ref in placement_graph.children_refs(system_ref)
+                    if service_ref.startswith("service:")
+                ],
+            ]
         )
         return {
             "chains": [
@@ -1135,8 +1105,16 @@ def _relationship_topology(
         }
 
     if catalog_object.kind == "system":
-        host_refs = hosts_by_system.get(current_ref, [])
-        service_refs = services_by_system.get(current_ref, [])
+        host_refs = [
+            ref
+            for ref in placement_graph.parent_path_refs(current_ref)
+            if ref.startswith("host:")
+        ]
+        service_refs = [
+            ref
+            for ref in placement_graph.children_refs(current_ref)
+            if ref.startswith("service:")
+        ]
         return {
             "chains": [
                 {
@@ -1148,12 +1126,6 @@ def _relationship_topology(
         }
 
     return {"chains": []}
-
-
-def _append_unique_ref(target: dict[str, list[str]], key: str, value: str) -> None:
-    values = target.setdefault(key, [])
-    if value not in values:
-        values.append(value)
 
 
 def _unique_refs(values: Any) -> list[str]:

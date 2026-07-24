@@ -130,7 +130,7 @@ def test_delete_catalog_object_removes_relationship_edges(
                     kind="service",
                     label="n8n Web UI",
                     status="active",
-                    data={"schema_version": 1, "system_id": "system:n8n"},
+                    data={"schema_version": 1},
                 ),
             )
             session.add(
@@ -161,7 +161,7 @@ def test_catalog_input_rejects_secret_shaped_payload() -> None:
                 "id": "bad-service",
                 "kind": "service",
                 "label": "Bad Service",
-                "data": {"system_id": "system:n8n", "auth": {"token": "not-allowed"}},
+                "data": {"auth": {"token": "not-allowed"}},
             }
         )
 

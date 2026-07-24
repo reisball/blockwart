@@ -42,9 +42,11 @@ Returns one object as agent context:
 - source references, last update timestamp, and structured upstream/downstream dependencies
 - extracted credential-reference IDs
 
-Placement resolution understands both the current `provides` relationships and `hosts`
-relationships. It supports `host -> system -> service` as well as a service placed directly on a
-host. A service's `data.system_id` remains a compatibility fallback.
+Placement resolution uses only canonical `hosts` relationships. It supports
+`host -> system -> service` as well as a service placed directly on a host. The
+catalog REST API exposes the same `parent_path`; the UI and MCP use the same
+placement graph. Legacy `provides` and `data.system_id` values are migrated by
+Alembic and are not read fallbacks.
 
 ### GET /api/agent/context
 

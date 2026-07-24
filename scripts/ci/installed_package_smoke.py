@@ -85,7 +85,7 @@ def main() -> None:
     openapi = fetch_json("/openapi.json")
     search = fetch_json("/api/agent/search?limit=1")
 
-    assert readiness["revision"] == "20260723_0002"
+    assert readiness["revision"] == "20260724_0003"
     assert "Blockwart" in index
     assert static_content_type == "text/css"
     assert not any(

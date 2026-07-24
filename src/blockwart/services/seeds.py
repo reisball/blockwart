@@ -35,6 +35,9 @@ def import_seed_payload(session: Session, payload: dict[str, Any]) -> SeedImport
         raise ValueError("Seed payload must contain an objects list")
 
     objects = [_validate_object(raw_object) for raw_object in raw_objects]
+    object_ids = [obj.id for obj in objects]
+    if len(object_ids) != len(set(object_ids)):
+        raise ValueError("Seed object ids must be globally unique across kinds")
     object_refs = {f"{obj.kind}:{obj.id}" for obj in objects}
     _validate_typed_references(objects, object_refs)
 
