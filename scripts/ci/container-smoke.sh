@@ -17,18 +17,23 @@ trap cleanup EXIT
 
 wait_for_candidate() {
   local container=$1
-  local port
-  port=$(docker port "$container" 8000/tcp | sed -n 's/.*://p')
-  [[ -n "$port" ]]
 
   local payload=
   for _ in $(seq 1 45); do
-    if payload=$(curl -fsS --max-time 7 "http://127.0.0.1:${port}/api/health/ready" 2>/dev/null); then
+    if payload=$(
+      docker exec "$container" python -c \
+        "from urllib.request import urlopen; print(urlopen('http://127.0.0.1:8000/api/health/ready', timeout=7).read().decode())" \
+        2>/dev/null
+    ); then
       break
     fi
     sleep 1
   done
-  [[ -n "$payload" ]]
+  if [[ -z "$payload" ]]; then
+    docker inspect "$container" --format '{{json .State}}' >&2
+    docker logs "$container" >&2
+    return 1
+  fi
   READY_PAYLOAD="$payload" python3 - "$EXPECTED_BUILD_REVISION" <<'PY'
 import json
 import os
@@ -52,7 +57,13 @@ PY
     fi
     sleep 1
   done
-  [[ $(docker inspect "$container" --format '{{.State.Status}} {{.State.Health.Status}} {{.RestartCount}}') == "running healthy 0" ]]
+  local final_state
+  final_state=$(docker inspect "$container" --format '{{.State.Status}} {{.State.Health.Status}} {{.RestartCount}}')
+  if [[ "$final_state" != "running healthy 0" ]]; then
+    printf 'unexpected container state: %s\n' "$final_state" >&2
+    docker logs "$container" >&2
+    return 1
+  fi
   docker exec "$container" blockwart-db check
 }
 
@@ -64,7 +75,6 @@ docker run -d \
   -e BLOCKWART_DATABASE_URL=sqlite:////data/blockwart.sqlite3 \
   -e BLOCKWART_ADMIN_TOKEN= \
   -v "$EMPTY_VOLUME:/data" \
-  -p 127.0.0.1::8000 \
   "$IMAGE" >/dev/null
 wait_for_candidate "$EMPTY_CONTAINER"
 docker rm -f "$EMPTY_CONTAINER" >/dev/null
@@ -109,7 +119,6 @@ docker run -d \
   -e BLOCKWART_DATABASE_URL=sqlite:////data/blockwart.sqlite3 \
   -e BLOCKWART_ADMIN_TOKEN= \
   -v "$MIGRATED_VOLUME:/data" \
-  -p 127.0.0.1::8000 \
   "$IMAGE" >/dev/null
 wait_for_candidate "$MIGRATED_CONTAINER"
 docker exec -i "$MIGRATED_CONTAINER" python - <<'PY'
