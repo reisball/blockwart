@@ -66,6 +66,7 @@ PY
   fi
   docker exec "$container" blockwart-db check
   docker exec "$container" blockwart-db integrity
+  docker exec "$container" blockwart-db interfaces
 }
 
 docker image inspect "$IMAGE" >/dev/null

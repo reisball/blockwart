@@ -126,6 +126,12 @@ Treat application code and its database revision as one release. Before updating
 5. Start the new image and require `blockwart-db check`, `blockwart-db integrity`, and the normal
    application smoke tests.
 
+For a service-interface data rollout, run `blockwart-db interfaces` against the
+restored candidate first and review every diagnostic. `blockwart-db --apply
+interfaces` is a separate explicit step; application startup never performs
+that JSON normalization automatically. Re-run the dry run afterward and
+require zero changes before switching live traffic.
+
 Example host-side backup:
 
 ```bash

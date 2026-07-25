@@ -87,6 +87,10 @@ All relationship types, directions, typed-reference checks, dependency storage, 
 delete behavior, database constraints, and the read-only integrity diagnostic are documented in
 `docs/relationship-integrity.md`.
 
+Endpoint, technical-port, and administrative-access semantics use one backend contract. Agent API
+and MCP expose its normalized view, while live-data normalization remains an explicit dry-run-first
+operation. See `docs/service-interfaces.md`.
+
 The catalog REST API is also read-only. Object changes are available only through authenticated
 UI form routes.
 
@@ -115,6 +119,7 @@ Alembic is the only application and container schema lifecycle. Useful commands:
 blockwart-db upgrade
 blockwart-db check
 blockwart-db integrity
+blockwart-db interfaces
 ```
 
 Both use an explicitly supplied `--database-url` first, then `BLOCKWART_DATABASE_URL`, then the

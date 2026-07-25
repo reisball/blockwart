@@ -2,11 +2,14 @@ import json
 from collections.abc import Mapping
 from ipaddress import ip_address
 from typing import Any
-from urllib.parse import urlsplit
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from blockwart.domain.interfaces import (
+    InterfaceContractError,
+    normalize_interface_data,
+)
 from blockwart.domain.placement import PlacementGraph
 from blockwart.domain.security import FORBIDDEN_SECRET_KEYS, looks_like_secret
 from blockwart.models import CatalogObject, Relationship
@@ -29,6 +32,9 @@ def search_agent_objects(
     parent: str | None = None,
     ip: str | None = None,
     port: int | None = None,
+    endpoint_type: str | None = None,
+    protocol: str | None = None,
+    exposure: str | None = None,
     status: str | None = None,
     lifecycle: str | None = None,
     health: str | None = None,
@@ -41,6 +47,9 @@ def search_agent_objects(
         parent=parent,
         ip=ip,
         port=port,
+        endpoint_type=endpoint_type,
+        protocol=protocol,
+        exposure=exposure,
         status=status,
         lifecycle=lifecycle,
         health=health,
@@ -68,6 +77,9 @@ def build_agent_context(
     parent: str | None = None,
     ip: str | None = None,
     port: int | None = None,
+    endpoint_type: str | None = None,
+    protocol: str | None = None,
+    exposure: str | None = None,
     status: str | None = None,
     lifecycle: str | None = None,
     health: str | None = None,
@@ -80,6 +92,9 @@ def build_agent_context(
         parent=parent,
         ip=ip,
         port=port,
+        endpoint_type=endpoint_type,
+        protocol=protocol,
+        exposure=exposure,
         status=status,
         lifecycle=lifecycle,
         health=health,
@@ -116,6 +131,9 @@ class _AgentCatalogResolver:
         parent: str | None,
         ip: str | None,
         port: int | None,
+        endpoint_type: str | None,
+        protocol: str | None,
+        exposure: str | None,
         status: str | None,
         lifecycle: str | None,
         health: str | None,
@@ -140,6 +158,25 @@ class _AgentCatalogResolver:
             if ip and ip not in self.resolved_ips(obj):
                 continue
             if port is not None and port not in self.ports(obj):
+                continue
+            endpoints = self.endpoints(obj)
+            if endpoint_type and not _endpoint_value_matches(
+                endpoints,
+                "type",
+                endpoint_type,
+            ):
+                continue
+            if protocol and not _endpoint_value_matches(
+                endpoints,
+                "protocol",
+                protocol,
+            ):
+                continue
+            if exposure and not _endpoint_value_matches(
+                endpoints,
+                "exposure",
+                exposure,
+            ):
                 continue
             matches.append(obj)
             if len(matches) == limit:
@@ -220,23 +257,19 @@ class _AgentCatalogResolver:
 
     def endpoints(self, obj: CatalogObject) -> list[dict[str, Any]]:
         data = _safe_object_data(obj)
-        endpoints: list[dict[str, Any]] = []
-        for endpoint in _mapping_list(data.get("endpoints")):
-            endpoints.append(_normalize_endpoint(endpoint, source="endpoint"))
-        for access_method in _mapping_list(data.get("access_methods")):
-            endpoint_url = access_method.get("endpoint")
-            if not isinstance(endpoint_url, str) or not endpoint_url:
-                continue
-            endpoints.append(
-                _normalize_endpoint(
-                    {
-                        "type": access_method.get("type"),
-                        "url": endpoint_url,
-                    },
-                    source="access_method",
-                )
-            )
-        return _unique_endpoints(endpoints)
+        try:
+            normalized = normalize_interface_data(
+                data,
+                kind=obj.kind,
+                object_id=obj.id,
+                allow_legacy=True,
+            ).data
+        except InterfaceContractError:
+            return []
+        return [
+            dict(endpoint)
+            for endpoint in _mapping_list(normalized.get("endpoints"))
+        ]
 
     def resolved_ips(self, obj: CatalogObject) -> list[str]:
         own_ips = _object_ips(_safe_object_data(obj), self.endpoints(obj))
@@ -319,6 +352,18 @@ def _matches_data_value(data: Mapping[str, Any], key: str, expected: str) -> boo
     return isinstance(value, str) and value.casefold() == expected.casefold()
 
 
+def _endpoint_value_matches(
+    endpoints: list[dict[str, Any]],
+    field: str,
+    expected: str,
+) -> bool:
+    return any(
+        isinstance(value := endpoint.get(field), str)
+        and value.casefold() == expected.casefold()
+        for endpoint in endpoints
+    )
+
+
 def _object_ref(obj: CatalogObject) -> str:
     return f"{obj.kind}:{obj.id}"
 
@@ -331,42 +376,6 @@ def _mapping_list(value: Any) -> list[Mapping[str, Any]]:
     if not isinstance(value, list):
         return []
     return [item for item in value if isinstance(item, Mapping)]
-
-
-def _normalize_endpoint(endpoint: Mapping[str, Any], *, source: str) -> dict[str, Any]:
-    normalized = {
-        str(key): value
-        for key, value in endpoint.items()
-        if value is not None and key not in FORBIDDEN_SECRET_KEYS
-    }
-    normalized["source"] = source
-    url = normalized.get("url")
-    if isinstance(url, str):
-        try:
-            parsed = urlsplit(url)
-            if parsed.hostname and "host" not in normalized:
-                normalized["host"] = parsed.hostname
-            if parsed.port is not None and "port" not in normalized:
-                normalized["port"] = parsed.port
-            if parsed.scheme and "protocol" not in normalized:
-                normalized["protocol"] = parsed.scheme
-            if parsed.path and parsed.path != "/" and "path" not in normalized:
-                normalized["path"] = parsed.path
-        except ValueError:
-            pass
-    return normalized
-
-
-def _unique_endpoints(endpoints: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    unique: list[dict[str, Any]] = []
-    seen: set[str] = set()
-    for endpoint in endpoints:
-        fingerprint = json.dumps(endpoint, sort_keys=True)
-        if fingerprint in seen:
-            continue
-        seen.add(fingerprint)
-        unique.append(endpoint)
-    return unique
 
 
 def _object_ips(data: Mapping[str, Any], endpoints: list[dict[str, Any]]) -> list[str]:

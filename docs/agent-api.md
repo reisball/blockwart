@@ -20,6 +20,9 @@ Query parameters:
 - parent: optional typed ancestor reference such as `host:fabrik-01`
 - ip: optional exact resolved IP address
 - port: optional exact endpoint or declared port
+- endpoint_type: optional exact endpoint capability such as `REST API`, `SMB`, or `HTTP`
+- protocol: optional exact application protocol such as `https`, `ssh`, or `smb`
+- exposure: optional exact `loopback`, `lan`, `vpn`, `internal`, `public`, or `unknown`
 - status: optional catalog status
 - lifecycle: optional exact lifecycle value
 - health: optional exact health value
@@ -38,7 +41,8 @@ Returns one object as agent context:
 - raw direct relationships
 - canonical root-to-parent path and immediate parent
 - direct placement children
-- normalized endpoints and resolved IPs/hostnames
+- normalized endpoints with stable ID, capability, URL/host/port, application
+  protocol, TCP/UDP transport, exposure and optional health URL
 - source references, last update timestamp, and structured upstream/downstream dependencies
 - extracted credential-reference IDs
 
@@ -52,6 +56,12 @@ Dependency resolution uses only canonical `depends_on` relationships. The source
 the target; Agent API `upstream` lists outgoing targets and `downstream` lists incoming sources.
 Legacy `data.dependencies` is migrated and rejected on new object writes.
 
+Endpoint resolution uses the shared service-interface contract. Legacy access
+method URLs are promoted into the normalized endpoint view and exact duplicate
+URLs are returned once. Generic HTTP endpoints remain `HTTP`; the read layer
+does not guess whether they are Web, REST, metrics, or webhooks. See
+`service-interfaces.md`.
+
 ### GET /api/agent/context
 
 Returns a small context bundle for a search query.
@@ -60,7 +70,8 @@ Query parameters:
 
 - q: optional search term
 - kind: optional object kind filter
-- parent, ip, port, status, lifecycle, health: same structured filters as search
+- parent, ip, port, endpoint_type, protocol, exposure, status, lifecycle,
+  health: same structured filters as search
 - limit: optional object limit, 1..20, default 5
 
 Search and context use the same resolver and filter semantics. All Agent API routes remain GET-only.

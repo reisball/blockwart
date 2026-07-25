@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 from pathlib import Path
 
@@ -57,6 +58,52 @@ def test_database_integrity_cli_reports_stable_codes(tmp_path: Path, capsys) -> 
     captured = capsys.readouterr()
     assert "code=invalid_relationship_direction" in captured.err
     assert "database_integrity_ok" not in captured.out
+
+
+def test_database_interfaces_defaults_to_dry_run_and_requires_apply(
+    tmp_path: Path,
+    capsys,
+) -> None:
+    database_url = f"sqlite:///{tmp_path / 'interfaces.sqlite3'}"
+    assert database_cli.main(["--database-url", database_url, "upgrade"]) == 0
+    capsys.readouterr()
+    engine = create_engine(database_url)
+    try:
+        with engine.begin() as connection:
+            connection.execute(
+                text(
+                    "INSERT INTO catalog_objects "
+                    "(id, kind, label, status, data_json) VALUES "
+                    "('legacy', 'service', 'Legacy', 'active', :data_json)"
+                ),
+                {"data_json": '{"schema_version":1,"endpoints":[]}'},
+            )
+        assert database_cli.main(
+            ["--database-url", database_url, "interfaces"]
+        ) == 0
+        dry_run = capsys.readouterr().out
+        assert "mode=dry-run scanned=1 changed=1 diagnostics=1" in dry_run
+        with engine.connect() as connection:
+            assert json.loads(
+                connection.execute(
+                    text("SELECT data_json FROM catalog_objects WHERE id='legacy'")
+                ).scalar_one()
+            ) == {"schema_version": 1, "endpoints": []}
+
+        assert database_cli.main(
+            ["--database-url", database_url, "--apply", "interfaces"]
+        ) == 0
+        applied = capsys.readouterr().out
+        assert "mode=apply scanned=1 changed=1 diagnostics=1" in applied
+        with engine.connect() as connection:
+            data = json.loads(
+                connection.execute(
+                    text("SELECT data_json FROM catalog_objects WHERE id='legacy'")
+                ).scalar_one()
+            )
+            assert data["interface"] == {"state": "incomplete"}
+    finally:
+        engine.dispose()
 
 
 def test_database_cli_redacts_migration_failure(
