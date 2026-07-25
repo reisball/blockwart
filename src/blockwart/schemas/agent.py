@@ -5,6 +5,20 @@ from pydantic import BaseModel, Field
 from blockwart.schemas.catalog import ObjectKind
 
 
+class AgentEndpoint(BaseModel):
+    id: str
+    type: str
+    label: str | None = None
+    url: str | None = None
+    host: str | None = None
+    port: int | None = None
+    path: str | None = None
+    protocol: str
+    transport: str
+    exposure: str
+    health_url: str | None = None
+
+
 class AgentAssetNode(BaseModel):
     ref: str
     id: str
@@ -23,7 +37,7 @@ class AgentCatalogObjectSummary(BaseModel):
     parent: AgentAssetNode | None = None
     ips: list[str] = Field(default_factory=list)
     hostnames: list[str] = Field(default_factory=list)
-    primary_endpoint: dict[str, Any] | None = None
+    primary_endpoint: AgentEndpoint | None = None
     lifecycle: str | None = None
     health: str | None = None
 
@@ -39,7 +53,7 @@ class AgentCatalogObjectContext(AgentCatalogObjectSummary):
     relationships: list[AgentRelationshipOut] = Field(default_factory=list)
     parent_path: list[AgentAssetNode] = Field(default_factory=list)
     children: list[AgentAssetNode] = Field(default_factory=list)
-    endpoints: list[dict[str, Any]] = Field(default_factory=list)
+    endpoints: list[AgentEndpoint] = Field(default_factory=list)
     source_references: list[dict[str, Any]] = Field(default_factory=list)
     updated_at: str | None = None
     dependencies: dict[str, list[str]] = Field(default_factory=dict)

@@ -84,6 +84,7 @@ def main() -> None:
         static_content_type = response.headers.get_content_type()
     openapi = fetch_json("/openapi.json")
     search = fetch_json("/api/agent/search?limit=1")
+    service = fetch_json("/api/agent/objects/n8n-web-ui")["objects"][0]
 
     assert readiness["revision"] == "20260724_0004"
     assert "Blockwart" in index
@@ -93,6 +94,14 @@ def main() -> None:
         for path in openapi["paths"]
     )
     assert search["count"] == 1
+    assert service["endpoints"]
+    assert {
+        "id",
+        "type",
+        "protocol",
+        "transport",
+        "exposure",
+    }.issubset(service["endpoints"][0])
     protocol = asyncio.run(check_mcp(search["results"][0]["id"]))
     print(
         "installed_package=ok "

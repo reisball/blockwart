@@ -56,6 +56,12 @@ QUERY_FILTER_PROPERTIES: JSON = {
     "parent": {"type": "string", "description": "Typed parent reference"},
     "ip": {"type": "string", "description": "Resolved exact IP address"},
     "port": {"type": "integer", "minimum": 1, "maximum": 65535},
+    "endpoint_type": {"type": "string", "description": "Exact endpoint capability"},
+    "protocol": {"type": "string", "description": "Exact application protocol"},
+    "exposure": {
+        "type": "string",
+        "enum": ["loopback", "lan", "vpn", "internal", "public", "unknown"],
+    },
     "status": {"type": "string", "enum": ["active", "inactive", "deleted"]},
     "lifecycle": {"type": "string"},
     "health": {"type": "string"},
@@ -232,7 +238,17 @@ def _clean_params(args: JSON, *, default_limit: int) -> JSON:
         "kind": args.get("kind"),
         "limit": args.get("limit", default_limit),
     }
-    for name in ("parent", "ip", "port", "status", "lifecycle", "health"):
+    for name in (
+        "parent",
+        "ip",
+        "port",
+        "endpoint_type",
+        "protocol",
+        "exposure",
+        "status",
+        "lifecycle",
+        "health",
+    ):
         if name in args:
             params[name] = args[name]
     return params

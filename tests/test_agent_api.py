@@ -213,6 +213,19 @@ def test_agent_context_resolves_host_system_service_path(
     ]
     assert obj["ips"] == ["10.20.0.20"]
     assert obj["primary_endpoint"]["port"] == 8443
+    assert obj["primary_endpoint"] == {
+        "id": "rest-api-8443-10-20-0-20",
+        "type": "REST API",
+        "label": None,
+        "url": "https://10.20.0.20:8443/api",
+        "host": "10.20.0.20",
+        "port": 8443,
+        "path": "/api",
+        "protocol": "https",
+        "transport": "tcp",
+        "exposure": "unknown",
+        "health_url": None,
+    }
     assert obj["lifecycle"] == "production"
     assert obj["health"] == "healthy"
     assert obj["dependencies"] == {
@@ -322,6 +335,9 @@ def test_agent_search_supports_structured_asset_filters(
             "parent": "host:baremetal-01",
             "ip": "10.20.0.20",
             "port": 8443,
+            "endpoint_type": "REST API",
+            "protocol": "https",
+            "exposure": "unknown",
             "status": "active",
             "lifecycle": "production",
             "health": "healthy",
@@ -334,6 +350,9 @@ def test_agent_search_supports_structured_asset_filters(
         "parent": "host:baremetal-01",
         "ip": "10.20.0.20",
         "port": 8443,
+        "endpoint_type": "REST API",
+        "protocol": "https",
+        "exposure": "unknown",
         "status": "active",
         "lifecycle": "production",
         "health": "healthy",

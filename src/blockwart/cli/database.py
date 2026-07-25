@@ -11,8 +11,12 @@ from blockwart.db.migrations import (
     check_database_revision,
     upgrade_database,
 )
-from blockwart.db.session import build_engine
+from blockwart.db.session import build_engine, transaction
 from blockwart.services.catalog import relationship_diagnostics
+from blockwart.services.interface_migration import (
+    apply_interface_migration_plan,
+    build_interface_migration_plan,
+)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -24,7 +28,15 @@ def build_parser() -> argparse.ArgumentParser:
         "--database-url",
         help="SQLAlchemy database URL. Defaults to BLOCKWART_DATABASE_URL or local config.",
     )
-    parser.add_argument("action", choices=("upgrade", "check", "integrity"))
+    parser.add_argument(
+        "--apply",
+        action="store_true",
+        help="Apply the interface normalization plan. Default is a read-only dry run.",
+    )
+    parser.add_argument(
+        "action",
+        choices=("upgrade", "check", "integrity", "interfaces"),
+    )
     return parser
 
 
@@ -45,6 +57,22 @@ def main(argv: Sequence[str] | None = None) -> int:
                         file=sys.stderr,
                     )
                 return 1
+        elif args.action == "interfaces":
+            revision = check_database_revision(args.database_url)
+            plan = _interface_plan(args.database_url, apply=args.apply)
+            for diagnostic in plan.diagnostics:
+                print(
+                    "interface_diagnostic "
+                    f"code={diagnostic.code} location={diagnostic.location}"
+                )
+            mode = "apply" if args.apply else "dry-run"
+            print(
+                "database_interfaces_ok "
+                f"revision={revision} mode={mode} "
+                f"scanned={plan.scanned_objects} changed={plan.changed_objects} "
+                f"diagnostics={len(plan.diagnostics)}"
+            )
+            return 0
         else:
             revision = check_database_revision(args.database_url)
     except Exception:  # noqa: BLE001 - CLI boundary must redact database details
@@ -62,6 +90,20 @@ def _relationship_diagnostics(database_url: str | None):
     try:
         with Session(engine) as session:
             return relationship_diagnostics(session)
+    finally:
+        engine.dispose()
+
+
+def _interface_plan(database_url: str | None, *, apply: bool):
+    config = build_alembic_config(database_url)
+    engine = build_engine(str(config.attributes["database_url"]))
+    try:
+        with Session(engine) as session:
+            plan = build_interface_migration_plan(session)
+            if apply:
+                with transaction(session):
+                    apply_interface_migration_plan(session, plan)
+            return plan
     finally:
         engine.dispose()
 

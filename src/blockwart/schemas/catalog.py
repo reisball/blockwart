@@ -3,6 +3,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field, model_validator
 
+from blockwart.domain.interfaces import normalize_interface_data
 from blockwart.domain.references import TypedReference
 from blockwart.domain.security import find_secret_violations
 
@@ -155,10 +156,7 @@ def _validate_endpoints(data: dict[str, Any]) -> None:
     for index, value in enumerate(_require_list(data["endpoints"], "data.endpoints")):
         endpoint = _require_mapping(value, f"data.endpoints[{index}]")
         if "type" in endpoint:
-            endpoint_type = _require_string(endpoint["type"], f"data.endpoints[{index}].type")
-            if endpoint_type not in ENDPOINT_TYPES:
-                allowed = ", ".join(ENDPOINT_TYPE_OPTIONS)
-                raise ValueError(f"data.endpoints[{index}].type must be one of: {allowed}")
+            _require_string(endpoint["type"], f"data.endpoints[{index}].type")
         if "url" in endpoint:
             _require_string(endpoint["url"], f"data.endpoints[{index}].url")
         if "port" in endpoint:
@@ -292,6 +290,11 @@ class CatalogObjectIn(BaseModel):
     def validate_catalog_data(self) -> "CatalogObjectIn":
         if "schema_version" in self.data and self.data["schema_version"] != 1:
             raise ValueError("data.schema_version must be 1")
+        normalize_interface_data(
+            self.data,
+            kind=self.kind,
+            object_id=self.id,
+        )
         _validate_dependencies(self.data)
         if self.kind in {"host", "system"}:
             _validate_system_data(self.data)
