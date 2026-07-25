@@ -15,6 +15,10 @@ from sqlalchemy.orm import Session
 from blockwart.api.deps import get_session
 from blockwart.db.session import transaction
 from blockwart.domain.placement import PlacementError, PlacementGraph
+from blockwart.domain.relationships import (
+    RELATIONSHIP_TYPES,
+    RelationshipIntegrityError,
+)
 from blockwart.domain.security import find_secret_violations
 from blockwart.domain.ui_schema import (
     create_field_payload,
@@ -49,7 +53,7 @@ router = APIRouter(tags=["ui"], include_in_schema=False)
 
 OBJECT_KINDS = PUBLIC_OBJECT_KINDS
 OBJECT_STATUSES_UI = OBJECT_STATUSES
-RELATION_TYPES = ("hosts", "depends_on", "uses", "documents", "related_to")
+RELATION_TYPES = RELATIONSHIP_TYPES
 PLATFORM_TYPES = ("LXC", "VM", "WSL")
 UI_KIND_PRIORITY = {kind: index for index, kind in enumerate(OBJECT_KINDS)}
 SAFE_DATA_JSON_FALLBACK = "{\n  \"schema_version\": 1\n}"
@@ -484,7 +488,7 @@ def save_relationship(
                 relation_type=relation_type,
                 to_ref=to_ref,
             )
-    except PlacementError as exc:
+    except (PlacementError, RelationshipIntegrityError) as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     return RedirectResponse(url=f"/objects/{object_id}", status_code=303)
 

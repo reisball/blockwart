@@ -196,7 +196,7 @@ class _AgentCatalogResolver:
                 dict(reference) for reference in _mapping_list(data.get("source_references"))
             ],
             updated_at=obj.updated_at.isoformat() if obj.updated_at else None,
-            dependencies=_dependencies(data),
+            dependencies=self.dependencies(object_ref),
             credential_references=sorted(_collect_credential_references(data)),
         )
 
@@ -279,6 +279,27 @@ class _AgentCatalogResolver:
                 ports.add(port_value)
         return ports
 
+    def dependencies(self, object_ref: str) -> dict[str, list[str]]:
+        upstream = sorted(
+            {
+                relationship.to_ref
+                for relationship in self.relationships
+                if relationship.relation_type == "depends_on"
+                and relationship.from_ref == object_ref
+            }
+        )
+        downstream = sorted(
+            {
+                relationship.from_ref
+                for relationship in self.relationships
+                if relationship.relation_type == "depends_on"
+                and relationship.to_ref == object_ref
+            }
+        )
+        if not upstream and not downstream:
+            return {}
+        return {"upstream": upstream, "downstream": downstream}
+
 def _safe_object_data(obj: CatalogObject) -> dict[str, Any]:
     try:
         data = json.loads(obj.data_json)
@@ -310,18 +331,6 @@ def _mapping_list(value: Any) -> list[Mapping[str, Any]]:
     if not isinstance(value, list):
         return []
     return [item for item in value if isinstance(item, Mapping)]
-
-
-def _dependencies(data: Mapping[str, Any]) -> dict[str, list[str]]:
-    dependencies = data.get("dependencies")
-    if not isinstance(dependencies, Mapping):
-        return {}
-    resolved: dict[str, list[str]] = {}
-    for direction in ("upstream", "downstream"):
-        references = dependencies.get(direction)
-        if isinstance(references, list):
-            resolved[direction] = [ref for ref in references if isinstance(ref, str)]
-    return resolved
 
 
 def _normalize_endpoint(endpoint: Mapping[str, Any], *, source: str) -> dict[str, Any]:

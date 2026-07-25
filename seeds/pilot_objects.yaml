@@ -540,11 +540,6 @@ objects:
     data: {schema_version: 1, target_refs: [system:splunk, service:splunk-web, service:splunk-management-api], safety: review_only, steps: ["Verify documented public URLs still match routing.", "Confirm Blockwart contains credential references only."]}
 
 relationships:
-  - {from_ref: system:fabrik, relation_type: hosts, to_ref: system:ollama}
-  - {from_ref: system:fabrik, relation_type: hosts, to_ref: system:vaultwarden}
-  - {from_ref: system:fabrik, relation_type: hosts, to_ref: system:paperless-ngx}
-  - {from_ref: system:fabrik, relation_type: hosts, to_ref: system:n8n}
-  - {from_ref: system:fabrik, relation_type: hosts, to_ref: system:splunk}
   - {from_ref: system:fabrik, relation_type: hosts, to_ref: service:fabrik-proxmox}
   - {from_ref: system:denkstube, relation_type: hosts, to_ref: service:denkstube-openclaw-gateway}
   - {from_ref: system:denkstube, relation_type: hosts, to_ref: service:denkstube-projects-smb}

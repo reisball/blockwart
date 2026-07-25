@@ -1,16 +1,23 @@
 import json
+from collections.abc import Mapping
 from datetime import UTC, datetime
 
-from sqlalchemy import delete, select
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from blockwart.domain.placement import (
     CANONICAL_PLACEMENT_RELATION_TYPE,
     PlacementError,
     PlacementGraph,
-    validate_placement_pair,
 )
-from blockwart.domain.references import TypedReference
+from blockwart.domain.relationships import (
+    RelationshipDiagnostic,
+    RelationshipIntegrityError,
+    diagnose_relationship_integrity,
+    iter_typed_reference_strings,
+    validate_data_references,
+    validate_relationship,
+)
 from blockwart.models import AuditEvent, CatalogObject, Relationship
 from blockwart.schemas.catalog import CatalogAssetNode, CatalogObjectIn, CatalogObjectOut
 
@@ -189,6 +196,13 @@ def create_relationship(
     relation_type: str,
     to_ref: str,
 ) -> dict[str, str]:
+    object_kinds = current_object_kinds(session)
+    validate_relationship(
+        from_ref=from_ref,
+        relation_type=relation_type,
+        to_ref=to_ref,
+        object_kinds=object_kinds,
+    )
     existing = session.scalar(
         select(Relationship).where(
             Relationship.from_ref == from_ref,
@@ -198,8 +212,6 @@ def create_relationship(
     )
     if existing is not None:
         return {"from_ref": from_ref, "relation_type": relation_type, "to_ref": to_ref}
-    if relation_type == "provides":
-        raise PlacementError("provides is obsolete; use a hosts relationship")
     if relation_type == CANONICAL_PLACEMENT_RELATION_TYPE:
         _validate_placement_relationship(
             session,
@@ -231,9 +243,6 @@ def _validate_placement_relationship(
     parent_ref: str,
     child_ref: str,
 ) -> None:
-    parent = _catalog_object_for_ref(session, parent_ref)
-    child = _catalog_object_for_ref(session, child_ref)
-    validate_placement_pair(parent.kind, child.kind)
     existing_parent = session.scalar(
         select(Relationship).where(
             Relationship.relation_type == CANONICAL_PLACEMENT_RELATION_TYPE,
@@ -247,16 +256,24 @@ def _validate_placement_relationship(
         )
 
 
-def _catalog_object_for_ref(session: Session, object_ref: str) -> CatalogObject:
-    parsed = TypedReference.parse(object_ref)
-    row = session.get(CatalogObject, parsed.object_id)
-    if row is None or row.kind != parsed.kind:
-        raise PlacementError(f"placement reference does not exist: {object_ref}")
-    return row
-
-
-def upsert_object(session: Session, payload: CatalogObjectIn) -> CatalogObjectOut:
+def upsert_object(
+    session: Session,
+    payload: CatalogObjectIn,
+    *,
+    known_object_kinds: Mapping[str, str] | None = None,
+) -> CatalogObjectOut:
     row = session.get(CatalogObject, payload.id)
+    object_kinds = current_object_kinds(session)
+    if known_object_kinds is not None:
+        object_kinds.update(known_object_kinds)
+    object_kinds[payload.id] = payload.kind
+    validate_data_references(
+        payload.data,
+        object_kinds,
+        object_id=payload.id,
+    )
+    if row is not None and row.kind != payload.kind:
+        ensure_kind_change_allowed(session, row, payload.kind)
     data_json = json.dumps(payload.data, sort_keys=True)
     changed_at = _now()
     if row is None:
@@ -413,11 +430,12 @@ def delete_object(session: Session, object_id: str) -> bool:
 
     kind = row.kind
     object_ref = f"{kind}:{object_id}"
-    session.execute(
-        delete(Relationship).where(
-            (Relationship.from_ref == object_ref) | (Relationship.to_ref == object_ref)
+    blockers = _reference_blockers(session, object_ref)
+    if blockers:
+        raise RelationshipIntegrityError(
+            "delete_referenced_object",
+            f"cannot delete {object_ref}: {len(blockers)} typed reference(s) still exist",
         )
-    )
     session.delete(row)
     _write_audit(session, object_id, "delete", f"Objekt gelöscht: {object_ref}")
     session.flush()
@@ -432,3 +450,61 @@ def _touch_objects_for_refs(session: Session, refs: list[str], changed_at: datet
         row = session.get(CatalogObject, object_id)
         if row is not None:
             row.updated_at = changed_at
+
+
+def relationship_diagnostics(session: Session) -> list[RelationshipDiagnostic]:
+    objects = list(session.scalars(select(CatalogObject).order_by(CatalogObject.id)).all())
+    relationships = list(
+        session.scalars(
+            select(Relationship).order_by(
+                Relationship.id,
+                Relationship.from_ref,
+                Relationship.relation_type,
+                Relationship.to_ref,
+            )
+        ).all()
+    )
+    return diagnose_relationship_integrity(objects, relationships)
+
+
+def current_object_kinds(session: Session) -> dict[str, str]:
+    rows = session.execute(select(CatalogObject.id, CatalogObject.kind)).all()
+    return {str(object_id): str(kind) for object_id, kind in rows}
+
+
+def ensure_kind_change_allowed(
+    session: Session,
+    row: CatalogObject,
+    new_kind: str,
+) -> None:
+    if row.kind == new_kind:
+        return
+    old_ref = f"{row.kind}:{row.id}"
+    blockers = _reference_blockers(session, old_ref)
+    if blockers:
+        raise RelationshipIntegrityError(
+            "kind_change_referenced",
+            f"cannot change {old_ref} to {new_kind}: "
+            f"{len(blockers)} typed reference(s) still exist",
+        )
+
+
+def _reference_blockers(session: Session, object_ref: str) -> list[str]:
+    blockers = [
+        f"relationship:{row.id}"
+        for row in session.scalars(
+            select(Relationship).where(
+                (Relationship.from_ref == object_ref)
+                | (Relationship.to_ref == object_ref)
+            )
+        ).all()
+    ]
+    for row in session.scalars(select(CatalogObject).order_by(CatalogObject.id)).all():
+        try:
+            data = json.loads(row.data_json)
+        except (TypeError, json.JSONDecodeError):
+            blockers.append(f"catalog_object:{row.id}:invalid_json")
+            continue
+        if object_ref in iter_typed_reference_strings(data):
+            blockers.append(f"catalog_object:{row.id}")
+    return blockers

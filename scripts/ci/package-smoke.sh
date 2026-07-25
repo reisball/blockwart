@@ -48,4 +48,5 @@ if ! "$VENV_PYTHON" "$SOURCE_DIR/scripts/ci/installed_package_smoke.py"; then
   exit 1
 fi
 "$TEMP_DIR/venv/bin/blockwart-db" check
+"$TEMP_DIR/venv/bin/blockwart-db" integrity
 echo "package_smoke=passed"

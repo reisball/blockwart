@@ -299,6 +299,16 @@ def test_import_tools_markdown_merges_canonical_existing_objects(
         upsert_object(
             session,
             CatalogObjectIn(
+                id="fabrik-proxmox",
+                kind="service",
+                label="Fabrik Proxmox",
+                status="active",
+                data={"schema_version": 1},
+            ),
+        )
+        upsert_object(
+            session,
+            CatalogObjectIn(
                 id="fabrik",
                 kind="system",
                 label="Fabrik",

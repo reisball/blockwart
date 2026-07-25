@@ -17,10 +17,46 @@ def test_database_cli_upgrades_then_checks_database(tmp_path: Path, capsys) -> N
     database_url = f"sqlite:///{tmp_path / 'cli.sqlite3'}"
 
     assert database_cli.main(["--database-url", database_url, "upgrade"]) == 0
-    assert "database_upgrade_ok revision=20260724_0003" in capsys.readouterr().out
+    assert "database_upgrade_ok revision=20260724_0004" in capsys.readouterr().out
 
     assert database_cli.main(["--database-url", database_url, "check"]) == 0
-    assert "database_check_ok revision=20260724_0003" in capsys.readouterr().out
+    assert "database_check_ok revision=20260724_0004" in capsys.readouterr().out
+
+    assert database_cli.main(["--database-url", database_url, "integrity"]) == 0
+    assert (
+        "database_integrity_ok revision=20260724_0004 diagnostics=0"
+        in capsys.readouterr().out
+    )
+
+
+def test_database_integrity_cli_reports_stable_codes(tmp_path: Path, capsys) -> None:
+    database_url = f"sqlite:///{tmp_path / 'invalid-integrity.sqlite3'}"
+    assert database_cli.main(["--database-url", database_url, "upgrade"]) == 0
+    capsys.readouterr()
+    engine = create_engine(database_url)
+    try:
+        with engine.begin() as connection:
+            connection.execute(
+                text(
+                    "INSERT INTO catalog_objects "
+                    "(id, kind, label, status, data_json) VALUES "
+                    "('runtime-a', 'system', 'Runtime A', 'active', '{}'),"
+                    "('runtime-b', 'system', 'Runtime B', 'active', '{}')"
+                )
+            )
+            connection.execute(
+                text(
+                    "INSERT INTO relationships (from_ref, relation_type, to_ref) "
+                    "VALUES ('system:runtime-a', 'hosts', 'system:runtime-b')"
+                )
+            )
+    finally:
+        engine.dispose()
+
+    assert database_cli.main(["--database-url", database_url, "integrity"]) == 1
+    captured = capsys.readouterr()
+    assert "code=invalid_relationship_direction" in captured.err
+    assert "database_integrity_ok" not in captured.out
 
 
 def test_database_cli_redacts_migration_failure(
@@ -75,7 +111,7 @@ def test_markdown_create_schema_uses_alembic(
     engine = create_engine(database_url)
     with engine.connect() as connection:
         assert connection.execute(text("SELECT version_num FROM alembic_version")).scalar_one() == (
-            "20260724_0003"
+            "20260724_0004"
         )
     engine.dispose()
 
@@ -146,7 +182,7 @@ def test_startup_upgrades_before_exec(monkeypatch: pytest.MonkeyPatch) -> None:
 
     def record_upgrade() -> str:
         calls.append(("upgrade", None))
-        return "20260724_0003"
+        return "20260724_0004"
 
     def record_exec(file: str, args: list[str]) -> None:
         calls.append(("exec", (file, args)))

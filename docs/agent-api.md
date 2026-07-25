@@ -48,6 +48,10 @@ catalog REST API exposes the same `parent_path`; the UI and MCP use the same
 placement graph. Legacy `provides` and `data.system_id` values are migrated by
 Alembic and are not read fallbacks.
 
+Dependency resolution uses only canonical `depends_on` relationships. The source object depends on
+the target; Agent API `upstream` lists outgoing targets and `downstream` lists incoming sources.
+Legacy `data.dependencies` is migrated and rejected on new object writes.
+
 ### GET /api/agent/context
 
 Returns a small context bundle for a search query.

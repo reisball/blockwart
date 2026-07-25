@@ -83,6 +83,10 @@ The canonical asset hierarchy is `host → system → service`, with direct
 parent-to-child `hosts` relationship; object IDs are globally unique. See
 `docs/domain-model.md`.
 
+All relationship types, directions, typed-reference checks, dependency storage, kind-change and
+delete behavior, database constraints, and the read-only integrity diagnostic are documented in
+`docs/relationship-integrity.md`.
+
 The catalog REST API is also read-only. Object changes are available only through authenticated
 UI form routes.
 
@@ -110,6 +114,7 @@ Alembic is the only application and container schema lifecycle. Useful commands:
 ```bash
 blockwart-db upgrade
 blockwart-db check
+blockwart-db integrity
 ```
 
 Both use an explicitly supplied `--database-url` first, then `BLOCKWART_DATABASE_URL`, then the

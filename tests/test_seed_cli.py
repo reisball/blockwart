@@ -23,17 +23,17 @@ def test_seed_cli_creates_schema_and_imports_seed(tmp_path, capsys):
 
     assert exit_code == 0
     output = capsys.readouterr().out
-    assert "seed_imported objects=52 relationships=33" in output
-    assert "catalog_summary objects=52 relationships=33 audit_events=85" in output
+    assert "seed_imported objects=52 relationships=63" in output
+    assert "catalog_summary objects=52 relationships=63 audit_events=115" in output
 
     engine = create_engine(f"sqlite:///{db_path}", connect_args={"check_same_thread": False})
     session_factory = sessionmaker(bind=engine)
     with session_factory() as session:
         assert session.query(CatalogObject).count() == 52
-        assert session.query(Relationship).count() == 33
-        assert session.query(AuditEvent).count() == 85
+        assert session.query(Relationship).count() == 63
+        assert session.query(AuditEvent).count() == 115
         assert session.execute(text("SELECT version_num FROM alembic_version")).scalar_one() == (
-            "20260724_0003"
+            "20260724_0004"
         )
 
 
@@ -46,7 +46,7 @@ def test_seed_cli_summary_only_reads_existing_database(tmp_path, capsys):
     assert main(["--database-url", database_url, "--summary-only"]) == 0
 
     output = capsys.readouterr().out
-    assert "catalog_summary objects=52 relationships=33 audit_events=85" in output
+    assert "catalog_summary objects=52 relationships=63 audit_events=115" in output
 
 
 def test_seed_cli_rejects_missing_seed_file(tmp_path, capsys):

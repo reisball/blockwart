@@ -64,6 +64,10 @@ which real hardware owns an unassigned runtime or service.
 - #38 owns classification of live and pilot inventory, including hardware kind
   corrections, runtime metadata, and explicit decisions for unassigned assets.
 
+The complete implemented relationship and object-lifecycle contract is documented in
+`relationship-integrity.md`. Generic dependencies are stored only as directed `depends_on`
+relationships; they are not duplicated in object JSON.
+
 Application rollback does not automatically downgrade canonical placement.
 Restore the verified pre-upgrade database backup together with the matching
 application image.

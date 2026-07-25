@@ -11,7 +11,12 @@ from sqlalchemy.orm import Session
 
 from blockwart.models import CatalogObject, Relationship
 from blockwart.schemas.catalog import CatalogObjectIn
-from blockwart.services.catalog import create_relationship, upsert_object
+from blockwart.services.catalog import (
+    create_relationship,
+    current_object_kinds,
+    delete_object,
+    upsert_object,
+)
 from blockwart.services.seeds import SeedImportResult
 
 STATUS_MAP = {
@@ -213,12 +218,19 @@ def import_tools_markdown(
     if not isinstance(relationships, list):
         raise ValueError("Markdown import payload must contain relationships")
 
-    for raw_object in objects:
-        payload = CatalogObjectIn.model_validate(raw_object)
+    object_payloads = [CatalogObjectIn.model_validate(raw_object) for raw_object in objects]
+    known_object_kinds = current_object_kinds(session)
+    known_object_kinds.update({payload.id: payload.kind for payload in object_payloads})
+
+    for payload in object_payloads:
         existing = session.get(CatalogObject, payload.id)
         if existing is not None and existing.kind == payload.kind:
             payload = _merge_existing_object(existing, payload)
-        upsert_object(session, payload)
+        upsert_object(
+            session,
+            payload,
+            known_object_kinds=known_object_kinds,
+        )
 
     _remove_stale_workspace_services(session, objects)
 
@@ -281,7 +293,8 @@ def _remove_stale_workspace_services(session: Session, objects: list[dict[str, A
                 (Relationship.from_ref == stale_ref) | (Relationship.to_ref == stale_ref)
             )
         )
-        session.delete(row)
+        session.flush()
+        delete_object(session, row.id)
     session.flush()
 
 
@@ -317,7 +330,7 @@ def _remove_stale_workspace_host_relationships(
             )
         )
         if remaining_relationship is None:
-            session.execute(delete(CatalogObject).where(CatalogObject.id == stale_object_id))
+            delete_object(session, stale_object_id)
     session.flush()
 
 

@@ -43,7 +43,7 @@ expected_revision = sys.argv[1]
 payload = json.loads(os.environ["READY_PAYLOAD"])
 assert payload["ok"] is True
 assert payload["build_revision"] == expected_revision
-assert payload["revision"] == "20260724_0003"
+assert payload["revision"] == "20260724_0004"
 assert all(value == "ok" for value in payload["checks"].values())
 PY
 
@@ -65,6 +65,7 @@ PY
     return 1
   fi
   docker exec "$container" blockwart-db check
+  docker exec "$container" blockwart-db integrity
 }
 
 docker image inspect "$IMAGE" >/dev/null

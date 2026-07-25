@@ -123,7 +123,8 @@ Treat application code and its database revision as one release. Before updating
 3. Run `PRAGMA integrity_check` against the backup and record the catalog, relationship, and audit
    counts.
 4. Keep the previous image under a release-specific rollback tag.
-5. Start the new image and require `blockwart-db check` plus the normal application smoke tests.
+5. Start the new image and require `blockwart-db check`, `blockwart-db integrity`, and the normal
+   application smoke tests.
 
 Example host-side backup:
 

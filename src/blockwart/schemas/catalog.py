@@ -31,7 +31,6 @@ REFERENCE_TARGETS = {
     "related_runbooks": {"runbook"},
 }
 
-DEPENDENCY_TARGETS = {"host", "system", "netzwerk", "service"}
 CREDENTIAL_PROVIDERS = {"vaultwarden", "secrets_json", "env_file", "local_file", "external"}
 CREDENTIAL_ACCESS_TYPES = {"ssh", "web", "api", "database", "smb", "sudo", "token", "other"}
 ENDPOINT_TYPE_OPTIONS = ("Web", "REST API", "MCP", "HEC", "SSH")
@@ -89,13 +88,9 @@ def _validate_reference_list(data: dict[str, Any], field: str, allowed_kinds: se
 def _validate_dependencies(data: dict[str, Any]) -> None:
     if "dependencies" not in data:
         return
-    dependencies = _require_mapping(data["dependencies"], "data.dependencies")
-    for side in ("upstream", "downstream"):
-        if side not in dependencies:
-            continue
-        references = _require_list(dependencies[side], f"data.dependencies.{side}")
-        for index, value in enumerate(references):
-            _validate_reference(value, DEPENDENCY_TARGETS, f"data.dependencies.{side}[{index}]")
+    raise ValueError(
+        "data.dependencies is obsolete; use depends_on relationships"
+    )
 
 
 def _validate_ports(data: dict[str, Any]) -> None:
@@ -178,7 +173,6 @@ def _validate_system_data(data: dict[str, Any]) -> None:
     _validate_network(data)
     _validate_endpoints(data)
     _validate_access_methods(data)
-    _validate_dependencies(data)
     for field, allowed_kinds in REFERENCE_TARGETS.items():
         _validate_reference_list(data, field, allowed_kinds)
 
@@ -200,7 +194,6 @@ def _validate_service_data(data: dict[str, Any]) -> None:
                     {"credential_reference"},
                     f"data.auth.credential_references[{index}]",
                 )
-    _validate_dependencies(data)
     for field, allowed_kinds in REFERENCE_TARGETS.items():
         _validate_reference_list(data, field, allowed_kinds)
 
@@ -299,6 +292,7 @@ class CatalogObjectIn(BaseModel):
     def validate_catalog_data(self) -> "CatalogObjectIn":
         if "schema_version" in self.data and self.data["schema_version"] != 1:
             raise ValueError("data.schema_version must be 1")
+        _validate_dependencies(self.data)
         if self.kind in {"host", "system"}:
             _validate_system_data(self.data)
         elif self.kind == "netzwerk":
