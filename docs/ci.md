@@ -78,5 +78,7 @@ python scripts/update_openapi_contract.py
 
 CI uses no live Blockwart instance, production database, admin token, or other secret. A trusted
 Gitea Actions runner labeled `ubuntu-latest` must provide Python 3.12 setup support, `curl`, and a
-working Docker daemon. Runner provisioning and automated deployment are separate infrastructure
-tasks.
+working Docker daemon. Before installing dependencies, the workflow records load average, Linux
+pressure-stall information, root-filesystem usage, and a compact Docker summary so host-level
+resource starvation can be distinguished from product failures. Runner provisioning and automated
+deployment are separate infrastructure tasks.

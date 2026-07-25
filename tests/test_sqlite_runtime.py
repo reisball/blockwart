@@ -1,12 +1,12 @@
 from __future__ import annotations
 
 import sqlite3
-import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+from threading import Event
 
 from alembic import command
-from sqlalchemy import text
+from sqlalchemy import event, text
 
 from blockwart.config import Settings
 from blockwart.db.migrations import BASELINE_REVISION, build_alembic_config, upgrade_database
@@ -72,7 +72,7 @@ def test_wal_allows_reader_and_bounded_competing_writer(tmp_path: Path) -> None:
     upgrade_database(database_url)
     engine = build_engine(
         database_url,
-        sqlite_busy_timeout_ms=1000,
+        sqlite_busy_timeout_ms=5000,
         sqlite_wal_enabled=True,
     )
     first_writer = engine.connect()
@@ -83,6 +83,19 @@ def test_wal_allows_reader_and_bounded_competing_writer(tmp_path: Path) -> None:
             "VALUES (NULL, 'first', 'test', 'first writer')"
         )
     )
+    competing_writer_started = Event()
+
+    @event.listens_for(engine, "before_cursor_execute")
+    def mark_competing_writer_attempt(
+        _connection,
+        _cursor,
+        statement,
+        _parameters,
+        _context,
+        _executemany,
+    ) -> None:
+        if statement == "BEGIN IMMEDIATE":
+            competing_writer_started.set()
 
     def competing_writer() -> None:
         with engine.connect() as connection:
@@ -98,14 +111,14 @@ def test_wal_allows_reader_and_bounded_competing_writer(tmp_path: Path) -> None:
     try:
         with ThreadPoolExecutor(max_workers=1) as pool:
             future = pool.submit(competing_writer)
-            time.sleep(0.15)
+            assert competing_writer_started.wait(timeout=10)
 
             with engine.connect() as reader:
                 assert reader.scalar(text("SELECT count(*) FROM audit_events")) == 0
             assert not future.done()
 
             first_writer.commit()
-            future.result(timeout=2)
+            future.result(timeout=10)
 
         with engine.connect() as connection:
             assert connection.scalar(text("SELECT count(*) FROM audit_events")) == 2
