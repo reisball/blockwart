@@ -157,6 +157,23 @@
             "title": "Parent Path",
             "type": "array"
           },
+          "placement_state": {
+            "anyOf": [
+              {
+                "enum": [
+                  "root",
+                  "assigned",
+                  "unassigned",
+                  "unknown"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Placement State"
+          },
           "primary_endpoint": {
             "anyOf": [
               {
@@ -292,6 +309,23 @@
                 "type": "null"
               }
             ]
+          },
+          "placement_state": {
+            "anyOf": [
+              {
+                "enum": [
+                  "root",
+                  "assigned",
+                  "unassigned",
+                  "unknown"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Placement State"
           },
           "primary_endpoint": {
             "anyOf": [
@@ -690,6 +724,23 @@
             },
             "title": "Parent Path",
             "type": "array"
+          },
+          "placement_state": {
+            "anyOf": [
+              {
+                "enum": [
+                  "root",
+                  "assigned",
+                  "unassigned",
+                  "unknown"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Placement State"
           },
           "status": {
             "default": "active",

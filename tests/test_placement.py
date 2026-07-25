@@ -2,7 +2,13 @@ from types import SimpleNamespace
 
 import pytest
 
-from blockwart.domain.placement import PlacementError, PlacementGraph, validate_placement_pair
+from blockwart.domain.placement import (
+    PlacementError,
+    PlacementGraph,
+    placement_state,
+    validate_placement_metadata,
+    validate_placement_pair,
+)
 
 
 def _object(object_id: str, kind: str) -> SimpleNamespace:
@@ -112,3 +118,48 @@ def test_unsupported_placement_pairs_are_rejected(
 ) -> None:
     with pytest.raises(PlacementError, match="unsupported placement"):
         validate_placement_pair(parent_kind, child_kind)
+
+
+def test_placement_state_distinguishes_root_assigned_unassigned_and_unknown() -> None:
+    assert placement_state(kind="host", parent_ref=None, data={}) == "root"
+    assert (
+        placement_state(
+            kind="system",
+            parent_ref="host:hardware",
+            data={},
+        )
+        == "assigned"
+    )
+    assert (
+        placement_state(
+            kind="service",
+            parent_ref=None,
+            data={"placement": {"state": "unassigned"}},
+        )
+        == "unassigned"
+    )
+    assert placement_state(kind="service", parent_ref=None, data={}) == "unknown"
+    assert placement_state(kind="netzwerk", parent_ref=None, data={}) is None
+
+
+def test_placement_metadata_accepts_only_explicit_unassigned_assets() -> None:
+    validate_placement_metadata(
+        {
+            "placement": {
+                "state": "unassigned",
+                "reason": "Pending inventory decision",
+            }
+        },
+        kind="service",
+    )
+
+    with pytest.raises(ValueError, match="must be unassigned"):
+        validate_placement_metadata(
+            {"placement": {"state": "assigned"}},
+            kind="service",
+        )
+    with pytest.raises(ValueError, match="only for system and service"):
+        validate_placement_metadata(
+            {"placement": {"state": "unassigned"}},
+            kind="host",
+        )

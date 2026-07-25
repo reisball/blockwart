@@ -40,6 +40,7 @@ def test_build_tools_import_plan_parses_infrastructure_rows(tmp_path: Path) -> N
     assert system["id"] == "ct-200"
     assert system["kind"] == "system"
     assert system["data"]["platform"] == "LXC"
+    assert system["data"]["placement"]["state"] == "unassigned"
     assert system["data"]["related_services"] == ["service:ct-200_demo-box"]
     assert system["data"]["container"] == {
         "id": "ct-200",
@@ -119,6 +120,10 @@ def test_build_tools_import_plan_sets_wsl_platform(tmp_path: Path) -> None:
 
     assert system["kind"] == "service"
     assert system["data"]["platform"] == "WSL"
+    assert system["data"]["placement"] == {
+        "state": "unassigned",
+        "reason": "No canonical parent is defined by the workspace import.",
+    }
 
 
 def test_import_tools_markdown_creates_hosted_service_relationship(

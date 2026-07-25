@@ -12,7 +12,7 @@ from blockwart.domain.relationships import (
     RelationshipIntegrityError,
     diagnose_relationship_integrity,
 )
-from blockwart.models import CatalogObject, Relationship
+from blockwart.models import AuditEvent, CatalogObject, Relationship
 from blockwart.schemas.catalog import CatalogObjectIn
 from blockwart.services.catalog import (
     create_relationship,
@@ -171,6 +171,32 @@ def test_database_prevents_second_placement_parent_when_service_is_bypassed(
 
     with pytest.raises(IntegrityError):
         session.flush()
+
+
+def test_explicit_parent_assignment_clears_unassigned_state(
+    session: Session,
+) -> None:
+    _add_object(session, "hardware", "host")
+    _add_object(
+        session,
+        "api",
+        "service",
+        {
+            "schema_version": 1,
+            "placement": {"state": "unassigned", "reason": "Pending decision"},
+        },
+    )
+    session.flush()
+
+    create_relationship(
+        session,
+        from_ref="host:hardware",
+        relation_type="hosts",
+        to_ref="service:api",
+    )
+
+    assert "placement" not in json.loads(session.get(CatalogObject, "api").data_json)
+    assert session.query(AuditEvent).filter_by(action="placement_assign").count() == 1
 
 
 def test_object_upsert_rejects_missing_json_typed_reference(session: Session) -> None:

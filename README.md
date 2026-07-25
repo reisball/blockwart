@@ -120,12 +120,15 @@ blockwart-db upgrade
 blockwart-db check
 blockwart-db integrity
 blockwart-db interfaces
+blockwart-db placements
 ```
 
 Both use an explicitly supplied `--database-url` first, then `BLOCKWART_DATABASE_URL`, then the
 local development default. Schema or revision mismatches fail closed. Blockwart never performs an
 automatic downgrade; restore the matching pre-upgrade database backup when rolling application
-code back. See `docs/deployment.md`.
+code back. `blockwart-db placements` is read-only by default and lists deliberately unassigned
+systems and services; `--apply` only records the explicit unassigned marker and requires the normal
+pre-change database backup. See `docs/deployment.md`.
 
 ## Deployment Readiness
 

@@ -27,9 +27,24 @@ system hosts service
 
 This produces either `host → system → service` or a service running directly on
 hardware. A valid runtime system has exactly one hardware parent, and a valid
-service has exactly one host or system parent. Temporarily unassigned inventory
-is represented by the absence of a placement relationship; it is never inferred
-from names, IP addresses, or arbitrary JSON data.
+service has exactly one host or system parent. Inventory may also be deliberately
+unassigned. That state uses no placement relationship and carries an explicit
+marker in object data:
+
+```json
+{
+  "placement": {
+    "state": "unassigned",
+    "reason": "No canonical placement parent has been assigned."
+  }
+}
+```
+
+The marker is valid only for `system` and `service`. A missing parent without the
+marker remains an unresolved migration decision, while a parent plus the marker
+is contradictory. Creating a canonical `hosts` relationship clears the marker
+in the same transaction. Placement is never inferred from names, IP addresses,
+or arbitrary JSON data.
 
 The shared placement graph is used by the catalog REST API, Agent API, MCP, and
 the UI topology. Multiple canonical parents fail closed instead of being
@@ -62,7 +77,7 @@ which real hardware owns an unassigned runtime or service.
 - #34 owns the complete relationship vocabulary, database constraints,
   referential integrity, and diagnostics.
 - #38 owns classification of live and pilot inventory, including hardware kind
-  corrections, runtime metadata, and explicit decisions for unassigned assets.
+  corrections, runtime metadata, and the explicit unassigned state.
 
 The complete implemented relationship and object-lifecycle contract is documented in
 `relationship-integrity.md`. Generic dependencies are stored only as directed `depends_on`

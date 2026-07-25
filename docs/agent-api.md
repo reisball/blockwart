@@ -10,8 +10,8 @@ resolve credential values. Catalog changes are restricted to authenticated UI fo
 
 ### GET /api/agent/search
 
-Returns compact object summaries with canonical parent, resolved IPs/hostnames, primary endpoint,
-lifecycle, and health where those values are available.
+Returns compact object summaries with canonical parent, explicit placement state, resolved
+IPs/hostnames, primary endpoint, lifecycle, and health where those values are available.
 
 Query parameters:
 
@@ -51,6 +51,11 @@ Placement resolution uses only canonical `hosts` relationships. It supports
 catalog REST API exposes the same `parent_path`; the UI and MCP use the same
 placement graph. Legacy `provides` and `data.system_id` values are migrated by
 Alembic and are not read fallbacks.
+
+`placement_state` is derived as `root` for hardware, `assigned` for a system or
+service with one canonical parent, `unassigned` for an explicit unassigned
+marker without a parent, and `unknown` for legacy inventory that has neither a
+parent nor an explicit decision. MCP returns the same field unchanged.
 
 Dependency resolution uses only canonical `depends_on` relationships. The source object depends on
 the target; Agent API `upstream` lists outgoing targets and `downstream` lists incoming sources.

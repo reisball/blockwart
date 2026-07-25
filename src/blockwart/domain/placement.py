@@ -1,7 +1,9 @@
 from collections.abc import Iterable, Mapping
-from typing import Any
+from typing import Any, Literal
 
 CANONICAL_PLACEMENT_RELATION_TYPE = "hosts"
+UNASSIGNED_PLACEMENT_STATE = "unassigned"
+PlacementState = Literal["root", "assigned", "unassigned", "unknown"]
 SUPPORTED_PLACEMENT_PAIRS = {
     ("host", "system"),
     ("host", "service"),
@@ -18,6 +20,48 @@ def validate_placement_pair(parent_kind: str, child_kind: str) -> None:
         raise PlacementError(
             f"unsupported placement: {parent_kind} hosts {child_kind}"
         )
+
+
+def validate_placement_metadata(data: Mapping[str, Any], *, kind: str) -> None:
+    placement = data.get("placement")
+    if placement is None:
+        return
+    if kind not in {"system", "service"}:
+        raise ValueError("data.placement is supported only for system and service objects")
+    if not isinstance(placement, Mapping):
+        raise ValueError("data.placement must be an object")
+    if placement.get("state") != UNASSIGNED_PLACEMENT_STATE:
+        raise ValueError("data.placement.state must be unassigned")
+    reason = placement.get("reason")
+    if reason is not None and (
+        not isinstance(reason, str) or not reason.strip()
+    ):
+        raise ValueError("data.placement.reason must be a non-empty string")
+
+
+def is_explicitly_unassigned(data: Mapping[str, Any]) -> bool:
+    placement = data.get("placement")
+    return (
+        isinstance(placement, Mapping)
+        and placement.get("state") == UNASSIGNED_PLACEMENT_STATE
+    )
+
+
+def placement_state(
+    *,
+    kind: str,
+    parent_ref: str | None,
+    data: Mapping[str, Any],
+) -> PlacementState | None:
+    if kind == "host":
+        return "root"
+    if kind not in {"system", "service"}:
+        return None
+    if parent_ref is not None:
+        return "assigned"
+    if is_explicitly_unassigned(data):
+        return "unassigned"
+    return "unknown"
 
 
 class PlacementGraph:

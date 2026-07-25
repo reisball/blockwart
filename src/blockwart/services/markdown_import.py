@@ -189,6 +189,7 @@ def build_tools_import_plan(
             for system_ref in hosted_system_refs
         )
 
+    _mark_unassigned_assets(objects, relationships)
     payload = {
         "schema_version": 1,
         "owner": "Kai + Zoe",
@@ -202,6 +203,32 @@ def build_tools_import_plan(
         object_count=len(objects),
         credential_reference_count=0,
     )
+
+
+def _mark_unassigned_assets(
+    objects: list[dict[str, Any]],
+    relationships: list[dict[str, str]],
+) -> None:
+    placed_refs = {
+        relationship["to_ref"]
+        for relationship in relationships
+        if relationship["relation_type"] == "hosts"
+    }
+    for obj in objects:
+        kind = obj.get("kind")
+        object_id = obj.get("id")
+        data = obj.get("data")
+        if (
+            kind not in {"system", "service"}
+            or not isinstance(object_id, str)
+            or not isinstance(data, dict)
+            or f"{kind}:{object_id}" in placed_refs
+        ):
+            continue
+        data["placement"] = {
+            "state": "unassigned",
+            "reason": "No canonical parent is defined by the workspace import.",
+        }
 
 
 def import_tools_markdown(

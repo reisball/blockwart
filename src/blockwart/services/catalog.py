@@ -9,6 +9,8 @@ from blockwart.domain.placement import (
     CANONICAL_PLACEMENT_RELATION_TYPE,
     PlacementError,
     PlacementGraph,
+    is_explicitly_unassigned,
+    placement_state,
 )
 from blockwart.domain.relationships import (
     RelationshipDiagnostic,
@@ -27,8 +29,11 @@ def _to_schema(
     placement_graph: PlacementGraph | None = None,
 ) -> CatalogObjectOut:
     updated_at = _format_timestamp(row.updated_at)
+    data = json.loads(row.data_json)
     parent_path = []
+    parent_ref = None
     if placement_graph is not None:
+        parent_ref = placement_graph.parent_ref(_object_ref(row))
         parent_path = [
             _placement_node(placement_graph, parent_ref)
             for parent_ref in placement_graph.parent_path_refs(_object_ref(row))
@@ -39,11 +44,16 @@ def _to_schema(
         label=row.label,
         status=_normalize_status(row.status),
         summary=row.summary,
-        data=json.loads(row.data_json),
+        data=data,
         created_at=_format_timestamp(row.created_at),
         updated_at=updated_at,
         last_changed=updated_at,
         parent_path=parent_path,
+        placement_state=placement_state(
+            kind=row.kind,
+            parent_ref=parent_ref,
+            data=data,
+        ),
     )
 
 
@@ -210,8 +220,6 @@ def create_relationship(
             Relationship.to_ref == to_ref,
         )
     )
-    if existing is not None:
-        return {"from_ref": from_ref, "relation_type": relation_type, "to_ref": to_ref}
     if relation_type == CANONICAL_PLACEMENT_RELATION_TYPE:
         _validate_placement_relationship(
             session,
@@ -219,6 +227,15 @@ def create_relationship(
             child_ref=to_ref,
         )
     changed_at = _now()
+    if relation_type == CANONICAL_PLACEMENT_RELATION_TYPE:
+        _clear_explicit_unassigned_state(
+            session,
+            child_ref=to_ref,
+            changed_at=changed_at,
+        )
+    if existing is not None:
+        session.flush()
+        return {"from_ref": from_ref, "relation_type": relation_type, "to_ref": to_ref}
     session.add(
         Relationship(
             from_ref=from_ref,
@@ -235,6 +252,30 @@ def create_relationship(
     _touch_objects_for_refs(session, [from_ref, to_ref], changed_at)
     session.flush()
     return {"from_ref": from_ref, "relation_type": relation_type, "to_ref": to_ref}
+
+
+def _clear_explicit_unassigned_state(
+    session: Session,
+    *,
+    child_ref: str,
+    changed_at: datetime,
+) -> None:
+    _, child_id = child_ref.split(":", 1)
+    row = session.get(CatalogObject, child_id)
+    if row is None:
+        return
+    data = json.loads(row.data_json)
+    if not is_explicitly_unassigned(data):
+        return
+    data.pop("placement", None)
+    row.data_json = json.dumps(data, sort_keys=True)
+    row.updated_at = changed_at
+    _write_audit(
+        session,
+        child_id,
+        "placement_assign",
+        f"Assign placement parent for {child_ref}",
+    )
 
 
 def _validate_placement_relationship(
