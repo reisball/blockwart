@@ -1,0 +1,631 @@
+from __future__ import annotations
+
+from collections import Counter
+from collections.abc import Mapping
+from dataclasses import dataclass
+from typing import Any, Literal, TypedDict
+
+from sqlalchemy import select
+from sqlalchemy.orm import Session
+
+from blockwart.domain.asset_state import AssetHealth, AssetLifecycle
+from blockwart.domain.placement import PlacementGraph
+from blockwart.domain.ui_schema import get_ui_schema
+from blockwart.models import CatalogObject, Relationship
+from blockwart.schemas.catalog import (
+    PUBLIC_OBJECT_KINDS,
+    CatalogObjectOut,
+)
+from blockwart.services.catalog import (
+    get_object,
+    list_audit_events_for_object,
+    list_objects,
+)
+
+PUBLIC_KIND_PRIORITY = {
+    kind: index for index, kind in enumerate(PUBLIC_OBJECT_KINDS)
+}
+
+
+class RelationshipReadModel(TypedDict):
+    from_ref: str
+    relation_type: str
+    to_ref: str
+
+
+class RelatedRelationshipReadModel(RelationshipReadModel):
+    other_ref: str
+    other_id: str
+    other_kind: str
+    other_label: str
+    other_status: str
+    other_data: dict[str, Any]
+
+
+class RelationshipPortReadModel(TypedDict):
+    label: str
+    value: str
+
+
+class TopologyNodeReadModel(TypedDict):
+    ref: str
+    id: str
+    kind: str
+    label: str
+    status: str
+    data: dict[str, Any]
+    ports: list[RelationshipPortReadModel]
+
+
+class TopologyChainReadModel(TypedDict):
+    hosts: list[TopologyNodeReadModel]
+    systems: list[TopologyNodeReadModel]
+    services: list[TopologyNodeReadModel]
+
+
+class TopologyReadModel(TypedDict):
+    chains: list[TopologyChainReadModel]
+
+
+class RelationshipCardReadModel(RelatedRelationshipReadModel):
+    left: TopologyNodeReadModel
+    right: TopologyNodeReadModel
+    current_side: Literal["left", "right"]
+
+
+class ObjectRelationshipsReadModel(TypedDict):
+    relationships: list[RelationshipCardReadModel]
+    topology: TopologyReadModel
+
+
+class AuditEventReadModel(TypedDict):
+    action: str
+    actor: str
+    summary: str
+    created_at: str
+
+
+@dataclass(frozen=True, slots=True)
+class CatalogBrowseReadModel:
+    objects: list[CatalogObjectOut]
+    all_objects: list[CatalogObjectOut]
+    systems: list[CatalogObjectOut]
+    relation_targets: list[CatalogObjectOut]
+    display_names: dict[str, str]
+    object_counts: Counter[str]
+    total_objects: int
+    index_relationships: dict[str, ObjectRelationshipsReadModel]
+
+
+@dataclass(frozen=True, slots=True)
+class CatalogDetailReadModel:
+    catalog_object: CatalogObjectOut
+    all_objects: list[CatalogObjectOut]
+    object_map: dict[str, CatalogObjectOut]
+    relationships: list[RelationshipReadModel]
+    relationship_groups: dict[str, list[RelatedRelationshipReadModel]]
+    relationship_targets: list[CatalogObjectOut]
+    audit_events: list[AuditEventReadModel]
+
+
+def list_catalog_objects(
+    session: Session,
+    *,
+    lifecycle: AssetLifecycle | None = None,
+    health: AssetHealth | None = None,
+) -> list[CatalogObjectOut]:
+    """Return the canonical catalog read model used by the JSON API."""
+    return list_objects(session, lifecycle=lifecycle, health=health)
+
+
+def get_catalog_object(
+    session: Session,
+    object_id: str,
+) -> CatalogObjectOut | None:
+    """Return one canonical catalog read model used by the JSON API."""
+    return get_object(session, object_id)
+
+
+def query_catalog_browse(
+    session: Session,
+    *,
+    query: str | None = None,
+    kind: str | None = None,
+) -> CatalogBrowseReadModel:
+    """Build the public catalog explorer model without FastAPI dependencies."""
+    all_objects = sort_for_browse(list_objects(session))
+    public_objects = visible_objects(all_objects)
+    normalized_query = query.strip() if query else ""
+    matching_ids = (
+        _matching_object_ids(session, normalized_query)
+        if normalized_query
+        else None
+    )
+    objects = [
+        catalog_object
+        for catalog_object in public_objects
+        if (kind is None or catalog_object.kind == kind)
+        and (matching_ids is None or catalog_object.id in matching_ids)
+    ]
+    systems = [
+        catalog_object
+        for catalog_object in all_objects
+        if catalog_object.kind == "system"
+    ]
+    relationships = _list_relationships(session)
+    object_map = {
+        f"{catalog_object.kind}:{catalog_object.id}": catalog_object
+        for catalog_object in all_objects
+    }
+    object_counts = Counter(catalog_object.kind for catalog_object in public_objects)
+    return CatalogBrowseReadModel(
+        objects=objects,
+        all_objects=all_objects,
+        systems=systems,
+        relation_targets=public_objects,
+        display_names={
+            catalog_object.id: primary_name_value(catalog_object)
+            for catalog_object in all_objects
+        },
+        object_counts=object_counts,
+        total_objects=sum(object_counts.values()),
+        index_relationships=_index_relationship_cards(
+            objects,
+            relationships,
+            object_map,
+        ),
+    )
+
+
+def query_catalog_detail(
+    session: Session,
+    object_id: str,
+) -> CatalogDetailReadModel | None:
+    """Build the object detail model without FastAPI or template dependencies."""
+    all_objects = sort_for_browse(list_objects(session))
+    catalog_object = next(
+        (
+            candidate
+            for candidate in all_objects
+            if candidate.id == object_id
+        ),
+        None,
+    )
+    if catalog_object is None:
+        return None
+    object_map = {
+        f"{candidate.kind}:{candidate.id}": candidate
+        for candidate in all_objects
+    }
+    all_relationships = _list_relationships(session)
+    object_ref = f"{catalog_object.kind}:{catalog_object.id}"
+    relationships = [
+        relationship
+        for relationship in all_relationships
+        if relationship["from_ref"] == object_ref
+        or relationship["to_ref"] == object_ref
+    ]
+    relationship_groups = group_relationships(
+        catalog_object,
+        relationships,
+        object_map,
+    )
+    audit_events = list_audit_events_for_object(
+        session,
+        catalog_object.id,
+    )
+    return CatalogDetailReadModel(
+        catalog_object=catalog_object,
+        all_objects=all_objects,
+        object_map=object_map,
+        relationships=relationships,
+        relationship_groups=relationship_groups,
+        relationship_targets=[
+            candidate
+            for candidate in visible_objects(all_objects)
+            if candidate.id != catalog_object.id
+        ],
+        audit_events=[
+            {
+                "action": event["action"],
+                "actor": event["actor"],
+                "summary": event["summary"],
+                "created_at": event["created_at"],
+            }
+            for event in audit_events
+        ],
+    )
+
+
+def build_topology_read_model(
+    catalog_object: CatalogObjectOut,
+    relationships: list[RelationshipReadModel],
+    object_map: dict[str, CatalogObjectOut],
+) -> TopologyReadModel:
+    """Resolve one UI/API-neutral placement topology from the canonical graph."""
+    current_ref = f"{catalog_object.kind}:{catalog_object.id}"
+    placement_graph = PlacementGraph(object_map.values(), relationships)
+
+    if catalog_object.kind == "service":
+        parent_path = placement_graph.parent_path_refs(current_ref)
+        host_refs = [ref for ref in parent_path if ref.startswith("host:")]
+        system_refs = [ref for ref in parent_path if ref.startswith("system:")]
+        return {
+            "chains": [
+                {
+                    "hosts": _relationship_nodes(host_refs, object_map),
+                    "systems": _relationship_nodes(system_refs, object_map),
+                    "services": [
+                        _relationship_node(current_ref, catalog_object)
+                    ],
+                }
+            ]
+        }
+
+    if catalog_object.kind == "host":
+        child_refs = placement_graph.children_refs(current_ref)
+        system_refs = [
+            ref for ref in child_refs if ref.startswith("system:")
+        ]
+        direct_service_refs = [
+            ref for ref in child_refs if ref.startswith("service:")
+        ]
+        service_refs = _unique_refs(
+            [
+                *direct_service_refs,
+                *[
+                    service_ref
+                    for system_ref in system_refs
+                    for service_ref in placement_graph.children_refs(system_ref)
+                    if service_ref.startswith("service:")
+                ],
+            ]
+        )
+        return {
+            "chains": [
+                {
+                    "hosts": [
+                        _relationship_node(current_ref, catalog_object)
+                    ],
+                    "systems": _relationship_nodes(system_refs, object_map),
+                    "services": _relationship_nodes(service_refs, object_map),
+                }
+            ]
+        }
+
+    if catalog_object.kind == "system":
+        host_refs = [
+            ref
+            for ref in placement_graph.parent_path_refs(current_ref)
+            if ref.startswith("host:")
+        ]
+        service_refs = [
+            ref
+            for ref in placement_graph.children_refs(current_ref)
+            if ref.startswith("service:")
+        ]
+        return {
+            "chains": [
+                {
+                    "hosts": _relationship_nodes(host_refs, object_map),
+                    "systems": [
+                        _relationship_node(current_ref, catalog_object)
+                    ],
+                    "services": _relationship_nodes(service_refs, object_map),
+                }
+            ]
+        }
+
+    return {"chains": []}
+
+
+def group_relationships(
+    catalog_object: CatalogObjectOut,
+    relationships: list[RelationshipReadModel],
+    object_map: dict[str, CatalogObjectOut],
+) -> dict[str, list[RelatedRelationshipReadModel]]:
+    current_ref = f"{catalog_object.kind}:{catalog_object.id}"
+    grouped: dict[str, list[RelatedRelationshipReadModel]] = {}
+    for relationship in relationships:
+        direction = (
+            "outbound"
+            if relationship["from_ref"] == current_ref
+            else "inbound"
+        )
+        other_ref = (
+            relationship["to_ref"]
+            if direction == "outbound"
+            else relationship["from_ref"]
+        )
+        other_object = object_map.get(other_ref)
+        grouped.setdefault(direction, []).append(
+            {
+                **relationship,
+                "other_ref": other_ref,
+                "other_id": object_id_from_ref(other_ref),
+                "other_kind": (
+                    other_object.kind
+                    if other_object
+                    else other_ref.split(":", 1)[0]
+                ),
+                "other_label": (
+                    primary_name_value(other_object)
+                    if other_object
+                    else other_ref
+                ),
+                "other_status": other_object.status if other_object else "",
+                "other_data": other_object.data if other_object else {},
+            }
+        )
+    return grouped
+
+
+def primary_name_value(catalog_object: CatalogObjectOut) -> str:
+    schema = get_ui_schema(catalog_object.kind)
+    if schema.primary_name_storage == "network_hostname":
+        network = catalog_object.data.get("network")
+        if isinstance(network, Mapping):
+            hostnames = network.get("hostnames")
+            if isinstance(hostnames, list) and hostnames:
+                return str(hostnames[0])
+    return catalog_object.label
+
+
+def sort_for_browse(
+    objects: list[CatalogObjectOut],
+) -> list[CatalogObjectOut]:
+    return sorted(
+        objects,
+        key=lambda catalog_object: (
+            PUBLIC_KIND_PRIORITY.get(
+                catalog_object.kind,
+                len(PUBLIC_KIND_PRIORITY),
+            ),
+            catalog_object.label.casefold(),
+            catalog_object.id.casefold(),
+        ),
+    )
+
+
+def visible_objects(
+    objects: list[CatalogObjectOut],
+) -> list[CatalogObjectOut]:
+    return sort_for_browse(
+        [
+            catalog_object
+            for catalog_object in objects
+            if catalog_object.kind in PUBLIC_OBJECT_KINDS
+        ]
+    )
+
+
+def object_id_from_ref(value: str) -> str:
+    if ":" not in value:
+        return value
+    return value.split(":", 1)[1]
+
+
+def _matching_object_ids(session: Session, query: str) -> set[str]:
+    term = f"%{query.lower()}%"
+    statement = select(CatalogObject.id).where(
+        CatalogObject.id.ilike(term)
+        | CatalogObject.label.ilike(term)
+        | CatalogObject.summary.ilike(term)
+        | CatalogObject.data_json.ilike(term)
+    )
+    return set(session.scalars(statement).all())
+
+
+def _list_relationships(session: Session) -> list[RelationshipReadModel]:
+    rows = session.scalars(
+        select(Relationship).order_by(
+            Relationship.relation_type,
+            Relationship.from_ref,
+            Relationship.to_ref,
+        )
+    ).all()
+    return [
+        {
+            "from_ref": row.from_ref,
+            "relation_type": row.relation_type,
+            "to_ref": row.to_ref,
+        }
+        for row in rows
+    ]
+
+
+def _index_relationship_cards(
+    objects: list[CatalogObjectOut],
+    relationships: list[RelationshipReadModel],
+    object_map: dict[str, CatalogObjectOut],
+) -> dict[str, ObjectRelationshipsReadModel]:
+    cards: dict[str, ObjectRelationshipsReadModel] = {}
+    for catalog_object in objects:
+        object_ref = f"{catalog_object.kind}:{catalog_object.id}"
+        object_relationships = [
+            relationship
+            for relationship in relationships
+            if relationship["from_ref"] == object_ref
+            or relationship["to_ref"] == object_ref
+        ]
+        grouped = group_relationships(
+            catalog_object,
+            object_relationships,
+            object_map,
+        )
+        cards[catalog_object.id] = {
+            "relationships": _relationship_display_cards(
+                catalog_object,
+                grouped,
+                object_map,
+            ),
+            "topology": build_topology_read_model(
+                catalog_object,
+                relationships,
+                object_map,
+            ),
+        }
+    return cards
+
+
+def _unique_refs(values: list[str]) -> list[str]:
+    seen: set[str] = set()
+    unique: list[str] = []
+    for value in values:
+        if value in seen:
+            continue
+        seen.add(value)
+        unique.append(value)
+    return unique
+
+
+def _relationship_nodes(
+    refs: list[str],
+    object_map: dict[str, CatalogObjectOut],
+) -> list[TopologyNodeReadModel]:
+    return [
+        _relationship_node(ref, object_map.get(ref))
+        for ref in refs
+    ]
+
+
+def _relationship_display_sort_key(
+    card: RelationshipCardReadModel,
+) -> tuple[int, str, str]:
+    left_kind = card["left"]["kind"]
+    right_kind = card["right"]["kind"]
+    is_system_service = (
+        left_kind == "system" and right_kind == "service"
+    )
+    return (
+        0 if is_system_service else 1,
+        card["left"]["label"],
+        card["right"]["label"],
+    )
+
+
+def _relationship_display_cards(
+    catalog_object: CatalogObjectOut,
+    grouped: dict[str, list[RelatedRelationshipReadModel]],
+    object_map: dict[str, CatalogObjectOut],
+) -> list[RelationshipCardReadModel]:
+    cards: list[RelationshipCardReadModel] = []
+    current_ref = f"{catalog_object.kind}:{catalog_object.id}"
+    for relationship in [
+        relationship
+        for direction in ("outbound", "inbound")
+        for relationship in grouped.get(direction, [])
+    ]:
+        from_ref = relationship["from_ref"]
+        to_ref = relationship["to_ref"]
+        from_object = object_map.get(from_ref)
+        to_object = object_map.get(to_ref)
+        left_ref, right_ref = _system_service_refs(
+            from_ref,
+            to_ref,
+            from_object,
+            to_object,
+        )
+        cards.append(
+            {
+                **relationship,
+                "left": _relationship_node(
+                    left_ref,
+                    object_map.get(left_ref),
+                ),
+                "right": _relationship_node(
+                    right_ref,
+                    object_map.get(right_ref),
+                ),
+                "current_side": (
+                    "left" if left_ref == current_ref else "right"
+                ),
+            }
+        )
+    return sorted(cards, key=_relationship_display_sort_key)
+
+
+def _system_service_refs(
+    from_ref: str,
+    to_ref: str,
+    from_object: CatalogObjectOut | None,
+    to_object: CatalogObjectOut | None,
+) -> tuple[str, str]:
+    if from_object is not None and to_object is not None:
+        if (
+            from_object.kind == "system"
+            and to_object.kind == "service"
+        ):
+            return from_ref, to_ref
+        if (
+            from_object.kind == "service"
+            and to_object.kind == "system"
+        ):
+            return to_ref, from_ref
+    if (
+        from_ref.startswith("system:")
+        and to_ref.startswith("service:")
+    ):
+        return from_ref, to_ref
+    if (
+        from_ref.startswith("service:")
+        and to_ref.startswith("system:")
+    ):
+        return to_ref, from_ref
+    return from_ref, to_ref
+
+
+def _relationship_node(
+    ref: str,
+    catalog_object: CatalogObjectOut | None,
+) -> TopologyNodeReadModel:
+    kind = (
+        catalog_object.kind
+        if catalog_object
+        else ref.split(":", 1)[0]
+    )
+    return {
+        "ref": ref,
+        "id": (
+            catalog_object.id
+            if catalog_object
+            else object_id_from_ref(ref)
+        ),
+        "kind": kind,
+        "label": (
+            primary_name_value(catalog_object)
+            if catalog_object
+            else ref
+        ),
+        "status": catalog_object.status if catalog_object else "",
+        "data": catalog_object.data if catalog_object else {},
+        "ports": _relationship_node_ports(catalog_object),
+    }
+
+
+def _relationship_node_ports(
+    catalog_object: CatalogObjectOut | None,
+) -> list[RelationshipPortReadModel]:
+    if catalog_object is None or catalog_object.kind != "service":
+        return []
+    ports: list[RelationshipPortReadModel] = []
+    for endpoint in _list_of_mappings(
+        catalog_object.data.get("endpoints")
+    ):
+        port = endpoint.get("port")
+        if port is None:
+            continue
+        protocol = str(endpoint.get("protocol") or "tcp")
+        ports.append(
+            {
+                "label": "service",
+                "value": f"{port}/{protocol}",
+            }
+        )
+    return ports
+
+
+def _list_of_mappings(value: Any) -> list[Mapping[str, Any]]:
+    if not isinstance(value, list):
+        return []
+    return [item for item in value if isinstance(item, Mapping)]

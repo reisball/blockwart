@@ -7,7 +7,10 @@ from blockwart.api.deps import get_session
 from blockwart.api.errors import API_ERROR_RESPONSES
 from blockwart.domain.asset_state import AssetHealth, AssetLifecycle
 from blockwart.schemas.catalog import CatalogObjectOut
-from blockwart.services.catalog import get_object, list_objects
+from blockwart.services.queries import (
+    get_catalog_object,
+    list_catalog_objects,
+)
 
 router = APIRouter(
     prefix="/objects",
@@ -28,7 +31,11 @@ def get_objects(
         Query(description="Exact asset health"),
     ] = None,
 ) -> list[CatalogObjectOut]:
-    return list_objects(session, lifecycle=lifecycle, health=health)
+    return list_catalog_objects(
+        session,
+        lifecycle=lifecycle,
+        health=health,
+    )
 
 
 @router.get("/{object_id}", response_model=CatalogObjectOut)
@@ -36,7 +43,7 @@ def get_object_by_id(
     object_id: str,
     session: Annotated[Session, Depends(get_session)],
 ) -> CatalogObjectOut:
-    catalog_object = get_object(session, object_id)
+    catalog_object = get_catalog_object(session, object_id)
     if catalog_object is None:
         raise HTTPException(status_code=404, detail="Catalog object not found")
     return catalog_object
