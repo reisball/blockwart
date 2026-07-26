@@ -100,6 +100,11 @@ Catalog JSON routes and UI reads use the same FastAPI-independent Application Qu
 object, Relationship, Audit, and canonical topology models. Agent context remains a separate,
 sanitized projection while sharing the canonical placement graph. See `docs/read-models.md`.
 
+Catalog writes, seeds, Markdown imports, and stored-record integrity checks use one immutable
+in-code object-schema registry for field paths and types. Unknown extension data stays compatible,
+while global secret rejection cannot be disabled or overridden by a schema. See
+`docs/object-validation.md`.
+
 The stable GET-only machine contract lives under `/api/v1` with opaque
 keyset cursors, deterministic sorting, structured domain filters, and
 versioned Relationship, Audit, and Topology resources. Existing `/api/objects`
