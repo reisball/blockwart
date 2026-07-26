@@ -863,6 +863,11 @@ def test_comment_form_updates_object_and_audit(
         catalog_object = get_object(session, "n8n")
     assert catalog_object is not None
     assert catalog_object.data["comment"] == "Interner Kommentar"
+    assert (catalog_object.status, catalog_object.lifecycle, catalog_object.health) == (
+        "active",
+        "active",
+        "unknown",
+    )
 
 
 def test_relationship_add_form_is_hidden_behind_add_button(client: TestClient) -> None:
@@ -1077,6 +1082,11 @@ def test_overview_edit_updates_object_metadata(client: TestClient, session_facto
         catalog_object = get_object(session, "n8n")
     assert catalog_object is not None
     assert catalog_object.label == "n8n-main"
+    assert (catalog_object.status, catalog_object.lifecycle, catalog_object.health) == (
+        "inactive",
+        "planned",
+        "unknown",
+    )
     assert catalog_object.data["platform"] == "LXC"
     assert catalog_object.data["network"]["hostnames"][0] == "n8n-main"
 

@@ -13,6 +13,7 @@ from blockwart.cli import import_markdown as import_markdown_cli
 from blockwart.cli import seed as seed_cli
 from blockwart.config import Settings
 from blockwart.db.session import transaction
+from blockwart.domain.asset_state import is_asset_kind
 from blockwart.main import create_app
 from blockwart.models import AuditEvent, CatalogObject, Relationship
 from blockwart.schemas.catalog import CatalogObjectIn
@@ -59,6 +60,8 @@ def _add_object(
             kind=kind,
             label=object_id,
             status="active",
+            lifecycle="active" if is_asset_kind(kind) else None,
+            health="unknown" if is_asset_kind(kind) else None,
             summary=None,
             data_json=data_json,
         )

@@ -7,6 +7,7 @@ from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from blockwart.domain.asset_state import is_asset_kind
 from blockwart.domain.relationships import (
     RELATIONSHIP_TYPES,
     RelationshipIntegrityError,
@@ -35,6 +36,8 @@ def _add_object(session: Session, object_id: str, kind: str, data: dict | None =
             kind=kind,
             label=object_id,
             status="active",
+            lifecycle="active" if is_asset_kind(kind) else None,
+            health="unknown" if is_asset_kind(kind) else None,
             summary=None,
             data_json=json.dumps(data or {"schema_version": 1}),
         )

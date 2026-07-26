@@ -5,6 +5,13 @@ from datetime import UTC, datetime
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from blockwart.domain.asset_state import (
+    AssetHealth,
+    AssetLifecycle,
+    AssetState,
+    resolve_asset_state,
+    state_from_record,
+)
 from blockwart.domain.placement import (
     CANONICAL_PLACEMENT_RELATION_TYPE,
     PlacementError,
@@ -28,6 +35,12 @@ def _to_schema(
     row: CatalogObject,
     placement_graph: PlacementGraph | None = None,
 ) -> CatalogObjectOut:
+    asset_state = state_from_record(
+        kind=row.kind,
+        status=row.status,
+        lifecycle=row.lifecycle,
+        health=row.health,
+    )
     updated_at = _format_timestamp(row.updated_at)
     data = json.loads(row.data_json)
     parent_path = []
@@ -42,7 +55,9 @@ def _to_schema(
         id=row.id,
         kind=row.kind,  # type: ignore[arg-type]
         label=row.label,
-        status=_normalize_status(row.status),
+        status=asset_state.status if asset_state is not None else _normalize_status(row.status),
+        lifecycle=asset_state.lifecycle if asset_state is not None else None,
+        health=asset_state.health if asset_state is not None else None,
         summary=row.summary,
         data=data,
         created_at=_format_timestamp(row.created_at),
@@ -143,9 +158,15 @@ def list_audit_events_for_object(session: Session, object_id: str) -> list[dict[
     ]
 
 
-def list_objects(session: Session) -> list[CatalogObjectOut]:
+def list_objects(
+    session: Session,
+    *,
+    lifecycle: AssetLifecycle | None = None,
+    health: AssetHealth | None = None,
+) -> list[CatalogObjectOut]:
     statement = select(CatalogObject).order_by(CatalogObject.kind, CatalogObject.label)
     rows = list(session.scalars(statement).all())
+    rows = _filter_asset_state(rows, lifecycle=lifecycle, health=health)
     return _schemas_with_placement(session, rows)
 
 
@@ -154,6 +175,8 @@ def search_objects(
     *,
     query: str | None = None,
     kind: str | None = None,
+    lifecycle: AssetLifecycle | None = None,
+    health: AssetHealth | None = None,
 ) -> list[CatalogObjectOut]:
     statement = select(CatalogObject)
     if kind:
@@ -168,7 +191,34 @@ def search_objects(
         )
     statement = statement.order_by(CatalogObject.kind, CatalogObject.label)
     rows = list(session.scalars(statement).all())
+    rows = _filter_asset_state(rows, lifecycle=lifecycle, health=health)
     return _schemas_with_placement(session, rows)
+
+
+def _filter_asset_state(
+    rows: list[CatalogObject],
+    *,
+    lifecycle: AssetLifecycle | None,
+    health: AssetHealth | None,
+) -> list[CatalogObject]:
+    if lifecycle is None and health is None:
+        return rows
+    matches: list[CatalogObject] = []
+    for row in rows:
+        state = state_from_record(
+            kind=row.kind,
+            status=row.status,
+            lifecycle=row.lifecycle,
+            health=row.health,
+        )
+        if state is None:
+            continue
+        if lifecycle is not None and state.lifecycle != lifecycle:
+            continue
+        if health is not None and state.health != health:
+            continue
+        matches.append(row)
+    return matches
 
 
 def get_object(session: Session, object_id: str) -> CatalogObjectOut | None:
@@ -315,6 +365,24 @@ def upsert_object(
     )
     if row is not None and row.kind != payload.kind:
         ensure_kind_change_allowed(session, row, payload.kind)
+    current_state = (
+        state_from_record(
+            kind=row.kind,
+            status=row.status,
+            lifecycle=row.lifecycle,
+            health=row.health,
+        )
+        if row is not None
+        else None
+    )
+    target_state = resolve_asset_state(
+        kind=payload.kind,
+        status=payload.status,
+        lifecycle=payload.lifecycle,
+        health=payload.health,
+        current=current_state,
+    )
+    target_status = target_state.status if target_state is not None else payload.status
     data_json = json.dumps(payload.data, sort_keys=True)
     changed_at = _now()
     if row is None:
@@ -324,7 +392,9 @@ def upsert_object(
             id=payload.id,
             kind=payload.kind,
             label=payload.label,
-            status=payload.status,
+            status=target_status,
+            lifecycle=target_state.lifecycle if target_state is not None else None,
+            health=target_state.health if target_state is not None else None,
             summary=payload.summary,
             data_json=data_json,
             created_at=changed_at,
@@ -333,10 +403,18 @@ def upsert_object(
         session.add(row)
     else:
         action = "update"
-        audit_summary = _update_summary(row, payload, data_json)
+        audit_summary = _update_summary(
+            row,
+            payload,
+            data_json,
+            target_state=target_state,
+            target_status=target_status,
+        )
         row.kind = payload.kind
         row.label = payload.label
-        row.status = payload.status
+        row.status = target_status
+        row.lifecycle = target_state.lifecycle if target_state is not None else None
+        row.health = target_state.health if target_state is not None else None
         row.summary = payload.summary
         row.data_json = data_json
         row.updated_at = changed_at
@@ -347,14 +425,54 @@ def upsert_object(
     return _to_schema(row)
 
 
-def _update_summary(row: CatalogObject, payload: CatalogObjectIn, data_json: str) -> str:
+def _update_summary(
+    row: CatalogObject,
+    payload: CatalogObjectIn,
+    data_json: str,
+    *,
+    target_state: AssetState | None,
+    target_status: str,
+) -> str:
     changes: list[str] = []
+    current_state = state_from_record(
+        kind=row.kind,
+        status=row.status,
+        lifecycle=row.lifecycle,
+        health=row.health,
+    )
     if row.kind != payload.kind:
         changes.append(_field_change("Typ", row.kind, payload.kind))
     if row.label != payload.label:
         changes.append(_field_change("Hostname", row.label, payload.label))
-    if _normalize_status(row.status) != _normalize_status(payload.status):
-        changes.append(_field_change("Status", _normalize_status(row.status), payload.status))
+    if current_state is not None or target_state is not None:
+        if (
+            current_state is None
+            or target_state is None
+            or current_state.lifecycle != target_state.lifecycle
+        ):
+            changes.append(
+                _field_change(
+                    "Lifecycle",
+                    current_state.lifecycle if current_state is not None else "",
+                    target_state.lifecycle if target_state is not None else "",
+                )
+            )
+        if (
+            current_state is None
+            or target_state is None
+            or current_state.health != target_state.health
+        ):
+            changes.append(
+                _field_change(
+                    "Health",
+                    current_state.health if current_state is not None else "",
+                    target_state.health if target_state is not None else "",
+                )
+            )
+    elif _normalize_status(row.status) != _normalize_status(target_status):
+        changes.append(
+            _field_change("Status", _normalize_status(row.status), target_status)
+        )
     if (row.summary or "") != (payload.summary or ""):
         changes.append(_field_change("Kurzbeschreibung", row.summary or "", payload.summary or ""))
 

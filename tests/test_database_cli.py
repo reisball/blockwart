@@ -18,14 +18,14 @@ def test_database_cli_upgrades_then_checks_database(tmp_path: Path, capsys) -> N
     database_url = f"sqlite:///{tmp_path / 'cli.sqlite3'}"
 
     assert database_cli.main(["--database-url", database_url, "upgrade"]) == 0
-    assert "database_upgrade_ok revision=20260724_0004" in capsys.readouterr().out
+    assert "database_upgrade_ok revision=20260726_0005" in capsys.readouterr().out
 
     assert database_cli.main(["--database-url", database_url, "check"]) == 0
-    assert "database_check_ok revision=20260724_0004" in capsys.readouterr().out
+    assert "database_check_ok revision=20260726_0005" in capsys.readouterr().out
 
     assert database_cli.main(["--database-url", database_url, "integrity"]) == 0
     assert (
-        "database_integrity_ok revision=20260724_0004 diagnostics=0"
+        "database_integrity_ok revision=20260726_0005 diagnostics=0"
         in capsys.readouterr().out
     )
 
@@ -40,9 +40,11 @@ def test_database_integrity_cli_reports_stable_codes(tmp_path: Path, capsys) -> 
             connection.execute(
                 text(
                     "INSERT INTO catalog_objects "
-                    "(id, kind, label, status, data_json) VALUES "
-                    "('runtime-a', 'system', 'Runtime A', 'active', '{}'),"
-                    "('runtime-b', 'system', 'Runtime B', 'active', '{}')"
+                    "(id, kind, label, status, lifecycle, health, data_json) VALUES "
+                    "('runtime-a', 'system', 'Runtime A', "
+                    "'active', 'active', 'unknown', '{}'),"
+                    "('runtime-b', 'system', 'Runtime B', "
+                    "'active', 'active', 'unknown', '{}')"
                 )
             )
             connection.execute(
@@ -73,8 +75,9 @@ def test_database_interfaces_defaults_to_dry_run_and_requires_apply(
             connection.execute(
                 text(
                     "INSERT INTO catalog_objects "
-                    "(id, kind, label, status, data_json) VALUES "
-                    "('legacy', 'service', 'Legacy', 'active', :data_json)"
+                    "(id, kind, label, status, lifecycle, health, data_json) VALUES "
+                    "('legacy', 'service', 'Legacy', "
+                    "'active', 'active', 'unknown', :data_json)"
                 ),
                 {"data_json": '{"schema_version":1,"endpoints":[]}'},
             )
@@ -119,8 +122,9 @@ def test_database_placements_defaults_to_dry_run_and_requires_apply(
             connection.execute(
                 text(
                     "INSERT INTO catalog_objects "
-                    "(id, kind, label, status, data_json) VALUES "
-                    "('pending', 'service', 'Pending', 'active', :data_json)"
+                    "(id, kind, label, status, lifecycle, health, data_json) VALUES "
+                    "('pending', 'service', 'Pending', "
+                    "'active', 'active', 'unknown', :data_json)"
                 ),
                 {"data_json": '{"schema_version":1}'},
             )
@@ -213,7 +217,7 @@ def test_markdown_create_schema_uses_alembic(
     engine = create_engine(database_url)
     with engine.connect() as connection:
         assert connection.execute(text("SELECT version_num FROM alembic_version")).scalar_one() == (
-            "20260724_0004"
+            "20260726_0005"
         )
     engine.dispose()
 

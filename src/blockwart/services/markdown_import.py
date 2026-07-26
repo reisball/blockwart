@@ -9,6 +9,7 @@ from typing import Any
 from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
+from blockwart.domain.asset_state import AssetState, state_from_record
 from blockwart.models import CatalogObject, Relationship
 from blockwart.schemas.catalog import CatalogObjectIn
 from blockwart.services.catalog import (
@@ -19,12 +20,12 @@ from blockwart.services.catalog import (
 )
 from blockwart.services.seeds import SeedImportResult
 
-STATUS_MAP = {
-    "✅": "active",
-    "🟢": "active",
-    "🟡": "inactive",
-    "⚠️": "inactive",
-    "❌": "inactive",
+STATUS_MARKER_STATES = {
+    "✅": AssetState("active", "unknown", "active"),
+    "🟢": AssetState("active", "unknown", "active"),
+    "🟡": AssetState("active", "degraded", "active"),
+    "⚠️": AssetState("active", "degraded", "active"),
+    "❌": AssetState("active", "down", "inactive"),
 }
 
 ACCESS_TYPES = {
@@ -88,7 +89,7 @@ def build_tools_import_plan(
         )
         service_id = _unique_id(_service_id(system_id, base_id), seen_ids)
         display_label = _display_label(_plain_text(label))
-        status = _status_from_cell(row.get("Status", ""))
+        asset_state = _state_from_cell(row.get("Status", ""))
         ip_port = row.get("IP:Port", "") or row.get("Ort", "")
         access = row.get("Access", "") or row.get("Access/Auth", "")
         auth = row.get("Auth", "") or row.get("Access/Auth", "")
@@ -138,7 +139,9 @@ def build_tools_import_plan(
                 "label": _host_system_label(display_label, typ)
                 if is_hosted_service
                 else display_label,
-                "status": status,
+                "status": asset_state.status,
+                "lifecycle": asset_state.lifecycle,
+                "health": asset_state.health,
                 "summary": (
                     f"Runtime host for {display_label}."
                     if is_hosted_service
@@ -156,7 +159,9 @@ def build_tools_import_plan(
                     "id": service_id,
                     "kind": "service",
                     "label": display_label,
-                    "status": status,
+                    "status": asset_state.status,
+                    "lifecycle": asset_state.lifecycle,
+                    "health": asset_state.health,
                     "summary": usage or f"Service running on {system_id}.",
                     "data": _service_data(
                         label=display_label,
@@ -369,11 +374,19 @@ def _merge_existing_object(existing: CatalogObject, imported: CatalogObjectIn) -
         **existing_data,
         "workspace_markdown_import": imported.data,
     }
+    existing_state = state_from_record(
+        kind=existing.kind,
+        status=existing.status,
+        lifecycle=existing.lifecycle,
+        health=existing.health,
+    )
     return CatalogObjectIn(
         id=existing.id,
         kind=existing.kind,  # type: ignore[arg-type]
         label=existing.label,
         status=existing.status,
+        lifecycle=existing_state.lifecycle if existing_state is not None else None,
+        health=existing_state.health if existing_state is not None else None,
         summary=existing.summary,
         data=merged_data,
     )
@@ -633,18 +646,24 @@ def _unique_id(base: str, seen: set[str]) -> str:
     return candidate
 
 
-def _status_from_cell(value: str) -> str:
-    for marker, status in STATUS_MAP.items():
+def _state_from_cell(value: str) -> AssetState:
+    for marker, state in STATUS_MARKER_STATES.items():
         if marker in value:
-            return status
+            return state
     text = _plain_text(value).casefold()
-    if "deleted" in text:
-        return "deleted"
-    if "inactive" in text:
-        return "inactive"
-    if "active" in text:
-        return "active"
-    return "inactive"
+    if any(term in text for term in ("deleted", "retired", "decommissioned")):
+        return AssetState("retired", "unknown", "deleted")
+    if any(term in text for term in ("planned", "inactive")):
+        return AssetState("planned", "unknown", "inactive")
+    if "maintenance" in text:
+        return AssetState("active", "maintenance", "inactive")
+    if any(term in text for term in ("partial", "degraded", "warning")):
+        return AssetState("active", "degraded", "active")
+    if any(term in text for term in ("down", "offline", "failed")):
+        return AssetState("active", "down", "inactive")
+    if "healthy" in text:
+        return AssetState("active", "healthy", "active")
+    return AssetState("active", "unknown", "active")
 
 
 def _source_references(
