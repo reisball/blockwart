@@ -407,6 +407,15 @@ def upsert_object(
     target_status = target_state.status if target_state is not None else payload.status
     data_json = json.dumps(payload.data, sort_keys=True)
     provenance_json = dump_provenance(payload.provenance)
+    if row is not None and _object_matches_target(
+        row,
+        payload,
+        data_json,
+        provenance_json,
+        target_state=target_state,
+        target_status=target_status,
+    ):
+        return _to_schema(row)
     changed_at = _now()
     if row is None:
         action = "create"
@@ -449,6 +458,27 @@ def upsert_object(
     session.flush()
     session.refresh(row)
     return _to_schema(row)
+
+
+def _object_matches_target(
+    row: CatalogObject,
+    payload: CatalogObjectIn,
+    data_json: str,
+    provenance_json: str,
+    *,
+    target_state: AssetState | None,
+    target_status: str,
+) -> bool:
+    return (
+        row.kind == payload.kind
+        and row.label == payload.label
+        and row.status == target_status
+        and row.lifecycle == (target_state.lifecycle if target_state is not None else None)
+        and row.health == (target_state.health if target_state is not None else None)
+        and row.summary == payload.summary
+        and row.data_json == data_json
+        and row.provenance_json == provenance_json
+    )
 
 
 def _update_summary(

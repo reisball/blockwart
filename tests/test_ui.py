@@ -1091,6 +1091,50 @@ def test_overview_edit_updates_object_metadata(client: TestClient, session_facto
     assert catalog_object.data["network"]["hostnames"][0] == "n8n-main"
 
 
+def test_repeating_identical_overview_update_is_noop(
+    client: TestClient,
+    session_factory,
+) -> None:
+    form = {
+        "primary_name": "n8n-idempotent",
+        "kind": "system",
+        "status": "active",
+        "platform": "LXC",
+        "summary": "Stable UI state.",
+    }
+    first_response = client.post(
+        "/objects/n8n",
+        data=form,
+        follow_redirects=False,
+    )
+    assert first_response.status_code == 303
+
+    with session_factory() as session:
+        after_first = get_object(session, "n8n")
+        audits_after_first = session.scalars(
+            select(AuditEvent).where(AuditEvent.object_id == "n8n").order_by(AuditEvent.id)
+        ).all()
+    assert after_first is not None
+    first_audit_ids = [audit.id for audit in audits_after_first]
+
+    second_response = client.post(
+        "/objects/n8n",
+        data=form,
+        follow_redirects=False,
+    )
+    assert second_response.status_code == 303
+
+    with session_factory() as session:
+        after_second = get_object(session, "n8n")
+        audits_after_second = session.scalars(
+            select(AuditEvent).where(AuditEvent.object_id == "n8n").order_by(AuditEvent.id)
+        ).all()
+
+    assert after_second is not None
+    assert after_second.updated_at == after_first.updated_at
+    assert [audit.id for audit in audits_after_second] == first_audit_ids
+
+
 def test_overview_edit_hides_platform_for_service(client: TestClient, session_factory) -> None:
     with session_factory() as session:
         upsert_object(
