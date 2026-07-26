@@ -4,6 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
 from blockwart.api.deps import get_session
+from blockwart.api.errors import API_ERROR_RESPONSES
 from blockwart.domain.asset_state import AssetHealth, AssetLifecycle
 from blockwart.schemas.agent import AgentContextOut, AgentSearchOut
 from blockwart.schemas.catalog import ObjectKind
@@ -13,7 +14,11 @@ from blockwart.services.agent import (
     search_agent_objects,
 )
 
-router = APIRouter(prefix="/agent", tags=["agent-readonly"])
+router = APIRouter(
+    prefix="/agent",
+    tags=["agent-readonly"],
+    responses=API_ERROR_RESPONSES,
+)
 
 
 @router.get("/search", response_model=AgentSearchOut)

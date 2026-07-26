@@ -82,6 +82,11 @@ Query parameters:
 
 Search and context use the same resolver and filter semantics. All Agent API routes remain GET-only.
 
+All Agent timestamps use RFC3339 UTC with `Z`. Every summary and context object also exposes
+`record_state` plus `diagnostics`. A damaged `data_json` row remains discoverable by ID, label, or
+summary, but its data is returned as an empty object with a `corrupt_record` diagnostic; raw broken
+JSON is never returned. See `api-boundary-contract.md`.
+
 ## Secret Handling
 
 Agent responses are defensive:

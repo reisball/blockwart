@@ -27,8 +27,15 @@ from blockwart.domain.relationships import (
     validate_data_references,
     validate_relationship,
 )
+from blockwart.domain.timestamps import format_rfc3339_utc
 from blockwart.models import AuditEvent, CatalogObject, Relationship
-from blockwart.schemas.catalog import CatalogAssetNode, CatalogObjectIn, CatalogObjectOut
+from blockwart.schemas.catalog import (
+    CatalogAssetNode,
+    CatalogObjectIn,
+    CatalogObjectOut,
+    CatalogRecordDiagnostic,
+)
+from blockwart.services.record_integrity import read_catalog_record_data
 
 
 def _to_schema(
@@ -41,8 +48,9 @@ def _to_schema(
         lifecycle=row.lifecycle,
         health=row.health,
     )
-    updated_at = _format_timestamp(row.updated_at)
-    data = json.loads(row.data_json)
+    updated_at = format_rfc3339_utc(row.updated_at)
+    record = read_catalog_record_data(row)
+    data = record.data
     parent_path = []
     parent_ref = None
     if placement_graph is not None:
@@ -60,7 +68,7 @@ def _to_schema(
         health=asset_state.health if asset_state is not None else None,
         summary=row.summary,
         data=data,
-        created_at=_format_timestamp(row.created_at),
+        created_at=format_rfc3339_utc(row.created_at),
         updated_at=updated_at,
         last_changed=updated_at,
         parent_path=parent_path,
@@ -69,6 +77,15 @@ def _to_schema(
             parent_ref=parent_ref,
             data=data,
         ),
+        record_state=record.record_state,
+        diagnostics=[
+            CatalogRecordDiagnostic(
+                code=diagnostic.code,
+                object_id=diagnostic.object_id,
+                message=diagnostic.message,
+            )
+            for diagnostic in record.diagnostics
+        ],
     )
 
 
@@ -118,12 +135,6 @@ def _normalize_status(status: str | None) -> str:
     if status in {"partial", "unknown", "", None}:
         return "inactive"
     return "inactive"
-
-
-def _format_timestamp(value: datetime | None) -> str | None:
-    if value is None:
-        return None
-    return value.isoformat(timespec="microseconds")
 
 
 def _now() -> datetime:
@@ -485,9 +496,7 @@ def _update_summary(
 
 
 def _format_log_timestamp(value: datetime | None) -> str:
-    if value is None:
-        return ""
-    return value.strftime("%Y-%m-%d %H:%M:%S")
+    return format_rfc3339_utc(value) or ""
 
 
 def _audit_summary(summary: str) -> str:
