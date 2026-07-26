@@ -1,4 +1,5 @@
 from collections.abc import Generator
+from datetime import datetime
 
 import pytest
 from fastapi.testclient import TestClient
@@ -228,6 +229,71 @@ def test_asset_state_changes_have_distinct_audit_fields(session_factory) -> None
     assert len(audits) == 2
     assert "Feld Health wurde von unknown auf degraded geändert" in audits[-1].summary
     assert "Lifecycle" not in audits[-1].summary
+
+
+def test_identical_object_upsert_is_noop(
+    session_factory,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    created_at = datetime(2026, 7, 26, 21, 0)
+    changed_at = datetime(2026, 7, 26, 21, 1)
+    timestamps = iter((created_at, changed_at))
+    monkeypatch.setattr("blockwart.services.catalog._now", lambda: next(timestamps))
+    payload = CatalogObjectIn(
+        id="idempotent-service",
+        kind="service",
+        label="Idempotent Service",
+        status="active",
+        summary="Stable state.",
+        data={
+            "schema_version": 1,
+            "network": {"hostnames": ["idempotent.internal"]},
+        },
+    )
+
+    with session_factory() as session:
+        with transaction(session):
+            upsert_object(session, payload)
+    with session_factory() as session:
+        with transaction(session):
+            unchanged = upsert_object(
+                session,
+                payload.model_copy(
+                    update={
+                        "data": {
+                            "network": {"hostnames": ["idempotent.internal"]},
+                            "schema_version": 1,
+                        }
+                    }
+                ),
+            )
+    with session_factory() as session:
+        row = session.get(CatalogObject, payload.id)
+        audits = session.scalars(
+            select(AuditEvent).where(AuditEvent.object_id == payload.id).order_by(AuditEvent.id)
+        ).all()
+
+    assert row is not None
+    assert row.updated_at == created_at
+    assert unchanged.updated_at == "2026-07-26T21:00:00.000000Z"
+    assert [audit.action for audit in audits] == ["create"]
+
+    with session_factory() as session:
+        with transaction(session):
+            upsert_object(
+                session,
+                payload.model_copy(update={"summary": "A real change."}),
+            )
+    with session_factory() as session:
+        row = session.get(CatalogObject, payload.id)
+        audits = session.scalars(
+            select(AuditEvent).where(AuditEvent.object_id == payload.id).order_by(AuditEvent.id)
+        ).all()
+
+    assert row is not None
+    assert row.updated_at == changed_at
+    assert row.summary == "A real change."
+    assert [audit.action for audit in audits] == ["create", "update"]
 
 
 def test_catalog_input_accepts_only_explicit_unassigned_placement_metadata() -> None:
