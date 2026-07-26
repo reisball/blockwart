@@ -50,4 +50,5 @@ fi
 "$TEMP_DIR/venv/bin/blockwart-db" check
 "$TEMP_DIR/venv/bin/blockwart-db" integrity
 "$TEMP_DIR/venv/bin/blockwart-db" interfaces
+"$TEMP_DIR/venv/bin/blockwart-db" placements
 echo "package_smoke=passed"

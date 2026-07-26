@@ -62,12 +62,13 @@ The package smoke builds a wheel, installs it into a clean virtual environment, 
 directory outside the repository, starts `blockwart-start`, loads packaged templates and static
 assets, runs the relationship-integrity diagnostic, and calls all three tools through the installed
 `blockwart-mcp` console command. It also runs the read-only service-interface
-normalization plan from outside the source tree.
+normalization and placement-state plans from outside the source tree.
 
 The container smoke starts the built image first with an empty volume and then with a database at
 the historical Alembic baseline. Both must reach Docker health and application readiness. The
 second run must migrate to Head without losing its legacy JSON row. Both paths must also pass
-`blockwart-db integrity` and the read-only `blockwart-db interfaces` plan.
+`blockwart-db integrity` plus the read-only `blockwart-db interfaces` and
+`blockwart-db placements` plans.
 
 The OpenAPI snapshot at `tests/contracts/openapi.json` is an intentionally reviewed machine
 contract. After an approved API change, update and review it with:

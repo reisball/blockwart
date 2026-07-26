@@ -2,6 +2,7 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
+from blockwart.domain.placement import PlacementState
 from blockwart.schemas.catalog import ObjectKind
 
 
@@ -40,6 +41,7 @@ class AgentCatalogObjectSummary(BaseModel):
     primary_endpoint: AgentEndpoint | None = None
     lifecycle: str | None = None
     health: str | None = None
+    placement_state: PlacementState | None = None
 
 
 class AgentRelationshipOut(BaseModel):

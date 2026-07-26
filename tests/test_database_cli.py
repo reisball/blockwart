@@ -106,6 +106,61 @@ def test_database_interfaces_defaults_to_dry_run_and_requires_apply(
         engine.dispose()
 
 
+def test_database_placements_defaults_to_dry_run_and_requires_apply(
+    tmp_path: Path,
+    capsys,
+) -> None:
+    database_url = f"sqlite:///{tmp_path / 'placements.sqlite3'}"
+    assert database_cli.main(["--database-url", database_url, "upgrade"]) == 0
+    capsys.readouterr()
+    engine = create_engine(database_url)
+    try:
+        with engine.begin() as connection:
+            connection.execute(
+                text(
+                    "INSERT INTO catalog_objects "
+                    "(id, kind, label, status, data_json) VALUES "
+                    "('pending', 'service', 'Pending', 'active', :data_json)"
+                ),
+                {"data_json": '{"schema_version":1}'},
+            )
+
+        assert database_cli.main(
+            ["--database-url", database_url, "placements"]
+        ) == 0
+        dry_run = capsys.readouterr().out
+        assert "placement_unassigned ref=service:pending" in dry_run
+        assert "placement_change ref=service:pending action=mark_unassigned" in dry_run
+        assert (
+            "mode=dry-run scanned=1 changed=1 assigned=0 "
+            "unassigned=1 diagnostics=0"
+        ) in dry_run
+        with engine.connect() as connection:
+            assert json.loads(
+                connection.execute(
+                    text("SELECT data_json FROM catalog_objects WHERE id='pending'")
+                ).scalar_one()
+            ) == {"schema_version": 1}
+
+        assert database_cli.main(
+            ["--database-url", database_url, "--apply", "placements"]
+        ) == 0
+        applied = capsys.readouterr().out
+        assert (
+            "mode=apply scanned=1 changed=1 assigned=0 "
+            "unassigned=1 diagnostics=0"
+        ) in applied
+        with engine.connect() as connection:
+            data = json.loads(
+                connection.execute(
+                    text("SELECT data_json FROM catalog_objects WHERE id='pending'")
+                ).scalar_one()
+            )
+            assert data["placement"]["state"] == "unassigned"
+    finally:
+        engine.dispose()
+
+
 def test_database_cli_redacts_migration_failure(
     monkeypatch: pytest.MonkeyPatch,
     capsys,

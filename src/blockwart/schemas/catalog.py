@@ -4,6 +4,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, Field, model_validator
 
 from blockwart.domain.interfaces import normalize_interface_data
+from blockwart.domain.placement import PlacementState, validate_placement_metadata
 from blockwart.domain.references import TypedReference
 from blockwart.domain.security import find_secret_violations
 
@@ -295,6 +296,7 @@ class CatalogObjectIn(BaseModel):
             kind=self.kind,
             object_id=self.id,
         )
+        validate_placement_metadata(self.data, kind=self.kind)
         _validate_dependencies(self.data)
         if self.kind in {"host", "system"}:
             _validate_system_data(self.data)
@@ -323,6 +325,7 @@ class CatalogObjectOut(CatalogObjectIn):
     updated_at: str | None = None
     last_changed: str | None = None
     parent_path: list[CatalogAssetNode] = Field(default_factory=list)
+    placement_state: PlacementState | None = None
 
 
 class HealthOut(BaseModel):

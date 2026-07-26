@@ -96,12 +96,15 @@ def resolved_asset_graph(session_factory) -> None:
             ),
         ),
         CatalogObject(
-            id="unassigned-host",
-            kind="host",
-            label="Unassigned Host",
+            id="unassigned-service",
+            kind="service",
+            label="Unassigned Service",
             status="inactive",
             summary="Inventory item without placement.",
-            data_json='{"schema_version": 1}',
+            data_json=(
+                '{"schema_version": 1, "placement": {'
+                '"state": "unassigned", "reason": "Pending decision"}}'
+            ),
         ),
     ]
     relationships = [
@@ -207,6 +210,7 @@ def test_agent_context_resolves_host_system_service_path(
     assert response.status_code == 200
     obj = response.json()["objects"][0]
     assert obj["parent"]["ref"] == "system:runtime-01"
+    assert obj["placement_state"] == "assigned"
     assert [node["ref"] for node in obj["parent_path"]] == [
         "host:baremetal-01",
         "system:runtime-01",
@@ -289,6 +293,7 @@ def test_agent_context_resolves_direct_hardware_service_and_children(
 
     assert host_response.status_code == 200
     host = host_response.json()["objects"][0]
+    assert host["placement_state"] == "root"
     child_refs = {child["ref"] for child in host["children"]}
     assert child_refs == {"system:runtime-01", "service:hardware-console"}
     assert host["source_references"] == [
@@ -300,10 +305,11 @@ def test_agent_context_keeps_unassigned_asset_explicit(
     client: TestClient,
     resolved_asset_graph: None,
 ) -> None:
-    response = client.get("/api/agent/objects/unassigned-host")
+    response = client.get("/api/agent/objects/unassigned-service")
 
     assert response.status_code == 200
     obj = response.json()["objects"][0]
+    assert obj["placement_state"] == "unassigned"
     assert obj["parent"] is None
     assert obj["parent_path"] == []
     assert obj["children"] == []
