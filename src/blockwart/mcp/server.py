@@ -80,6 +80,14 @@ QUERY_FILTER_PROPERTIES: JSON = {
         "type": "string",
         "enum": ["unknown", "healthy", "degraded", "down", "maintenance"],
     },
+    "source_type": {
+        "type": "string",
+        "enum": ["unknown", "manual", "import", "discovery"],
+    },
+    "stale": {
+        "type": "boolean",
+        "description": "Exact computed freshness state",
+    },
     "cursor": {"type": "string", "description": "Opaque v1 continuation cursor"},
     "sort": {
         "type": "string",
@@ -289,6 +297,8 @@ def _clean_params(args: JSON, *, default_limit: int) -> JSON:
         "status",
         "lifecycle",
         "health",
+        "source_type",
+        "stale",
         "cursor",
         "sort",
         "direction",
@@ -323,6 +333,8 @@ def _legacy_page_payload(
             "status",
             "lifecycle",
             "health",
+            "source_type",
+            "stale",
         )
         if key in args
     }

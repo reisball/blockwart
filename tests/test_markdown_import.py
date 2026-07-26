@@ -221,6 +221,11 @@ def test_import_tools_markdown_updates_previous_workspace_import_shape(
                     '{"schema_version":1,"source":"workspace_markdown_import",'
                     '"system_id":"system:agent-zero-lxc"}'
                 ),
+                provenance_json=(
+                    '{"source_type":"import",'
+                    '"source_ref":"workspace_markdown_import",'
+                    '"manual_override":false}'
+                ),
             )
         )
         session.flush()
@@ -262,6 +267,11 @@ def test_import_tools_markdown_removes_stale_workspace_host_relationship(
                 status="active",
                 summary="Old generated host.",
                 data={"schema_version": 1, "source": "workspace_markdown_import"},
+                provenance={
+                    "source_type": "import",
+                    "source_ref": "workspace_markdown_import",
+                    "manual_override": False,
+                },
             ),
         )
         upsert_object(
@@ -273,6 +283,11 @@ def test_import_tools_markdown_removes_stale_workspace_host_relationship(
                 status="active",
                 summary="Agent Zero service.",
                 data={"schema_version": 1, "source": "workspace_markdown_import"},
+                provenance={
+                    "source_type": "import",
+                    "source_ref": "workspace_markdown_import",
+                    "manual_override": False,
+                },
             ),
         )
         session.add(
@@ -338,10 +353,12 @@ def test_import_tools_markdown_merges_canonical_existing_objects(
         result = import_tools_markdown(session, tools_path, references_root=tmp_path)
         row = session.get(CatalogObject, "fabrik")
 
-    assert result.objects_imported == 1
+    assert result.objects_imported == 0
     assert row is not None
     assert row.label == "Fabrik"
-    assert "workspace_markdown_import" in row.data_json
+    assert "workspace_markdown_import" not in row.data_json
+    assert '"source_type":"manual"' in row.provenance_json
+    assert '"manual_override":true' in row.provenance_json
 
 
 @pytest.mark.parametrize(

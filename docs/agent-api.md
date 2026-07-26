@@ -37,6 +37,8 @@ Query parameters:
 - status: optional catalog status
 - lifecycle: optional exact `planned`, `active`, or `retired`
 - health: optional exact `unknown`, `healthy`, `degraded`, `down`, or `maintenance`
+- source_type: optional exact `unknown`, `manual`, `import`, or `discovery`
+- stale: optional exact computed freshness state
 - limit: optional result limit, 1..50, default 10
 
 The parent filter matches the complete canonical parent path, not only the immediate parent.
@@ -56,6 +58,7 @@ Returns one object as agent context:
 - normalized endpoints with stable ID, capability, URL/host/port, application
   protocol, TCP/UDP transport, exposure and optional health URL
 - source references, last update timestamp, and structured upstream/downstream dependencies
+- canonical provenance and computed freshness
 - extracted credential-reference IDs
 
 Placement resolution uses only canonical `hosts` relationships. It supports
@@ -88,7 +91,7 @@ Query parameters:
 - q: optional search term
 - kind: optional object kind filter
 - parent, ip, port, endpoint_type, protocol, exposure, status, lifecycle,
-  health: same structured filters as search
+  health, source_type, stale: same structured filters as search
 - limit: optional object limit, 1..20, default 5
 
 Search and context use the same resolver and filter semantics. All Agent API routes remain GET-only.
@@ -97,6 +100,10 @@ All Agent timestamps use RFC3339 UTC with `Z`. Every summary and context object 
 `record_state` plus `diagnostics`. A damaged `data_json` row remains discoverable by ID, label, or
 summary, but its data is returned as an empty object with a `corrupt_record` diagnostic; raw broken
 JSON is never returned. See `api-boundary-contract.md`.
+
+`updated_at`, `observed_at`, `verified_at`, and `stale_after` have distinct
+meanings. The canonical header, migration rules, manual-override behavior, and
+freshness calculation are documented in `provenance.md`.
 
 ## Secret Handling
 

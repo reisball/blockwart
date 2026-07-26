@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 from blockwart.api.deps import get_session
 from blockwart.api.errors import API_ERROR_RESPONSES
 from blockwart.domain.asset_state import AssetHealth, AssetLifecycle
+from blockwart.domain.provenance import SourceType
 from blockwart.schemas.agent import AgentContextOut, AgentSearchOut
 from blockwart.schemas.catalog import ObjectKind
 from blockwart.services.agent import (
@@ -38,6 +39,11 @@ def agent_search(
     status: str | None = None,
     lifecycle: AssetLifecycle | None = None,
     health: AssetHealth | None = None,
+    source_type: SourceType | None = None,
+    stale: Annotated[
+        bool | None,
+        Query(description="Exact computed freshness state"),
+    ] = None,
     limit: Annotated[int, Query(ge=1, le=50)] = 10,
 ) -> AgentSearchOut:
     filters = _active_filters(
@@ -50,6 +56,8 @@ def agent_search(
         status=status,
         lifecycle=lifecycle,
         health=health,
+        source_type=source_type,
+        stale=stale,
     )
     results = search_agent_objects(
         session,
@@ -92,6 +100,11 @@ def agent_context(
     status: str | None = None,
     lifecycle: AssetLifecycle | None = None,
     health: AssetHealth | None = None,
+    source_type: SourceType | None = None,
+    stale: Annotated[
+        bool | None,
+        Query(description="Exact computed freshness state"),
+    ] = None,
     limit: Annotated[int, Query(ge=1, le=20)] = 5,
 ) -> AgentContextOut:
     filters = _active_filters(
@@ -104,6 +117,8 @@ def agent_context(
         status=status,
         lifecycle=lifecycle,
         health=health,
+        source_type=source_type,
+        stale=stale,
     )
     objects = build_agent_context(
         session,
@@ -132,8 +147,10 @@ def _active_filters(
     status: str | None,
     lifecycle: AssetLifecycle | None,
     health: AssetHealth | None,
-) -> dict[str, str | int]:
-    filters: dict[str, str | int | None] = {
+    source_type: SourceType | None,
+    stale: bool | None,
+) -> dict[str, str | int | bool]:
+    filters: dict[str, str | int | bool | None] = {
         "parent": parent,
         "ip": ip,
         "port": port,
@@ -143,5 +160,7 @@ def _active_filters(
         "status": status,
         "lifecycle": lifecycle,
         "health": health,
+        "source_type": source_type,
+        "stale": stale,
     }
     return {key: value for key, value in filters.items() if value is not None}

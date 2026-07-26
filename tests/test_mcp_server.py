@@ -353,6 +353,8 @@ def test_mcp_search_and_context_support_host_and_structured_filters() -> None:
             "status",
             "lifecycle",
             "health",
+            "source_type",
+            "stale",
             "cursor",
             "sort",
             "direction",
@@ -376,14 +378,26 @@ def test_mcp_search_calls_read_only_agent_search_endpoint() -> None:
 
     response = call_tool(
         "blockwart.search",
-        {"q": "brieftraeger", "kind": "system", "limit": 3},
+        {
+            "q": "brieftraeger",
+            "kind": "system",
+            "source_type": "import",
+            "stale": False,
+            "limit": 3,
+        },
         fetcher=fake_fetch,
     )
 
     assert calls == [
         (
             "/api/v1/objects",
-            {"q": "brieftraeger", "kind": "system", "limit": 3},
+            {
+                "q": "brieftraeger",
+                "kind": "system",
+                "source_type": "import",
+                "stale": False,
+                "limit": 3,
+            },
         )
     ]
     payload = json.loads(response["content"][0]["text"])

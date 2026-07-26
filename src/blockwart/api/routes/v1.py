@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 from blockwart.api.deps import get_session
 from blockwart.api.errors import API_ERROR_RESPONSES
 from blockwart.domain.asset_state import AssetHealth, AssetLifecycle
+from blockwart.domain.provenance import SourceType
 from blockwart.schemas.agent import AgentCatalogObjectContext
 from blockwart.schemas.catalog import ObjectKind, ObjectStatus
 from blockwart.schemas.v1 import (
@@ -83,6 +84,11 @@ def list_v1_objects(
     status: ObjectStatus | None = None,
     lifecycle: AssetLifecycle | None = None,
     health: AssetHealth | None = None,
+    source_type: SourceType | None = None,
+    stale: Annotated[
+        bool | None,
+        Query(description="Exact computed freshness state"),
+    ] = None,
     limit: PageLimit = 50,
     cursor: CursorParameter = None,
     sort: ObjectSortField = "id",
@@ -106,6 +112,8 @@ def list_v1_objects(
             status=status,
             lifecycle=lifecycle,
             health=health,
+            source_type=source_type,
+            stale=stale,
             limit=limit,
             cursor=cursor,
             sort=sort,
@@ -137,6 +145,11 @@ def get_v1_context(
     status: ObjectStatus | None = None,
     lifecycle: AssetLifecycle | None = None,
     health: AssetHealth | None = None,
+    source_type: SourceType | None = None,
+    stale: Annotated[
+        bool | None,
+        Query(description="Exact computed freshness state"),
+    ] = None,
     limit: Annotated[int, Query(ge=1, le=20)] = 5,
     cursor: CursorParameter = None,
     sort: ObjectSortField = "id",
@@ -160,6 +173,8 @@ def get_v1_context(
             status=status,
             lifecycle=lifecycle,
             health=health,
+            source_type=source_type,
+            stale=stale,
             limit=limit,
             cursor=cursor,
             sort=sort,

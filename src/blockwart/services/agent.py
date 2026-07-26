@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from collections.abc import Mapping
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from ipaddress import ip_address
 from typing import Any
 
@@ -20,6 +21,12 @@ from blockwart.domain.interfaces import (
     normalize_interface_data,
 )
 from blockwart.domain.placement import PlacementGraph, placement_state
+from blockwart.domain.provenance import (
+    CatalogProvenanceOut,
+    SourceType,
+    load_provenance,
+    provenance_for_read,
+)
 from blockwart.domain.security import FORBIDDEN_SECRET_KEYS, looks_like_secret
 from blockwart.domain.timestamps import format_rfc3339_utc
 from blockwart.models import CatalogObject, Relationship
@@ -71,6 +78,8 @@ def query_agent_objects_page(
     status: str | None = None,
     lifecycle: AssetLifecycle | None = None,
     health: AssetHealth | None = None,
+    source_type: SourceType | None = None,
+    stale: bool | None = None,
     limit: int = 50,
     cursor: str | None = None,
     sort: ObjectSortField = "id",
@@ -91,6 +100,8 @@ def query_agent_objects_page(
         status=status,
         lifecycle=lifecycle,
         health=health,
+        source_type=source_type,
+        stale=stale,
         limit=limit,
         cursor=cursor,
         sort=sort,
@@ -122,6 +133,8 @@ def query_agent_context_page(
     status: str | None = None,
     lifecycle: AssetLifecycle | None = None,
     health: AssetHealth | None = None,
+    source_type: SourceType | None = None,
+    stale: bool | None = None,
     limit: int = 20,
     cursor: str | None = None,
     sort: ObjectSortField = "id",
@@ -142,6 +155,8 @@ def query_agent_context_page(
         status=status,
         lifecycle=lifecycle,
         health=health,
+        source_type=source_type,
+        stale=stale,
         limit=limit,
         cursor=cursor,
         sort=sort,
@@ -173,6 +188,8 @@ def search_agent_objects(
     status: str | None = None,
     lifecycle: AssetLifecycle | None = None,
     health: AssetHealth | None = None,
+    source_type: SourceType | None = None,
+    stale: bool | None = None,
     limit: int = 10,
 ) -> list[AgentCatalogObjectSummary]:
     return query_agent_objects_page(
@@ -188,6 +205,8 @@ def search_agent_objects(
         status=status,
         lifecycle=lifecycle,
         health=health,
+        source_type=source_type,
+        stale=stale,
         limit=limit,
         sort="kind",
     ).items
@@ -218,6 +237,8 @@ def build_agent_context(
     status: str | None = None,
     lifecycle: AssetLifecycle | None = None,
     health: AssetHealth | None = None,
+    source_type: SourceType | None = None,
+    stale: bool | None = None,
     limit: int = 5,
 ) -> list[AgentCatalogObjectContext]:
     return query_agent_context_page(
@@ -233,6 +254,8 @@ def build_agent_context(
         status=status,
         lifecycle=lifecycle,
         health=health,
+        source_type=source_type,
+        stale=stale,
         limit=limit,
         sort="kind",
     ).items
@@ -252,6 +275,8 @@ def _query_agent_rows_page(
     status: str | None,
     lifecycle: AssetLifecycle | None,
     health: AssetHealth | None,
+    source_type: SourceType | None,
+    stale: bool | None,
     limit: int,
     cursor: str | None,
     sort: ObjectSortField,
@@ -272,6 +297,8 @@ def _query_agent_rows_page(
         status=status,
         lifecycle=lifecycle,
         health=health,
+        source_type=source_type,
+        stale=stale,
         limit=None,
     )
     page = paginate_items(
@@ -293,6 +320,8 @@ def _query_agent_rows_page(
             "protocol": _normalized_filter(protocol),
             "q": query.strip().casefold() if query else None,
             "status": _normalized_filter(status),
+            "source_type": source_type,
+            "stale": stale,
         },
         cursor=cursor,
         include_total=include_total,
@@ -303,6 +332,7 @@ def _query_agent_rows_page(
 class _AgentCatalogResolver:
     def __init__(self, session: Session) -> None:
         self.session = session
+        self.now = datetime.now(UTC)
         self.objects = list(
             session.scalars(
                 select(CatalogObject).order_by(CatalogObject.kind, CatalogObject.label)
@@ -335,6 +365,8 @@ class _AgentCatalogResolver:
         status: str | None,
         lifecycle: AssetLifecycle | None,
         health: AssetHealth | None,
+        source_type: SourceType | None,
+        stale: bool | None,
         limit: int | None,
     ) -> list[CatalogObject]:
         matches: list[CatalogObject] = []
@@ -362,6 +394,11 @@ class _AgentCatalogResolver:
             if lifecycle and (state is None or state.lifecycle != lifecycle):
                 continue
             if health and (state is None or state.health != health):
+                continue
+            provenance = self.provenance(obj)
+            if source_type is not None and provenance.source_type != source_type:
+                continue
+            if stale is not None and provenance.is_stale is not stale:
                 continue
             if parent and parent not in self.parent_path_refs(obj):
                 continue
@@ -419,6 +456,7 @@ class _AgentCatalogResolver:
                 | CatalogObject.label.ilike(term)
                 | CatalogObject.summary.ilike(term)
                 | CatalogObject.data_json.ilike(term)
+                | CatalogObject.provenance_json.ilike(term)
             )
         return set(self.session.scalars(statement).all())
 
@@ -460,7 +498,12 @@ class _AgentCatalogResolver:
                 )
                 for diagnostic in record.diagnostics
             ],
+            provenance=self.provenance(obj),
         )
+
+    def provenance(self, obj: CatalogObject) -> CatalogProvenanceOut:
+        provenance, _ = load_provenance(obj.provenance_json)
+        return provenance_for_read(provenance, now=self.now)
 
     def context(self, obj: CatalogObject) -> AgentCatalogObjectContext:
         data = _safe_object_data(obj)
@@ -608,7 +651,13 @@ def _safe_object_record(obj: CatalogObject) -> CatalogDataRead:
 
 
 def _matches_query(obj: CatalogObject, data: Mapping[str, Any], query_term: str) -> bool:
-    values = [obj.id, obj.label, obj.summary or "", json.dumps(data, sort_keys=True)]
+    values = [
+        obj.id,
+        obj.label,
+        obj.summary or "",
+        json.dumps(data, sort_keys=True),
+        obj.provenance_json,
+    ]
     return any(query_term in value.casefold() for value in values)
 
 

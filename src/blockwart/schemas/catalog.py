@@ -6,6 +6,11 @@ from blockwart.domain.asset_state import AssetHealth, AssetLifecycle, is_asset_k
 from blockwart.domain.interfaces import normalize_interface_data
 from blockwart.domain.object_schema import validate_object_data
 from blockwart.domain.placement import PlacementState, validate_placement_metadata
+from blockwart.domain.provenance import (
+    CatalogProvenance,
+    CatalogProvenanceOut,
+    manual_provenance,
+)
 from blockwart.domain.security import find_secret_violations
 
 ObjectKind = Literal[
@@ -36,6 +41,7 @@ class CatalogObjectIn(BaseModel):
     health: AssetHealth | None = None
     summary: str | None = None
     data: dict[str, Any] = Field(default_factory=dict)
+    provenance: CatalogProvenance = Field(default_factory=manual_provenance)
 
     @model_validator(mode="after")
     def reject_secret_values(self) -> "CatalogObjectIn":
@@ -75,6 +81,7 @@ class CatalogRecordDiagnostic(BaseModel):
 
 
 class CatalogObjectOut(CatalogObjectIn):
+    provenance: CatalogProvenanceOut
     created_at: str | None = None
     updated_at: str | None = None
     last_changed: str | None = None

@@ -1,0 +1,68 @@
+# Catalog provenance and freshness
+
+Every catalog object has a canonical `provenance` header separate from its
+kind-specific `data`. The header is stored as validated JSON in
+`catalog_objects.provenance_json` and returned by catalog REST, Agent API,
+`/api/v1`, and MCP read models.
+
+## Contract
+
+The header contains:
+
+- `source_type`: `unknown`, `manual`, `import`, or `discovery`
+- `source_ref`: optional stable identifier or reference for the source
+- `managed_by`: optional party responsible for maintaining the record
+- `observed_at`: optional time at which the source observation was made
+- `verified_at`: optional time at which the fact was explicitly checked
+- `stale_after`: optional absolute time after which the record is stale
+- `manual_override`: whether an import must preserve the whole canonical record
+- `is_stale`: read-only value derived from `stale_after` and current UTC time
+
+All provenance timestamps are timezone-aware RFC3339 and are normalized to UTC
+with `Z`. `updated_at` is different: it records when Blockwart last wrote the
+catalog row. It does not claim that the underlying fact was observed or
+verified at that time.
+
+`stale_after` is an absolute boundary, not a duration. Missing freshness
+timestamps mean "not known"; they are never replaced with an invented current
+time. Consequently, a record without `stale_after` has `is_stale=false` while
+remaining explicitly unverified when `verified_at` is null.
+
+## Write and import ownership
+
+Ordinary catalog writes default to `source_type=manual` and
+`manual_override=true`. The override protects the entire canonical object,
+including kind, label, state, summary, data, and provenance. An import may keep
+its candidate outside the canonical record for comparison, but it must not
+silently replace or mutate those canonical values.
+
+Seed and workspace Markdown imports set `source_type=import`,
+`manual_override=false`, and deterministic source metadata. Seed-level
+`updated_at` and `last_verified` values become `observed_at` and `verified_at`
+respectively; a missing source timestamp remains null. Re-running an import
+updates records it owns while preserving a manual override.
+
+Discovery is a reserved source type only. Active discovery, monitoring,
+automatic deletion, and automatic freshness scheduling are outside the
+current contract.
+
+## Legacy migration
+
+Alembic revision `20260726_0006` adds the canonical header without rewriting
+`data_json`:
+
+1. a non-empty legacy `data.source` becomes an import `source_ref`;
+2. otherwise the first non-empty `source_references[].uri` is used;
+3. otherwise the presence of `import_notes` produces
+   `source_ref=legacy:import_notes`;
+4. records without a reliable signal, including malformed legacy JSON, become
+   `source_type=unknown`.
+
+Legacy `source`, `source_references`, and `import_notes` fields remain available
+for compatibility. The canonical header wins for provenance filters and import
+ownership. No migration value is inferred from `updated_at`, because a database
+write is not proof of an observation or verification.
+
+Invalid or secret-shaped stored provenance is treated as a safe
+`corrupt_record`: read surfaces fall back to an unknown header and never return
+the raw invalid JSON.

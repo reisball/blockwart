@@ -14,7 +14,8 @@ There are no writable MCP tools.
 `blockwart.search` and `blockwart.get_context` accept `host`, `system`, `netzwerk`, and `service`
 as kinds. Both tools also forward v1's structured `parent`, `ip`, `port`,
 `endpoint_type`, `protocol`, `exposure`, `status`, `lifecycle`, and `health`
-filters plus `cursor`, `sort`, `direction`, and optional `include_total`.
+filters plus canonical `source_type` and computed `stale`, `cursor`, `sort`,
+`direction`, and optional `include_total`.
 Resolved context comes from the same service implementation used by REST.
 
 For compatibility, MCP output retains the established `results` and `objects`
@@ -47,6 +48,8 @@ notification and ping request through the SDK protocol implementation.
 
 The MCP wrapper never resolves credential values. It only returns whatever the read-only v1 API
 returns: sanitized object context, relationships, and credential-reference IDs.
+Canonical provenance is returned unchanged from v1; secret-shaped stored
+provenance is handled by the same safe record-integrity boundary.
 
 Writable tools, credential resolution, and Gateway registration require separate design and approval.
 
