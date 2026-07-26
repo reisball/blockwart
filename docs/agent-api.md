@@ -6,6 +6,12 @@ The namespace is intentionally separate from the catalog read API. Both API surf
 agents and integrations can search and retrieve context, but they cannot create, update, delete, or
 resolve credential values. Catalog changes are restricted to authenticated UI form routes.
 
+The catalog model is the faithful stored-object projection: validated data, canonical asset and
+placement state, timestamps, parent path, and safe integrity diagnostics. Agent context is a
+different compact projection with resolved endpoint, network, dependency, child, and
+credential-reference summaries plus defensive secret redaction. Both use the same canonical
+placement graph; neither response shape is derived from the HTML UI. See `read-models.md`.
+
 ## Endpoints
 
 ### GET /api/agent/search

@@ -1,6 +1,5 @@
 import json
 import re
-from collections import Counter
 from collections.abc import Mapping
 from datetime import UTC, datetime
 from typing import Annotated, Any
@@ -9,12 +8,11 @@ from fastapi import APIRouter, Depends, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 from pydantic import ValidationError
-from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from blockwart.api.deps import get_session
 from blockwart.db.session import transaction
-from blockwart.domain.placement import PlacementError, PlacementGraph
+from blockwart.domain.placement import PlacementError
 from blockwart.domain.relationships import (
     RELATIONSHIP_TYPES,
     RelationshipIntegrityError,
@@ -28,7 +26,6 @@ from blockwart.domain.ui_schema import (
     schema_field_payload,
     ui_schema_payload,
 )
-from blockwart.models import Relationship
 from blockwart.schemas.catalog import (
     ENDPOINT_TYPE_OPTIONS,
     OBJECT_STATUSES,
@@ -39,11 +36,14 @@ from blockwart.schemas.catalog import (
 from blockwart.services.catalog import (
     create_relationship,
     get_object,
-    list_audit_events_for_object,
-    list_objects,
-    list_relationships_for_object,
-    search_objects,
     upsert_object,
+)
+from blockwart.services.queries import (
+    RelatedRelationshipReadModel,
+    object_id_from_ref,
+    primary_name_value,
+    query_catalog_browse,
+    query_catalog_detail,
 )
 from blockwart.ui.admin_auth import can_write, require_admin_write
 from blockwart.ui.paths import TEMPLATE_DIR
@@ -55,7 +55,6 @@ OBJECT_KINDS = PUBLIC_OBJECT_KINDS
 OBJECT_STATUSES_UI = OBJECT_STATUSES
 RELATION_TYPES = RELATIONSHIP_TYPES
 PLATFORM_TYPES = ("LXC", "VM", "WSL")
-UI_KIND_PRIORITY = {kind: index for index, kind in enumerate(OBJECT_KINDS)}
 SAFE_DATA_JSON_FALLBACK = "{\n  \"schema_version\": 1\n}"
 HARDWARE_OBJECT_KINDS = {"host", "system"}
 NETWORK_ADDRESS_EDIT_KINDS = {"host", "system", "netzwerk"}
@@ -130,22 +129,17 @@ def index(
     write_enabled = can_write(request)
     normalized_kind = kind if kind in OBJECT_KINDS else ""
     layout_cols = cols if cols in {"1", "2", "3"} else "1"
-    objects = _visible_objects(
-        search_objects(session, query=q.strip() or None, kind=normalized_kind or None)
+    read_model = query_catalog_browse(
+        session,
+        query=q,
+        kind=normalized_kind or None,
     )
-    all_objects = _sort_for_browse(list_objects(session))
-    systems = _sort_for_browse(search_objects(session, kind="system"))
-    relation_targets = _visible_objects(all_objects)
-    object_map = {f"{obj.kind}:{obj.id}": obj for obj in all_objects}
-    object_counts = Counter(obj.kind for obj in _visible_objects(search_objects(session)))
-    total_objects = sum(object_counts.values())
-    display_names = {obj.id: _primary_name_value(obj) for obj in all_objects}
     return templates.TemplateResponse(
         request,
         "index.html",
         context={
             "title": "Blockwart",
-            "objects": objects,
+            "objects": read_model.objects,
             "q": q,
             "kind": normalized_kind,
             "layout_cols": layout_cols,
@@ -157,16 +151,16 @@ def index(
             "create_fields_by_key": _fields_by_key(
                 schema_field_payload(get_ui_schema(_empty_form()["kind"]))
             ),
-            "display_names": display_names,
-            "object_counts": object_counts,
-            "total_objects": total_objects,
+            "display_names": read_model.display_names,
+            "object_counts": read_model.object_counts,
+            "total_objects": read_model.total_objects,
             "error": None,
             "form": _empty_form(),
-            "systems": systems,
-            "relation_targets": relation_targets,
+            "systems": read_model.systems,
+            "relation_targets": read_model.relation_targets,
             "relation_types": RELATION_TYPES,
             "show_create_form": write_enabled and create == "1",
-            "index_relationships": _index_relationship_cards(session, objects, object_map),
+            "index_relationships": read_model.index_relationships,
             "can_write": write_enabled,
         },
     )
@@ -255,22 +249,16 @@ def object_detail(
     edit: str = "",
 ):
     write_enabled = can_write(request)
-    catalog_object = get_object(session, object_id)
-    if catalog_object is None:
+    read_model = query_catalog_detail(session, object_id)
+    if read_model is None:
         raise HTTPException(status_code=404, detail="Catalog object not found")
-    all_objects = _sort_for_browse(list_objects(session))
-    relationships = list_relationships_for_object(session, catalog_object)
-    object_map = {f"{obj.kind}:{obj.id}": obj for obj in all_objects}
-    relationship_groups = _group_relationships(catalog_object, relationships, object_map)
-    relationship_targets = [
-        obj for obj in all_objects if obj.id != catalog_object.id and obj.kind in OBJECT_KINDS
-    ]
+    catalog_object = read_model.catalog_object
     object_data = catalog_object.data
     ui_schema = get_ui_schema(catalog_object.kind)
     access_methods = _display_access_methods(
         catalog_object,
-        relationship_groups,
-        object_map,
+        read_model.relationship_groups,
+        read_model.object_map,
     )
     network = _network_summary(object_data)
     hardware = _hardware_summary(object_data)
@@ -285,15 +273,15 @@ def object_detail(
         context={
             "title": f"{catalog_object.label} - Blockwart",
             "object": catalog_object,
-            "relationships": relationships,
-            "relationship_groups": relationship_groups,
-            "relationship_targets": relationship_targets,
+            "relationships": read_model.relationships,
+            "relationship_groups": read_model.relationship_groups,
+            "relationship_targets": read_model.relationship_targets,
             "relation_types": RELATION_TYPES,
             "comment": str(object_data.get("comment") or ""),
-            "audit_events": list_audit_events_for_object(session, catalog_object.id),
+            "audit_events": read_model.audit_events,
             "ui_schema": ui_schema,
             "schema_fields_by_key": _fields_by_key(schema_field_payload(ui_schema)),
-            "primary_name_value": _primary_name_value(catalog_object),
+            "primary_name_value": primary_name_value(catalog_object),
             "network": network,
             "hardware": hardware,
             "hardware_fields": hardware_fields,
@@ -417,16 +405,13 @@ def save_object(
                 )
     except (json.JSONDecodeError, ValidationError, ValueError) as exc:
         form["data_json"] = SAFE_DATA_JSON_FALLBACK
-        objects = _visible_objects(search_objects(session))
-        all_objects = _sort_for_browse(list_objects(session))
-        object_map = {f"{obj.kind}:{obj.id}": obj for obj in all_objects}
-        object_counts = Counter(obj.kind for obj in objects)
+        read_model = query_catalog_browse(session)
         return templates.TemplateResponse(
             request,
             "index.html",
             context={
                 "title": "Blockwart",
-                "objects": objects,
+                "objects": read_model.objects,
                 "q": "",
                 "kind": "",
                 "layout_cols": "1",
@@ -436,20 +421,16 @@ def save_object(
                 "ui_schemas": ui_schema_payload(),
                 "form_ui_schema": get_ui_schema(kind),
                 "create_fields_by_key": _fields_by_key(schema_field_payload(get_ui_schema(kind))),
-                "display_names": {obj.id: _primary_name_value(obj) for obj in all_objects},
-                "object_counts": object_counts,
-                "total_objects": sum(object_counts.values()),
+                "display_names": read_model.display_names,
+                "object_counts": read_model.object_counts,
+                "total_objects": read_model.total_objects,
                 "error": _safe_error_message(exc),
                 "form": form,
-                "systems": _sort_for_browse(search_objects(session, kind="system")),
-                "relation_targets": _visible_objects(all_objects),
+                "systems": read_model.systems,
+                "relation_targets": read_model.relation_targets,
                 "relation_types": RELATION_TYPES,
                 "show_create_form": True,
-                "index_relationships": _index_relationship_cards(
-                    session,
-                    objects,
-                    object_map,
-                ),
+                "index_relationships": read_model.index_relationships,
                 "can_write": True,
             },
             status_code=422,
@@ -667,12 +648,10 @@ def update_object(
         with transaction(session):
             upsert_object(session, payload)
     except (json.JSONDecodeError, ValidationError, ValueError) as exc:
-        catalog_object = get_object(session, object_id)
-        if catalog_object is None:
+        read_model = query_catalog_detail(session, object_id)
+        if read_model is None:
             raise HTTPException(status_code=404, detail="Catalog object not found") from exc
-        relationships = list_relationships_for_object(session, catalog_object)
-        all_objects = _sort_for_browse(list_objects(session))
-        object_map = {f"{obj.kind}:{obj.id}": obj for obj in all_objects}
+        catalog_object = read_model.catalog_object
         object_data = catalog_object.data
         ui_schema = get_ui_schema(catalog_object.kind)
         network = _network_summary(object_data)
@@ -684,15 +663,10 @@ def update_object(
         service_information_fields = _service_information_schema_fields(
             ui_schema, service_information
         )
-        relationship_groups = _group_relationships(
-            catalog_object,
-            relationships,
-            object_map,
-        )
         access_methods = _display_access_methods(
             catalog_object,
-            relationship_groups,
-            object_map,
+            read_model.relationship_groups,
+            read_model.object_map,
         )
         return templates.TemplateResponse(
             request,
@@ -700,15 +674,15 @@ def update_object(
             context={
                 "title": f"{catalog_object.label} - Blockwart",
                 "object": catalog_object,
-                "relationships": relationships,
-                "relationship_groups": relationship_groups,
-                "relationship_targets": [obj for obj in all_objects if obj.id != catalog_object.id],
+                "relationships": read_model.relationships,
+                "relationship_groups": read_model.relationship_groups,
+                "relationship_targets": read_model.relationship_targets,
                 "relation_types": RELATION_TYPES,
                 "comment": str(object_data.get("comment") or ""),
-                "audit_events": list_audit_events_for_object(session, catalog_object.id),
+                "audit_events": read_model.audit_events,
                 "ui_schema": ui_schema,
                 "schema_fields_by_key": _fields_by_key(schema_field_payload(ui_schema)),
-                "primary_name_value": _primary_name_value(catalog_object),
+                "primary_name_value": primary_name_value(catalog_object),
                 "network": network,
                 "hardware": hardware,
                 "hardware_fields": hardware_fields,
@@ -964,15 +938,6 @@ def _safe_error_message(exc: Exception) -> str:
     return "Invalid catalog object payload."
 
 
-def _primary_name_value(catalog_object: CatalogObjectOut) -> str:
-    schema = get_ui_schema(catalog_object.kind)
-    if schema.primary_name_storage == "network_hostname":
-        network = _network_summary(catalog_object.data)
-        if network["hostnames"]:
-            return str(network["hostnames"][0])
-    return catalog_object.label
-
-
 def _apply_primary_name(data: dict[str, Any], schema: Any, value: str) -> None:
     if schema.primary_name_storage != "network_hostname":
         return
@@ -1009,290 +974,9 @@ def _access_method_rows(
     ]
 
 
-def _sort_for_browse(objects: list[CatalogObjectOut]) -> list[CatalogObjectOut]:
-    return sorted(
-        objects,
-        key=lambda obj: (
-            UI_KIND_PRIORITY.get(obj.kind, len(UI_KIND_PRIORITY)),
-            obj.label.casefold(),
-            obj.id.casefold(),
-        ),
-    )
-
-
-def _visible_objects(objects: list[CatalogObjectOut]) -> list[CatalogObjectOut]:
-    return _sort_for_browse([obj for obj in objects if obj.kind in OBJECT_KINDS])
-
-
-def _index_relationship_cards(
-    session: Session,
-    objects: list[CatalogObjectOut],
-    object_map: dict[str, CatalogObjectOut],
-) -> dict[str, dict[str, Any]]:
-    cards: dict[str, dict[str, Any]] = {}
-    all_relationships = _all_relationships(session)
-    for catalog_object in objects:
-        relationships = list_relationships_for_object(session, catalog_object)
-        grouped = _group_relationships(catalog_object, relationships, object_map)
-        cards[catalog_object.id] = {
-            "relationships": _relationship_display_cards(catalog_object, grouped, object_map),
-            "topology": _relationship_topology(catalog_object, all_relationships, object_map),
-        }
-    return cards
-
-
-def _all_relationships(session: Session) -> list[dict[str, str]]:
-    rows = session.scalars(
-        select(Relationship).order_by(
-            Relationship.relation_type,
-            Relationship.from_ref,
-            Relationship.to_ref,
-        )
-    ).all()
-    return [
-        {
-            "from_ref": row.from_ref,
-            "relation_type": row.relation_type,
-            "to_ref": row.to_ref,
-        }
-        for row in rows
-    ]
-
-
-def _relationship_topology(
-    catalog_object: CatalogObjectOut,
-    relationships: list[dict[str, str]],
-    object_map: dict[str, CatalogObjectOut],
-) -> dict[str, Any]:
-    current_ref = f"{catalog_object.kind}:{catalog_object.id}"
-    placement_graph = PlacementGraph(object_map.values(), relationships)
-
-    if catalog_object.kind == "service":
-        parent_path = placement_graph.parent_path_refs(current_ref)
-        host_refs = [ref for ref in parent_path if ref.startswith("host:")]
-        system_refs = [ref for ref in parent_path if ref.startswith("system:")]
-        return {
-            "chains": [
-                {
-                    "hosts": _relationship_nodes(host_refs, object_map),
-                    "systems": _relationship_nodes(system_refs, object_map),
-                    "services": [_relationship_node(current_ref, catalog_object)],
-                }
-            ]
-        }
-
-    if catalog_object.kind == "host":
-        child_refs = placement_graph.children_refs(current_ref)
-        system_refs = [ref for ref in child_refs if ref.startswith("system:")]
-        direct_service_refs = [
-            ref for ref in child_refs if ref.startswith("service:")
-        ]
-        service_refs = _unique_refs(
-            [
-                *direct_service_refs,
-                *[
-                    service_ref
-                    for system_ref in system_refs
-                    for service_ref in placement_graph.children_refs(system_ref)
-                    if service_ref.startswith("service:")
-                ],
-            ]
-        )
-        return {
-            "chains": [
-                {
-                    "hosts": [_relationship_node(current_ref, catalog_object)],
-                    "systems": _relationship_nodes(system_refs, object_map),
-                    "services": _relationship_nodes(service_refs, object_map),
-                }
-            ]
-        }
-
-    if catalog_object.kind == "system":
-        host_refs = [
-            ref
-            for ref in placement_graph.parent_path_refs(current_ref)
-            if ref.startswith("host:")
-        ]
-        service_refs = [
-            ref
-            for ref in placement_graph.children_refs(current_ref)
-            if ref.startswith("service:")
-        ]
-        return {
-            "chains": [
-                {
-                    "hosts": _relationship_nodes(host_refs, object_map),
-                    "systems": [_relationship_node(current_ref, catalog_object)],
-                    "services": _relationship_nodes(service_refs, object_map),
-                }
-            ]
-        }
-
-    return {"chains": []}
-
-
-def _unique_refs(values: Any) -> list[str]:
-    seen: set[str] = set()
-    unique: list[str] = []
-    for value in values:
-        if value in seen:
-            continue
-        seen.add(value)
-        unique.append(value)
-    return unique
-
-
-def _relationship_nodes(
-    refs: list[str],
-    object_map: dict[str, CatalogObjectOut],
-) -> list[dict[str, Any]]:
-    return [_relationship_node(ref, object_map.get(ref)) for ref in refs]
-
-
-def _relationship_display_sort_key(card: dict[str, Any]) -> tuple[int, str, str]:
-    left_kind = card["left"]["kind"]
-    right_kind = card["right"]["kind"]
-    is_system_service = left_kind == "system" and right_kind == "service"
-    return (0 if is_system_service else 1, card["left"]["label"], card["right"]["label"])
-
-
-def _relationship_display_cards(
-    catalog_object: CatalogObjectOut,
-    grouped: dict[str, list[dict[str, str]]],
-    object_map: dict[str, CatalogObjectOut],
-) -> list[dict[str, Any]]:
-    cards: list[dict[str, Any]] = []
-    current_ref = f"{catalog_object.kind}:{catalog_object.id}"
-    for relationship in [
-        relationship
-        for direction in ("outbound", "inbound")
-        for relationship in grouped.get(direction, [])
-    ]:
-        from_ref = relationship["from_ref"]
-        to_ref = relationship["to_ref"]
-        from_object = object_map.get(from_ref)
-        to_object = object_map.get(to_ref)
-        left_ref = from_ref
-        right_ref = to_ref
-        left_ref, right_ref = _system_service_refs(
-            from_ref,
-            to_ref,
-            from_object,
-            to_object,
-        )
-        left_object = object_map.get(left_ref)
-        right_object = object_map.get(right_ref)
-        cards.append(
-            {
-                **relationship,
-                "left": _relationship_node(left_ref, left_object),
-                "right": _relationship_node(right_ref, right_object),
-                "current_side": "left" if left_ref == current_ref else "right",
-            }
-        )
-    return sorted(cards, key=_relationship_display_sort_key)
-
-
-def _system_service_refs(
-    from_ref: str,
-    to_ref: str,
-    from_object: CatalogObjectOut | None,
-    to_object: CatalogObjectOut | None,
-) -> tuple[str, str]:
-    if from_object is not None and to_object is not None:
-        if from_object.kind == "system" and to_object.kind == "service":
-            return from_ref, to_ref
-        if from_object.kind == "service" and to_object.kind == "system":
-            return to_ref, from_ref
-    if from_ref.startswith("system:") and to_ref.startswith("service:"):
-        return from_ref, to_ref
-    if from_ref.startswith("service:") and to_ref.startswith("system:"):
-        return to_ref, from_ref
-    return from_ref, to_ref
-
-
-def _relationship_node(
-    ref: str,
-    catalog_object: CatalogObjectOut | None,
-) -> dict[str, Any]:
-    kind = catalog_object.kind if catalog_object else ref.split(":", 1)[0]
-    return {
-        "ref": ref,
-        "id": catalog_object.id if catalog_object else _object_id_from_ref(ref),
-        "kind": kind,
-        "label": _primary_name_value(catalog_object) if catalog_object else ref,
-        "status": catalog_object.status if catalog_object else "",
-        "data": catalog_object.data if catalog_object else {},
-        "ports": _relationship_node_ports(catalog_object),
-    }
-
-
-def _group_relationships(
-    catalog_object: CatalogObjectOut,
-    relationships: list[dict[str, str]],
-    object_map: dict[str, CatalogObjectOut],
-) -> dict[str, list[dict[str, str]]]:
-    current_ref = f"{catalog_object.kind}:{catalog_object.id}"
-    grouped: dict[str, list[dict[str, str]]] = {}
-    for relationship in relationships:
-        direction = "outbound" if relationship["from_ref"] == current_ref else "inbound"
-        other_ref = (
-            relationship["to_ref"]
-            if direction == "outbound"
-            else relationship["from_ref"]
-        )
-        other_object = object_map.get(other_ref)
-        grouped.setdefault(direction, []).append(
-            {
-                **relationship,
-                "other_ref": other_ref,
-                "other_id": _object_id_from_ref(other_ref),
-                "other_kind": other_object.kind if other_object else other_ref.split(":", 1)[0],
-                "other_label": _primary_name_value(other_object) if other_object else other_ref,
-                "other_status": other_object.status if other_object else "",
-                "other_data": other_object.data if other_object else {},
-            }
-        )
-    return grouped
-
-
-def _relationship_node_ports(catalog_object: CatalogObjectOut | None) -> list[dict[str, str]]:
-    if catalog_object is None:
-        return []
-    if catalog_object.kind == "system":
-        return _relationship_system_ports(catalog_object)
-    if catalog_object.kind == "service":
-        return _relationship_service_ports(catalog_object, None)
-    return []
-
-
-def _relationship_system_ports(catalog_object: CatalogObjectOut) -> list[dict[str, str]]:
-    if catalog_object.kind == "service":
-        return _relationship_service_ports(catalog_object, None)
-    return []
-
-
-def _relationship_service_ports(
-    catalog_object: CatalogObjectOut,
-    other_object: CatalogObjectOut | None,
-) -> list[dict[str, str]]:
-    service = catalog_object if catalog_object.kind == "service" else other_object
-    if service is None or service.kind != "service":
-        return []
-    ports: list[dict[str, str]] = []
-    for endpoint in _list_of_mappings(service.data.get("endpoints")):
-        port = endpoint.get("port")
-        if port is None:
-            continue
-        protocol = str(endpoint.get("protocol") or "tcp")
-        ports.append({"label": "service", "value": f"{port}/{protocol}"})
-    return ports
-
-
 def _display_access_methods(
     catalog_object: CatalogObjectOut,
-    relationship_groups: dict[str, list[dict[str, str]]],
+    relationship_groups: dict[str, list[RelatedRelationshipReadModel]],
     object_map: dict[str, CatalogObjectOut],
 ) -> list[dict[str, Any]]:
     methods = _access_methods(
@@ -1318,12 +1002,6 @@ def _display_access_methods(
             )
         )
     return methods
-
-
-def _object_id_from_ref(value: str) -> str:
-    if ":" not in value:
-        return value
-    return value.split(":", 1)[1]
 
 
 def _network_summary(data: Mapping[str, Any]) -> dict[str, list[Mapping[str, Any]] | list[str]]:
@@ -1656,7 +1334,7 @@ def _without_credential_references(value: Any) -> Any:
 
 def _credential_references(data: Mapping[str, Any]) -> list[dict[str, str]]:
     return [
-        {"ref": ref, "id": _object_id_from_ref(ref)}
+        {"ref": ref, "id": object_id_from_ref(ref)}
         for ref in sorted(_collect_credential_references(data))
     ]
 

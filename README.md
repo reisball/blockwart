@@ -96,6 +96,10 @@ UI form routes. Catalog, Agent, and MCP boundaries share RFC3339 UTC timestamps,
 codes with correlation IDs, and explicit safe diagnostics for corrupt catalog rows. See
 `docs/api-boundary-contract.md`.
 
+Catalog JSON routes and UI reads use the same FastAPI-independent Application Query layer for
+object, Relationship, Audit, and canonical topology models. Agent context remains a separate,
+sanitized projection while sharing the canonical placement graph. See `docs/read-models.md`.
+
 A local MCP-compatible stdio wrapper is available as blockwart-mcp. See docs/mcp.md.
 
 ## Markdown Import
