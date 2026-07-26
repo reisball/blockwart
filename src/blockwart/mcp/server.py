@@ -4,6 +4,7 @@ import asyncio
 import json
 import logging
 import os
+import re
 from collections.abc import Callable
 from typing import Any
 from urllib.error import HTTPError, URLError
@@ -23,6 +24,8 @@ SERVER_VERSION = "0.1.0"
 JSON = dict[str, Any]
 Fetcher = Callable[[str, dict[str, Any]], JSON]
 logger = logging.getLogger(__name__)
+_API_ERROR_CODE_PATTERN = re.compile(r"^[a-z][a-z0-9_]{1,63}$")
+_CORRELATION_ID_PATTERN = re.compile(r"^[A-Za-z0-9._-]{1,64}$")
 
 
 class ToolInputError(ValueError):
@@ -34,10 +37,16 @@ class UnknownToolError(ToolInputError):
 
 
 class UpstreamError(RuntimeError):
-    def __init__(self, code: str, public_message: str) -> None:
+    def __init__(
+        self,
+        code: str,
+        public_message: str,
+        correlation_id: str | None = None,
+    ) -> None:
         super().__init__(public_message)
         self.code = code
         self.public_message = public_message
+        self.correlation_id = correlation_id
 
 
 READ_ONLY_ANNOTATIONS: JSON = {
@@ -185,10 +194,7 @@ def fetch_json(path: str, params: JSON, *, base_url: str | None = None) -> JSON:
                     "Blockwart Agent API returned an invalid response.",
                 ) from exc
     except HTTPError as exc:
-        raise UpstreamError(
-            "upstream_http_error",
-            "Blockwart Agent API returned an error.",
-        ) from exc
+        raise _translate_http_error(exc) from exc
     except URLError as exc:
         raise UpstreamError(
             "upstream_unavailable",
@@ -216,7 +222,11 @@ async def handle_call_tool(name: str, arguments: JSON) -> types.CallToolResult:
     except ToolInputError:
         return _tool_error_result("invalid_arguments", "Tool arguments are invalid.")
     except UpstreamError as exc:
-        return _tool_error_result(exc.code, exc.public_message)
+        return _tool_error_result(
+            exc.code,
+            exc.public_message,
+            correlation_id=exc.correlation_id,
+        )
     except Exception:
         logger.exception("Unexpected MCP tool failure for %s", name)
         return _tool_error_result("internal_error", "Blockwart tool execution failed.")
@@ -267,8 +277,45 @@ def _required_string(args: JSON, key: str) -> str:
     return value
 
 
-def _tool_error_result(code: str, message: str) -> types.CallToolResult:
-    payload = {"error": {"code": code, "message": message}}
+def _translate_http_error(exc: HTTPError) -> UpstreamError:
+    try:
+        body = exc.read(65537)
+        payload = None if len(body) > 65536 else json.loads(body.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        payload = None
+    if isinstance(payload, dict) and isinstance(error := payload.get("error"), dict):
+        code = error.get("code")
+        message = error.get("message")
+        correlation_id = error.get("correlation_id")
+        if (
+            isinstance(code, str)
+            and _API_ERROR_CODE_PATTERN.fullmatch(code)
+            and isinstance(message, str)
+            and 0 < len(message) <= 200
+        ):
+            safe_correlation_id = (
+                correlation_id
+                if isinstance(correlation_id, str)
+                and _CORRELATION_ID_PATTERN.fullmatch(correlation_id)
+                else None
+            )
+            return UpstreamError(code, message, safe_correlation_id)
+    return UpstreamError(
+        "upstream_http_error",
+        "Blockwart Agent API returned an error.",
+    )
+
+
+def _tool_error_result(
+    code: str,
+    message: str,
+    *,
+    correlation_id: str | None = None,
+) -> types.CallToolResult:
+    error = {"code": code, "message": message}
+    if correlation_id is not None:
+        error["correlation_id"] = correlation_id
+    payload = {"error": error}
     return types.CallToolResult(
         content=[
             types.TextContent(

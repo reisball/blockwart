@@ -4,11 +4,16 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
 from blockwart.api.deps import get_session
+from blockwart.api.errors import API_ERROR_RESPONSES
 from blockwart.domain.asset_state import AssetHealth, AssetLifecycle
 from blockwart.schemas.catalog import CatalogObjectOut
 from blockwart.services.catalog import get_object, list_objects
 
-router = APIRouter(prefix="/objects", tags=["catalog"])
+router = APIRouter(
+    prefix="/objects",
+    tags=["catalog"],
+    responses=API_ERROR_RESPONSES,
+)
 
 
 @router.get("", response_model=list[CatalogObjectOut])

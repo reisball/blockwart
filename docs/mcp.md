@@ -44,3 +44,11 @@ The MCP wrapper never resolves credential values. It only returns whatever the r
 returns: sanitized object context, relationships, and credential-reference IDs.
 
 Writable tools, credential resolution, and Gateway registration require separate design and approval.
+
+## Error Contract
+
+Local tool validation, unknown-tool, and internal failures use stable public MCP error codes and do
+not include exception text. Structured Agent API errors preserve only the public REST code, message,
+and validated correlation ID. Legacy or malformed upstream error bodies become
+`upstream_http_error`; arbitrary upstream details are not forwarded. Catalog record-integrity
+markers and RFC3339 UTC timestamps pass through unchanged. See `api-boundary-contract.md`.

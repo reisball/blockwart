@@ -92,7 +92,9 @@ and MCP expose its normalized view, while live-data normalization remains an exp
 operation. See `docs/service-interfaces.md`.
 
 The catalog REST API is also read-only. Object changes are available only through authenticated
-UI form routes.
+UI form routes. Catalog, Agent, and MCP boundaries share RFC3339 UTC timestamps, stable REST error
+codes with correlation IDs, and explicit safe diagnostics for corrupt catalog rows. See
+`docs/api-boundary-contract.md`.
 
 A local MCP-compatible stdio wrapper is available as blockwart-mcp. See docs/mcp.md.
 

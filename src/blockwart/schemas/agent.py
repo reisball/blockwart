@@ -1,10 +1,10 @@
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
 from blockwart.domain.asset_state import AssetHealth, AssetLifecycle
 from blockwart.domain.placement import PlacementState
-from blockwart.schemas.catalog import ObjectKind
+from blockwart.schemas.catalog import CatalogRecordDiagnostic, ObjectKind
 
 
 class AgentEndpoint(BaseModel):
@@ -43,6 +43,8 @@ class AgentCatalogObjectSummary(BaseModel):
     lifecycle: AssetLifecycle | None = None
     health: AssetHealth | None = None
     placement_state: PlacementState | None = None
+    record_state: Literal["valid", "corrupt"] = "valid"
+    diagnostics: list[CatalogRecordDiagnostic] = Field(default_factory=list)
 
 
 class AgentRelationshipOut(BaseModel):

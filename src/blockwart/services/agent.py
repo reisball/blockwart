@@ -11,12 +11,14 @@ from blockwart.domain.asset_state import (
     AssetLifecycle,
     state_from_record,
 )
+from blockwart.domain.catalog_data import CatalogDataRead
 from blockwart.domain.interfaces import (
     InterfaceContractError,
     normalize_interface_data,
 )
 from blockwart.domain.placement import PlacementGraph, placement_state
 from blockwart.domain.security import FORBIDDEN_SECRET_KEYS, looks_like_secret
+from blockwart.domain.timestamps import format_rfc3339_utc
 from blockwart.models import CatalogObject, Relationship
 from blockwart.schemas.agent import (
     AgentAssetNode,
@@ -24,7 +26,8 @@ from blockwart.schemas.agent import (
     AgentCatalogObjectSummary,
     AgentRelationshipOut,
 )
-from blockwart.schemas.catalog import ObjectKind
+from blockwart.schemas.catalog import CatalogRecordDiagnostic, ObjectKind
+from blockwart.services.record_integrity import read_catalog_record_data
 
 REDACTED = "[redacted-secret-field]"
 
@@ -195,7 +198,8 @@ class _AgentCatalogResolver:
         return matches
 
     def summary(self, obj: CatalogObject) -> AgentCatalogObjectSummary:
-        data = _safe_object_data(obj)
+        record = _safe_object_record(obj)
+        data = record.data
         state = state_from_record(
             kind=obj.kind,
             status=obj.status,
@@ -222,6 +226,15 @@ class _AgentCatalogResolver:
                 parent_ref=parent_ref,
                 data=data,
             ),
+            record_state=record.record_state,
+            diagnostics=[
+                CatalogRecordDiagnostic(
+                    code=diagnostic.code,
+                    object_id=diagnostic.object_id,
+                    message=diagnostic.message,
+                )
+                for diagnostic in record.diagnostics
+            ],
         )
 
     def context(self, obj: CatalogObject) -> AgentCatalogObjectContext:
@@ -254,7 +267,7 @@ class _AgentCatalogResolver:
             source_references=[
                 dict(reference) for reference in _mapping_list(data.get("source_references"))
             ],
-            updated_at=obj.updated_at.isoformat() if obj.updated_at else None,
+            updated_at=format_rfc3339_utc(obj.updated_at),
             dependencies=self.dependencies(object_ref),
             credential_references=sorted(_collect_credential_references(data)),
         )
@@ -356,12 +369,17 @@ class _AgentCatalogResolver:
         return {"upstream": upstream, "downstream": downstream}
 
 def _safe_object_data(obj: CatalogObject) -> dict[str, Any]:
-    try:
-        data = json.loads(obj.data_json)
-    except (TypeError, json.JSONDecodeError):
-        return {}
-    sanitized = _sanitize_for_agent(data)
-    return sanitized if isinstance(sanitized, dict) else {}
+    return _safe_object_record(obj).data
+
+
+def _safe_object_record(obj: CatalogObject) -> CatalogDataRead:
+    record = read_catalog_record_data(obj, retain_schema_invalid_data=True)
+    sanitized = _sanitize_for_agent(record.data)
+    return CatalogDataRead(
+        data=sanitized if isinstance(sanitized, dict) else {},
+        record_state=record.record_state,
+        diagnostics=record.diagnostics,
+    )
 
 
 def _matches_query(obj: CatalogObject, data: Mapping[str, Any], query_term: str) -> bool:

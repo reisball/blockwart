@@ -331,12 +331,20 @@ class CatalogAssetNode(BaseModel):
     status: str
 
 
+class CatalogRecordDiagnostic(BaseModel):
+    code: Literal["corrupt_record"]
+    object_id: str
+    message: str
+
+
 class CatalogObjectOut(CatalogObjectIn):
     created_at: str | None = None
     updated_at: str | None = None
     last_changed: str | None = None
     parent_path: list[CatalogAssetNode] = Field(default_factory=list)
     placement_state: PlacementState | None = None
+    record_state: Literal["valid", "corrupt"] = "valid"
+    diagnostics: list[CatalogRecordDiagnostic] = Field(default_factory=list)
 
 
 class HealthOut(BaseModel):

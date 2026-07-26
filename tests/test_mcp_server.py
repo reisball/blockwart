@@ -9,7 +9,9 @@ import threading
 from contextlib import contextmanager
 from datetime import timedelta
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from io import BytesIO
 from pathlib import Path
+from urllib.error import HTTPError
 from urllib.parse import parse_qs, urlsplit
 
 import mcp.types as mcp_types
@@ -17,6 +19,7 @@ import pytest
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 
+from blockwart.mcp import server as mcp_server
 from blockwart.mcp.server import TOOLS, ToolInputError, call_tool
 
 
@@ -466,3 +469,42 @@ def test_mcp_rejects_unknown_tools_without_fetching() -> None:
         assert "Unknown tool" in str(exc)
     else:
         raise AssertionError("unknown tool should fail")
+
+
+def test_mcp_translates_stable_api_error_without_leaking_details() -> None:
+    upstream_error = HTTPError(
+        "http://127.0.0.1/api/agent/objects/missing",
+        404,
+        "Not Found",
+        {},
+        BytesIO(
+            json.dumps(
+                {
+                    "error": {
+                        "code": "not_found",
+                        "message": "Catalog object not found",
+                        "correlation_id": "mcp-proof-47",
+                        "details": [{"internal": "must-not-leak"}],
+                    }
+                }
+            ).encode()
+        ),
+    )
+
+    translated = mcp_server._translate_http_error(upstream_error)
+    result = mcp_server._tool_error_result(
+        translated.code,
+        translated.public_message,
+        correlation_id=translated.correlation_id,
+    )
+    payload = json.loads(result.content[0].text)
+
+    assert result.isError is True
+    assert payload == {
+        "error": {
+            "code": "not_found",
+            "message": "Catalog object not found",
+            "correlation_id": "mcp-proof-47",
+        }
+    }
+    assert "must-not-leak" not in result.content[0].text
