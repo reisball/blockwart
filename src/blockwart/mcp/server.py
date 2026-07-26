@@ -80,6 +80,18 @@ QUERY_FILTER_PROPERTIES: JSON = {
         "type": "string",
         "enum": ["unknown", "healthy", "degraded", "down", "maintenance"],
     },
+    "cursor": {"type": "string", "description": "Opaque v1 continuation cursor"},
+    "sort": {
+        "type": "string",
+        "enum": ["id", "label", "kind", "updated_at"],
+        "default": "id",
+    },
+    "direction": {
+        "type": "string",
+        "enum": ["asc", "desc"],
+        "default": "asc",
+    },
+    "include_total": {"type": "boolean", "default": False},
 }
 
 TOOLS: list[JSON] = [
@@ -157,12 +169,25 @@ def call_tool(
     fetch = fetcher or (lambda path, params: fetch_json(path, params, base_url=base_url))
 
     if name == "blockwart.search":
-        payload = fetch("/api/agent/search", _clean_params(args, default_limit=10))
+        payload = _legacy_page_payload(
+            fetch("/api/v1/objects", _clean_params(args, default_limit=10)),
+            args=args,
+            items_field="results",
+        )
     elif name == "blockwart.get_object_context":
         object_id = _required_string(args, "object_id")
-        payload = fetch(f"/api/agent/objects/{quote(object_id, safe='')}", {})
+        context = fetch(f"/api/v1/objects/{quote(object_id, safe='')}", {})
+        payload = {
+            "query": object_id,
+            "count": 1,
+            "objects": [context],
+        }
     elif name == "blockwart.get_context":
-        payload = fetch("/api/agent/context", _clean_params(args, default_limit=5))
+        payload = _legacy_page_payload(
+            fetch("/api/v1/context", _clean_params(args, default_limit=5)),
+            args=args,
+            items_field="objects",
+        )
     else:
         raise UnknownToolError(f"Unknown tool: {name}")
 
@@ -264,10 +289,54 @@ def _clean_params(args: JSON, *, default_limit: int) -> JSON:
         "status",
         "lifecycle",
         "health",
+        "cursor",
+        "sort",
+        "direction",
+        "include_total",
     ):
         if name in args:
             params[name] = args[name]
     return params
+
+
+def _legacy_page_payload(
+    payload: JSON,
+    *,
+    args: JSON,
+    items_field: str,
+) -> JSON:
+    items = payload.get("items")
+    if not isinstance(items, list):
+        raise UpstreamError(
+            "upstream_invalid_response",
+            "Blockwart v1 API returned an invalid response.",
+        )
+    filters = {
+        key: args[key]
+        for key in (
+            "parent",
+            "ip",
+            "port",
+            "endpoint_type",
+            "protocol",
+            "exposure",
+            "status",
+            "lifecycle",
+            "health",
+        )
+        if key in args
+    }
+    return {
+        "query": args.get("q"),
+        "kind": args.get("kind"),
+        "filters": filters,
+        "count": len(items),
+        items_field: items,
+        "next_cursor": payload.get("next_cursor"),
+        "total": payload.get("total"),
+        "sort": payload.get("sort"),
+        "direction": payload.get("direction"),
+    }
 
 
 def _required_string(args: JSON, key: str) -> str:

@@ -100,7 +100,13 @@ Catalog JSON routes and UI reads use the same FastAPI-independent Application Qu
 object, Relationship, Audit, and canonical topology models. Agent context remains a separate,
 sanitized projection while sharing the canonical placement graph. See `docs/read-models.md`.
 
-A local MCP-compatible stdio wrapper is available as blockwart-mcp. See docs/mcp.md.
+The stable GET-only machine contract lives under `/api/v1` with opaque
+keyset cursors, deterministic sorting, structured domain filters, and
+versioned Relationship, Audit, and Topology resources. Existing `/api/objects`
+and `/api/agent` routes remain compatibility surfaces. See `docs/api-v1.md`.
+
+A local MCP-compatible stdio wrapper is available as blockwart-mcp. It reads
+the v1 service layer. See docs/mcp.md.
 
 ## Markdown Import
 

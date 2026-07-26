@@ -18,6 +18,7 @@ from blockwart.schemas.errors import ApiErrorResponse
 
 CORRELATION_ID_HEADER = "X-Correlation-ID"
 API_ERROR_RESPONSES = {
+    400: {"model": ApiErrorResponse, "description": "Invalid request"},
     500: {"model": ApiErrorResponse, "description": "Internal server error"},
     404: {"model": ApiErrorResponse, "description": "Resource not found"},
     409: {"model": ApiErrorResponse, "description": "Conflict"},
@@ -89,6 +90,7 @@ def install_api_error_contract(app: FastAPI) -> None:
         if not _is_api_request(request):
             return await http_exception_handler(request, exc)
         code = {
+            400: "invalid_request",
             403: "forbidden",
             404: "not_found",
             405: "method_not_allowed",

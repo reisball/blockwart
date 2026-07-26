@@ -12,6 +12,11 @@ different compact projection with resolved endpoint, network, dependency, child,
 credential-reference summaries plus defensive secret redaction. Both use the same canonical
 placement graph; neither response shape is derived from the HTML UI. See `read-models.md`.
 
+`/api/agent` is the compatibility namespace. New clients should use the
+cursor-paginated `/api/v1/objects`, `/api/v1/context`, and object-resource
+endpoints documented in `api-v1.md`. Both namespaces delegate to the same
+Agent query service.
+
 ## Endpoints
 
 ### GET /api/agent/search
@@ -106,7 +111,8 @@ enters the catalog.
 
 ## MCP Direction
 
-The first MCP server should wrap these read-only operations:
+The MCP server wraps these read-only operations through `/api/v1` while
+preserving its established `results` and `objects` payload fields:
 
 - blockwart.search
 - blockwart.get_object_context

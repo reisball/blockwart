@@ -65,7 +65,19 @@ def _agent_api_server():
                 body = b'{"detail":"sensitive-upstream-detail"}'
                 self.send_response(503)
             else:
-                body = json.dumps({"path": parsed.path, "query": query}).encode()
+                item = {"path": parsed.path, "query": query}
+                payload = (
+                    {
+                        "items": [item],
+                        "next_cursor": None,
+                        "total": 1,
+                        "sort": "id",
+                        "direction": "asc",
+                    }
+                    if parsed.path in {"/api/v1/objects", "/api/v1/context"}
+                    else item
+                )
+                body = json.dumps(payload).encode()
                 self.send_response(200)
             self.send_header("Content-Type", "application/json")
             self.send_header("Content-Length", str(len(body)))
@@ -234,11 +246,15 @@ def test_mcp_client_completes_handshake_and_calls_every_read_only_tool() -> None
         content = result.content[0]
         assert isinstance(content, mcp_types.TextContent)
         result_payloads[name] = json.loads(content.text)
-    assert result_payloads["blockwart.search"]["path"] == "/api/agent/search"
-    assert result_payloads["blockwart.get_object_context"]["path"] == (
-        "/api/agent/objects/host%2Ffabrik"
+    assert result_payloads["blockwart.search"]["results"][0]["path"] == (
+        "/api/v1/objects"
     )
-    assert result_payloads["blockwart.get_context"]["path"] == "/api/agent/context"
+    assert result_payloads["blockwart.get_object_context"]["objects"][0]["path"] == (
+        "/api/v1/objects/host%2Ffabrik"
+    )
+    assert result_payloads["blockwart.get_context"]["objects"][0]["path"] == (
+        "/api/v1/context"
+    )
 
     upstream_content = upstream_error.content[0]
     assert isinstance(upstream_content, mcp_types.TextContent)
@@ -274,10 +290,10 @@ def test_mcp_client_completes_handshake_and_calls_every_read_only_tool() -> None
 
     assert [request["method"] for request in requests] == ["GET"] * 4
     assert [request["path"] for request in requests] == [
-        "/api/agent/search",
-        "/api/agent/objects/host%2Ffabrik",
-        "/api/agent/context",
-        "/api/agent/search",
+        "/api/v1/objects",
+        "/api/v1/objects/host%2Ffabrik",
+        "/api/v1/context",
+        "/api/v1/objects",
     ]
     assert "Content-Length:" not in stderr
     assert "sensitive-upstream-detail" not in stderr
@@ -337,6 +353,10 @@ def test_mcp_search_and_context_support_host_and_structured_filters() -> None:
             "status",
             "lifecycle",
             "health",
+            "cursor",
+            "sort",
+            "direction",
+            "include_total",
             "limit",
         }
 
@@ -346,7 +366,13 @@ def test_mcp_search_calls_read_only_agent_search_endpoint() -> None:
 
     def fake_fetch(path, params):
         calls.append((path, params))
-        return {"count": 1, "results": [{"ref": "system:brieftraeger"}]}
+        return {
+            "items": [{"ref": "system:brieftraeger"}],
+            "next_cursor": None,
+            "total": None,
+            "sort": "id",
+            "direction": "asc",
+        }
 
     response = call_tool(
         "blockwart.search",
@@ -354,7 +380,12 @@ def test_mcp_search_calls_read_only_agent_search_endpoint() -> None:
         fetcher=fake_fetch,
     )
 
-    assert calls == [("/api/agent/search", {"q": "brieftraeger", "kind": "system", "limit": 3})]
+    assert calls == [
+        (
+            "/api/v1/objects",
+            {"q": "brieftraeger", "kind": "system", "limit": 3},
+        )
+    ]
     payload = json.loads(response["content"][0]["text"])
     assert payload["results"][0]["ref"] == "system:brieftraeger"
     assert response["isError"] is False
@@ -366,15 +397,10 @@ def test_mcp_get_object_context_calls_read_only_agent_object_endpoint() -> None:
     def fake_fetch(path, params):
         calls.append((path, params))
         return {
-            "count": 1,
-            "objects": [
-                {
-                    "ref": "service:n8n-web-ui",
-                    "parent_path": [
-                        {"ref": "host:fabrik"},
-                        {"ref": "system:n8n"},
-                    ],
-                }
+            "ref": "service:n8n-web-ui",
+            "parent_path": [
+                {"ref": "host:fabrik"},
+                {"ref": "system:n8n"},
             ],
         }
 
@@ -384,7 +410,7 @@ def test_mcp_get_object_context_calls_read_only_agent_object_endpoint() -> None:
         fetcher=fake_fetch,
     )
 
-    assert calls == [("/api/agent/objects/n8n", {})]
+    assert calls == [("/api/v1/objects/n8n", {})]
     payload = json.loads(response["content"][0]["text"])
     assert payload["objects"][0]["ref"] == "service:n8n-web-ui"
     assert [node["ref"] for node in payload["objects"][0]["parent_path"]] == [
@@ -398,7 +424,13 @@ def test_mcp_context_calls_read_only_agent_context_endpoint() -> None:
 
     def fake_fetch(path, params):
         calls.append((path, params))
-        return {"count": 2, "objects": []}
+        return {
+            "items": [{"ref": "service:one"}, {"ref": "service:two"}],
+            "next_cursor": None,
+            "total": 2,
+            "sort": "id",
+            "direction": "asc",
+        }
 
     response = call_tool(
         "blockwart.get_context",
@@ -406,7 +438,12 @@ def test_mcp_context_calls_read_only_agent_context_endpoint() -> None:
         fetcher=fake_fetch,
     )
 
-    assert calls == [("/api/agent/context", {"q": "paperless", "kind": "service", "limit": 2})]
+    assert calls == [
+        (
+            "/api/v1/context",
+            {"q": "paperless", "kind": "service", "limit": 2},
+        )
+    ]
     assert json.loads(response["content"][0]["text"])["count"] == 2
 
 
@@ -415,7 +452,13 @@ def test_mcp_forwards_structured_filters_to_the_read_only_agent_api() -> None:
 
     def fake_fetch(path, params):
         calls.append((path, params))
-        return {"count": 1, "objects": [{"ref": "host:baremetal-01"}]}
+        return {
+            "items": [{"ref": "host:baremetal-01"}],
+            "next_cursor": None,
+            "total": 1,
+            "sort": "id",
+            "direction": "asc",
+        }
 
     response = call_tool(
         "blockwart.get_context",
@@ -437,7 +480,7 @@ def test_mcp_forwards_structured_filters_to_the_read_only_agent_api() -> None:
 
     assert calls == [
         (
-            "/api/agent/context",
+            "/api/v1/context",
             {
                 "q": None,
                 "kind": "host",

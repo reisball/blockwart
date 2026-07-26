@@ -37,8 +37,11 @@ identical.
 
 ## HTTP boundary
 
-This query extraction does not add new public resources. Versioned,
-paginated Relationship, Audit, and Topology endpoints belong to issue #43.
-Those endpoints can consume the same query layer without importing UI code.
-Existing `/api`, UI URL, redirect, form, and template contracts remain
-compatible during that work.
+The versioned `/api/v1` object, Relationship, Audit, and Topology resources
+consume this query layer without importing UI code. Agent summaries and
+contexts use the shared Agent resolver on top of the same placement and
+endpoint domain contracts. See `api-v1.md`.
+
+The existing `/api`, UI URL, redirect, form, and template contracts remain
+compatible. Query extraction and v1 delivery do not make HTML templates part
+of the machine API.

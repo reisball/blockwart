@@ -1,5 +1,8 @@
+from __future__ import annotations
+
 import json
 from collections.abc import Mapping
+from dataclasses import dataclass
 from ipaddress import ip_address
 from typing import Any
 
@@ -27,9 +30,133 @@ from blockwart.schemas.agent import (
     AgentRelationshipOut,
 )
 from blockwart.schemas.catalog import CatalogRecordDiagnostic, ObjectKind
+from blockwart.schemas.v1 import ObjectSortField, SortDirection
+from blockwart.services.pagination import CursorPage, paginate_items
 from blockwart.services.record_integrity import read_catalog_record_data
 
 REDACTED = "[redacted-secret-field]"
+
+
+@dataclass(frozen=True, slots=True)
+class AgentObjectPage:
+    items: list[AgentCatalogObjectSummary]
+    next_cursor: str | None
+    total: int | None
+
+
+@dataclass(frozen=True, slots=True)
+class AgentContextPage:
+    items: list[AgentCatalogObjectContext]
+    next_cursor: str | None
+    total: int | None
+
+
+@dataclass(frozen=True, slots=True)
+class _AgentRowsPage:
+    resolver: _AgentCatalogResolver
+    page: CursorPage[CatalogObject]
+
+
+def query_agent_objects_page(
+    session: Session,
+    *,
+    query: str | None = None,
+    kind: ObjectKind | None = None,
+    parent: str | None = None,
+    ip: str | None = None,
+    port: int | None = None,
+    endpoint_type: str | None = None,
+    protocol: str | None = None,
+    exposure: str | None = None,
+    status: str | None = None,
+    lifecycle: AssetLifecycle | None = None,
+    health: AssetHealth | None = None,
+    limit: int = 50,
+    cursor: str | None = None,
+    sort: ObjectSortField = "id",
+    direction: SortDirection = "asc",
+    include_total: bool = False,
+) -> AgentObjectPage:
+    """Return one stable v1 page of sanitized catalog summaries."""
+    rows_page = _query_agent_rows_page(
+        session,
+        query=query,
+        kind=kind,
+        parent=parent,
+        ip=ip,
+        port=port,
+        endpoint_type=endpoint_type,
+        protocol=protocol,
+        exposure=exposure,
+        status=status,
+        lifecycle=lifecycle,
+        health=health,
+        limit=limit,
+        cursor=cursor,
+        sort=sort,
+        direction=direction,
+        include_total=include_total,
+        resource="objects",
+    )
+    return AgentObjectPage(
+        items=[
+            rows_page.resolver.summary(catalog_object)
+            for catalog_object in rows_page.page.items
+        ],
+        next_cursor=rows_page.page.next_cursor,
+        total=rows_page.page.total,
+    )
+
+
+def query_agent_context_page(
+    session: Session,
+    *,
+    query: str | None = None,
+    kind: ObjectKind | None = None,
+    parent: str | None = None,
+    ip: str | None = None,
+    port: int | None = None,
+    endpoint_type: str | None = None,
+    protocol: str | None = None,
+    exposure: str | None = None,
+    status: str | None = None,
+    lifecycle: AssetLifecycle | None = None,
+    health: AssetHealth | None = None,
+    limit: int = 20,
+    cursor: str | None = None,
+    sort: ObjectSortField = "id",
+    direction: SortDirection = "asc",
+    include_total: bool = False,
+) -> AgentContextPage:
+    """Return one stable v1 page of sanitized object contexts."""
+    rows_page = _query_agent_rows_page(
+        session,
+        query=query,
+        kind=kind,
+        parent=parent,
+        ip=ip,
+        port=port,
+        endpoint_type=endpoint_type,
+        protocol=protocol,
+        exposure=exposure,
+        status=status,
+        lifecycle=lifecycle,
+        health=health,
+        limit=limit,
+        cursor=cursor,
+        sort=sort,
+        direction=direction,
+        include_total=include_total,
+        resource="context",
+    )
+    return AgentContextPage(
+        items=[
+            rows_page.resolver.context(catalog_object)
+            for catalog_object in rows_page.page.items
+        ],
+        next_cursor=rows_page.page.next_cursor,
+        total=rows_page.page.total,
+    )
 
 
 def search_agent_objects(
@@ -48,8 +175,8 @@ def search_agent_objects(
     health: AssetHealth | None = None,
     limit: int = 10,
 ) -> list[AgentCatalogObjectSummary]:
-    resolver = _AgentCatalogResolver(session)
-    objects = resolver.search(
+    return query_agent_objects_page(
+        session,
         query=query,
         kind=kind,
         parent=parent,
@@ -62,8 +189,8 @@ def search_agent_objects(
         lifecycle=lifecycle,
         health=health,
         limit=limit,
-    )
-    return [resolver.summary(obj) for obj in objects]
+        sort="kind",
+    ).items
 
 
 def get_agent_object_context(
@@ -93,6 +220,45 @@ def build_agent_context(
     health: AssetHealth | None = None,
     limit: int = 5,
 ) -> list[AgentCatalogObjectContext]:
+    return query_agent_context_page(
+        session,
+        query=query,
+        kind=kind,
+        parent=parent,
+        ip=ip,
+        port=port,
+        endpoint_type=endpoint_type,
+        protocol=protocol,
+        exposure=exposure,
+        status=status,
+        lifecycle=lifecycle,
+        health=health,
+        limit=limit,
+        sort="kind",
+    ).items
+
+
+def _query_agent_rows_page(
+    session: Session,
+    *,
+    query: str | None,
+    kind: ObjectKind | None,
+    parent: str | None,
+    ip: str | None,
+    port: int | None,
+    endpoint_type: str | None,
+    protocol: str | None,
+    exposure: str | None,
+    status: str | None,
+    lifecycle: AssetLifecycle | None,
+    health: AssetHealth | None,
+    limit: int,
+    cursor: str | None,
+    sort: ObjectSortField,
+    direction: SortDirection,
+    include_total: bool,
+    resource: str,
+) -> _AgentRowsPage:
     resolver = _AgentCatalogResolver(session)
     objects = resolver.search(
         query=query,
@@ -106,13 +272,37 @@ def build_agent_context(
         status=status,
         lifecycle=lifecycle,
         health=health,
-        limit=limit,
+        limit=None,
     )
-    return [resolver.context(obj) for obj in objects]
+    page = paginate_items(
+        objects,
+        key=lambda catalog_object: _object_sort_key(catalog_object, sort),
+        limit=limit,
+        resource=resource,
+        sort=sort,
+        direction=direction,
+        query={
+            "endpoint_type": _normalized_filter(endpoint_type),
+            "exposure": _normalized_filter(exposure),
+            "health": health,
+            "ip": ip,
+            "kind": kind,
+            "lifecycle": lifecycle,
+            "parent": parent,
+            "port": port,
+            "protocol": _normalized_filter(protocol),
+            "q": query.strip().casefold() if query else None,
+            "status": _normalized_filter(status),
+        },
+        cursor=cursor,
+        include_total=include_total,
+    )
+    return _AgentRowsPage(resolver=resolver, page=page)
 
 
 class _AgentCatalogResolver:
     def __init__(self, session: Session) -> None:
+        self.session = session
         self.objects = list(
             session.scalars(
                 select(CatalogObject).order_by(CatalogObject.kind, CatalogObject.label)
@@ -145,14 +335,20 @@ class _AgentCatalogResolver:
         status: str | None,
         lifecycle: AssetLifecycle | None,
         health: AssetHealth | None,
-        limit: int,
+        limit: int | None,
     ) -> list[CatalogObject]:
         matches: list[CatalogObject] = []
-        query_term = query.casefold() if query else None
+        normalized_query = query.strip() if query else ""
+        query_term = normalized_query.casefold() if normalized_query else None
+        candidate_ids = self._candidate_ids(
+            query=query,
+            kind=kind,
+            status=status,
+            lifecycle=lifecycle,
+            health=health,
+        )
         for obj in self.objects:
-            if kind and obj.kind != kind:
-                continue
-            if status and obj.status.casefold() != status.casefold():
+            if obj.id not in candidate_ids:
                 continue
             data = _safe_object_data(obj)
             state = state_from_record(
@@ -193,9 +389,38 @@ class _AgentCatalogResolver:
             ):
                 continue
             matches.append(obj)
-            if len(matches) == limit:
+            if limit is not None and len(matches) == limit:
                 break
         return matches
+
+    def _candidate_ids(
+        self,
+        *,
+        query: str | None,
+        kind: ObjectKind | None,
+        status: str | None,
+        lifecycle: AssetLifecycle | None,
+        health: AssetHealth | None,
+    ) -> set[str]:
+        statement = select(CatalogObject.id)
+        if kind:
+            statement = statement.where(CatalogObject.kind == kind)
+        if status:
+            statement = statement.where(CatalogObject.status.ilike(status))
+        if lifecycle:
+            statement = statement.where(CatalogObject.lifecycle == lifecycle)
+        if health:
+            statement = statement.where(CatalogObject.health == health)
+        normalized_query = query.strip() if query else ""
+        if normalized_query:
+            term = f"%{normalized_query}%"
+            statement = statement.where(
+                CatalogObject.id.ilike(term)
+                | CatalogObject.label.ilike(term)
+                | CatalogObject.summary.ilike(term)
+                | CatalogObject.data_json.ilike(term)
+            )
+        return set(self.session.scalars(statement).all())
 
     def summary(self, obj: CatalogObject) -> AgentCatalogObjectSummary:
         record = _safe_object_record(obj)
@@ -401,6 +626,23 @@ def _endpoint_value_matches(
 
 def _object_ref(obj: CatalogObject) -> str:
     return f"{obj.kind}:{obj.id}"
+
+
+def _object_sort_key(
+    obj: CatalogObject,
+    sort: ObjectSortField,
+) -> tuple[str, str]:
+    if sort == "label":
+        return obj.label.casefold(), obj.id
+    if sort == "kind":
+        return obj.kind.casefold(), f"{obj.label.casefold()}\0{obj.id}"
+    if sort == "updated_at":
+        return format_rfc3339_utc(obj.updated_at) or "", obj.id
+    return obj.id.casefold(), obj.id
+
+
+def _normalized_filter(value: str | None) -> str | None:
+    return value.casefold() if value else None
 
 
 def _optional_text(value: Any) -> str | None:
