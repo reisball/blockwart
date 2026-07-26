@@ -14,6 +14,21 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v4
 
+      - name: Report runner resource pressure
+        run: |
+          printf 'loadavg='
+          cat /proc/loadavg
+          for resource in cpu io memory; do
+            if [ -r "/proc/pressure/$resource" ]; then
+              printf 'pressure_%s=' "$resource"
+              tr '\n' ' ' <"/proc/pressure/$resource"
+              printf '\n'
+            fi
+          done
+          df -h /
+          docker info \
+            --format 'docker_driver={{.Driver}} containers={{.Containers}} images={{.Images}}'
+
       - name: Set up Python 3.12
         uses: actions/setup-python@v5
         with:
