@@ -1,7 +1,8 @@
 # API Boundary Contract
 
-Blockwart's catalog and Agent APIs use one external time, error, and record-integrity
-contract. The HTML UI remains a separate surface.
+Blockwart's v1, catalog-compatibility, and Agent-compatibility APIs use one
+external time, error, and record-integrity contract. The HTML UI remains a
+separate surface.
 
 ## Timestamps
 

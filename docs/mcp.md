@@ -3,18 +3,23 @@
 Blockwart ships a local MCP stdio server named `blockwart-mcp`. Transport and protocol lifecycle
 are implemented by the official Python MCP SDK.
 
-It wraps only the read-only Agent API:
+It wraps only the read-only v1 API:
 
-- blockwart.search -> GET /api/agent/search
-- blockwart.get_object_context -> GET /api/agent/objects/{object_id}
-- blockwart.get_context -> GET /api/agent/context
+- blockwart.search -> GET /api/v1/objects
+- blockwart.get_object_context -> GET /api/v1/objects/{object_id}
+- blockwart.get_context -> GET /api/v1/context
 
 There are no writable MCP tools.
 
 `blockwart.search` and `blockwart.get_context` accept `host`, `system`, `netzwerk`, and `service`
-as kinds. Both tools also forward the Agent API's structured `parent`, `ip`, `port`, `status`,
-`lifecycle`, and `health` filters. Resolved context comes from the same service implementation used
-by REST.
+as kinds. Both tools also forward v1's structured `parent`, `ip`, `port`,
+`endpoint_type`, `protocol`, `exposure`, `status`, `lifecycle`, and `health`
+filters plus `cursor`, `sort`, `direction`, and optional `include_total`.
+Resolved context comes from the same service implementation used by REST.
+
+For compatibility, MCP output retains the established `results` and `objects`
+fields. It additionally returns v1 `next_cursor`, `total`, `sort`, and
+`direction` metadata.
 
 ## Local Usage
 
@@ -40,7 +45,7 @@ notification and ping request through the SDK protocol implementation.
 
 ## Secret Handling
 
-The MCP wrapper never resolves credential values. It only returns whatever the read-only Agent API
+The MCP wrapper never resolves credential values. It only returns whatever the read-only v1 API
 returns: sanitized object context, relationships, and credential-reference IDs.
 
 Writable tools, credential resolution, and Gateway registration require separate design and approval.

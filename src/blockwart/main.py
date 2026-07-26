@@ -2,7 +2,7 @@ from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 
 from blockwart.api.errors import install_api_error_contract
-from blockwart.api.routes import agent, catalog, health
+from blockwart.api.routes import agent, catalog, health, v1
 from blockwart.config import Settings, get_settings
 from blockwart.ui.admin import router as admin_router
 from blockwart.ui.paths import STATIC_DIR
@@ -18,6 +18,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(health.router, prefix="/api")
     app.include_router(catalog.router, prefix="/api")
     app.include_router(agent.router, prefix="/api")
+    app.include_router(v1.router, prefix="/api")
     app.include_router(admin_router)
     app.include_router(ui_router)
     return app

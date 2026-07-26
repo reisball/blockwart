@@ -152,7 +152,10 @@ def _write_audit(session: Session, object_id: str | None, action: str, summary: 
     )
 
 
-def list_audit_events_for_object(session: Session, object_id: str) -> list[dict[str, str]]:
+def list_audit_events_for_object(
+    session: Session,
+    object_id: str,
+) -> list[dict[str, str | int]]:
     statement = (
         select(AuditEvent)
         .where(AuditEvent.object_id == object_id)
@@ -160,6 +163,7 @@ def list_audit_events_for_object(session: Session, object_id: str) -> list[dict[
     )
     return [
         {
+            "id": row.id,
             "action": row.action,
             "actor": row.actor,
             "summary": _audit_summary(row.summary),

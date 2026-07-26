@@ -202,6 +202,7 @@ serve Blockwart through HTTPS and set `BLOCKWART_ADMIN_COOKIE_SECURE=true`.
 
 ## Agent Access
 
-The read-only agent API lives under `/api/agent`. The local MCP wrapper uses that API through
-`BLOCKWART_API_BASE_URL`. Deployment of the MCP wrapper into OpenClaw/Gateway config is a separate
-approval step.
+The stable read-only API lives under `/api/v1`; `/api/agent` remains a
+compatibility namespace. The local MCP wrapper uses v1 through
+`BLOCKWART_API_BASE_URL`. Deployment of the MCP wrapper into OpenClaw/Gateway
+config is a separate approval step.

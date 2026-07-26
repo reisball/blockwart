@@ -79,6 +79,7 @@ class ObjectRelationshipsReadModel(TypedDict):
 
 
 class AuditEventReadModel(TypedDict):
+    id: int
     action: str
     actor: str
     summary: str
@@ -227,6 +228,7 @@ def query_catalog_detail(
         ],
         audit_events=[
             {
+                "id": int(event["id"]),
                 "action": event["action"],
                 "actor": event["actor"],
                 "summary": event["summary"],
@@ -234,6 +236,38 @@ def query_catalog_detail(
             }
             for event in audit_events
         ],
+    )
+
+
+def query_catalog_topology(
+    session: Session,
+    object_id: str,
+) -> tuple[str, TopologyReadModel] | None:
+    """Return one canonical topology resource without UI dependencies."""
+    all_objects = sort_for_browse(list_objects(session))
+    catalog_object = next(
+        (
+            candidate
+            for candidate in all_objects
+            if candidate.id == object_id
+        ),
+        None,
+    )
+    if catalog_object is None:
+        return None
+    object_map = {
+        f"{candidate.kind}:{candidate.id}": candidate
+        for candidate in all_objects
+    }
+    relationships = _list_relationships(session)
+    object_ref = f"{catalog_object.kind}:{catalog_object.id}"
+    return (
+        object_ref,
+        build_topology_read_model(
+            catalog_object,
+            relationships,
+            object_map,
+        ),
     )
 
 
