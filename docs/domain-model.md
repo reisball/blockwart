@@ -12,6 +12,27 @@ Blockwart version 1 models concrete infrastructure assets:
 
 `netzwerk` and the non-public catalog kinds are not placement levels.
 
+## Lifecycle and operational health
+
+Infrastructure assets use two independent, closed dimensions:
+
+- `lifecycle`: `planned`, `active`, or `retired`
+- `health`: `unknown`, `healthy`, `degraded`, `down`, or `maintenance`
+
+The values are stored in dedicated `catalog_objects` columns for `host`, `system`, `netzwerk`, and
+`service`. They are absent for knowledge objects such as runbooks and decisions. Free-form
+`data.lifecycle` and `data.health` fields are rejected.
+
+The legacy `status` column remains a derived compatibility field while UI work is out of scope:
+`retired` maps to `deleted`; `planned`, `down`, and `maintenance` map to `inactive`; all other
+active-lifecycle pairs map to `active`. Health is never inferred as healthy. A legacy `active`
+record becomes `active`/`unknown`, `inactive` becomes `planned`/`unknown`, and `deleted` becomes
+`retired`/`unknown`.
+
+The database enforces the vocabulary, asset-only presence, and compatibility mapping. Seeds,
+Markdown import, catalog REST, Agent API, and MCP use the same contract. Lifecycle and health
+changes are named separately in object-update audit summaries.
+
 ## Canonical placement
 
 Placement has one storage source: a `hosts` relationship whose direction is

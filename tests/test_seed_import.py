@@ -41,6 +41,62 @@ def test_import_pilot_seed_into_fresh_db(session: Session) -> None:
         "ollama",
         "splunk",
     }
+    asset_states = session.execute(
+        select(
+            CatalogObject.status,
+            CatalogObject.lifecycle,
+            CatalogObject.health,
+        ).where(CatalogObject.kind.in_({"host", "system", "netzwerk", "service"}))
+    ).all()
+    assert asset_states
+    assert all(
+        lifecycle is not None and health is not None
+        for _, lifecycle, health in asset_states
+    )
+    assert all(
+        (status, lifecycle, health) == ("active", "active", "unknown")
+        for status, lifecycle, health in asset_states
+    )
+    knowledge_states = session.execute(
+        select(CatalogObject.lifecycle, CatalogObject.health).where(
+            CatalogObject.kind.in_(
+                {"credential_reference", "runbook", "decision", "project"}
+            )
+        )
+    ).all()
+    assert knowledge_states
+    assert all(state == (None, None) for state in knowledge_states)
+
+
+def test_seed_accepts_explicit_asset_state_and_derives_compatibility_status(
+    session: Session,
+) -> None:
+    result = import_seed_payload(
+        session,
+        {
+            "schema_version": 1,
+            "objects": [
+                {
+                    "id": "maintenance-api",
+                    "kind": "service",
+                    "label": "Maintenance API",
+                    "lifecycle": "active",
+                    "health": "maintenance",
+                    "data": {"schema_version": 1},
+                }
+            ],
+            "relationships": [],
+        },
+    )
+    row = session.get(CatalogObject, "maintenance-api")
+
+    assert result.objects_imported == 1
+    assert row is not None
+    assert (row.status, row.lifecycle, row.health) == (
+        "inactive",
+        "active",
+        "maintenance",
+    )
 
 
 def test_pilot_seed_imports_core_ids_and_kinds(session: Session) -> None:

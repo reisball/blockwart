@@ -6,6 +6,11 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from blockwart.domain.asset_state import (
+    AssetHealth,
+    AssetLifecycle,
+    state_from_record,
+)
 from blockwart.domain.interfaces import (
     InterfaceContractError,
     normalize_interface_data,
@@ -36,8 +41,8 @@ def search_agent_objects(
     protocol: str | None = None,
     exposure: str | None = None,
     status: str | None = None,
-    lifecycle: str | None = None,
-    health: str | None = None,
+    lifecycle: AssetLifecycle | None = None,
+    health: AssetHealth | None = None,
     limit: int = 10,
 ) -> list[AgentCatalogObjectSummary]:
     resolver = _AgentCatalogResolver(session)
@@ -81,8 +86,8 @@ def build_agent_context(
     protocol: str | None = None,
     exposure: str | None = None,
     status: str | None = None,
-    lifecycle: str | None = None,
-    health: str | None = None,
+    lifecycle: AssetLifecycle | None = None,
+    health: AssetHealth | None = None,
     limit: int = 5,
 ) -> list[AgentCatalogObjectContext]:
     resolver = _AgentCatalogResolver(session)
@@ -135,8 +140,8 @@ class _AgentCatalogResolver:
         protocol: str | None,
         exposure: str | None,
         status: str | None,
-        lifecycle: str | None,
-        health: str | None,
+        lifecycle: AssetLifecycle | None,
+        health: AssetHealth | None,
         limit: int,
     ) -> list[CatalogObject]:
         matches: list[CatalogObject] = []
@@ -147,11 +152,17 @@ class _AgentCatalogResolver:
             if status and obj.status.casefold() != status.casefold():
                 continue
             data = _safe_object_data(obj)
+            state = state_from_record(
+                kind=obj.kind,
+                status=obj.status,
+                lifecycle=obj.lifecycle,
+                health=obj.health,
+            )
             if query_term and not _matches_query(obj, data, query_term):
                 continue
-            if lifecycle and not _matches_data_value(data, "lifecycle", lifecycle):
+            if lifecycle and (state is None or state.lifecycle != lifecycle):
                 continue
-            if health and not _matches_data_value(data, "health", health):
+            if health and (state is None or state.health != health):
                 continue
             if parent and parent not in self.parent_path_refs(obj):
                 continue
@@ -185,6 +196,12 @@ class _AgentCatalogResolver:
 
     def summary(self, obj: CatalogObject) -> AgentCatalogObjectSummary:
         data = _safe_object_data(obj)
+        state = state_from_record(
+            kind=obj.kind,
+            status=obj.status,
+            lifecycle=obj.lifecycle,
+            health=obj.health,
+        )
         parent_ref = self.canonical_parent_ref(obj)
         endpoints = self.endpoints(obj)
         return AgentCatalogObjectSummary(
@@ -192,14 +209,14 @@ class _AgentCatalogResolver:
             id=obj.id,
             kind=obj.kind,
             label=obj.label,
-            status=obj.status,
+            status=state.status if state is not None else obj.status,
             summary=obj.summary,
             parent=self.node(parent_ref) if parent_ref else None,
             ips=self.resolved_ips(obj),
             hostnames=self.resolved_hostnames(obj),
             primary_endpoint=endpoints[0] if endpoints else None,
-            lifecycle=_optional_text(data.get("lifecycle")),
-            health=_optional_text(data.get("health")),
+            lifecycle=state.lifecycle if state is not None else None,
+            health=state.health if state is not None else None,
             placement_state=placement_state(
                 kind=obj.kind,
                 parent_ref=parent_ref,
@@ -350,11 +367,6 @@ def _safe_object_data(obj: CatalogObject) -> dict[str, Any]:
 def _matches_query(obj: CatalogObject, data: Mapping[str, Any], query_term: str) -> bool:
     values = [obj.id, obj.label, obj.summary or "", json.dumps(data, sort_keys=True)]
     return any(query_term in value.casefold() for value in values)
-
-
-def _matches_data_value(data: Mapping[str, Any], key: str, expected: str) -> bool:
-    value = data.get(key)
-    return isinstance(value, str) and value.casefold() == expected.casefold()
 
 
 def _endpoint_value_matches(

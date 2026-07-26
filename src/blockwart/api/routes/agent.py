@@ -4,6 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
 from blockwart.api.deps import get_session
+from blockwart.domain.asset_state import AssetHealth, AssetLifecycle
 from blockwart.schemas.agent import AgentContextOut, AgentSearchOut
 from blockwart.schemas.catalog import ObjectKind
 from blockwart.services.agent import (
@@ -30,8 +31,8 @@ def agent_search(
     protocol: str | None = None,
     exposure: str | None = None,
     status: str | None = None,
-    lifecycle: str | None = None,
-    health: str | None = None,
+    lifecycle: AssetLifecycle | None = None,
+    health: AssetHealth | None = None,
     limit: Annotated[int, Query(ge=1, le=50)] = 10,
 ) -> AgentSearchOut:
     filters = _active_filters(
@@ -84,8 +85,8 @@ def agent_context(
     protocol: str | None = None,
     exposure: str | None = None,
     status: str | None = None,
-    lifecycle: str | None = None,
-    health: str | None = None,
+    lifecycle: AssetLifecycle | None = None,
+    health: AssetHealth | None = None,
     limit: Annotated[int, Query(ge=1, le=20)] = 5,
 ) -> AgentContextOut:
     filters = _active_filters(
@@ -124,8 +125,8 @@ def _active_filters(
     protocol: str | None,
     exposure: str | None,
     status: str | None,
-    lifecycle: str | None,
-    health: str | None,
+    lifecycle: AssetLifecycle | None,
+    health: AssetHealth | None,
 ) -> dict[str, str | int]:
     filters: dict[str, str | int | None] = {
         "parent": parent,

@@ -43,6 +43,8 @@ def resolved_asset_graph(session_factory) -> None:
             kind="host",
             label="Bare Metal 01",
             status="active",
+            lifecycle="active",
+            health="unknown",
             summary="Physical host.",
             data_json=(
                 '{"schema_version": 1, "network": {'
@@ -56,10 +58,11 @@ def resolved_asset_graph(session_factory) -> None:
             kind="system",
             label="Runtime 01",
             status="active",
+            lifecycle="active",
+            health="healthy",
             summary="Runtime hosted on bare metal.",
             data_json=(
-                '{"schema_version": 1, "lifecycle": "production", "health": "healthy", '
-                '"network": {"hostnames": ["runtime-01"], '
+                '{"schema_version": 1, "network": {"hostnames": ["runtime-01"], '
                 '"addresses": [{"ip": "10.20.0.20"}]}}'
             ),
         ),
@@ -68,10 +71,12 @@ def resolved_asset_graph(session_factory) -> None:
             kind="service",
             label="Runtime API",
             status="active",
+            lifecycle="active",
+            health="healthy",
             summary="Service on the runtime.",
             data_json=(
-                '{"schema_version": 1, "lifecycle": "production", "health": "healthy", '
-                '"endpoints": [{"type": "REST API", "url": "https://10.20.0.20:8443/api", '
+                '{"schema_version": 1, "endpoints": [{"type": "REST API", '
+                '"url": "https://10.20.0.20:8443/api", '
                 '"host": "10.20.0.20", "port": 8443, "protocol": "https"}]}'
             ),
         ),
@@ -80,6 +85,8 @@ def resolved_asset_graph(session_factory) -> None:
             kind="service",
             label="Auth",
             status="active",
+            lifecycle="active",
+            health="unknown",
             summary="Authentication dependency.",
             data_json='{"schema_version": 1}',
         ),
@@ -88,6 +95,8 @@ def resolved_asset_graph(session_factory) -> None:
             kind="service",
             label="Hardware Console",
             status="active",
+            lifecycle="active",
+            health="unknown",
             summary="Service running directly on hardware.",
             data_json=(
                 '{"schema_version": 1, '
@@ -100,6 +109,8 @@ def resolved_asset_graph(session_factory) -> None:
             kind="service",
             label="Unassigned Service",
             status="inactive",
+            lifecycle="planned",
+            health="unknown",
             summary="Inventory item without placement.",
             data_json=(
                 '{"schema_version": 1, "placement": {'
@@ -187,6 +198,8 @@ def test_agent_output_redacts_secret_shaped_data(client: TestClient, session_fac
                 kind="system",
                 label="Unsafe Import",
                 status="active",
+                lifecycle="active",
+                health="unknown",
                 summary="Bypassed validation to prove agent output sanitization.",
                 data_json='{"schema_version": 1, "password": "super-secret-value"}',
             )
@@ -230,7 +243,7 @@ def test_agent_context_resolves_host_system_service_path(
         "exposure": "unknown",
         "health_url": None,
     }
-    assert obj["lifecycle"] == "production"
+    assert obj["lifecycle"] == "active"
     assert obj["health"] == "healthy"
     assert obj["dependencies"] == {
         "upstream": ["service:auth"],
@@ -345,7 +358,7 @@ def test_agent_search_supports_structured_asset_filters(
             "protocol": "https",
             "exposure": "unknown",
             "status": "active",
-            "lifecycle": "production",
+            "lifecycle": "active",
             "health": "healthy",
         },
     )
@@ -360,10 +373,14 @@ def test_agent_search_supports_structured_asset_filters(
         "protocol": "https",
         "exposure": "unknown",
         "status": "active",
-        "lifecycle": "production",
+        "lifecycle": "active",
         "health": "healthy",
     }
     assert [result["ref"] for result in payload["results"]] == ["service:runtime-api"]
+    assert client.get(
+        "/api/agent/search",
+        params={"lifecycle": "production"},
+    ).status_code == 422
 
 
 def test_agent_context_query_uses_the_same_structured_filters(

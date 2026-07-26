@@ -27,6 +27,8 @@ def _object(
         kind=kind,
         label=object_id,
         status="active",
+        lifecycle="active",
+        health="unknown",
         data_json=json.dumps(data, sort_keys=True),
     )
 

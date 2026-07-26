@@ -18,11 +18,41 @@ from blockwart.db.base import Base
 
 class CatalogObject(Base):
     __tablename__ = "catalog_objects"
+    __table_args__ = (
+        CheckConstraint(
+            "lifecycle IS NULL OR lifecycle IN ('planned','active','retired')",
+            name="ck_catalog_objects_lifecycle",
+        ),
+        CheckConstraint(
+            "health IS NULL OR "
+            "health IN ('unknown','healthy','degraded','down','maintenance')",
+            name="ck_catalog_objects_health",
+        ),
+        CheckConstraint(
+            "(kind IN ('host','system','netzwerk','service') "
+            "AND lifecycle IS NOT NULL AND health IS NOT NULL) OR "
+            "(kind NOT IN ('host','system','netzwerk','service') "
+            "AND lifecycle IS NULL AND health IS NULL)",
+            name="ck_catalog_objects_asset_state",
+        ),
+        CheckConstraint(
+            "lifecycle IS NULL OR "
+            "(lifecycle = 'planned' AND status = 'inactive') OR "
+            "(lifecycle = 'retired' AND status = 'deleted') OR "
+            "(lifecycle = 'active' AND health IN ('down','maintenance') "
+            "AND status = 'inactive') OR "
+            "(lifecycle = 'active' AND health IN ('unknown','healthy','degraded') "
+            "AND status = 'active')",
+            name="ck_catalog_objects_compatibility_status",
+        ),
+    )
 
     id: Mapped[str] = mapped_column(String(128), primary_key=True)
     kind: Mapped[str] = mapped_column(String(64), index=True)
     label: Mapped[str] = mapped_column(String(255), index=True)
     status: Mapped[str] = mapped_column(String(64), default="unknown")
+    lifecycle: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    health: Mapped[str | None] = mapped_column(String(32), nullable=True)
     summary: Mapped[str | None] = mapped_column(Text)
     data_json: Mapped[str] = mapped_column(Text, default="{}")
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())

@@ -1,9 +1,10 @@
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
 from blockwart.api.deps import get_session
+from blockwart.domain.asset_state import AssetHealth, AssetLifecycle
 from blockwart.schemas.catalog import CatalogObjectOut
 from blockwart.services.catalog import get_object, list_objects
 
@@ -11,8 +12,18 @@ router = APIRouter(prefix="/objects", tags=["catalog"])
 
 
 @router.get("", response_model=list[CatalogObjectOut])
-def get_objects(session: Annotated[Session, Depends(get_session)]) -> list[CatalogObjectOut]:
-    return list_objects(session)
+def get_objects(
+    session: Annotated[Session, Depends(get_session)],
+    lifecycle: Annotated[
+        AssetLifecycle | None,
+        Query(description="Exact asset lifecycle"),
+    ] = None,
+    health: Annotated[
+        AssetHealth | None,
+        Query(description="Exact asset health"),
+    ] = None,
+) -> list[CatalogObjectOut]:
+    return list_objects(session, lifecycle=lifecycle, health=health)
 
 
 @router.get("/{object_id}", response_model=CatalogObjectOut)

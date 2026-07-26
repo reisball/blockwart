@@ -8,6 +8,7 @@ import yaml
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from blockwart.domain.asset_state import resolve_asset_state, state_from_record
 from blockwart.domain.relationships import (
     dependency_relationships_from_data,
     validate_data_references,
@@ -61,13 +62,33 @@ def import_seed_payload(session: Session, payload: dict[str, Any]) -> SeedImport
     for obj in objects:
         row = session.get(CatalogObject, obj.id)
         data_json = json.dumps(obj.data, sort_keys=True)
+        current_state = (
+            state_from_record(
+                kind=row.kind,
+                status=row.status,
+                lifecycle=row.lifecycle,
+                health=row.health,
+            )
+            if row is not None
+            else None
+        )
+        target_state = resolve_asset_state(
+            kind=obj.kind,
+            status=obj.status,
+            lifecycle=obj.lifecycle,
+            health=obj.health,
+            current=current_state,
+        )
+        target_status = target_state.status if target_state is not None else obj.status
         if row is None:
             session.add(
                 CatalogObject(
                     id=obj.id,
                     kind=obj.kind,
                     label=obj.label,
-                    status=obj.status,
+                    status=target_status,
+                    lifecycle=target_state.lifecycle if target_state is not None else None,
+                    health=target_state.health if target_state is not None else None,
                     summary=obj.summary,
                     data_json=data_json,
                 )
@@ -78,7 +99,9 @@ def import_seed_payload(session: Session, payload: dict[str, Any]) -> SeedImport
         ensure_kind_change_allowed(session, row, obj.kind)
         row.kind = obj.kind
         row.label = obj.label
-        row.status = obj.status
+        row.status = target_status
+        row.lifecycle = target_state.lifecycle if target_state is not None else None
+        row.health = target_state.health if target_state is not None else None
         row.summary = obj.summary
         row.data_json = data_json
         _write_seed_audit(session, obj.id, "seed_update", f"Seed update {obj.kind}:{obj.id}")

@@ -82,6 +82,144 @@ def test_catalog_input_rejects_unsupported_status() -> None:
         )
 
 
+def test_catalog_input_rejects_invalid_or_non_asset_state_fields() -> None:
+    with pytest.raises(ValidationError):
+        CatalogObjectIn.model_validate(
+            {
+                "id": "invalid-health",
+                "kind": "service",
+                "label": "Invalid Health",
+                "lifecycle": "active",
+                "health": "reachable",
+            }
+        )
+    with pytest.raises(ValidationError, match="only valid for asset kinds"):
+        CatalogObjectIn.model_validate(
+            {
+                "id": "invalid-runbook-state",
+                "kind": "runbook",
+                "label": "Invalid Runbook State",
+                "lifecycle": "active",
+                "health": "unknown",
+            }
+        )
+    with pytest.raises(ValidationError, match="top-level fields"):
+        CatalogObjectIn.model_validate(
+            {
+                "id": "legacy-data-state",
+                "kind": "service",
+                "label": "Legacy Data State",
+                "data": {"lifecycle": "active", "health": "healthy"},
+            }
+        )
+
+
+def test_catalog_rest_filters_canonical_lifecycle_and_health(
+    client: TestClient,
+    session_factory,
+) -> None:
+    with session_factory() as session:
+        with transaction(session):
+            active = upsert_object(
+                session,
+                CatalogObjectIn(
+                    id="active-api",
+                    kind="service",
+                    label="Active API",
+                    lifecycle="active",
+                    health="healthy",
+                    data={"schema_version": 1},
+                ),
+            )
+            down = upsert_object(
+                session,
+                CatalogObjectIn(
+                    id="down-api",
+                    kind="service",
+                    label="Down API",
+                    lifecycle="active",
+                    health="down",
+                    data={"schema_version": 1},
+                ),
+            )
+            planned = upsert_object(
+                session,
+                CatalogObjectIn(
+                    id="planned-api",
+                    kind="service",
+                    label="Planned API",
+                    status="inactive",
+                    data={"schema_version": 1},
+                ),
+            )
+
+    assert (active.status, active.lifecycle, active.health) == (
+        "active",
+        "active",
+        "healthy",
+    )
+    assert (down.status, down.lifecycle, down.health) == (
+        "inactive",
+        "active",
+        "down",
+    )
+    assert (planned.status, planned.lifecycle, planned.health) == (
+        "inactive",
+        "planned",
+        "unknown",
+    )
+    active_results = client.get(
+        "/api/objects",
+        params={"lifecycle": "active", "health": "healthy"},
+    )
+    planned_results = client.get(
+        "/api/objects",
+        params={"lifecycle": "planned", "health": "unknown"},
+    )
+
+    assert active_results.status_code == 200
+    assert [item["id"] for item in active_results.json()] == ["active-api"]
+    assert planned_results.status_code == 200
+    assert [item["id"] for item in planned_results.json()] == ["planned-api"]
+    assert client.get("/api/objects", params={"health": "reachable"}).status_code == 422
+
+
+def test_asset_state_changes_have_distinct_audit_fields(session_factory) -> None:
+    with session_factory() as session:
+        with transaction(session):
+            upsert_object(
+                session,
+                CatalogObjectIn(
+                    id="state-audit",
+                    kind="service",
+                    label="State Audit",
+                    data={"schema_version": 1},
+                ),
+            )
+            upsert_object(
+                session,
+                CatalogObjectIn(
+                    id="state-audit",
+                    kind="service",
+                    label="State Audit",
+                    lifecycle="active",
+                    health="degraded",
+                    data={"schema_version": 1},
+                ),
+            )
+
+    with session_factory() as session:
+        audits = session.scalars(
+            select(AuditEvent)
+            .where(AuditEvent.object_id == "state-audit")
+            .order_by(AuditEvent.id)
+        ).all()
+
+    assert len(audits) == 2
+    assert "Feld Health wurde von unknown auf degraded geändert" in audits[-1].summary
+    assert "Lifecycle" not in audits[-1].summary
+
+
 def test_catalog_input_accepts_only_explicit_unassigned_placement_metadata() -> None:
     accepted = CatalogObjectIn.model_validate(
         {

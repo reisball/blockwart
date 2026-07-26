@@ -24,13 +24,14 @@ Query parameters:
 - protocol: optional exact application protocol such as `https`, `ssh`, or `smb`
 - exposure: optional exact `loopback`, `lan`, `vpn`, `internal`, `public`, or `unknown`
 - status: optional catalog status
-- lifecycle: optional exact lifecycle value
-- health: optional exact health value
+- lifecycle: optional exact `planned`, `active`, or `retired`
+- health: optional exact `unknown`, `healthy`, `degraded`, `down`, or `maintenance`
 - limit: optional result limit, 1..50, default 10
 
 The parent filter matches the complete canonical parent path, not only the immediate parent.
-Lifecycle and health currently reflect the object's own data fields; their final vocabulary belongs
-to the domain contracts tracked separately from this read API.
+Lifecycle and health are canonical catalog columns, not free-form object-data fields. Asset writes
+that omit them keep an existing canonical pair; new legacy-style writes are mapped
+deterministically from `status`. See `domain-model.md`.
 
 ### GET /api/agent/objects/{object_id}
 

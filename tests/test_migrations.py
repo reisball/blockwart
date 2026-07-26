@@ -24,7 +24,8 @@ from blockwart.db.migrations import (
 
 PREVIOUS_HEAD_REVISION = "20260723_0002"
 PLACEMENT_REVISION = "20260724_0003"
-HEAD_REVISION = "20260724_0004"
+RELATIONSHIP_REVISION = "20260724_0004"
+HEAD_REVISION = "20260726_0005"
 PROJECT_ALEMBIC_CONFIG = Path(__file__).resolve().parents[1] / "alembic.ini"
 LEGACY_SNAPSHOT = Path(__file__).resolve().parent / "fixtures" / "legacy_snapshot.sql"
 
@@ -449,6 +450,200 @@ def test_relationship_integrity_migration_rejects_invalid_data_before_writing(
     assert _revision(database_url) == PLACEMENT_REVISION
 
 
+def test_asset_state_migration_is_deterministic_and_preserves_non_state_data(
+    tmp_path: Path,
+) -> None:
+    database_path = tmp_path / "asset-state.sqlite3"
+    database_url = _database_url(database_path)
+    config = build_alembic_config(database_url)
+    command.upgrade(config, RELATIONSHIP_REVISION)
+
+    connection = sqlite3.connect(database_path)
+    try:
+        connection.executemany(
+            "INSERT INTO catalog_objects "
+            "(id, kind, label, status, summary, data_json, created_at, updated_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            [
+                (
+                    "active-legacy",
+                    "host",
+                    "Active Legacy",
+                    "active",
+                    "active",
+                    '{"schema_version":1,"future":{"keep":true}}',
+                    "2026-01-01 01:02:03",
+                    "2026-02-02 02:03:04",
+                ),
+                (
+                    "planned-legacy",
+                    "system",
+                    "Planned Legacy",
+                    "inactive",
+                    "planned",
+                    '{"schema_version":1}',
+                    "2026-01-01 01:02:03",
+                    "2026-02-02 02:03:04",
+                ),
+                (
+                    "retired-legacy",
+                    "service",
+                    "Retired Legacy",
+                    "deleted",
+                    "retired",
+                    '{"schema_version":1}',
+                    "2026-01-01 01:02:03",
+                    "2026-02-02 02:03:04",
+                ),
+                (
+                    "legacy-state-data",
+                    "service",
+                    "Legacy State Data",
+                    "active",
+                    "state in JSON",
+                    '{"schema_version":1,"lifecycle":"production",'
+                    '"health":"healthy","future":["keep"]}',
+                    "2026-01-01 01:02:03",
+                    "2026-02-02 02:03:04",
+                ),
+                (
+                    "knowledge-only",
+                    "runbook",
+                    "Knowledge Only",
+                    "inactive",
+                    "not an asset",
+                    '{"schema_version":1}',
+                    "2026-01-01 01:02:03",
+                    "2026-02-02 02:03:04",
+                ),
+            ],
+        )
+        connection.commit()
+    finally:
+        connection.close()
+
+    command.upgrade(config, "head")
+    command.check(config)
+
+    connection = sqlite3.connect(database_path)
+    connection.row_factory = sqlite3.Row
+    try:
+        rows = {
+            str(row["id"]): dict(row)
+            for row in connection.execute(
+                "SELECT id, status, lifecycle, health, data_json, "
+                "created_at, updated_at FROM catalog_objects ORDER BY id"
+            )
+        }
+    finally:
+        connection.close()
+
+    assert (
+        rows["active-legacy"]["status"],
+        rows["active-legacy"]["lifecycle"],
+        rows["active-legacy"]["health"],
+    ) == ("active", "active", "unknown")
+    assert (
+        rows["planned-legacy"]["status"],
+        rows["planned-legacy"]["lifecycle"],
+        rows["planned-legacy"]["health"],
+    ) == ("inactive", "planned", "unknown")
+    assert (
+        rows["retired-legacy"]["status"],
+        rows["retired-legacy"]["lifecycle"],
+        rows["retired-legacy"]["health"],
+    ) == ("deleted", "retired", "unknown")
+    assert (
+        rows["legacy-state-data"]["status"],
+        rows["legacy-state-data"]["lifecycle"],
+        rows["legacy-state-data"]["health"],
+    ) == ("active", "active", "healthy")
+    assert json.loads(str(rows["legacy-state-data"]["data_json"])) == {
+        "schema_version": 1,
+        "future": ["keep"],
+    }
+    assert rows["active-legacy"]["data_json"] == (
+        '{"schema_version":1,"future":{"keep":true}}'
+    )
+    assert (
+        rows["knowledge-only"]["lifecycle"],
+        rows["knowledge-only"]["health"],
+    ) == (None, None)
+    assert {
+        (row["created_at"], row["updated_at"])
+        for row in rows.values()
+    } == {("2026-01-01 01:02:03", "2026-02-02 02:03:04")}
+    assert _revision(database_url) == HEAD_REVISION
+
+
+@pytest.mark.parametrize(
+    ("kind", "status", "data_json", "error"),
+    [
+        (
+            "service",
+            "invented",
+            '{"schema_version":1}',
+            "unsupported status",
+        ),
+        (
+            "runbook",
+            "active",
+            '{"schema_version":1,"health":"healthy"}',
+            "not valid for non-asset",
+        ),
+        (
+            "service",
+            "active",
+            "{broken",
+            "invalid data_json",
+        ),
+    ],
+)
+def test_asset_state_migration_rejects_invalid_rows_before_schema_changes(
+    tmp_path: Path,
+    kind: str,
+    status: str,
+    data_json: str,
+    error: str,
+) -> None:
+    database_path = tmp_path / f"invalid-asset-state-{kind}-{status}.sqlite3"
+    database_url = _database_url(database_path)
+    config = build_alembic_config(database_url)
+    command.upgrade(config, RELATIONSHIP_REVISION)
+
+    connection = sqlite3.connect(database_path)
+    try:
+        connection.execute(
+            "INSERT INTO catalog_objects "
+            "(id, kind, label, status, data_json) "
+            "VALUES ('invalid-state', ?, 'Invalid State', ?, ?)",
+            (kind, status, data_json),
+        )
+        connection.commit()
+    finally:
+        connection.close()
+
+    with pytest.raises(RuntimeError, match=error):
+        command.upgrade(config, "head")
+
+    connection = sqlite3.connect(database_path)
+    try:
+        columns = {
+            str(row[1])
+            for row in connection.execute("PRAGMA table_info(catalog_objects)")
+        }
+        stored = connection.execute(
+            "SELECT kind, status, data_json FROM catalog_objects "
+            "WHERE id = 'invalid-state'"
+        ).fetchone()
+    finally:
+        connection.close()
+
+    assert {"lifecycle", "health"}.isdisjoint(columns)
+    assert stored == (kind, status, data_json)
+    assert _revision(database_url) == RELATIONSHIP_REVISION
+
+
 def test_relationship_database_constraints_reject_bypass_writes(
     tmp_path: Path,
 ) -> None:
@@ -461,7 +656,8 @@ def test_relationship_database_constraints_reject_bypass_writes(
     try:
         connection.executemany(
             "INSERT INTO catalog_objects "
-            "(id, kind, label, status, data_json) VALUES (?, ?, ?, 'active', '{}')",
+            "(id, kind, label, status, lifecycle, health, data_json) "
+            "VALUES (?, ?, ?, 'active', 'active', 'unknown', '{}')",
             [
                 ("hardware-a", "host", "Hardware A"),
                 ("hardware-b", "host", "Hardware B"),
@@ -476,6 +672,29 @@ def test_relationship_database_constraints_reject_bypass_writes(
         connection.commit()
 
         invalid_statements = [
+            (
+                "INSERT INTO catalog_objects "
+                "(id, kind, label, status, data_json) "
+                "VALUES ('missing-state', 'service', 'Missing State', 'active', '{}')"
+            ),
+            (
+                "INSERT INTO catalog_objects "
+                "(id, kind, label, status, lifecycle, health, data_json) "
+                "VALUES ('bad-lifecycle', 'service', 'Bad Lifecycle', 'active', "
+                "'production', 'unknown', '{}')"
+            ),
+            (
+                "INSERT INTO catalog_objects "
+                "(id, kind, label, status, lifecycle, health, data_json) "
+                "VALUES ('runbook-state', 'runbook', 'Runbook State', 'active', "
+                "'active', 'unknown', '{}')"
+            ),
+            (
+                "INSERT INTO catalog_objects "
+                "(id, kind, label, status, lifecycle, health, data_json) "
+                "VALUES ('bad-status', 'service', 'Bad Status', 'inactive', "
+                "'active', 'healthy', '{}')"
+            ),
             (
                 "INSERT INTO relationships (from_ref, relation_type, to_ref) "
                 "VALUES ('host:hardware-a', 'hosts', 'service:api')"

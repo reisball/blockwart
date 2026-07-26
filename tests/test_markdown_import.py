@@ -1,5 +1,6 @@
 from pathlib import Path
 
+import pytest
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -39,6 +40,11 @@ def test_build_tools_import_plan_parses_infrastructure_rows(tmp_path: Path) -> N
     service = plan.payload["objects"][1]
     assert system["id"] == "ct-200"
     assert system["kind"] == "system"
+    assert (system["status"], system["lifecycle"], system["health"]) == (
+        "active",
+        "active",
+        "unknown",
+    )
     assert system["data"]["platform"] == "LXC"
     assert system["data"]["placement"]["state"] == "unassigned"
     assert system["data"]["related_services"] == ["service:ct-200_demo-box"]
@@ -50,6 +56,11 @@ def test_build_tools_import_plan_parses_infrastructure_rows(tmp_path: Path) -> N
     }
     assert service["id"] == "ct-200_demo-box"
     assert service["kind"] == "service"
+    assert (service["status"], service["lifecycle"], service["health"]) == (
+        "active",
+        "active",
+        "unknown",
+    )
     assert "platform" not in service["data"]
     assert "system_id" not in service["data"]
     assert system["data"]["network"]["addresses"][0]["ip"] == "192.168.50.200"
@@ -203,6 +214,8 @@ def test_import_tools_markdown_updates_previous_workspace_import_shape(
                 kind="service",
                 label="Agent Zero",
                 status="active",
+                lifecycle="active",
+                health="unknown",
                 summary="Old import.",
                 data_json=(
                     '{"schema_version":1,"source":"workspace_markdown_import",'
@@ -329,3 +342,44 @@ def test_import_tools_markdown_merges_canonical_existing_objects(
     assert row is not None
     assert row.label == "Fabrik"
     assert "workspace_markdown_import" in row.data_json
+
+
+@pytest.mark.parametrize(
+    ("source_status", "expected"),
+    [
+        ("planned", ("inactive", "planned", "unknown")),
+        ("partial", ("active", "active", "degraded")),
+        ("unknown", ("active", "active", "unknown")),
+        ("", ("active", "active", "unknown")),
+        ("maintenance", ("inactive", "active", "maintenance")),
+        ("offline", ("inactive", "active", "down")),
+    ],
+)
+def test_markdown_import_preserves_lifecycle_and_health_semantics(
+    tmp_path: Path,
+    source_status: str,
+    expected: tuple[str, str, str],
+) -> None:
+    tools_path = tmp_path / "TOOLS.md"
+    tools_path.write_text(
+        "\n".join(
+            [
+                "| System | Typ | IP:Port | Status | Access | Auth | Nutzung | Ref | Skill |",
+                "|--------|-----|---------|--------|--------|------|---------|-----|-------|",
+                (
+                    f"| State Demo | Service | 192.168.50.210:8080 | {source_status} | "
+                    "Web | no auth | State demo | - | - |"
+                ),
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    plan = build_tools_import_plan(tools_path, references_root=tmp_path)
+    catalog_object = plan.payload["objects"][0]
+
+    assert (
+        catalog_object["status"],
+        catalog_object["lifecycle"],
+        catalog_object["health"],
+    ) == expected

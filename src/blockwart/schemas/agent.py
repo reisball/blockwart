@@ -2,6 +2,7 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
+from blockwart.domain.asset_state import AssetHealth, AssetLifecycle
 from blockwart.domain.placement import PlacementState
 from blockwart.schemas.catalog import ObjectKind
 
@@ -39,8 +40,8 @@ class AgentCatalogObjectSummary(BaseModel):
     ips: list[str] = Field(default_factory=list)
     hostnames: list[str] = Field(default_factory=list)
     primary_endpoint: AgentEndpoint | None = None
-    lifecycle: str | None = None
-    health: str | None = None
+    lifecycle: AssetLifecycle | None = None
+    health: AssetHealth | None = None
     placement_state: PlacementState | None = None
 
 

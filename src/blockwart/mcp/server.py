@@ -63,8 +63,14 @@ QUERY_FILTER_PROPERTIES: JSON = {
         "enum": ["loopback", "lan", "vpn", "internal", "public", "unknown"],
     },
     "status": {"type": "string", "enum": ["active", "inactive", "deleted"]},
-    "lifecycle": {"type": "string"},
-    "health": {"type": "string"},
+    "lifecycle": {
+        "type": "string",
+        "enum": ["planned", "active", "retired"],
+    },
+    "health": {
+        "type": "string",
+        "enum": ["unknown", "healthy", "degraded", "down", "maintenance"],
+    },
 }
 
 TOOLS: list[JSON] = [

@@ -19,6 +19,8 @@ def _legacy_service(object_id: str = "legacy") -> CatalogObject:
         kind="service",
         label="Legacy Service",
         status="active",
+        lifecycle="active",
+        health="unknown",
         data_json=json.dumps(
             {
                 "schema_version": 1,
@@ -130,6 +132,8 @@ def test_interface_plan_rejects_corrupt_data_json(
                 kind="service",
                 label="Corrupt",
                 status="active",
+                lifecycle="active",
+                health="unknown",
                 data_json="{broken",
             )
         )

@@ -85,6 +85,13 @@
           "health": {
             "anyOf": [
               {
+                "enum": [
+                  "unknown",
+                  "healthy",
+                  "degraded",
+                  "down",
+                  "maintenance"
+                ],
                 "type": "string"
               },
               {
@@ -132,6 +139,11 @@
           "lifecycle": {
             "anyOf": [
               {
+                "enum": [
+                  "planned",
+                  "active",
+                  "retired"
+                ],
                 "type": "string"
               },
               {
@@ -245,6 +257,13 @@
           "health": {
             "anyOf": [
               {
+                "enum": [
+                  "unknown",
+                  "healthy",
+                  "degraded",
+                  "down",
+                  "maintenance"
+                ],
                 "type": "string"
               },
               {
@@ -292,6 +311,11 @@
           "lifecycle": {
             "anyOf": [
               {
+                "enum": [
+                  "planned",
+                  "active",
+                  "retired"
+                ],
                 "type": "string"
               },
               {
@@ -684,6 +708,24 @@
             "title": "Data",
             "type": "object"
           },
+          "health": {
+            "anyOf": [
+              {
+                "enum": [
+                  "unknown",
+                  "healthy",
+                  "degraded",
+                  "down",
+                  "maintenance"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Health"
+          },
           "id": {
             "pattern": "^[a-z0-9][a-z0-9_-]*[a-z0-9]$|^[a-z0-9]$",
             "title": "Id",
@@ -717,6 +759,22 @@
               }
             ],
             "title": "Last Changed"
+          },
+          "lifecycle": {
+            "anyOf": [
+              {
+                "enum": [
+                  "planned",
+                  "active",
+                  "retired"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Lifecycle"
           },
           "parent_path": {
             "items": {
@@ -1124,6 +1182,11 @@
             "schema": {
               "anyOf": [
                 {
+                  "enum": [
+                    "planned",
+                    "active",
+                    "retired"
+                  ],
                   "type": "string"
                 },
                 {
@@ -1140,6 +1203,13 @@
             "schema": {
               "anyOf": [
                 {
+                  "enum": [
+                    "unknown",
+                    "healthy",
+                    "degraded",
+                    "down",
+                    "maintenance"
+                  ],
                   "type": "string"
                 },
                 {
@@ -1405,6 +1475,11 @@
             "schema": {
               "anyOf": [
                 {
+                  "enum": [
+                    "planned",
+                    "active",
+                    "retired"
+                  ],
                   "type": "string"
                 },
                 {
@@ -1421,6 +1496,13 @@
             "schema": {
               "anyOf": [
                 {
+                  "enum": [
+                    "unknown",
+                    "healthy",
+                    "degraded",
+                    "down",
+                    "maintenance"
+                  ],
                   "type": "string"
                 },
                 {
@@ -1547,6 +1629,56 @@
     "/api/objects": {
       "get": {
         "operationId": "get_objects_api_objects_get",
+        "parameters": [
+          {
+            "description": "Exact asset lifecycle",
+            "in": "query",
+            "name": "lifecycle",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "planned",
+                    "active",
+                    "retired"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Exact asset lifecycle",
+              "title": "Lifecycle"
+            }
+          },
+          {
+            "description": "Exact asset health",
+            "in": "query",
+            "name": "health",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "unknown",
+                    "healthy",
+                    "degraded",
+                    "down",
+                    "maintenance"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Exact asset health",
+              "title": "Health"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "content": {
@@ -1561,6 +1693,16 @@
               }
             },
             "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
           }
         },
         "summary": "Get Objects",

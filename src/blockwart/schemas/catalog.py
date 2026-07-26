@@ -3,6 +3,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field, model_validator
 
+from blockwart.domain.asset_state import AssetHealth, AssetLifecycle, is_asset_kind
 from blockwart.domain.interfaces import normalize_interface_data
 from blockwart.domain.placement import PlacementState, validate_placement_metadata
 from blockwart.domain.references import TypedReference
@@ -277,6 +278,8 @@ class CatalogObjectIn(BaseModel):
     kind: ObjectKind
     label: str
     status: ObjectStatus = "active"
+    lifecycle: AssetLifecycle | None = None
+    health: AssetHealth | None = None
     summary: str | None = None
     data: dict[str, Any] = Field(default_factory=dict)
 
@@ -289,6 +292,14 @@ class CatalogObjectIn(BaseModel):
 
     @model_validator(mode="after")
     def validate_catalog_data(self) -> "CatalogObjectIn":
+        if not is_asset_kind(self.kind) and (
+            self.lifecycle is not None or self.health is not None
+        ):
+            raise ValueError("lifecycle and health are only valid for asset kinds")
+        if "lifecycle" in self.data or "health" in self.data:
+            raise ValueError(
+                "data.lifecycle and data.health are obsolete; use top-level fields"
+            )
         if "schema_version" in self.data and self.data["schema_version"] != 1:
             raise ValueError("data.schema_version must be 1")
         normalize_interface_data(
