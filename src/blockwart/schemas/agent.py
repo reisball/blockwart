@@ -4,6 +4,7 @@ from pydantic import BaseModel, Field
 
 from blockwart.domain.asset_state import AssetHealth, AssetLifecycle
 from blockwart.domain.placement import PlacementState
+from blockwart.domain.provenance import CatalogProvenanceOut
 from blockwart.schemas.catalog import CatalogRecordDiagnostic, ObjectKind
 
 
@@ -45,6 +46,7 @@ class AgentCatalogObjectSummary(BaseModel):
     placement_state: PlacementState | None = None
     record_state: Literal["valid", "corrupt"] = "valid"
     diagnostics: list[CatalogRecordDiagnostic] = Field(default_factory=list)
+    provenance: CatalogProvenanceOut
 
 
 class AgentRelationshipOut(BaseModel):
@@ -68,7 +70,7 @@ class AgentCatalogObjectContext(AgentCatalogObjectSummary):
 class AgentSearchOut(BaseModel):
     query: str | None = None
     kind: ObjectKind | None = None
-    filters: dict[str, str | int] = Field(default_factory=dict)
+    filters: dict[str, str | int | bool] = Field(default_factory=dict)
     count: int
     results: list[AgentCatalogObjectSummary]
 
@@ -76,6 +78,6 @@ class AgentSearchOut(BaseModel):
 class AgentContextOut(BaseModel):
     query: str | None = None
     kind: ObjectKind | None = None
-    filters: dict[str, str | int] = Field(default_factory=dict)
+    filters: dict[str, str | int | bool] = Field(default_factory=dict)
     count: int
     objects: list[AgentCatalogObjectContext]

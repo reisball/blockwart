@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 import re
 from dataclasses import dataclass
 from pathlib import Path
@@ -9,7 +8,11 @@ from typing import Any
 from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
-from blockwart.domain.asset_state import AssetState, state_from_record
+from blockwart.domain.asset_state import AssetState
+from blockwart.domain.provenance import (
+    CatalogProvenance,
+    load_provenance,
+)
 from blockwart.models import CatalogObject, Relationship
 from blockwart.schemas.catalog import CatalogObjectIn
 from blockwart.services.catalog import (
@@ -195,6 +198,14 @@ def build_tools_import_plan(
         )
 
     _mark_unassigned_assets(objects, relationships)
+    provenance = CatalogProvenance(
+        source_type="import",
+        source_ref=str(path),
+        managed_by="Kai + Zoe",
+        manual_override=False,
+    ).model_dump()
+    for obj in objects:
+        obj["provenance"] = provenance
     payload = {
         "schema_version": 1,
         "owner": "Kai + Zoe",
@@ -254,20 +265,31 @@ def import_tools_markdown(
     known_object_kinds = current_object_kinds(session)
     known_object_kinds.update({payload.id: payload.kind for payload in object_payloads})
 
+    imported_objects = 0
+    protected_refs: set[str] = set()
     for payload in object_payloads:
         existing = session.get(CatalogObject, payload.id)
-        if existing is not None and existing.kind == payload.kind:
+        if existing is not None:
             payload = _merge_existing_object(existing, payload)
+            if payload is None:
+                protected_refs.add(f"{existing.kind}:{existing.id}")
+                continue
         upsert_object(
             session,
             payload,
             known_object_kinds=known_object_kinds,
         )
+        imported_objects += 1
 
     _remove_stale_workspace_services(session, objects)
 
     inserted_relationships = 0
     for relationship in relationships:
+        if (
+            relationship["from_ref"] in protected_refs
+            or relationship["to_ref"] in protected_refs
+        ):
+            continue
         _remove_stale_workspace_host_relationships(session, relationship)
         existing = session.scalar(
             select(Relationship).where(
@@ -286,7 +308,7 @@ def import_tools_markdown(
             inserted_relationships += 1
 
     return SeedImportResult(
-        objects_imported=len(objects),
+        objects_imported=imported_objects,
         relationships_imported=inserted_relationships,
     )
 
@@ -316,8 +338,7 @@ def _remove_stale_workspace_services(session: Session, objects: list[dict[str, A
         expected_id = imported_services.get(row.label)
         if not expected_id or row.id == expected_id:
             continue
-        data = json.loads(row.data_json or "{}")
-        if data.get("source") != "workspace_markdown_import":
+        if not _is_workspace_import(row):
             continue
         stale_ref = f"service:{row.id}"
         session.execute(
@@ -350,8 +371,7 @@ def _remove_stale_workspace_host_relationships(
         stale_object = session.get(CatalogObject, stale_object_id)
         if stale_object is None:
             continue
-        stale_data = json.loads(stale_object.data_json)
-        if stale_data.get("source") != "workspace_markdown_import":
+        if not _is_workspace_import(stale_object):
             continue
         session.delete(stale_relationship)
         session.flush()
@@ -366,30 +386,37 @@ def _remove_stale_workspace_host_relationships(
     session.flush()
 
 
-def _merge_existing_object(existing: CatalogObject, imported: CatalogObjectIn) -> CatalogObjectIn:
-    existing_data = json.loads(existing.data_json)
-    if existing_data.get("source") == "workspace_markdown_import":
+def _is_workspace_import(row: CatalogObject) -> bool:
+    provenance, valid = load_provenance(row.provenance_json)
+    if (
+        not valid
+        or provenance.manual_override
+        or provenance.source_type != "import"
+        or provenance.source_ref is None
+    ):
+        return False
+    source_ref = provenance.source_ref.replace("\\", "/")
+    return (
+        source_ref == "workspace_markdown_import"
+        or source_ref == "TOOLS.md"
+        or source_ref.endswith("/TOOLS.md")
+    )
+
+
+def _merge_existing_object(
+    existing: CatalogObject,
+    imported: CatalogObjectIn,
+) -> CatalogObjectIn | None:
+    existing_provenance, valid = load_provenance(existing.provenance_json)
+    if (
+        valid
+        and not existing_provenance.manual_override
+        and existing_provenance.source_type == "import"
+        and existing_provenance.source_ref
+        in {"workspace_markdown_import", imported.provenance.source_ref}
+    ):
         return imported
-    merged_data = {
-        **existing_data,
-        "workspace_markdown_import": imported.data,
-    }
-    existing_state = state_from_record(
-        kind=existing.kind,
-        status=existing.status,
-        lifecycle=existing.lifecycle,
-        health=existing.health,
-    )
-    return CatalogObjectIn(
-        id=existing.id,
-        kind=existing.kind,  # type: ignore[arg-type]
-        label=existing.label,
-        status=existing.status,
-        lifecycle=existing_state.lifecycle if existing_state is not None else None,
-        health=existing_state.health if existing_state is not None else None,
-        summary=existing.summary,
-        data=merged_data,
-    )
+    return None
 
 
 def _parse_markdown_tables(markdown: str) -> list[dict[str, str]]:

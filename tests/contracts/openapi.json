@@ -203,6 +203,9 @@
               }
             ]
           },
+          "provenance": {
+            "$ref": "#/components/schemas/CatalogProvenanceOut"
+          },
           "record_state": {
             "default": "valid",
             "enum": [
@@ -263,7 +266,8 @@
           "id",
           "kind",
           "label",
-          "status"
+          "status",
+          "provenance"
         ],
         "title": "AgentCatalogObjectContext",
         "type": "object"
@@ -384,6 +388,9 @@
               }
             ]
           },
+          "provenance": {
+            "$ref": "#/components/schemas/CatalogProvenanceOut"
+          },
           "record_state": {
             "default": "valid",
             "enum": [
@@ -418,7 +425,8 @@
           "id",
           "kind",
           "label",
-          "status"
+          "status",
+          "provenance"
         ],
         "title": "AgentCatalogObjectSummary",
         "type": "object"
@@ -437,6 +445,9 @@
                 },
                 {
                   "type": "integer"
+                },
+                {
+                  "type": "boolean"
                 }
               ]
             },
@@ -626,6 +637,9 @@
                 },
                 {
                   "type": "integer"
+                },
+                {
+                  "type": "boolean"
                 }
               ]
             },
@@ -911,6 +925,9 @@
             ],
             "title": "Placement State"
           },
+          "provenance": {
+            "$ref": "#/components/schemas/CatalogProvenanceOut"
+          },
           "record_state": {
             "default": "valid",
             "enum": [
@@ -956,9 +973,94 @@
         "required": [
           "id",
           "kind",
-          "label"
+          "label",
+          "provenance"
         ],
         "title": "CatalogObjectOut",
+        "type": "object"
+      },
+      "CatalogProvenanceOut": {
+        "properties": {
+          "is_stale": {
+            "default": false,
+            "title": "Is Stale",
+            "type": "boolean"
+          },
+          "managed_by": {
+            "anyOf": [
+              {
+                "maxLength": 255,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Managed By"
+          },
+          "manual_override": {
+            "default": false,
+            "title": "Manual Override",
+            "type": "boolean"
+          },
+          "observed_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Observed At"
+          },
+          "source_ref": {
+            "anyOf": [
+              {
+                "maxLength": 2048,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Ref"
+          },
+          "source_type": {
+            "default": "unknown",
+            "enum": [
+              "unknown",
+              "manual",
+              "import",
+              "discovery"
+            ],
+            "title": "Source Type",
+            "type": "string"
+          },
+          "stale_after": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Stale After"
+          },
+          "verified_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Verified At"
+          }
+        },
+        "title": "CatalogProvenanceOut",
         "type": "object"
       },
       "CatalogRecordDiagnostic": {
@@ -1710,6 +1812,46 @@
           },
           {
             "in": "query",
+            "name": "source_type",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "unknown",
+                    "manual",
+                    "import",
+                    "discovery"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Source Type"
+            }
+          },
+          {
+            "description": "Exact computed freshness state",
+            "in": "query",
+            "name": "stale",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Exact computed freshness state",
+              "title": "Stale"
+            }
+          },
+          {
+            "in": "query",
             "name": "limit",
             "required": false,
             "schema": {
@@ -2099,6 +2241,46 @@
                 }
               ],
               "title": "Health"
+            }
+          },
+          {
+            "in": "query",
+            "name": "source_type",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "unknown",
+                    "manual",
+                    "import",
+                    "discovery"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Source Type"
+            }
+          },
+          {
+            "description": "Exact computed freshness state",
+            "in": "query",
+            "name": "stale",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Exact computed freshness state",
+              "title": "Stale"
             }
           },
           {
@@ -2721,6 +2903,46 @@
           },
           {
             "in": "query",
+            "name": "source_type",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "unknown",
+                    "manual",
+                    "import",
+                    "discovery"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Source Type"
+            }
+          },
+          {
+            "description": "Exact computed freshness state",
+            "in": "query",
+            "name": "stale",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Exact computed freshness state",
+              "title": "Stale"
+            }
+          },
+          {
+            "in": "query",
             "name": "limit",
             "required": false,
             "schema": {
@@ -3096,6 +3318,46 @@
                 }
               ],
               "title": "Health"
+            }
+          },
+          {
+            "in": "query",
+            "name": "source_type",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "unknown",
+                    "manual",
+                    "import",
+                    "discovery"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Source Type"
+            }
+          },
+          {
+            "description": "Exact computed freshness state",
+            "in": "query",
+            "name": "stale",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Exact computed freshness state",
+              "title": "Stale"
             }
           },
           {

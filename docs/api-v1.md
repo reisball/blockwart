@@ -60,6 +60,8 @@ The list accepts:
 - `status`: compatibility status
 - `lifecycle`: `planned`, `active`, or `retired`
 - `health`: `unknown`, `healthy`, `degraded`, `down`, or `maintenance`
+- `source_type`: `unknown`, `manual`, `import`, or `discovery`
+- `stale`: exact computed freshness state
 
 The database applies ID/kind/status/lifecycle/health and text prefilters before
 the shared resolver evaluates placement and normalized endpoint filters. The
@@ -73,7 +75,9 @@ the existing database search is the bottleneck.
 Returns one sanitized Agent context: canonical identity and state, resolved
 parent path, children, IPs, hostnames and endpoints, direct relationships,
 dependency directions, source references, credential-reference IDs, and safe
-record-integrity diagnostics. Credential values are never resolved.
+record-integrity diagnostics. Every object also includes the canonical
+provenance header and computed `is_stale` value described in `provenance.md`.
+Credential values are never resolved.
 
 ### `GET /api/v1/context`
 

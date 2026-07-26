@@ -105,6 +105,12 @@ in-code object-schema registry for field paths and types. Unknown extension data
 while global secret rejection cannot be disabled or overridden by a schema. See
 `docs/object-validation.md`.
 
+Every object also has a validated provenance header that distinguishes manual,
+imported, discovered, and unknown sources; separates database update,
+observation, verification, and staleness times; and protects explicit manual
+overrides from silent import replacement. Read APIs and MCP expose the same
+header and source/freshness filters. See `docs/provenance.md`.
+
 The stable GET-only machine contract lives under `/api/v1` with opaque
 keyset cursors, deterministic sorting, structured domain filters, and
 versioned Relationship, Audit, and Topology resources. Existing `/api/objects`

@@ -4,7 +4,10 @@ import pytest
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from blockwart.domain.provenance import load_provenance
 from blockwart.models import AuditEvent, CatalogObject, Relationship
+from blockwart.schemas.catalog import CatalogObjectIn
+from blockwart.services.catalog import upsert_object
 from blockwart.services.seeds import import_seed_file, import_seed_payload
 
 SEED_PATH = Path(__file__).resolve().parents[1] / "seeds" / "pilot_objects.yaml"
@@ -66,6 +69,53 @@ def test_import_pilot_seed_into_fresh_db(session: Session) -> None:
     ).all()
     assert knowledge_states
     assert all(state == (None, None) for state in knowledge_states)
+    fabrik = session.get(CatalogObject, "fabrik")
+    assert fabrik is not None
+    provenance, valid = load_provenance(fabrik.provenance_json)
+    assert valid is True
+    assert provenance.source_type == "import"
+    assert provenance.source_ref == str(SEED_PATH)
+    assert provenance.managed_by == "Kai + Zoe"
+    assert provenance.observed_at == "2026-05-16T00:00:00.000000Z"
+    assert provenance.verified_at == "2026-05-16T00:00:00.000000Z"
+    assert provenance.manual_override is False
+
+
+def test_seed_does_not_silently_overwrite_manual_override(session: Session) -> None:
+    payload = {
+        "schema_version": 1,
+        "objects": [
+            {
+                "id": "protected",
+                "kind": "service",
+                "label": "Imported",
+                "data": {"schema_version": 1, "purpose": "imported"},
+            }
+        ],
+        "relationships": [],
+    }
+    assert import_seed_payload(session, payload).objects_imported == 1
+    upsert_object(
+        session,
+        CatalogObjectIn(
+            id="protected",
+            kind="service",
+            label="Manual",
+            data={"schema_version": 1, "purpose": "manual"},
+        ),
+    )
+
+    result = import_seed_payload(session, payload)
+    row = session.get(CatalogObject, "protected")
+
+    assert result.objects_imported == 0
+    assert row is not None
+    assert row.label == "Manual"
+    assert '"purpose": "manual"' in row.data_json
+    provenance, valid = load_provenance(row.provenance_json)
+    assert valid is True
+    assert provenance.source_type == "manual"
+    assert provenance.manual_override is True
 
 
 def test_seed_accepts_explicit_asset_state_and_derives_compatibility_status(

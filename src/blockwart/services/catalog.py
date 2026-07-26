@@ -19,6 +19,11 @@ from blockwart.domain.placement import (
     is_explicitly_unassigned,
     placement_state,
 )
+from blockwart.domain.provenance import (
+    dump_provenance,
+    load_provenance,
+    provenance_for_read,
+)
 from blockwart.domain.relationships import (
     RelationshipDiagnostic,
     RelationshipIntegrityError,
@@ -50,6 +55,7 @@ def _to_schema(
     )
     updated_at = format_rfc3339_utc(row.updated_at)
     record = read_catalog_record_data(row)
+    provenance, _ = load_provenance(row.provenance_json)
     data = record.data
     parent_path = []
     parent_ref = None
@@ -68,6 +74,7 @@ def _to_schema(
         health=asset_state.health if asset_state is not None else None,
         summary=row.summary,
         data=data,
+        provenance=provenance_for_read(provenance),
         created_at=format_rfc3339_utc(row.created_at),
         updated_at=updated_at,
         last_changed=updated_at,
@@ -399,6 +406,7 @@ def upsert_object(
     )
     target_status = target_state.status if target_state is not None else payload.status
     data_json = json.dumps(payload.data, sort_keys=True)
+    provenance_json = dump_provenance(payload.provenance)
     changed_at = _now()
     if row is None:
         action = "create"
@@ -412,6 +420,7 @@ def upsert_object(
             health=target_state.health if target_state is not None else None,
             summary=payload.summary,
             data_json=data_json,
+            provenance_json=provenance_json,
             created_at=changed_at,
             updated_at=changed_at,
         )
@@ -422,6 +431,7 @@ def upsert_object(
             row,
             payload,
             data_json,
+            provenance_json,
             target_state=target_state,
             target_status=target_status,
         )
@@ -432,6 +442,7 @@ def upsert_object(
         row.health = target_state.health if target_state is not None else None
         row.summary = payload.summary
         row.data_json = data_json
+        row.provenance_json = provenance_json
         row.updated_at = changed_at
 
     _write_audit(session, payload.id, action, audit_summary)
@@ -444,6 +455,7 @@ def _update_summary(
     row: CatalogObject,
     payload: CatalogObjectIn,
     data_json: str,
+    provenance_json: str,
     *,
     target_state: AssetState | None,
     target_status: str,
@@ -496,6 +508,8 @@ def _update_summary(
         changes.extend(_data_changes(old_data, payload.data))
     if not changes and row.data_json != data_json:
         changes.append("Daten wurden geändert")
+    if row.provenance_json != provenance_json:
+        changes.append("Herkunft wurde geändert")
     return "; ".join(changes) if changes else f"Objekt aktualisiert: {payload.kind}:{payload.id}"
 
 

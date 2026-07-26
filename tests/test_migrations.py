@@ -25,7 +25,7 @@ from blockwart.db.migrations import (
 PREVIOUS_HEAD_REVISION = "20260723_0002"
 PLACEMENT_REVISION = "20260724_0003"
 RELATIONSHIP_REVISION = "20260724_0004"
-HEAD_REVISION = "20260726_0005"
+HEAD_REVISION = "20260726_0006"
 PROJECT_ALEMBIC_CONFIG = Path(__file__).resolve().parents[1] / "alembic.ini"
 LEGACY_SNAPSHOT = Path(__file__).resolve().parent / "fixtures" / "legacy_snapshot.sql"
 
@@ -145,6 +145,73 @@ def test_real_alembic_upgrade_creates_fresh_database_and_has_no_drift(
         "relationships",
     }
     assert _revision(database_url) == HEAD_REVISION
+
+
+def test_provenance_migration_derives_legacy_sources_without_rewriting_data(
+    tmp_path: Path,
+) -> None:
+    database_path = tmp_path / "legacy-provenance.sqlite3"
+    database_url = _database_url(database_path)
+    config = build_alembic_config(database_url)
+    command.upgrade(config, "20260726_0005")
+
+    rows = [
+        ("legacy-source", '{"schema_version":1,"source":"workspace_markdown_import"}'),
+        (
+            "legacy-reference",
+            '{"schema_version":1,"source_references":'
+            '[{"label":"CMDB","uri":"cmdb://asset/42"}]}',
+        ),
+        ("legacy-notes", '{"schema_version":1,"import_notes":{"row":4}}'),
+        ("legacy-unknown", '{"schema_version":1}'),
+        ("legacy-corrupt", "{"),
+    ]
+    connection = sqlite3.connect(database_path)
+    try:
+        connection.executemany(
+            "INSERT INTO catalog_objects "
+            "(id, kind, label, status, summary, data_json, created_at, updated_at) "
+            "VALUES (?, 'project', ?, 'active', NULL, ?, "
+            "'2026-01-01 00:00:00', '2026-01-01 00:00:00')",
+            [(object_id, object_id, data_json) for object_id, data_json in rows],
+        )
+        connection.commit()
+    finally:
+        connection.close()
+
+    command.upgrade(config, "head")
+
+    connection = sqlite3.connect(database_path)
+    try:
+        migrated = {
+            object_id: (data_json, json.loads(provenance_json))
+            for object_id, data_json, provenance_json in connection.execute(
+                "SELECT id, data_json, provenance_json "
+                "FROM catalog_objects ORDER BY id"
+            )
+        }
+    finally:
+        connection.close()
+
+    assert {object_id: data_json for object_id, data_json in rows} == {
+        object_id: migrated[object_id][0] for object_id, _ in rows
+    }
+    assert migrated["legacy-source"][1] == {
+        "source_type": "import",
+        "source_ref": "workspace_markdown_import",
+        "manual_override": False,
+    }
+    assert migrated["legacy-reference"][1]["source_ref"] == "cmdb://asset/42"
+    assert migrated["legacy-notes"][1]["source_ref"] == "legacy:import_notes"
+    assert migrated["legacy-unknown"][1] == {
+        "source_type": "unknown",
+        "manual_override": False,
+    }
+    assert migrated["legacy-corrupt"][1] == {
+        "source_type": "unknown",
+        "manual_override": False,
+    }
+    command.check(config)
 
 
 def test_upgrade_from_previous_real_revision_preserves_rows_and_json(

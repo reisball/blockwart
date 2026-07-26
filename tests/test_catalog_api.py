@@ -57,6 +57,16 @@ def test_get_and_list_catalog_objects_are_read_only(client: TestClient, session_
     assert get_response.json()["created_at"] == created.created_at
     assert get_response.json()["data"]["network"]["addresses"][0]["ip"] == "192.168.50.83"
     assert get_response.json()["placement_state"] == "unknown"
+    assert get_response.json()["provenance"] == {
+        "source_type": "manual",
+        "source_ref": None,
+        "managed_by": None,
+        "observed_at": None,
+        "verified_at": None,
+        "stale_after": None,
+        "manual_override": True,
+        "is_stale": False,
+    }
 
     list_response = client.get("/api/objects")
     assert list_response.status_code == 200

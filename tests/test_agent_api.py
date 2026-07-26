@@ -9,6 +9,8 @@ from blockwart.api.deps import get_session
 from blockwart.db.session import transaction
 from blockwart.main import create_app
 from blockwart.models import CatalogObject, Relationship
+from blockwart.schemas.catalog import CatalogObjectIn
+from blockwart.services.catalog import upsert_object
 from blockwart.services.seeds import import_seed_file
 
 SEED_PATH = Path(__file__).resolve().parents[1] / "seeds" / "pilot_objects.yaml"
@@ -179,6 +181,43 @@ def test_agent_context_limit_and_kind_filter(client: TestClient) -> None:
     payload = response.json()
     assert payload["count"] == 2
     assert all(obj["kind"] == "service" for obj in payload["objects"])
+
+
+def test_agent_filters_and_returns_canonical_provenance(
+    client: TestClient,
+    session_factory,
+) -> None:
+    with session_factory() as session:
+        upsert_object(
+            session,
+            CatalogObjectIn(
+                id="stale-manual",
+                kind="service",
+                label="Stale Manual",
+                data={"schema_version": 1},
+                provenance={
+                    "source_type": "manual",
+                    "source_ref": "operator:Kai",
+                    "verified_at": "2025-01-01T00:00:00Z",
+                    "stale_after": "2025-02-01T00:00:00Z",
+                    "manual_override": True,
+                },
+            ),
+        )
+        session.commit()
+
+    response = client.get(
+        "/api/agent/search",
+        params={"source_type": "manual", "stale": "true"},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["filters"]["source_type"] == "manual"
+    assert payload["filters"]["stale"] is True
+    result = next(item for item in payload["results"] if item["id"] == "stale-manual")
+    assert result["provenance"]["source_ref"] == "operator:Kai"
+    assert result["provenance"]["is_stale"] is True
 
 
 def test_agent_namespace_is_read_only(client: TestClient) -> None:

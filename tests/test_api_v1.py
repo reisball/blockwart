@@ -87,6 +87,12 @@ def session_factory(alembic_session_factory):
                     kind="runbook",
                     label="V1 Runbook",
                     data={"schema_version": 1},
+                    provenance={
+                        "source_type": "import",
+                        "source_ref": "runbook-export",
+                        "stale_after": "2025-01-01T00:00:00Z",
+                        "manual_override": False,
+                    },
                 ),
             ):
                 upsert_object(session, payload)
@@ -176,6 +182,19 @@ def test_v1_object_list_enumerates_stable_keyset_pages(client: TestClient) -> No
     assert totals == [7, 7, 7, 7]
     assert seen == sorted(seen)
     assert len(seen) == len(set(seen)) == 7
+
+
+def test_v1_filters_source_type_and_computed_staleness(client: TestClient) -> None:
+    response = client.get(
+        "/api/v1/objects",
+        params={"source_type": "import", "stale": "true", "include_total": "true"},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["total"] == 1
+    assert [item["id"] for item in payload["items"]] == ["v1-runbook"]
+    assert payload["items"][0]["provenance"]["is_stale"] is True
 
 
 def test_v1_cursor_is_bound_to_filters_sort_and_direction(

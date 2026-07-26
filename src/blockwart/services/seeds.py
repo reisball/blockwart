@@ -9,6 +9,12 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from blockwart.domain.asset_state import resolve_asset_state, state_from_record
+from blockwart.domain.provenance import (
+    CatalogProvenance,
+    dump_provenance,
+    load_provenance,
+    seed_timestamp,
+)
 from blockwart.domain.relationships import (
     dependency_relationships_from_data,
     validate_data_references,
@@ -31,10 +37,19 @@ def import_seed_file(session: Session, path: str | Path) -> SeedImportResult:
     payload = yaml.safe_load(seed_path.read_text(encoding="utf-8"))
     if not isinstance(payload, dict):
         raise ValueError("Seed file must contain a mapping")
-    return import_seed_payload(session, payload)
+    return import_seed_payload(
+        session,
+        payload,
+        source_ref=str(seed_path),
+    )
 
 
-def import_seed_payload(session: Session, payload: dict[str, Any]) -> SeedImportResult:
+def import_seed_payload(
+    session: Session,
+    payload: dict[str, Any],
+    *,
+    source_ref: str | None = None,
+) -> SeedImportResult:
     if payload.get("schema_version") != 1:
         raise ValueError("Unsupported seed schema_version")
 
@@ -43,7 +58,11 @@ def import_seed_payload(session: Session, payload: dict[str, Any]) -> SeedImport
         raise ValueError("Seed payload must contain an objects list")
 
     normalized_objects, dependency_relationships = _normalize_legacy_dependencies(raw_objects)
-    objects = [_validate_object(raw_object) for raw_object in normalized_objects]
+    provenance = _seed_provenance(payload, source_ref=source_ref)
+    objects = [
+        _validate_object(raw_object, provenance=provenance)
+        for raw_object in normalized_objects
+    ]
     object_ids = [obj.id for obj in objects]
     if len(object_ids) != len(set(object_ids)):
         raise ValueError("Seed object ids must be globally unique across kinds")
@@ -59,9 +78,25 @@ def import_seed_payload(session: Session, payload: dict[str, Any]) -> SeedImport
     ]
     validate_relationship_collection(relationships, object_kinds)
 
+    imported_objects = 0
     for obj in objects:
         row = session.get(CatalogObject, obj.id)
         data_json = json.dumps(obj.data, sort_keys=True)
+        provenance_json = dump_provenance(obj.provenance)
+        if row is not None:
+            existing_provenance, valid = load_provenance(row.provenance_json)
+            if (
+                not valid
+                or existing_provenance.manual_override
+                or existing_provenance.source_type != "import"
+            ):
+                _write_seed_audit(
+                    session,
+                    obj.id,
+                    "seed_skip_manual_override",
+                    f"Preserve manual override {row.kind}:{row.id}",
+                )
+                continue
         current_state = (
             state_from_record(
                 kind=row.kind,
@@ -91,9 +126,11 @@ def import_seed_payload(session: Session, payload: dict[str, Any]) -> SeedImport
                     health=target_state.health if target_state is not None else None,
                     summary=obj.summary,
                     data_json=data_json,
+                    provenance_json=provenance_json,
                 )
             )
             _write_seed_audit(session, obj.id, "seed_create", f"Seed create {obj.kind}:{obj.id}")
+            imported_objects += 1
             continue
 
         ensure_kind_change_allowed(session, row, obj.kind)
@@ -104,7 +141,9 @@ def import_seed_payload(session: Session, payload: dict[str, Any]) -> SeedImport
         row.health = target_state.health if target_state is not None else None
         row.summary = obj.summary
         row.data_json = data_json
+        row.provenance_json = provenance_json
         _write_seed_audit(session, obj.id, "seed_update", f"Seed update {obj.kind}:{obj.id}")
+        imported_objects += 1
 
     inserted_relationships = 0
     for relationship in relationships:
@@ -132,7 +171,7 @@ def import_seed_payload(session: Session, payload: dict[str, Any]) -> SeedImport
 
     session.flush()
     return SeedImportResult(
-        objects_imported=len(objects),
+        objects_imported=imported_objects,
         relationships_imported=inserted_relationships,
     )
 
@@ -148,10 +187,41 @@ def _write_seed_audit(session: Session, object_id: str | None, action: str, summ
     )
 
 
-def _validate_object(raw_object: Any) -> CatalogObjectIn:
+def _validate_object(
+    raw_object: Any,
+    *,
+    provenance: CatalogProvenance,
+) -> CatalogObjectIn:
     if not isinstance(raw_object, dict):
         raise ValueError("Seed object must be a mapping")
-    return CatalogObjectIn.model_validate(raw_object)
+    return CatalogObjectIn.model_validate(
+        {
+            **raw_object,
+            "provenance": provenance.model_dump(),
+        }
+    )
+
+
+def _seed_provenance(
+    payload: dict[str, Any],
+    *,
+    source_ref: str | None,
+) -> CatalogProvenance:
+    payload_source = payload.get("source")
+    effective_source = (
+        source_ref
+        or (payload_source.strip() if isinstance(payload_source, str) else None)
+        or "seed"
+    )
+    owner = payload.get("owner")
+    return CatalogProvenance(
+        source_type="import",
+        source_ref=effective_source,
+        managed_by=owner if isinstance(owner, str) else None,
+        observed_at=seed_timestamp(payload.get("updated_at")),
+        verified_at=seed_timestamp(payload.get("last_verified")),
+        manual_override=False,
+    )
 
 
 def _validate_relationship(
