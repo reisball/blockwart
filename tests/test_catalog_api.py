@@ -56,6 +56,7 @@ def test_get_and_list_catalog_objects_are_read_only(client: TestClient, session_
     assert get_response.status_code == 200
     assert get_response.json()["created_at"] == created.created_at
     assert get_response.json()["data"]["network"]["addresses"][0]["ip"] == "192.168.50.83"
+    assert get_response.json()["placement_state"] == "unknown"
 
     list_response = client.get("/api/objects")
     assert list_response.status_code == 200
@@ -77,6 +78,37 @@ def test_catalog_input_rejects_unsupported_status() -> None:
                 "label": "Bad Status",
                 "status": "partial",
                 "data": {"schema_version": 1},
+            }
+        )
+
+
+def test_catalog_input_accepts_only_explicit_unassigned_placement_metadata() -> None:
+    accepted = CatalogObjectIn.model_validate(
+        {
+            "id": "pending",
+            "kind": "service",
+            "label": "Pending",
+            "data": {
+                "schema_version": 1,
+                "placement": {
+                    "state": "unassigned",
+                    "reason": "No parent decision yet",
+                },
+            },
+        }
+    )
+    assert accepted.data["placement"]["state"] == "unassigned"
+
+    with pytest.raises(ValidationError, match="must be unassigned"):
+        CatalogObjectIn.model_validate(
+            {
+                "id": "invalid-placement",
+                "kind": "service",
+                "label": "Invalid Placement",
+                "data": {
+                    "schema_version": 1,
+                    "placement": {"state": "assigned"},
+                },
             }
         )
 

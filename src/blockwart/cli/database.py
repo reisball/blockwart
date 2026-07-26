@@ -17,6 +17,10 @@ from blockwart.services.interface_migration import (
     apply_interface_migration_plan,
     build_interface_migration_plan,
 )
+from blockwart.services.placement_migration import (
+    apply_placement_migration_plan,
+    build_placement_migration_plan,
+)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -31,11 +35,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--apply",
         action="store_true",
-        help="Apply the interface normalization plan. Default is a read-only dry run.",
+        help="Apply a data-normalization plan. Default is a read-only dry run.",
     )
     parser.add_argument(
         "action",
-        choices=("upgrade", "check", "integrity", "interfaces"),
+        choices=("upgrade", "check", "integrity", "interfaces", "placements"),
     )
     return parser
 
@@ -73,6 +77,37 @@ def main(argv: Sequence[str] | None = None) -> int:
                 f"diagnostics={len(plan.diagnostics)}"
             )
             return 0
+        elif args.action == "placements":
+            revision = check_database_revision(args.database_url)
+            plan = _placement_plan(args.database_url, apply=args.apply)
+            for diagnostic in plan.diagnostics:
+                print(
+                    "placement_diagnostic "
+                    f"code={diagnostic.code} location={diagnostic.location}",
+                    file=sys.stderr,
+                )
+            for object_ref in plan.unassigned_refs:
+                print(f"placement_unassigned ref={object_ref}")
+            for change in plan.changes:
+                print(
+                    "placement_change "
+                    f"ref={change.kind}:{change.object_id} action={change.action}"
+                )
+            mode = "apply" if args.apply else "dry-run"
+            result = (
+                "database_placements_error"
+                if plan.diagnostics
+                else "database_placements_ok"
+            )
+            print(
+                f"{result} "
+                f"revision={revision} mode={mode} "
+                f"scanned={plan.scanned_assets} changed={plan.changed_objects} "
+                f"assigned={len(plan.assigned_refs)} "
+                f"unassigned={len(plan.unassigned_refs)} "
+                f"diagnostics={len(plan.diagnostics)}"
+            )
+            return 1 if plan.diagnostics else 0
         else:
             revision = check_database_revision(args.database_url)
     except Exception:  # noqa: BLE001 - CLI boundary must redact database details
@@ -103,6 +138,20 @@ def _interface_plan(database_url: str | None, *, apply: bool):
             if apply:
                 with transaction(session):
                     apply_interface_migration_plan(session, plan)
+            return plan
+    finally:
+        engine.dispose()
+
+
+def _placement_plan(database_url: str | None, *, apply: bool):
+    config = build_alembic_config(database_url)
+    engine = build_engine(str(config.attributes["database_url"]))
+    try:
+        with Session(engine) as session:
+            plan = build_placement_migration_plan(session)
+            if apply and not plan.diagnostics:
+                with transaction(session):
+                    apply_placement_migration_plan(session, plan)
             return plan
     finally:
         engine.dispose()

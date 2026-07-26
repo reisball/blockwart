@@ -10,7 +10,7 @@ from blockwart.domain.interfaces import (
     InterfaceContractError,
     normalize_interface_data,
 )
-from blockwart.domain.placement import PlacementGraph
+from blockwart.domain.placement import PlacementGraph, placement_state
 from blockwart.domain.security import FORBIDDEN_SECRET_KEYS, looks_like_secret
 from blockwart.models import CatalogObject, Relationship
 from blockwart.schemas.agent import (
@@ -200,6 +200,11 @@ class _AgentCatalogResolver:
             primary_endpoint=endpoints[0] if endpoints else None,
             lifecycle=_optional_text(data.get("lifecycle")),
             health=_optional_text(data.get("health")),
+            placement_state=placement_state(
+                kind=obj.kind,
+                parent_ref=parent_ref,
+                data=data,
+            ),
         )
 
     def context(self, obj: CatalogObject) -> AgentCatalogObjectContext:

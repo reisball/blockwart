@@ -12,6 +12,7 @@ objects:
     summary: Proxmox VE host for CT/VM workloads.
     data:
       schema_version: 1
+      placement: {state: unassigned, reason: "Pilot seed does not define a canonical parent."}
       type: host
       purpose: Proxmox host and central virtualization platform for pilot infrastructure.
       tags: [proxmox, host, fabrik, pilot]
@@ -44,6 +45,7 @@ objects:
     summary: Ubuntu gateway host for OpenClaw and project workspace access.
     data:
       schema_version: 1
+      placement: {state: unassigned, reason: "Pilot seed does not define a canonical parent."}
       type: host
       aliases: [OpenClaw Gateway Host]
       purpose: OpenClaw gateway, SMB project share, and main workspace host.
@@ -74,6 +76,7 @@ objects:
     summary: LAN-only n8n workflow automation container.
     data:
       schema_version: 1
+      placement: {state: unassigned, reason: "Pilot seed does not define a canonical parent."}
       type: lxc
       aliases: [CT 127]
       purpose: Workflow automation and integration experiments with Ollama and OpenClaw.
@@ -108,6 +111,7 @@ objects:
     summary: Raspberry Pi 4B scanner and document-processing host.
     data:
       schema_version: 1
+      placement: {state: unassigned, reason: "Pilot seed does not define a canonical parent."}
       type: device
       aliases: [brieftraeger, postverarbeitung]
       purpose: Samsung Scan-to-PC and ScanSnap iX500 scanner workflows feeding Paperless.
@@ -140,6 +144,7 @@ objects:
     summary: Paperless-ngx document management container.
     data:
       schema_version: 1
+      placement: {state: unassigned, reason: "Pilot seed does not define a canonical parent."}
       type: lxc
       aliases: [Paperless, CT 106, paperless]
       purpose: Document management, OCR, and document ingestion target for scanner workflows.
@@ -172,6 +177,7 @@ objects:
     summary: Bitwarden-compatible secret store.
     data:
       schema_version: 1
+      placement: {state: unassigned, reason: "Pilot seed does not define a canonical parent."}
       type: lxc
       aliases: [CT 103]
       purpose: Secret storage for credentials referenced by Blockwart, without importing values.
@@ -205,6 +211,7 @@ objects:
     summary: Main LAN Ollama model-serving container on Fabrik.
     data:
       schema_version: 1
+      placement: {state: unassigned, reason: "Pilot seed does not define a canonical parent."}
       type: lxc
       aliases: [Ollama, CT 100, ollama-fabrik]
       purpose: Local LLM and embedding model serving for OpenClaw, Paperless, n8n, and experiments.
@@ -238,6 +245,7 @@ objects:
     summary: Splunk Enterprise container with web, management API, receiving port, and public Caddy exposure.
     data:
       schema_version: 1
+      placement: {state: unassigned, reason: "Pilot seed does not define a canonical parent."}
       type: lxc
       aliases: [Splunk Enterprise, CT 109]
       purpose: SIEM/search platform and Splunk integration lab.
