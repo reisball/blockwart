@@ -4,7 +4,7 @@
 
 alembic==1.18.5
     # via blockwart (pyproject.toml)
-annotated-doc==0.0.4
+annotated-doc==0.0.5
     # via fastapi
 annotated-types==0.8.0
     # via pydantic
@@ -29,7 +29,7 @@ click==8.4.2
     # via uvicorn
 cryptography==49.0.0
     # via pyjwt
-fastapi==0.140.0
+fastapi==0.140.13
     # via blockwart (pyproject.toml)
 greenlet==3.5.4
     # via sqlalchemy
@@ -63,7 +63,7 @@ markupsafe==3.0.3
     # via
     #   jinja2
     #   mako
-mcp==1.28.1
+mcp==1.29.0
     # via blockwart (pyproject.toml)
 pycparser==3.0
     # via cffi
