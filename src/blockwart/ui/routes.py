@@ -39,6 +39,7 @@ from blockwart.services.catalog import (
     upsert_object,
 )
 from blockwart.services.queries import (
+    CatalogBrowseReadModel,
     RelatedRelationshipReadModel,
     object_id_from_ref,
     primary_name_value,
@@ -46,6 +47,7 @@ from blockwart.services.queries import (
     query_catalog_detail,
 )
 from blockwart.ui.admin_auth import can_write, require_admin_write
+from blockwart.ui.i18n import translation_context
 from blockwart.ui.paths import TEMPLATE_DIR
 
 templates = Jinja2Templates(directory=TEMPLATE_DIR)
@@ -117,6 +119,119 @@ templates.env.filters["metadata_timestamp"] = _metadata_timestamp
 templates.env.filters["audit_summary_lines"] = _audit_summary_lines
 
 
+def _index_template_context(
+    request: Request,
+    read_model: CatalogBrowseReadModel,
+    *,
+    q: str,
+    kind: str,
+    view: str,
+    form: dict[str, str],
+    error: str | None,
+    show_create_form: bool,
+    can_write_enabled: bool,
+    form_kind: str | None = None,
+) -> dict[str, Any]:
+    i18n = translation_context(request)
+    translator = i18n["t"]
+    localized_schemas = _localized_ui_schema_payload(translator)
+    selected_form_kind = (
+        form_kind
+        if form_kind in OBJECT_KINDS
+        else str(form.get("kind") or OBJECT_KINDS[0])
+    )
+    if selected_form_kind not in OBJECT_KINDS:
+        selected_form_kind = OBJECT_KINDS[0]
+    explorer = read_model.explorer
+    normalized_query = q.strip().casefold()
+    selected_asset_ref = next(
+        (
+            f"{catalog_object.kind}:{catalog_object.id}"
+            for catalog_object in read_model.objects
+            if normalized_query
+            and normalized_query
+            in {
+                catalog_object.id.casefold(),
+                read_model.display_names[catalog_object.id].casefold(),
+            }
+        ),
+        next(
+            (
+                f"{catalog_object.kind}:{catalog_object.id}"
+                for catalog_object in read_model.objects
+            ),
+            next(iter(explorer["assets"]), ""),
+        ),
+    )
+    return {
+        "title": "Blockwart",
+        "objects": read_model.objects,
+        "q": q,
+        "kind": kind,
+        "view": view,
+        "is_filtered": bool(q or kind),
+        "object_kinds": OBJECT_KINDS,
+        "object_statuses": OBJECT_STATUSES_UI,
+        "platform_types": PLATFORM_TYPES,
+        "ui_schemas": localized_schemas,
+        "form_ui_schema": localized_schemas[selected_form_kind],
+        "create_fields_by_key": _fields_by_key(
+            localized_schemas[selected_form_kind][
+                "create_field_definitions"
+            ]
+        ),
+        "display_names": read_model.display_names,
+        "object_counts": read_model.object_counts,
+        "health_counts": read_model.health_counts,
+        "total_objects": read_model.total_objects,
+        "error": error,
+        "form": form,
+        "systems": read_model.systems,
+        "relation_targets": read_model.relation_targets,
+        "relation_types": RELATION_TYPES,
+        "show_create_form": show_create_form,
+        "index_relationships": read_model.index_relationships,
+        "explorer": explorer,
+        "selected_asset_ref": selected_asset_ref,
+        "unassigned_count": (
+            len(explorer["standalone_systems"])
+            + len(explorer["standalone_services"])
+            + sum(
+                len(branch["services"])
+                for branch in explorer["standalone_systems"]
+            )
+        ),
+        "can_write": can_write_enabled,
+        **i18n,
+    }
+
+
+def _localized_ui_schema_payload(translator: Any) -> dict[str, dict[str, Any]]:
+    payload = ui_schema_payload()
+    placeholder_keys = {
+        "object_id",
+        "primary_name",
+        "labels",
+        "summary",
+    }
+    for kind, schema in payload.items():
+        primary_name_label = translator(f"field.primary_name.{kind}.label")
+        schema["primary_name_label"] = primary_name_label
+        for field in schema["create_field_definitions"]:
+            key = str(field["key"])
+            label_key = (
+                f"field.primary_name.{kind}.label"
+                if key == "primary_name"
+                else f"field.{key}.label"
+            )
+            field["label"] = translator(label_key)
+            if key in placeholder_keys:
+                field["placeholder"] = translator(
+                    f"field.{key}.placeholder"
+                )
+    return payload
+
+
 @router.get("/", response_class=HTMLResponse)
 def index(
     request: Request,
@@ -124,11 +239,11 @@ def index(
     q: str = "",
     kind: str = "",
     create: str = "",
-    cols: str = "1",
+    view: str = "catalog",
 ):
     write_enabled = can_write(request)
     normalized_kind = kind if kind in OBJECT_KINDS else ""
-    layout_cols = cols if cols in {"1", "2", "3"} else "1"
+    selected_view = view if view in {"catalog", "topology"} else "catalog"
     read_model = query_catalog_browse(
         session,
         query=q,
@@ -137,32 +252,17 @@ def index(
     return templates.TemplateResponse(
         request,
         "index.html",
-        context={
-            "title": "Blockwart",
-            "objects": read_model.objects,
-            "q": q,
-            "kind": normalized_kind,
-            "layout_cols": layout_cols,
-            "object_kinds": OBJECT_KINDS,
-            "object_statuses": OBJECT_STATUSES_UI,
-            "platform_types": PLATFORM_TYPES,
-            "ui_schemas": ui_schema_payload(),
-            "form_ui_schema": get_ui_schema(_empty_form()["kind"]),
-            "create_fields_by_key": _fields_by_key(
-                schema_field_payload(get_ui_schema(_empty_form()["kind"]))
-            ),
-            "display_names": read_model.display_names,
-            "object_counts": read_model.object_counts,
-            "total_objects": read_model.total_objects,
-            "error": None,
-            "form": _empty_form(),
-            "systems": read_model.systems,
-            "relation_targets": read_model.relation_targets,
-            "relation_types": RELATION_TYPES,
-            "show_create_form": write_enabled and create == "1",
-            "index_relationships": read_model.index_relationships,
-            "can_write": write_enabled,
-        },
+        context=_index_template_context(
+            request,
+            read_model,
+            q=q,
+            kind=normalized_kind,
+            view=selected_view,
+            form=_empty_form(),
+            error=None,
+            show_create_form=write_enabled and create == "1",
+            can_write_enabled=write_enabled,
+        ),
     )
 
 
@@ -409,30 +509,18 @@ def save_object(
         return templates.TemplateResponse(
             request,
             "index.html",
-            context={
-                "title": "Blockwart",
-                "objects": read_model.objects,
-                "q": "",
-                "kind": "",
-                "layout_cols": "1",
-                "object_kinds": OBJECT_KINDS,
-                "object_statuses": OBJECT_STATUSES_UI,
-                "platform_types": PLATFORM_TYPES,
-                "ui_schemas": ui_schema_payload(),
-                "form_ui_schema": get_ui_schema(kind),
-                "create_fields_by_key": _fields_by_key(schema_field_payload(get_ui_schema(kind))),
-                "display_names": read_model.display_names,
-                "object_counts": read_model.object_counts,
-                "total_objects": read_model.total_objects,
-                "error": _safe_error_message(exc),
-                "form": form,
-                "systems": read_model.systems,
-                "relation_targets": read_model.relation_targets,
-                "relation_types": RELATION_TYPES,
-                "show_create_form": True,
-                "index_relationships": read_model.index_relationships,
-                "can_write": True,
-            },
+            context=_index_template_context(
+                request,
+                read_model,
+                q="",
+                kind="",
+                view="catalog",
+                form=form,
+                error=_safe_error_message(exc),
+                show_create_form=True,
+                can_write_enabled=True,
+                form_kind=kind,
+            ),
             status_code=422,
         )
     return RedirectResponse(url=f"/objects/{payload.id}", status_code=303)

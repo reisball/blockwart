@@ -102,6 +102,7 @@ def test_application_queries_build_catalog_relationship_audit_and_topology_model
         "system": 1,
         "service": 1,
     }
+    assert browse.health_counts == {"unknown": 3}
     assert browse.total_objects == 3
     assert [catalog_object.id for catalog_object in filtered.objects] == [
         "query-service"
@@ -115,6 +116,18 @@ def test_application_queries_build_catalog_relationship_audit_and_topology_model
         "query-service",
     ]
     assert browse.display_names["query-host"] == "query-host.local"
+    assert browse.explorer["clusters"][0]["host"]["ref"] == "host:query-host"
+    assert browse.explorer["clusters"][0]["systems"][0]["system"]["ref"] == (
+        "system:query-system"
+    )
+    assert browse.explorer["clusters"][0]["systems"][0]["services"][0]["ref"] == (
+        "service:query-service"
+    )
+    assert set(filtered.explorer["assets"]) == {
+        "host:query-host",
+        "system:query-system",
+        "service:query-service",
+    }
 
     topology = browse.index_relationships["query-service"]["topology"]
     assert [

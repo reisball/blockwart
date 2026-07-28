@@ -201,9 +201,9 @@ def test_locked_ui_hides_write_controls(anonymous_client: TestClient) -> None:
     schema = anonymous_client.get("/settings/schema")
 
     assert response.status_code == 200
-    assert "Neues Objekt anlegen" not in response.text
+    assert "Add asset" not in response.text
     assert 'action="/objects"' not in response.text
-    assert "Admin freigeben" in response.text
+    assert "Unlock admin" in response.text
     assert 'action="/objects/protected-object"' not in detail.text
     assert "Kommentar speichern" not in detail.text
     assert "?edit=overview" not in detail.text
@@ -268,8 +268,8 @@ def test_valid_unlock_enables_ui_write_then_lock_disables_it(
     assert "Max-Age=3600" in set_cookie
 
     unlocked_page = configured_client.get("/")
-    assert "Neues Objekt anlegen" in unlocked_page.text
-    assert "Admin sperren" in unlocked_page.text
+    assert "Add asset" in unlocked_page.text
+    assert "Lock admin" in unlocked_page.text
 
     write = configured_client.post(
         "/objects",
@@ -326,8 +326,8 @@ def test_tampered_admin_cookie_is_rejected(configured_client: TestClient) -> Non
 
     response = configured_client.get("/")
 
-    assert "Neues Objekt anlegen" not in response.text
-    assert "Admin freigeben" in response.text
+    assert "Add asset" not in response.text
+    assert "Unlock admin" in response.text
 
 
 def test_admin_session_expires_and_token_rotation_invalidates_it() -> None:

@@ -78,6 +78,45 @@ class ObjectRelationshipsReadModel(TypedDict):
     topology: TopologyReadModel
 
 
+class ExplorerAssetReadModel(TypedDict):
+    ref: str
+    id: str
+    kind: str
+    label: str
+    summary: str
+    status: str
+    lifecycle: str
+    health: str
+    address: str
+    platform: str
+    endpoint: str
+    updated_at: str
+
+
+class ExplorerSystemBranchReadModel(TypedDict):
+    system: ExplorerAssetReadModel
+    services: list[ExplorerAssetReadModel]
+
+
+class ExplorerClusterReadModel(TypedDict):
+    host: ExplorerAssetReadModel
+    systems: list[ExplorerSystemBranchReadModel]
+    direct_services: list[ExplorerAssetReadModel]
+
+
+class ExplorerStandaloneSystemReadModel(TypedDict):
+    system: ExplorerAssetReadModel
+    services: list[ExplorerAssetReadModel]
+
+
+class ExplorerReadModel(TypedDict):
+    clusters: list[ExplorerClusterReadModel]
+    standalone_systems: list[ExplorerStandaloneSystemReadModel]
+    standalone_services: list[ExplorerAssetReadModel]
+    networks: list[ExplorerAssetReadModel]
+    assets: dict[str, ExplorerAssetReadModel]
+
+
 class AuditEventReadModel(TypedDict):
     id: int
     action: str
@@ -94,8 +133,10 @@ class CatalogBrowseReadModel:
     relation_targets: list[CatalogObjectOut]
     display_names: dict[str, str]
     object_counts: Counter[str]
+    health_counts: Counter[str]
     total_objects: int
     index_relationships: dict[str, ObjectRelationshipsReadModel]
+    explorer: ExplorerReadModel
 
 
 @dataclass(frozen=True, slots=True)
@@ -159,6 +200,18 @@ def query_catalog_browse(
         for catalog_object in all_objects
     }
     object_counts = Counter(catalog_object.kind for catalog_object in public_objects)
+    health_counts = Counter(
+        str(catalog_object.health or "unknown")
+        for catalog_object in public_objects
+    )
+    included_refs = (
+        {
+            f"{catalog_object.kind}:{catalog_object.id}"
+            for catalog_object in objects
+        }
+        if normalized_query or kind is not None
+        else None
+    )
     return CatalogBrowseReadModel(
         objects=objects,
         all_objects=all_objects,
@@ -169,11 +222,17 @@ def query_catalog_browse(
             for catalog_object in all_objects
         },
         object_counts=object_counts,
+        health_counts=health_counts,
         total_objects=sum(object_counts.values()),
         index_relationships=_index_relationship_cards(
             objects,
             relationships,
             object_map,
+        ),
+        explorer=build_explorer_read_model(
+            public_objects,
+            relationships,
+            included_refs=included_refs,
         ),
     )
 
@@ -351,6 +410,143 @@ def build_topology_read_model(
         }
 
     return {"chains": []}
+
+
+def build_explorer_read_model(
+    objects: list[CatalogObjectOut],
+    relationships: list[RelationshipReadModel],
+    *,
+    included_refs: set[str] | None = None,
+) -> ExplorerReadModel:
+    """Build the shared catalog/topology hierarchy from canonical placement."""
+    object_map = {
+        f"{catalog_object.kind}:{catalog_object.id}": catalog_object
+        for catalog_object in objects
+    }
+    graph = PlacementGraph(object_map.values(), relationships)
+    assets = {
+        ref: _explorer_asset(catalog_object)
+        for ref, catalog_object in object_map.items()
+    }
+
+    def is_included(ref: str) -> bool:
+        return included_refs is None or ref in included_refs
+
+    clusters: list[ExplorerClusterReadModel] = []
+    placed_system_refs: set[str] = set()
+    placed_service_refs: set[str] = set()
+    for host_ref in _refs_for_kind(objects, "host"):
+        host_is_included = is_included(host_ref)
+        system_branches: list[ExplorerSystemBranchReadModel] = []
+        direct_services: list[ExplorerAssetReadModel] = []
+        for child_ref in graph.children_refs(host_ref):
+            if child_ref.startswith("system:"):
+                system_is_included = is_included(child_ref)
+                placed_system_refs.add(child_ref)
+                service_refs = [
+                    ref
+                    for ref in graph.children_refs(child_ref)
+                    if ref.startswith("service:")
+                ]
+                placed_service_refs.update(service_refs)
+                visible_services = [
+                    assets[ref]
+                    for ref in service_refs
+                    if (
+                        included_refs is None
+                        or host_is_included
+                        or system_is_included
+                        or ref in included_refs
+                    )
+                ]
+                if host_is_included or system_is_included or visible_services:
+                    system_branches.append(
+                        {
+                            "system": assets[child_ref],
+                            "services": visible_services,
+                        }
+                    )
+            elif child_ref.startswith("service:"):
+                placed_service_refs.add(child_ref)
+                if host_is_included or is_included(child_ref):
+                    direct_services.append(assets[child_ref])
+        if host_is_included or system_branches or direct_services:
+            clusters.append(
+                {
+                    "host": assets[host_ref],
+                    "systems": system_branches,
+                    "direct_services": direct_services,
+                }
+            )
+
+    standalone_systems: list[ExplorerStandaloneSystemReadModel] = []
+    for system_ref in _refs_for_kind(objects, "system"):
+        if system_ref in placed_system_refs:
+            continue
+        system_is_included = is_included(system_ref)
+        service_refs = [
+            ref
+            for ref in graph.children_refs(system_ref)
+            if ref.startswith("service:")
+        ]
+        placed_service_refs.update(service_refs)
+        visible_services = [
+            assets[ref]
+            for ref in service_refs
+            if (
+                included_refs is None
+                or system_is_included
+                or ref in included_refs
+            )
+        ]
+        if system_is_included or visible_services:
+            standalone_systems.append(
+                {
+                    "system": assets[system_ref],
+                    "services": visible_services,
+                }
+            )
+
+    standalone_services = [
+        assets[service_ref]
+        for service_ref in _refs_for_kind(objects, "service")
+        if service_ref not in placed_service_refs and is_included(service_ref)
+    ]
+    networks = [
+        assets[network_ref]
+        for network_ref in _refs_for_kind(objects, "netzwerk")
+        if is_included(network_ref)
+    ]
+    visible_refs = set(included_refs or assets)
+    for cluster in clusters:
+        visible_refs.add(cluster["host"]["ref"])
+        visible_refs.update(
+            service["ref"]
+            for service in cluster["direct_services"]
+        )
+        for branch in cluster["systems"]:
+            visible_refs.add(branch["system"]["ref"])
+            visible_refs.update(
+                service["ref"] for service in branch["services"]
+            )
+    for branch in standalone_systems:
+        visible_refs.add(branch["system"]["ref"])
+        visible_refs.update(
+            service["ref"] for service in branch["services"]
+        )
+    visible_refs.update(service["ref"] for service in standalone_services)
+    visible_refs.update(network["ref"] for network in networks)
+    return {
+        "clusters": clusters,
+        "standalone_systems": standalone_systems,
+        "standalone_services": standalone_services,
+        "networks": networks,
+        "assets": {
+            ref: asset
+            for ref, asset in assets.items()
+            if ref in visible_refs
+        },
+    }
 
 
 def group_relationships(
@@ -657,6 +853,57 @@ def _relationship_node_ports(
             }
         )
     return ports
+
+
+def _refs_for_kind(
+    objects: list[CatalogObjectOut],
+    kind: str,
+) -> list[str]:
+    return [
+        f"{catalog_object.kind}:{catalog_object.id}"
+        for catalog_object in objects
+        if catalog_object.kind == kind
+    ]
+
+
+def _explorer_asset(
+    catalog_object: CatalogObjectOut,
+) -> ExplorerAssetReadModel:
+    network = catalog_object.data.get("network")
+    addresses = (
+        _list_of_mappings(network.get("addresses"))
+        if isinstance(network, Mapping)
+        else []
+    )
+    endpoints = _list_of_mappings(catalog_object.data.get("endpoints"))
+    first_address = str(addresses[0].get("ip") or "") if addresses else ""
+    first_endpoint = endpoints[0] if endpoints else {}
+    endpoint_type = str(first_endpoint.get("type") or "")
+    endpoint_port = first_endpoint.get("port")
+    endpoint = endpoint_type
+    if endpoint_port is not None:
+        endpoint = f"{endpoint_type} :{endpoint_port}".strip()
+    platform = str(
+        catalog_object.data.get("platform")
+        or catalog_object.data.get("type")
+        or ""
+    )
+    return {
+        "ref": f"{catalog_object.kind}:{catalog_object.id}",
+        "id": catalog_object.id,
+        "kind": catalog_object.kind,
+        "label": primary_name_value(catalog_object),
+        "summary": catalog_object.summary or "",
+        "status": catalog_object.status,
+        "lifecycle": str(catalog_object.lifecycle or ""),
+        "health": str(catalog_object.health or "unknown"),
+        "address": first_address,
+        "platform": platform,
+        "endpoint": endpoint,
+        "updated_at": catalog_object.last_changed
+        or catalog_object.updated_at
+        or "",
+    }
 
 
 def _list_of_mappings(value: Any) -> list[Mapping[str, Any]]:

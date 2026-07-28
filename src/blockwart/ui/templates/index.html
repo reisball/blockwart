@@ -1,5 +1,78 @@
+{% macro node_icon(kind) -%}
+  {% if kind == "host" %}□{% elif kind == "system" %}⬡{% elif kind == "service" %}◆{% elif kind == "netzwerk" %}⌁{% else %}?{% endif %}
+{%- endmacro %}
+
+{% macro health_badge(asset) -%}
+  {% set health = asset.health or "unknown" %}
+  <span class="state-badge state-{{ health }}">
+    <i></i>{{ t("health." ~ health) }}
+  </span>
+{%- endmacro %}
+
+{% macro asset_row(asset, depth=0) -%}
+  <tr
+    class="asset-row depth-{{ depth }} {% if asset.ref == selected_asset_ref %}selected{% endif %}"
+    tabindex="0"
+    data-asset-ref="{{ asset.ref }}"
+  >
+    <td>
+      {% if depth > 0 %}<span class="tree-line"></span>{% endif %}
+      <span class="node-icon {{ asset.kind }}">{{ node_icon(asset.kind) }}</span>
+      <span class="asset-name">
+        <strong>{{ asset.label }}</strong>
+        <small>{{ asset.ref }}</small>
+      </span>
+    </td>
+    <td><span class="type-tag">{{ t("kind." ~ asset.kind) }}</span></td>
+    <td>{{ health_badge(asset) }}</td>
+    <td>
+      {% if asset.address %}<code>{{ asset.address }}</code>{% else %}<span class="muted">{{ t("asset.no_value") }}</span>{% endif %}
+    </td>
+    <td>{{ asset.platform or t("asset.no_value") }}</td>
+    <td>
+      {% if asset.endpoint %}<code>{{ asset.endpoint }}</code>{% else %}<span class="muted">{{ t("asset.no_value") }}</span>{% endif %}
+    </td>
+    <td class="updated-column">{{ asset.updated_at[:10] or t("asset.no_value") }}</td>
+    <td><a class="row-detail" href="/objects/{{ asset.id }}" aria-label="{{ t('asset.details') }}">›</a></td>
+  </tr>
+{%- endmacro %}
+
+{% macro group_row(asset, service_count=0, extra_class="") -%}
+  <tr
+    class="group-row {{ extra_class }} {% if asset.ref == selected_asset_ref %}selected{% endif %}"
+    tabindex="0"
+    data-asset-ref="{{ asset.ref }}"
+  >
+    <td colspan="8">
+      <span class="node-icon {{ asset.kind }}">{{ node_icon(asset.kind) }}</span>
+      <strong>{{ asset.label }}</strong>
+      <span class="path-copy">{{ t("kind." ~ asset.kind) }}{% if asset.summary %} · {{ asset.summary }}{% endif %}</span>
+      <span class="group-count">{{ t("catalog.service_count", count=service_count) }}</span>
+    </td>
+  </tr>
+{%- endmacro %}
+
+{% macro map_node(asset, class_name="") -%}
+  <button
+    class="map-node {{ class_name }} {% if asset.ref == selected_asset_ref %}selected{% endif %}"
+    type="button"
+    data-asset-ref="{{ asset.ref }}"
+  >
+    <span class="node-icon {{ asset.kind }} large-icon">{{ node_icon(asset.kind) }}</span>
+    <span class="map-node-copy">
+      <small>{{ t("kind." ~ asset.kind) }} · {{ (asset.lifecycle or asset.status)|upper }}</small>
+      <strong>{{ asset.label }}</strong>
+      <em>{{ asset.summary or asset.ref }}</em>
+    </span>
+    <span class="node-meta">
+      <span class="status-dot {{ asset.health or 'unknown' }}"></span>
+      <code>{{ asset.address or asset.endpoint or asset.ref }}</code>
+    </span>
+  </button>
+{%- endmacro %}
+
 <!doctype html>
-<html lang="de">
+<html lang="{{ locale }}" data-view="{{ view }}">
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
@@ -9,296 +82,427 @@
         document.documentElement.dataset.theme = "light";
       }
     </script>
-    <link rel="stylesheet" href="/static/app.css?v=055" />
+    <link rel="stylesheet" href="/static/app.css?v=056" />
+    <link rel="stylesheet" href="/static/explorer.css?v=001" />
     <script>
       window.BLOCKWART_UI_SCHEMAS = {{ ui_schemas|tojson }};
+      window.BLOCKWART_EXPLORER_ASSETS = {{ explorer.assets|tojson }};
+      window.BLOCKWART_KIND_LABELS = {
+        {% for object_kind in object_kinds %}
+          "{{ object_kind }}": {{ t("kind." ~ object_kind)|tojson }}{% if not loop.last %},{% endif %}
+        {% endfor %}
+      };
+      window.BLOCKWART_UI_COPY = {
+        selectAsset: {{ t("catalog.select_asset")|tojson }},
+        noValue: {{ t("asset.no_value")|tojson }},
+        details: {{ t("asset.details")|tojson }},
+        health: {
+          "healthy": {{ t("health.healthy")|tojson }},
+          "degraded": {{ t("health.degraded")|tojson }},
+          "down": {{ t("health.down")|tojson }},
+          "maintenance": {{ t("health.maintenance")|tojson }},
+          "unknown": {{ t("health.unknown")|tojson }}
+        }
+      };
     </script>
     <script src="/static/theme.js?v=054" defer></script>
-    <script src="/static/index.js?v=055" defer></script>
+    <script src="/static/index.js?v=056" defer></script>
   </head>
-  <body>
-    <header class="topbar">
-      <div class="topbar-inner">
-        <div class="title-row">
-          <div>
-            <h1>Blockwart</h1>
-            <div class="subtle">Search-first Infrastruktur-Katalog, Credential-Referenzen und Runbooks.</div>
-          </div>
-          <div class="top-actions">
-            <div class="theme-toggle" role="group" aria-label="Farbschema">
-              <button class="theme-option" type="button" data-theme-value="dark">Dark</button>
-              <button class="theme-option" type="button" data-theme-value="light">Light</button>
-            </div>
-            <a class="button button-small button-muted" href="/settings/schema">Settings</a>
-            {% include "_admin_controls.html" %}
-          </div>
+  <body class="explorer-body explorer-{{ view }}">
+    <header class="explorer-topbar">
+      <a class="explorer-brand" href="/" aria-label="{{ t('app.name') }}">
+        <span class="brand-cube" aria-hidden="true">
+          <svg viewBox="0 0 32 32">
+            <path d="M5.5 10.2 16 4.5l10.5 5.7v11.6L16 27.5 5.5 21.8Z"></path>
+            <path d="m5.5 10.2 10.5 5.7 10.5-5.7M16 15.9v11.6"></path>
+          </svg>
+        </span>
+        <span class="brand-copy">
+          <strong>{{ t("app.name") }}</strong>
+          <small>{% if view == "topology" %}{{ t("app.topology_tagline") }}{% else %}{{ t("app.catalog_tagline") }}{% endif %}</small>
+        </span>
+      </a>
+
+      <nav class="mode-nav" aria-label="{{ t('nav.view') }}">
+        <a {% if view == "catalog" %}class="active"{% endif %} href="/?view=catalog&q={{ q|urlencode }}&kind={{ kind }}">{{ t("nav.catalog") }}</a>
+        <a {% if view == "topology" %}class="active"{% endif %} href="/?view=topology&q={{ q|urlencode }}&kind={{ kind }}">{{ t("nav.topology") }}</a>
+      </nav>
+
+      <form class="top-search" method="get" action="/">
+        <input type="hidden" name="view" value="{{ view }}" />
+        <input type="hidden" name="kind" value="{{ kind }}" />
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <circle cx="11" cy="11" r="6.5"></circle>
+          <path d="m16 16 4 4"></path>
+        </svg>
+        <input name="q" type="search" value="{{ q }}" placeholder="{{ t('search.placeholder') }}" autocomplete="off" spellcheck="false" />
+        <button type="submit">{{ t("search.submit") }}</button>
+      </form>
+
+      <div class="explorer-top-actions">
+        <div class="theme-toggle compact-theme-toggle" role="group" aria-label="{{ t('nav.theme') }}">
+          <button class="theme-option" type="button" data-theme-value="dark">{{ t("nav.dark") }}</button>
+          <button class="theme-option" type="button" data-theme-value="light">{{ t("nav.light") }}</button>
         </div>
-        <form class="toolbar" method="get" action="/">
-          <input type="hidden" name="cols" value="{{ layout_cols }}" />
-          <label>
-            Suche
-            <input type="search" name="q" value="{{ q }}" placeholder="System, Service, Port, Referenz..." autocomplete="off" spellcheck="false" />
-          </label>
-          <label>
-            Typ
-            <select name="kind" aria-label="Typ">
-              <option value="">Alle Typen</option>
-              {% for object_kind in object_kinds %}
-                <option value="{{ object_kind }}" {% if object_kind == kind %}selected{% endif %}>{{ object_kind }}</option>
-              {% endfor %}
-            </select>
-          </label>
-          <button type="submit">Suchen</button>
-        </form>
-        <nav class="stats" aria-label="Objektzahlen">
-          <a class="stat" href="/?cols={{ layout_cols }}" {% if not kind %}aria-current="page"{% endif %}><strong>{{ total_objects }}</strong> alle</a>
-          {% for object_kind in object_kinds %}
-            <a class="stat" href="/?kind={{ object_kind }}&cols={{ layout_cols }}" {% if object_kind == kind %}aria-current="page"{% endif %}><strong>{{ object_counts[object_kind] or 0 }}</strong> {{ object_kind }}</a>
-          {% endfor %}
-        </nav>
+        <a class="icon-button" href="/settings/schema" aria-label="{{ t('nav.settings') }}">⚙</a>
+        {% if can_write %}
+          <a class="primary-button" href="/?view={{ view }}&q={{ q|urlencode }}&kind={{ kind }}&create=1">＋ {{ t("asset.create") }}</a>
+        {% endif %}
+        {% include "_admin_controls.html" %}
       </div>
     </header>
-    <main class="page page-grid">
-      <section>
-        <div class="panel-head">
-          <h2 class="section-title">{{ objects|length }} Treffer</h2>
-          <div class="panel-actions">
-            <div class="view-toggle" role="group" aria-label="Spaltenansicht">
-              {% for col_value in ["1", "2", "3"] %}
-                <a class="view-option" href="/?q={{ q|urlencode }}&kind={{ kind }}&cols={{ col_value }}" {% if layout_cols == col_value %}aria-current="page"{% endif %}>{{ col_value }}</a>
+
+    {% if show_create_form %}
+      <div class="modal-overlay explorer-modal" role="presentation">
+        <a class="modal-backdrop" href="/?view={{ view }}&q={{ q|urlencode }}&kind={{ kind }}" aria-label="{{ t('asset.close_create') }}"></a>
+        <section class="panel modal-window" role="dialog" aria-modal="true" aria-labelledby="create-object-title">
+          <div class="modal-head">
+            <h2 class="section-title" id="create-object-title">{{ t("asset.create_title") }}</h2>
+            <a class="button button-small button-muted" href="/?view={{ view }}&q={{ q|urlencode }}&kind={{ kind }}">{{ t("asset.close") }}</a>
+          </div>
+          {% if error %}<div class="error">{{ error }}</div>{% endif %}
+          <form class="form-grid" method="post" action="/objects">
+            <label data-create-field="kind"><span data-field-label="kind">{{ create_fields_by_key.kind.label }}</span>
+              <select name="kind" data-kind-select>
+                {% for object_kind in object_kinds %}
+                  <option value="{{ object_kind }}" {% if object_kind == form.kind %}selected{% endif %}>{{ t("kind." ~ object_kind) }}</option>
+                {% endfor %}
+              </select>
+            </label>
+            <label data-create-field="object_id"><span data-field-label="object_id">{{ create_fields_by_key.object_id.label }}</span>
+              <input name="object_id" data-field-input="object_id" value="{{ form.id }}" placeholder="{{ create_fields_by_key.object_id.placeholder }}" autocomplete="off" spellcheck="false" {% if create_fields_by_key.object_id.required %}required{% endif %} />
+            </label>
+            <label data-create-field="primary_name"><span data-primary-name-label>{{ form_ui_schema.primary_name_label }}</span>
+              <input name="primary_name" data-field-input="primary_name" data-primary-name-input value="{{ form.primary_name or form.hostname or form.label }}" placeholder="{{ create_fields_by_key.primary_name.placeholder }}" autocomplete="off" {% if create_fields_by_key.primary_name.required %}required{% endif %} />
+            </label>
+            <label data-create-field="labels"><span data-field-label="labels">{{ create_fields_by_key.labels.label }}</span>
+              <input name="labels" data-field-input="labels" value="{{ form.labels }}" placeholder="{{ create_fields_by_key.labels.placeholder }}" autocomplete="off" {% if create_fields_by_key.labels.required %}required{% endif %} />
+            </label>
+            <label data-create-field="platform" data-platform-field {% if "platform" not in form_ui_schema.create_fields %}hidden{% endif %}><span data-field-label="platform">{{ create_fields_by_key.platform.label }}</span>
+              <select name="platform">
+                <option value="">{{ t("asset.none_platform") }}</option>
+                {% for platform in platform_types %}
+                  <option value="{{ platform }}" {% if platform == form.platform %}selected{% endif %}>{{ platform }}</option>
+                {% endfor %}
+              </select>
+            </label>
+            <label data-create-field="status"><span data-field-label="status">{{ create_fields_by_key.status.label }}</span>
+              <select name="status">
+                {% for object_status in object_statuses %}
+                  <option value="{{ object_status }}" {% if object_status == form.status %}selected{% endif %}>{{ object_status }}</option>
+                {% endfor %}
+              </select>
+            </label>
+            <label data-create-field="relationship"><span data-field-label="relationship">{{ create_fields_by_key.relationship.label }}</span>
+              <select name="relation_target_ref">
+                <option value="">{{ t("asset.none_relationship") }}</option>
+                {% for target in relation_targets %}
+                  {% set target_ref = target.kind ~ ":" ~ target.id %}
+                  <option value="{{ target_ref }}" {% if target_ref == form.relation_target_ref or target.id == form.hosted_on_system_id %}selected{% endif %}>{{ display_names[target.id] }} · {{ target_ref }}</option>
+                {% endfor %}
+              </select>
+            </label>
+            <label data-create-field="relation_type"><span data-field-label="relation_type">{{ create_fields_by_key.relation_type.label }}</span>
+              <select name="relation_type">
+                {% for relation in relation_types %}
+                  <option value="{{ relation }}" {% if relation == form.relation_type %}selected{% endif %}>{{ relation }}</option>
+                {% endfor %}
+              </select>
+            </label>
+            <label data-create-field="summary"><span data-field-label="summary">{{ create_fields_by_key.summary.label }}</span>
+              <textarea class="summary-input" name="summary" data-field-input="summary" placeholder="{{ create_fields_by_key.summary.placeholder }}" {% if create_fields_by_key.summary.required %}required{% endif %}>{{ form.summary }}</textarea>
+            </label>
+            <div class="button-row">
+              <button type="submit">{{ t("asset.save") }}</button>
+              <a class="button button-muted" href="/?view={{ view }}&q={{ q|urlencode }}&kind={{ kind }}">{{ t("asset.cancel") }}</a>
+            </div>
+          </form>
+        </section>
+      </div>
+    {% endif %}
+
+    {% if view == "catalog" %}
+      <main class="catalog-shell">
+        <aside class="filter-rail">
+          <div class="rail-heading"><span>{{ t("catalog.views") }}</span></div>
+          <nav class="rail-nav">
+            <a class="{% if not kind %}active{% endif %}" href="/?view=catalog&q={{ q|urlencode }}">
+              <span class="rail-icon">⌘</span>{{ t("catalog.all") }}<b>{{ total_objects }}</b>
+            </a>
+            <a class="{% if kind == 'host' %}active{% endif %}" href="/?view=catalog&q={{ q|urlencode }}&kind=host">
+              <span class="rail-icon square">□</span>{{ t("catalog.hardware") }}<b>{{ object_counts.host or 0 }}</b>
+            </a>
+            <a class="{% if kind == 'system' %}active{% endif %}" href="/?view=catalog&q={{ q|urlencode }}&kind=system">
+              <span class="rail-icon hex">⬡</span>{{ t("catalog.runtime_hosts") }}<b>{{ object_counts.system or 0 }}</b>
+            </a>
+            <a class="{% if kind == 'service' %}active{% endif %}" href="/?view=catalog&q={{ q|urlencode }}&kind=service">
+              <span class="rail-icon diamond">◆</span>{{ t("catalog.services") }}<b>{{ object_counts.service or 0 }}</b>
+            </a>
+            <a class="{% if kind == 'netzwerk' %}active{% endif %}" href="/?view=catalog&q={{ q|urlencode }}&kind=netzwerk">
+              <span class="rail-icon network">⌁</span>{{ t("catalog.networks") }}<b>{{ object_counts.netzwerk or 0 }}</b>
+            </a>
+          </nav>
+          <div class="rail-heading rail-heading-spaced"><span>{{ t("asset.health") }}</span></div>
+          <div class="health-list">
+            {% for health in ("healthy", "degraded", "down", "maintenance", "unknown") %}
+              <span><i class="status-dot {{ health }}"></i>{{ t("health." ~ health) }}<b>{{ health_counts[health] or 0 }}</b></span>
+            {% endfor %}
+          </div>
+          <div class="rail-footer">
+            <span class="sync-state"><i></i>{{ t("catalog.connected") }}</span>
+            <small>{{ t("catalog.subtitle", count=total_objects) }}</small>
+          </div>
+        </aside>
+
+        <section class="catalog-main">
+          <header class="content-heading">
+            <div>
+              <p class="eyebrow">{{ t("catalog.eyebrow") }}</p>
+              <h1>{{ t("catalog.title") }}</h1>
+              <span>{% if is_filtered %}{{ t("catalog.results", count=objects|length) }}{% else %}{{ t("catalog.subtitle", count=total_objects) }}{% endif %}</span>
+            </div>
+          </header>
+          <div class="query-bar">
+            <div class="query-pills">
+              <a class="query-pill {% if not kind %}active{% endif %}" href="/?view=catalog&q={{ q|urlencode }}">{{ t("catalog.filter_all") }} <b>{{ total_objects }}</b></a>
+              {% for object_kind in object_kinds %}
+                <a class="query-pill {% if kind == object_kind %}active{% endif %}" href="/?view=catalog&q={{ q|urlencode }}&kind={{ object_kind }}">{{ t("kind." ~ object_kind) }} <b>{{ object_counts[object_kind] or 0 }}</b></a>
               {% endfor %}
             </div>
-            {% if can_write %}
-              {% if not q and not kind and layout_cols == "1" %}
-                <a class="button button-small" href="/?create=1">Neues Objekt anlegen</a>
-              {% else %}
-                <a class="button button-small" href="/?q={{ q|urlencode }}&kind={{ kind }}&cols={{ layout_cols }}&create=1">Neues Objekt anlegen</a>
-              {% endif %}
-            {% endif %}
+          </div>
+
+          <div class="table-wrap">
+            <table class="asset-table">
+              <thead>
+                <tr>
+                  <th class="tree-column">{{ t("catalog.all") }}</th>
+                  <th>{{ t("asset.type") }}</th>
+                  <th>{{ t("asset.health") }}</th>
+                  <th>{{ t("asset.address") }}</th>
+                  <th>{{ t("asset.platform") }}</th>
+                  <th>{{ t("asset.endpoint") }}</th>
+                  <th class="updated-column">{{ t("asset.updated") }}</th>
+                  <th aria-label="{{ t('asset.details') }}"></th>
+                </tr>
+              </thead>
+              <tbody>
+                {% if objects %}
+                  {% if is_filtered %}
+                    {% for object in objects %}
+                      {% set ref = object.kind ~ ":" ~ object.id %}
+                      {{ asset_row(explorer.assets[ref]) }}
+                    {% endfor %}
+                  {% else %}
+                    {% for cluster in explorer.clusters %}
+                      {% set service_counter = namespace(value=cluster.direct_services|length) %}
+                      {% for branch in cluster.systems %}{% set service_counter.value = service_counter.value + branch.services|length %}{% endfor %}
+                      {{ group_row(cluster.host, service_counter.value) }}
+                      {% for branch in cluster.systems %}
+                        {{ asset_row(branch.system, 1) }}
+                        {% for service in branch.services %}{{ asset_row(service, 2) }}{% endfor %}
+                      {% endfor %}
+                      {% for service in cluster.direct_services %}{{ asset_row(service, 1) }}{% endfor %}
+                    {% endfor %}
+                    {% if explorer.standalone_systems or explorer.standalone_services %}
+                      <tr class="group-row unassigned-group">
+                        <td colspan="8">
+                          <span class="node-icon unknown">?</span>
+                          <strong>{{ t("catalog.unassigned") }}</strong>
+                          <span class="path-copy">{{ t("catalog.placement_missing") }}</span>
+                          <span class="group-count warning-count">{{ t("catalog.asset_count", count=unassigned_count) }}</span>
+                        </td>
+                      </tr>
+                      {% for branch in explorer.standalone_systems %}
+                        {{ asset_row(branch.system, 1) }}
+                        {% for service in branch.services %}{{ asset_row(service, 2) }}{% endfor %}
+                      {% endfor %}
+                      {% for service in explorer.standalone_services %}{{ asset_row(service, 1) }}{% endfor %}
+                    {% endif %}
+                    {% if explorer.networks %}
+                      <tr class="group-row secondary-group">
+                        <td colspan="8">
+                          <span class="node-icon netzwerk">⌁</span>
+                          <strong>{{ t("catalog.networks") }}</strong>
+                          <span class="group-count">{{ t("catalog.asset_count", count=explorer.networks|length) }}</span>
+                        </td>
+                      </tr>
+                      {% for network in explorer.networks %}{{ asset_row(network, 1) }}{% endfor %}
+                    {% endif %}
+                  {% endif %}
+                {% else %}
+                  <tr class="empty-row"><td colspan="8">{{ t("catalog.empty") }}</td></tr>
+                {% endif %}
+              </tbody>
+            </table>
+          </div>
+          <footer class="table-footer">{{ t("catalog.results", count=objects|length) }}</footer>
+        </section>
+
+        <aside class="asset-inspector" data-inspector>
+          <header class="inspector-head">
+            <div class="selected-kind" data-inspector-kind>{{ t("catalog.inspector") }}</div>
+            <h2 data-inspector-title>{{ t("catalog.select_asset") }}</h2>
+            <p data-inspector-summary></p>
+            <span data-inspector-health></span>
+          </header>
+          <section class="inspector-section">
+            <div class="section-title"><h3>{{ t("catalog.at_a_glance") }}</h3></div>
+            <dl class="fact-grid">
+              <div><dt>{{ t("asset.address") }}</dt><dd data-inspector-address>{{ t("asset.no_value") }}</dd></div>
+              <div><dt>{{ t("asset.platform") }}</dt><dd data-inspector-platform>{{ t("asset.no_value") }}</dd></div>
+              <div><dt>{{ t("asset.lifecycle") }}</dt><dd data-inspector-lifecycle>{{ t("asset.no_value") }}</dd></div>
+              <div><dt>{{ t("asset.reference") }}</dt><dd><code data-inspector-ref>{{ t("asset.no_value") }}</code></dd></div>
+            </dl>
+          </section>
+          <footer class="inspector-footer">
+            <a class="secondary-button" href="/" data-inspector-details>{{ t("asset.details") }}</a>
+          </footer>
+        </aside>
+      </main>
+    {% else %}
+      <main class="topology-shell">
+        <section class="map-heading">
+          <div>
+            <p class="eyebrow">{{ t("topology.eyebrow") }}</p>
+            <h1>{{ t("topology.title") }}</h1>
+            <span>{{ t("topology.subtitle") }}</span>
+          </div>
+          <div class="map-health">
+            {% for health in ("healthy", "degraded", "down", "unknown") %}
+              <div><span class="status-dot {{ health }}"></span><strong>{{ health_counts[health] or 0 }}</strong><small>{{ t("health." ~ health) }}</small></div>
+            {% endfor %}
+          </div>
+        </section>
+        <div class="map-toolbar">
+          <div class="map-filters">
+            <a class="{% if not kind %}active{% endif %}" href="/?view=topology&q={{ q|urlencode }}">{{ t("topology.overview") }}</a>
+            {% for object_kind in object_kinds %}
+              <a class="{% if kind == object_kind %}active{% endif %}" href="/?view=topology&q={{ q|urlencode }}&kind={{ object_kind }}">{{ t("kind." ~ object_kind) }}</a>
+            {% endfor %}
           </div>
         </div>
-        {% if show_create_form %}
-          <div class="modal-overlay" role="presentation">
-            <a class="modal-backdrop" href="/?q={{ q|urlencode }}&kind={{ kind }}&cols={{ layout_cols }}" aria-label="Objekt-Anlegen schließen"></a>
-            <section class="panel modal-window" role="dialog" aria-modal="true" aria-labelledby="create-object-title">
-              <div class="modal-head">
-                <h2 class="section-title" id="create-object-title">Neues Objekt anlegen</h2>
-                <a class="button button-small button-muted" href="/?q={{ q|urlencode }}&kind={{ kind }}&cols={{ layout_cols }}">Schließen</a>
-              </div>
-              {% if error %}
-                <div class="error">{{ error }}</div>
-              {% endif %}
-              <form class="form-grid" method="post" action="/objects">
-                <label data-create-field="kind"><span data-field-label="kind">{{ create_fields_by_key.kind.label }}</span>
-                  <select name="kind" data-kind-select>
-                    {% for object_kind in object_kinds %}
-                      <option value="{{ object_kind }}" {% if object_kind == form.kind %}selected{% endif %}>{{ object_kind }}</option>
-                    {% endfor %}
-                  </select>
-                </label>
-                <label data-create-field="object_id"><span data-field-label="object_id">{{ create_fields_by_key.object_id.label }}</span>
-                  <input name="object_id" data-field-input="object_id" value="{{ form.id }}" placeholder="{{ create_fields_by_key.object_id.placeholder }}" autocomplete="off" spellcheck="false" {% if create_fields_by_key.object_id.required %}required{% endif %} />
-                </label>
-                <label data-create-field="primary_name"><span data-primary-name-label>{{ form_ui_schema.primary_name_label }}</span>
-                  <input name="primary_name" data-field-input="primary_name" data-primary-name-input value="{{ form.primary_name or form.hostname or form.label }}" placeholder="{{ create_fields_by_key.primary_name.placeholder }}" autocomplete="off" {% if create_fields_by_key.primary_name.required %}required{% endif %} />
-                </label>
-                <label data-create-field="labels"><span data-field-label="labels">{{ create_fields_by_key.labels.label }}</span>
-                  <input name="labels" data-field-input="labels" value="{{ form.labels }}" placeholder="{{ create_fields_by_key.labels.placeholder }}" autocomplete="off" {% if create_fields_by_key.labels.required %}required{% endif %} />
-                </label>
-                <label data-create-field="platform" data-platform-field {% if "platform" not in form_ui_schema.create_fields %}hidden{% endif %}><span data-field-label="platform">{{ create_fields_by_key.platform.label }}</span>
-                  <select name="platform">
-                    <option value="">Keine Plattform</option>
-                    {% for platform in platform_types %}
-                      <option value="{{ platform }}" {% if platform == form.platform %}selected{% endif %}>{{ platform }}</option>
-                    {% endfor %}
-                  </select>
-                </label>
-                <label data-create-field="status"><span data-field-label="status">{{ create_fields_by_key.status.label }}</span>
-                  <select name="status">
-                    {% for object_status in object_statuses %}
-                      <option value="{{ object_status }}" {% if object_status == form.status %}selected{% endif %}>{{ object_status }}</option>
-                    {% endfor %}
-                  </select>
-                </label>
-                <label data-create-field="relationship"><span data-field-label="relationship">{{ create_fields_by_key.relationship.label }}</span>
-                  <select name="relation_target_ref">
-                    <option value="">Keine Relationship setzen</option>
-                    {% for target in relation_targets %}
-                      {% set target_ref = target.kind ~ ":" ~ target.id %}
-                      <option value="{{ target_ref }}" {% if target_ref == form.relation_target_ref or target.id == form.hosted_on_system_id %}selected{% endif %}>{{ target.label }} · {{ target_ref }}</option>
-                    {% endfor %}
-                  </select>
-                </label>
-                <label data-create-field="relation_type"><span data-field-label="relation_type">{{ create_fields_by_key.relation_type.label }}</span>
-                  <select name="relation_type">
-                    {% for relation in relation_types %}
-                      <option value="{{ relation }}" {% if relation == form.relation_type %}selected{% endif %}>{{ relation }}</option>
-                    {% endfor %}
-                  </select>
-                </label>
-                <label data-create-field="summary"><span data-field-label="summary">{{ create_fields_by_key.summary.label }}</span>
-                  <textarea class="summary-input" name="summary" data-field-input="summary" placeholder="{{ create_fields_by_key.summary.placeholder }}" {% if create_fields_by_key.summary.required %}required{% endif %}>{{ form.summary }}</textarea>
-                </label>
-                <div class="button-row">
-                  <button type="submit">Speichern</button>
-                  <a class="button button-muted" href="/?q={{ q|urlencode }}&kind={{ kind }}&cols={{ layout_cols }}">Abbrechen</a>
-                </div>
-              </form>
-            </section>
-          </div>
-        {% endif %}
-        {% if objects %}
-          <div class="list list-cols-{{ layout_cols }}">
-            {% for object in objects %}
-              {% set object_relationships = index_relationships[object.id] %}
-              <article class="object-card" data-object-card>
-                <div class="object-row" role="button" tabindex="0" aria-expanded="false" data-object-toggle>
-                  <div class="kind">
-                    <span>Typ: {{ object.kind }}</span>
-                    {% if object.data.platform and ui_schemas[object.kind].supports_platform %}
-                      <span>Plattform: {{ object.data.platform }}</span>
-                    {% endif %}
-                    <span class="status">Status: {{ object.status }}</span>
-                  </div>
-                  <div>
-                    <div class="label">
-                      {{ display_names[object.id] }}
-                    </div>
-                    <div class="summary">{{ object.summary or object.id }}</div>
-                    <div class="badges">
-                      {% if object.data.network and object.data.network.addresses %}
-                        {% for address in object.data.network.addresses[:2] %}
-                          <span class="badge">{{ address.ip }}</span>
-                        {% endfor %}
-                      {% endif %}
-                      {% if object.data.labels %}
-                        {% for label in object.data.labels[:3] %}
-                          <span class="badge">{{ label }}</span>
-                        {% endfor %}
-                      {% endif %}
-                    </div>
-                  </div>
-                  <div class="object-actions">
-                    <span class="object-id">{{ object.id }}</span>
-                    <a class="button button-small button-muted" href="/objects/{{ object.id }}" data-detail-link>Details</a>
-                  </div>
-                </div>
-                <div class="object-expanded" data-object-expanded>
-                  <div class="relationship-map">
-                    {% if object_relationships.topology.chains %}
-                      {% for chain in object_relationships.topology.chains %}
-                        {% set chain_index = loop.index %}
-                        <div class="relationship-chain">
-                          <section class="relationship-column">
-                            <span class="relationship-column-title">Host</span>
-                            <div class="relationship-list">
-                              {% for node in chain.hosts %}
-                                <div class="relationship-pill relationship-pill-{{ node.kind }} {% if node.id == object.id and node.kind == object.kind %}relationship-pill-current{% endif %}" role="button" tabindex="0" data-ref="{{ node.ref }}" data-relationship-node data-detail-target="relationship-detail-{{ object.id }}-{{ chain_index }}-host-{{ loop.index }}">
-                                  <span>{{ node.kind }}</span>
-                                  <strong>{{ node.label }}</strong>
-                                </div>
-                              {% else %}
-                                <span class="relationship-empty-pill">Kein Host</span>
-                              {% endfor %}
-                            </div>
-                          </section>
-                          <div class="relationship-line" aria-hidden="true"></div>
-                          <section class="relationship-column">
-                            <span class="relationship-column-title">Systeme</span>
-                            <div class="relationship-list">
-                              {% for node in chain.systems %}
-                                <div class="relationship-pill relationship-pill-{{ node.kind }} {% if node.id == object.id and node.kind == object.kind %}relationship-pill-current{% endif %}" role="button" tabindex="0" data-ref="{{ node.ref }}" data-relationship-node data-detail-target="relationship-detail-{{ object.id }}-{{ chain_index }}-system-{{ loop.index }}">
-                                  <span>{{ node.kind }}</span>
-                                  <strong>{{ node.label }}</strong>
-                                  {% if node.ports %}
-                                    <small>
-                                      {% for port in node.ports[:2] %}
-                                        {{ port.value }}{% if not loop.last %}, {% endif %}
-                                      {% endfor %}
-                                    </small>
-                                  {% endif %}
-                                </div>
-                              {% else %}
-                                <span class="relationship-empty-pill">Kein System</span>
-                              {% endfor %}
-                            </div>
-                          </section>
-                          <div class="relationship-line" aria-hidden="true"></div>
-                          <section class="relationship-column">
-                            <span class="relationship-column-title">Services</span>
-                            <div class="relationship-list">
-                              {% for node in chain.services %}
-                                <div class="relationship-pill relationship-pill-{{ node.kind }} {% if node.id == object.id and node.kind == object.kind %}relationship-pill-current{% endif %}" role="button" tabindex="0" data-ref="{{ node.ref }}" data-relationship-node data-detail-target="relationship-detail-{{ object.id }}-{{ chain_index }}-service-{{ loop.index }}">
-                                  <span>{{ node.kind }}</span>
-                                  <strong>{{ node.label }}</strong>
-                                  {% if node.ports %}
-                                    <small>
-                                      {% for port in node.ports[:2] %}
-                                        {{ port.value }}{% if not loop.last %}, {% endif %}
-                                      {% endfor %}
-                                    </small>
-                                  {% endif %}
-                                </div>
-                              {% else %}
-                                <span class="relationship-empty-pill">Kein Service</span>
-                              {% endfor %}
-                            </div>
-                          </section>
-                        </div>
-                      {% endfor %}
-                    {% else %}
-                      <div class="empty relationship-empty">Keine Beziehungen erfasst.</div>
-                    {% endif %}
-                  </div>
-                  <div class="relationship-detail-stack">
-                    {% for chain in object_relationships.topology.chains %}
-                      {% set chain_index = loop.index %}
-                      {% for column_name, nodes in (("host", chain.hosts), ("system", chain.systems), ("service", chain.services)) %}
-                        {% for node in nodes %}
-                          <section class="relationship-detail-panel" id="relationship-detail-{{ object.id }}-{{ chain_index }}-{{ column_name }}-{{ loop.index }}" data-relationship-detail-panel>
-                            <div class="relationship-detail-panel-head">
-                              <div>
-                                <span class="relationship-type">Typ: {{ node.kind }}</span>
-                                <strong class="relationship-node-name">{{ node.label }}</strong>
-                              </div>
-                              <a class="button button-small button-muted" href="/objects/{{ node.id }}" data-detail-link>Details</a>
-                            </div>
-                            <div class="relationship-detail-grid">
-                              {% if node.status %}
-                                <div><span>Status</span><strong>{{ node.status }}</strong></div>
-                              {% endif %}
-                              <div><span>ID</span><strong>{{ node.id }}</strong></div>
-                              <div><span>Referenz</span><strong>{{ node.ref }}</strong></div>
-                              {% if node.data.network and node.data.network.addresses %}
-                                <div class="relationship-detail-wide">
-                                  <span>Adressen</span>
-                                  {% for address in node.data.network.addresses[:3] %}
-                                    <strong>{{ address.ip }}{% if address.scope %} · {{ address.scope }}{% endif %}</strong>
-                                  {% endfor %}
-                                </div>
-                              {% endif %}
-                              {% if node.ports %}
-                                <div class="relationship-detail-wide">
-                                  <span>Ports</span>
-                                  {% for port in node.ports %}
-                                    <strong>{{ port.label }} {{ port.value }}</strong>
-                                  {% endfor %}
-                                </div>
-                              {% endif %}
-                            </div>
-                          </section>
-                        {% endfor %}
-                      {% endfor %}
-                    {% endfor %}
-                  </div>
+        <section class="map-workbench">
+          <div class="topology-canvas">
+            <div class="canvas-grid" aria-hidden="true"></div>
+            <header class="canvas-labels">
+              <span>{{ t("topology.hardware_column") }}</span>
+              <span>{{ t("topology.system_column") }}</span>
+              <span>{{ t("topology.service_column") }}</span>
+            </header>
+
+            {% for cluster in explorer.clusters %}
+              <article class="topology-cluster">
+                {{ map_node(cluster.host, "hardware-node") }}
+                <div class="cluster-connector" aria-hidden="true"><i></i></div>
+                <div class="host-stack">
+                  {% for branch in cluster.systems %}
+                    <section class="host-branch">
+                      {{ map_node(branch.system, "host-node") }}
+                      <div class="service-connector" aria-hidden="true"><i></i></div>
+                      <div class="service-stack">
+                        {% for service in branch.services %}{{ map_node(service, "service-node") }}{% endfor %}
+                      </div>
+                    </section>
+                  {% endfor %}
+                  {% if cluster.direct_services %}
+                    <section class="host-branch direct-service-branch">
+                      <div class="direct-service-label">{{ t("topology.direct_service") }}</div>
+                      <div class="service-connector" aria-hidden="true"><i></i></div>
+                      <div class="service-stack">
+                        {% for service in cluster.direct_services %}{{ map_node(service, "service-node") }}{% endfor %}
+                      </div>
+                    </section>
+                  {% endif %}
                 </div>
               </article>
             {% endfor %}
+
+            {% if explorer.standalone_systems or explorer.standalone_services %}
+              <article class="topology-cluster unassigned-topology-cluster">
+                <div class="hardware-node map-node unassigned-root">
+                  <span class="node-icon unknown large-icon">?</span>
+                  <span class="map-node-copy">
+                    <small>{{ t("catalog.placement_missing")|upper }}</small>
+                    <strong>{{ t("catalog.unassigned") }}</strong>
+                    <em>{{ t("topology.unassigned_assets", count=unassigned_count) }}</em>
+                  </span>
+                </div>
+                <div class="cluster-connector" aria-hidden="true"><i></i></div>
+                <div class="host-stack">
+                  {% for branch in explorer.standalone_systems %}
+                    <section class="host-branch">
+                      {{ map_node(branch.system, "host-node") }}
+                      <div class="service-connector" aria-hidden="true"><i></i></div>
+                      <div class="service-stack">
+                        {% for service in branch.services %}{{ map_node(service, "service-node") }}{% endfor %}
+                      </div>
+                    </section>
+                  {% endfor %}
+                  {% if explorer.standalone_services %}
+                    <section class="host-branch direct-service-branch">
+                      <div class="direct-service-label">{{ t("topology.direct_service") }}</div>
+                      <div class="service-connector" aria-hidden="true"><i></i></div>
+                      <div class="service-stack">
+                        {% for service in explorer.standalone_services %}{{ map_node(service, "service-node") }}{% endfor %}
+                      </div>
+                    </section>
+                  {% endif %}
+                </div>
+              </article>
+            {% endif %}
+            {% if explorer.networks %}
+              <article class="topology-cluster network-topology-cluster">
+                <div class="hardware-node map-node network-root">
+                  <span class="node-icon netzwerk large-icon">⌁</span>
+                  <span class="map-node-copy">
+                    <small>{{ t("kind.netzwerk")|upper }}</small>
+                    <strong>{{ t("topology.network_inventory") }}</strong>
+                    <em>{{ t("topology.network_count", count=explorer.networks|length) }}</em>
+                  </span>
+                </div>
+                <div class="cluster-connector" aria-hidden="true"><i></i></div>
+                <div class="service-stack network-stack">
+                  {% for network in explorer.networks %}{{ map_node(network, "service-node network-node") }}{% endfor %}
+                </div>
+              </article>
+            {% endif %}
+            {% if not explorer.clusters and not explorer.standalone_systems and not explorer.standalone_services and not explorer.networks %}
+              <div class="topology-empty">{{ t("topology.no_clusters") }}</div>
+            {% endif %}
+            <div class="map-legend" aria-label="{{ t('topology.legend') }}">
+              <span><i class="legend-shape hardware"></i>{{ t("kind.host") }}</span>
+              <span><i class="legend-shape host"></i>{{ t("kind.system") }}</span>
+              <span><i class="legend-shape service"></i>{{ t("kind.service") }}</span>
+              <span><span class="status-dot healthy"></span>{{ t("health.healthy") }}</span>
+              <span><span class="status-dot degraded"></span>{{ t("health.degraded") }}</span>
+            </div>
           </div>
-        {% else %}
-          <div class="empty">Keine passenden Objekte.</div>
-        {% endif %}
-      </section>
-    </main>
+
+          <aside class="map-inspector" data-inspector>
+            <header>
+              <div class="inspector-kicker" data-inspector-kind>{{ t("catalog.inspector") }}</div>
+              <h2 data-inspector-title>{{ t("catalog.select_asset") }}</h2>
+              <p data-inspector-summary></p>
+              <div class="inspector-state-line">
+                <span data-inspector-health></span>
+                <code data-inspector-ref>{{ t("asset.no_value") }}</code>
+              </div>
+            </header>
+            <section>
+              <h3>{{ t("catalog.at_a_glance") }}</h3>
+              <dl class="vertical-facts">
+                <div><dt>{{ t("asset.address") }}</dt><dd data-inspector-address>{{ t("asset.no_value") }}</dd></div>
+                <div><dt>{{ t("asset.platform") }}</dt><dd data-inspector-platform>{{ t("asset.no_value") }}</dd></div>
+                <div><dt>{{ t("asset.lifecycle") }}</dt><dd data-inspector-lifecycle>{{ t("asset.no_value") }}</dd></div>
+                <div><dt>{{ t("asset.endpoint") }}</dt><dd data-inspector-endpoint>{{ t("asset.no_value") }}</dd></div>
+              </dl>
+            </section>
+            <footer>
+              <a class="secondary-button" href="/" data-inspector-details>{{ t("asset.details") }}</a>
+            </footer>
+          </aside>
+        </section>
+      </main>
+    {% endif %}
   </body>
 </html>
