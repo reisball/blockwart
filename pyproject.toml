@@ -51,6 +51,7 @@ blockwart = [
   "ui/templates/*.html",
   "ui/static/*.css",
   "ui/static/*.js",
+  "ui/locales/*.json",
 ]
 
 [tool.pytest.ini_options]

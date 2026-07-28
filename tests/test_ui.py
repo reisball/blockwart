@@ -87,11 +87,73 @@ def test_ui_assets_resolve_from_package_outside_repo_root(
     assert "text/css" in static_response.headers["content-type"]
 
 
+def test_index_uses_english_as_the_fallback_locale(client: TestClient) -> None:
+    response = client.get(
+        "/?lang=de",
+        headers={"Accept-Language": "de-DE,de;q=0.9"},
+    )
+
+    assert response.status_code == 200
+    assert '<html lang="en" data-view="catalog">' in response.text
+    assert "Asset catalog" in response.text
+    assert "Asset-Katalog" not in response.text
+
+
+def test_topology_is_a_real_second_view(client: TestClient) -> None:
+    response = client.get("/?view=topology")
+
+    assert response.status_code == 200
+    assert '<html lang="en" data-view="topology">' in response.text
+    assert "Hardware, runtime hosts, and services" in response.text
+    assert 'class="topology-canvas"' in response.text
+    assert 'data-asset-ref="system:fabrik"' in response.text
+    assert 'data-asset-ref="service:fabrik-proxmox"' in response.text
+    assert 'data-inspector' in response.text
+
+
+def test_topology_keeps_network_assets_visible(
+    client: TestClient,
+    session_factory,
+) -> None:
+    with session_factory() as session:
+        upsert_object(
+            session,
+            CatalogObjectIn(
+                id="topology-network",
+                kind="netzwerk",
+                label="Topology Network",
+                data={
+                    "schema_version": 1,
+                    "network": {
+                        "addresses": [
+                            {
+                                "ip": "192.168.99.1",
+                                "family": "ipv4",
+                                "scope": "lan",
+                            }
+                        ]
+                    },
+                },
+            ),
+        )
+
+    response = client.get("/?view=topology&kind=netzwerk")
+
+    assert response.status_code == 200
+    assert "Network inventory" in response.text
+    assert "Network segments: 1" in response.text
+    assert 'data-asset-ref="netzwerk:topology-network"' in response.text
+    assert "No matching placement topology." not in response.text
+
+
 def test_index_shows_kind_counts(client: TestClient) -> None:
     response = client.get("/")
 
     assert response.status_code == 200
-    assert "<strong>25</strong> alle" in response.text
+    assert '<html lang="en" data-view="catalog">' in response.text
+    assert "Asset catalog" in response.text
+    assert "All assets" in response.text
+    assert "<b>25</b>" in response.text
     assert "system" in response.text
     assert "netzwerk" in response.text
     assert "service" in response.text
@@ -100,7 +162,8 @@ def test_index_shows_kind_counts(client: TestClient) -> None:
     assert 'value="project"' not in response.text
     assert 'value="runbook"' not in response.text
     assert "credential_reference" not in response.text
-    assert "Neues Objekt anlegen" in response.text
+    assert "Add asset" in response.text
+    assert 'href="/?view=topology' in response.text
     assert 'href="/settings/schema"' in response.text
     assert 'class="panel panel-sticky"' not in response.text
     assert 'data-theme-value="dark"' in response.text
@@ -113,23 +176,19 @@ def test_create_object_form_is_hidden_behind_button(client: TestClient) -> None:
     create_response = client.get("/?create=1")
 
     assert response.status_code == 200
-    assert 'href="/?create=1"' in response.text
+    assert "create=1" in response.text
     assert 'name="object_id"' not in response.text
-    assert 'role="button"' in response.text
-    assert 'data-object-toggle' in response.text
-    assert 'data-detail-link' in response.text
-    assert "relationship-chain" in response.text
-    assert "relationship-pill" in response.text
-    assert "<span>hosts</span>" not in response.text
-    assert "<span>system</span>" in response.text
-    assert "Status: active" in response.text
-    assert "<span>service</span>" in response.text
-    assert "<span>Beschreibung</span>" not in response.text
+    assert 'data-asset-ref="system:fabrik"' in response.text
+    assert 'class="asset-table"' in response.text
+    assert 'data-inspector' in response.text
+    assert "Runtime host" in response.text
+    assert "Service" in response.text
     assert "/static/index.js" in response.text
+    assert "/static/explorer.css" in response.text
     assert create_response.status_code == 200
-    assert "Neues Objekt anlegen" in create_response.text
+    assert "Create asset" in create_response.text
     assert 'role="dialog"' in create_response.text
-    assert 'class="modal-overlay"' in create_response.text
+    assert 'class="modal-overlay explorer-modal"' in create_response.text
     assert create_response.text.find('data-create-field="kind"') < create_response.text.find(
         'data-create-field="object_id"'
     )
@@ -705,29 +764,21 @@ def test_network_and_service_detail_do_not_show_hardware_panel(
 
 
 def test_service_result_keeps_service_on_right_side(client: TestClient) -> None:
-    response = client.get("/?q=n8n-web-ui")
+    response = client.get("/?view=topology&q=n8n-web-ui")
 
     assert response.status_code == 200
-    object_marker = '<span class="object-id">n8n-web-ui</span>'
-    object_index = response.text.find(object_marker)
-    assert object_index >= 0
-    article_start = response.text.rfind("<article", 0, object_index)
-    article_end = response.text.find("</article>", object_index)
-    article = response.text[article_start:article_end]
-
-    relationship_start = article.find('class="relationship-map"')
-    relationships = article[relationship_start:]
-
-    assert relationships.find('data-ref="system:fabrik"') < relationships.find(
-        'data-ref="system:n8n"'
+    assert '<html lang="en" data-view="topology">' in response.text
+    assert "Infrastructure Map" not in response.text
+    assert "Topology" in response.text
+    assert response.text.find('data-asset-ref="system:n8n"') < response.text.find(
+        'data-asset-ref="service:n8n-web-ui"'
     )
-    assert relationships.find("system:n8n") < relationships.find("service:n8n-web-ui")
-    assert relationships.find("Systeme") < relationships.find("Services")
-    assert "relationship-detail-stack" in article
-    assert 'data-relationship-node' in relationships
-    assert 'data-detail-target=' in relationships
-    assert '<a class="relationship-pill' not in relationships
-    assert 'href="/objects/n8n-web-ui"' in article
+    assert re.search(
+        r'class="map-node service-node selected"\s+'
+        r'type="button"\s+data-asset-ref="service:n8n-web-ui"',
+        response.text,
+    )
+    assert "service:paperless-api" not in response.text
 
 
 def test_host_result_groups_systems_and_services_in_one_relation_row(
@@ -772,25 +823,14 @@ def test_host_result_groups_systems_and_services_in_one_relation_row(
                 ]
             )
 
-    response = client.get("/?q=hardware-ui")
+    response = client.get("/?view=topology&q=hardware-ui")
 
     assert response.status_code == 200
-    object_marker = '<span class="object-id">hardware-ui</span>'
-    object_index = response.text.find(object_marker)
-    assert object_index >= 0
-    article_start = response.text.rfind("<article", 0, object_index)
-    article_end = response.text.find("</article>", object_index)
-    article = response.text[article_start:article_end]
-
-    relationship_start = article.find('class="relationship-map"')
-    relationships = article[relationship_start:]
-
-    assert relationships.count('class="relationship-chain"') == 1
-    assert relationships.find("Host") < relationships.find("Systeme")
-    assert relationships.find("Systeme") < relationships.find("Services")
-    assert 'data-ref="host:hardware-ui"' in relationships
-    assert 'data-ref="system:runtime-ui"' in relationships
-    assert 'data-ref="service:service-ui"' in relationships
+    host_index = response.text.find('data-asset-ref="host:hardware-ui"')
+    system_index = response.text.find('data-asset-ref="system:runtime-ui"')
+    service_index = response.text.find('data-asset-ref="service:service-ui"')
+    assert 0 <= host_index < system_index < service_index
+    assert response.text.count('class="topology-cluster') == 1
 
 
 def test_object_detail_shows_data_and_relationships(client: TestClient) -> None:
@@ -916,7 +956,7 @@ def test_create_object_form_redirects_to_detail(
     assert "infra" in index.text
     assert "docker" in index.text
     assert "intern" in index.text
-    assert "Plattform: LXC" in index.text
+    assert "LXC" in index.text
     with session_factory() as session:
         catalog_object = get_object(session, "test-system")
     assert catalog_object is not None

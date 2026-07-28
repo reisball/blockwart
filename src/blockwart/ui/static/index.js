@@ -1,101 +1,101 @@
 (() => {
-  const cards = Array.from(document.querySelectorAll("[data-object-card]"));
-  const createKindSelect = document.querySelector("[data-kind-select]");
-  const platformField = document.querySelector("[data-platform-field]");
-  const primaryNameLabel = document.querySelector("[data-primary-name-label]");
-  const createFields = Array.from(document.querySelectorAll("[data-create-field]"));
+  const assets = window.BLOCKWART_EXPLORER_ASSETS || {};
+  const kindLabels = window.BLOCKWART_KIND_LABELS || {};
+  const copy = window.BLOCKWART_UI_COPY || {};
   const uiSchemas = window.BLOCKWART_UI_SCHEMAS || {};
+  const selectableNodes = Array.from(document.querySelectorAll("[data-asset-ref]"));
 
-  function closeCard(card) {
-    card.classList.remove("is-expanded");
-    card.querySelector("[data-object-toggle]")?.setAttribute("aria-expanded", "false");
-    closeRelationshipDetails(card);
+  function setInspectorValue(root, selector, value) {
+    const target = root.querySelector(selector);
+    if (target) {
+      target.textContent = value || copy.noValue || "—";
+    }
   }
 
-  function closeAll(except = null) {
-    for (const card of cards) {
-      if (card !== except) {
-        closeCard(card);
+  function updateHealth(root, health) {
+    const target = root.querySelector("[data-inspector-health]");
+    if (!target) {
+      return;
+    }
+    const normalizedHealth = health || "unknown";
+    const badge = document.createElement("span");
+    const dot = document.createElement("i");
+    badge.className = `state-badge state-${normalizedHealth}`;
+    badge.append(dot, document.createTextNode(
+      copy.health?.[normalizedHealth] || normalizedHealth,
+    ));
+    target.replaceChildren(badge);
+  }
+
+  function updateInspector(root, asset) {
+    if (!root || !asset) {
+      return;
+    }
+    setInspectorValue(root, "[data-inspector-kind]", kindLabels[asset.kind] || asset.kind);
+    setInspectorValue(root, "[data-inspector-title]", asset.label);
+    setInspectorValue(root, "[data-inspector-summary]", asset.summary);
+    setInspectorValue(root, "[data-inspector-address]", asset.address);
+    setInspectorValue(root, "[data-inspector-platform]", asset.platform);
+    setInspectorValue(root, "[data-inspector-lifecycle]", asset.lifecycle || asset.status);
+    setInspectorValue(root, "[data-inspector-endpoint]", asset.endpoint);
+    setInspectorValue(root, "[data-inspector-ref]", asset.ref);
+    updateHealth(root, asset.health);
+    const detailsLink = root.querySelector("[data-inspector-details]");
+    if (detailsLink) {
+      detailsLink.href = `/objects/${encodeURIComponent(asset.id)}`;
+    }
+  }
+
+  function selectAsset(ref) {
+    const asset = assets[ref];
+    if (!asset) {
+      return;
+    }
+    for (const node of selectableNodes) {
+      node.classList.toggle("selected", node.dataset.assetRef === ref);
+    }
+    for (const inspector of document.querySelectorAll("[data-inspector]")) {
+      updateInspector(inspector, asset);
+    }
+  }
+
+  for (const node of selectableNodes) {
+    node.addEventListener("click", (event) => {
+      if (event.target.closest("a")) {
+        return;
       }
-    }
-  }
-
-  function toggleCard(card) {
-    const isExpanded = card.classList.contains("is-expanded");
-    closeAll(card);
-    if (isExpanded) {
-      closeCard(card);
-      return;
-    }
-    card.classList.add("is-expanded");
-    card.querySelector("[data-object-toggle]")?.setAttribute("aria-expanded", "true");
-  }
-
-  function closeRelationshipDetails(card) {
-    for (const node of card.querySelectorAll("[data-relationship-node]")) {
-      node.classList.remove("is-selected");
-      node.setAttribute("aria-expanded", "false");
-    }
-    for (const panel of card.querySelectorAll("[data-relationship-detail-panel]")) {
-      panel.classList.remove("is-open");
-    }
-  }
-
-  function openRelationshipDetail(card, node) {
-    const targetId = node.getAttribute("data-detail-target");
-    const panel = targetId ? card.querySelector(`#${CSS.escape(targetId)}`) : null;
-    if (!panel) {
-      return;
-    }
-    closeRelationshipDetails(card);
-    node.classList.add("is-selected");
-    node.setAttribute("aria-expanded", "true");
-    panel.classList.add("is-open");
-  }
-
-  for (const card of cards) {
-    const toggle = card.querySelector("[data-object-toggle]");
-    for (const detailLink of card.querySelectorAll("[data-detail-link]")) {
-      detailLink.addEventListener("click", (event) => event.stopPropagation());
-    }
-    for (const relationshipNode of card.querySelectorAll("[data-relationship-node]")) {
-      relationshipNode.setAttribute("aria-expanded", "false");
-      relationshipNode.addEventListener("click", (event) => {
-        event.stopPropagation();
-        openRelationshipDetail(card, relationshipNode);
-      });
-      relationshipNode.addEventListener("keydown", (event) => {
+      selectAsset(node.dataset.assetRef);
+    });
+    if (node.tagName !== "BUTTON") {
+      node.addEventListener("keydown", (event) => {
         if (event.key !== "Enter" && event.key !== " ") {
           return;
         }
         event.preventDefault();
-        openRelationshipDetail(card, relationshipNode);
+        selectAsset(node.dataset.assetRef);
       });
     }
-    toggle?.addEventListener("click", () => toggleCard(card));
-    toggle?.addEventListener("keydown", (event) => {
-      if (event.key !== "Enter" && event.key !== " ") {
-        return;
-      }
-      event.preventDefault();
-      toggleCard(card);
-    });
   }
 
-  document.addEventListener("click", (event) => {
-    const target = event.target;
-    if (!(target instanceof Element)) {
-      return;
+  const initiallySelected = selectableNodes.find((node) => (
+    node.classList.contains("selected") && assets[node.dataset.assetRef]
+  )) || selectableNodes.find((node) => assets[node.dataset.assetRef]);
+  if (initiallySelected) {
+    selectAsset(initiallySelected.dataset.assetRef);
+  }
+
+  const searchInput = document.querySelector('.top-search input[type="search"]');
+  document.addEventListener("keydown", (event) => {
+    if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
+      event.preventDefault();
+      searchInput?.focus();
     }
-    if (target.closest("[data-object-card]")) {
-      const card = target.closest("[data-object-card]");
-      if (!target.closest("[data-relationship-detail-panel]")) {
-        closeRelationshipDetails(card);
-      }
-      return;
-    }
-    closeAll();
   });
+
+  const createKindSelect = document.querySelector("[data-kind-select]");
+  const platformField = document.querySelector("[data-platform-field]");
+  const primaryNameLabel = document.querySelector("[data-primary-name-label]");
+  const createFields = Array.from(document.querySelectorAll("[data-create-field]"));
 
   function setFieldEnabled(field, enabled) {
     field.hidden = !enabled;
@@ -111,7 +111,7 @@
     const schema = uiSchemas[createKindSelect.value] || {};
     const allowedFields = new Set(schema.create_fields || []);
     const fieldDefinitions = new Map(
-      (schema.create_field_definitions || []).map((field) => [field.key, field])
+      (schema.create_field_definitions || []).map((field) => [field.key, field]),
     );
     if (primaryNameLabel && schema.primary_name_label) {
       primaryNameLabel.textContent = schema.primary_name_label;
@@ -121,10 +121,10 @@
       setFieldEnabled(field, !key || allowedFields.has(key));
       const definition = key ? fieldDefinitions.get(key) : null;
       const label = key
-        ? field.querySelector('[data-field-label="' + CSS.escape(key) + '"]')
+        ? field.querySelector(`[data-field-label="${CSS.escape(key)}"]`)
         : null;
       const input = key
-        ? field.querySelector('[data-field-input="' + CSS.escape(key) + '"]')
+        ? field.querySelector(`[data-field-input="${CSS.escape(key)}"]`)
         : null;
       if (label && definition?.label) {
         label.textContent = definition.label;
