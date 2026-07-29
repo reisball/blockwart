@@ -5,7 +5,7 @@ AssetLifecycle = Literal["planned", "active", "retired"]
 AssetHealth = Literal["unknown", "healthy", "degraded", "down", "maintenance"]
 LegacyObjectStatus = Literal["active", "inactive", "deleted"]
 
-ASSET_KINDS = frozenset({"host", "system", "netzwerk", "service"})
+ASSET_KINDS = frozenset({"host", "system", "network", "service"})
 ASSET_LIFECYCLES: tuple[AssetLifecycle, ...] = ("planned", "active", "retired")
 ASSET_HEALTH_VALUES: tuple[AssetHealth, ...] = (
     "unknown",

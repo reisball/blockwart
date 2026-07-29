@@ -3,7 +3,7 @@ from dataclasses import dataclass
 VALID_REFERENCE_KINDS = {
     "host",
     "system",
-    "netzwerk",
+    "network",
     "service",
     "credential_reference",
     "runbook",

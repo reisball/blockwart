@@ -21,8 +21,9 @@ from blockwart.domain.relationships import (
     validate_relationship,
     validate_relationship_collection,
 )
-from blockwart.models import AuditEvent, CatalogObject, Relationship
+from blockwart.models import CatalogObject, Relationship
 from blockwart.schemas.catalog import CatalogObjectIn
+from blockwart.services.audit import add_audit_event
 from blockwart.services.catalog import ensure_kind_change_allowed
 
 
@@ -94,7 +95,7 @@ def import_seed_payload(
                     session,
                     obj.id,
                     "seed_skip_manual_override",
-                    f"Preserve manual override {row.kind}:{row.id}",
+                    {"object_ref": f"{row.kind}:{row.id}"},
                 )
                 continue
         current_state = (
@@ -129,7 +130,12 @@ def import_seed_payload(
                     provenance_json=provenance_json,
                 )
             )
-            _write_seed_audit(session, obj.id, "seed_create", f"Seed create {obj.kind}:{obj.id}")
+            _write_seed_audit(
+                session,
+                obj.id,
+                "seed_create",
+                {"object_ref": f"{obj.kind}:{obj.id}"},
+            )
             imported_objects += 1
             continue
 
@@ -142,7 +148,12 @@ def import_seed_payload(
         row.summary = obj.summary
         row.data_json = data_json
         row.provenance_json = provenance_json
-        _write_seed_audit(session, obj.id, "seed_update", f"Seed update {obj.kind}:{obj.id}")
+        _write_seed_audit(
+            session,
+            obj.id,
+            "seed_update",
+            {"object_ref": f"{obj.kind}:{obj.id}"},
+        )
         imported_objects += 1
 
     inserted_relationships = 0
@@ -157,16 +168,11 @@ def import_seed_payload(
         if exists is None:
             session.add(Relationship(**relationship))
             inserted_relationships += 1
-            relationship_summary = (
-                f"{relationship['from_ref']} "
-                f"{relationship['relation_type']} "
-                f"{relationship['to_ref']}"
-            )
             _write_seed_audit(
                 session,
                 None,
                 "seed_relationship_create",
-                f"Seed relationship {relationship_summary}",
+                relationship,
             )
 
     session.flush()
@@ -176,14 +182,18 @@ def import_seed_payload(
     )
 
 
-def _write_seed_audit(session: Session, object_id: str | None, action: str, summary: str) -> None:
-    session.add(
-        AuditEvent(
-            object_id=object_id,
-            action=action,
-            actor="seed-import",
-            summary=summary,
-        )
+def _write_seed_audit(
+    session: Session,
+    object_id: str | None,
+    action: str,
+    details: dict[str, str],
+) -> None:
+    add_audit_event(
+        session,
+        object_id=object_id,
+        action=action,
+        actor="seed-import",
+        details=details,
     )
 
 

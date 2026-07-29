@@ -1,0 +1,10 @@
+<nav class="language-switcher" aria-label="{{ t('language.selector') }}">
+  {% for language in supported_locales %}
+    <a
+      href="{{ language_url(language) }}"
+      lang="{{ language }}"
+      hreflang="{{ language }}"
+      {% if language == locale %}class="active" aria-current="page"{% endif %}
+    >{{ t("language." ~ language) }}</a>
+  {% endfor %}
+</nav>

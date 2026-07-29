@@ -24,7 +24,7 @@ Relevant hardcoded areas:
 - Markdown/seed imports: `src/blockwart/services/markdown_import.py`,
   `src/blockwart/services/seeds.py`
 
-The public UI currently exposes only `host`, `system`, `netzwerk`, and
+The public UI currently exposes only `host`, `system`, `network`, and
 `service`, while the backend also knows `credential_reference`, `runbook`,
 `decision`, and `project`.
 
@@ -33,7 +33,7 @@ The public UI currently exposes only `host`, `system`, `netzwerk`, and
 - `Hostname` is currently both a UI label and a storage behavior. On create/edit,
   the submitted hostname updates `data.network.hostnames[0]` and also becomes
   `catalog_objects.label`.
-- Detail panels such as `Netzwerk` and `Zugriff` are rendered only when data
+- Detail panels such as `Network` and `Access` are rendered only when data
   exists. This blocks adding missing rows from empty objects.
 - Field and panel validation is procedural, not declarative.
 - Secret safety must remain global. A configurable schema must not be able to

@@ -11,7 +11,7 @@ It wraps only the read-only v1 API:
 
 There are no writable MCP tools.
 
-`blockwart.search` and `blockwart.get_context` accept `host`, `system`, `netzwerk`, and `service`
+`blockwart.search` and `blockwart.get_context` accept `host`, `system`, `network`, and `service`
 as kinds. Both tools also forward v1's structured `parent`, `ip`, `port`,
 `endpoint_type`, `protocol`, `exposure`, `status`, `lifecycle`, and `health`
 filters plus canonical `source_type` and computed `stale`, `cursor`, `sort`,

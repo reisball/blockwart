@@ -15,7 +15,7 @@ The registry covers the existing object kinds:
 
 - `host`
 - `system`
-- `netzwerk`
+- `network`
 - `service`
 - `credential_reference`
 - `runbook`

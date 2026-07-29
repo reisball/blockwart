@@ -5,14 +5,17 @@ from blockwart.api.errors import install_api_error_contract
 from blockwart.api.routes import agent, catalog, health, v1
 from blockwart.config import Settings, get_settings
 from blockwart.ui.admin import router as admin_router
+from blockwart.ui.i18n import persist_locale_cookie, validate_locale_catalogs
 from blockwart.ui.paths import STATIC_DIR
 from blockwart.ui.routes import router as ui_router
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
+    validate_locale_catalogs()
     app = FastAPI(title="Blockwart", version="0.1.0")
     app.state.settings = settings or get_settings()
     install_api_error_contract(app)
+    app.middleware("http")(persist_locale_cookie)
 
     app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
     app.include_router(health.router, prefix="/api")

@@ -12,6 +12,7 @@ from blockwart.ui.admin_auth import (
     create_admin_session,
     settings_for_request,
 )
+from blockwart.ui.i18n import translation_context
 from blockwart.ui.paths import TEMPLATE_DIR
 
 templates = Jinja2Templates(directory=TEMPLATE_DIR)
@@ -30,7 +31,11 @@ def unlock_admin(
 ):
     settings = settings_for_request(request)
     if not admin_token_matches(settings, admin_token):
-        return _admin_response(request, error="Admin-Freigabe fehlgeschlagen.", status_code=403)
+        return _admin_response(
+            request,
+            error=translation_context(request)["t"]("admin.unlock_failed"),
+            status_code=403,
+        )
     response = RedirectResponse(url="/", status_code=303)
     response.set_cookie(
         key=ADMIN_COOKIE_NAME,
@@ -66,14 +71,16 @@ def _admin_response(
     error: str | None = None,
     status_code: int = 200,
 ) -> HTMLResponse:
+    i18n = translation_context(request)
     response = templates.TemplateResponse(
         request,
         "admin.html",
         context={
-            "title": "Admin-Freigabe - Blockwart",
+            "title": i18n["t"]("admin.title"),
             "admin_configured": admin_is_configured(request),
             "can_write": can_write(request),
             "error": error,
+            **i18n,
         },
         status_code=status_code,
     )

@@ -25,7 +25,8 @@ from blockwart.db.migrations import (
 PREVIOUS_HEAD_REVISION = "20260723_0002"
 PLACEMENT_REVISION = "20260724_0003"
 RELATIONSHIP_REVISION = "20260724_0004"
-HEAD_REVISION = "20260726_0006"
+ENGLISH_CONTRACT_REVISION = "20260729_0007"
+HEAD_REVISION = ENGLISH_CONTRACT_REVISION
 PROJECT_ALEMBIC_CONFIG = Path(__file__).resolve().parents[1] / "alembic.ini"
 LEGACY_SNAPSHOT = Path(__file__).resolve().parent / "fixtures" / "legacy_snapshot.sql"
 
@@ -256,6 +257,12 @@ def test_upgrade_from_previous_real_revision_preserves_rows_and_json(
         row for row in expected["catalog_objects"] if row["id"] == "legacy-service"
     )
     assert legacy_service["data_json"].pop("system_id") == "system:legacy-system"
+    legacy_network = next(
+        row for row in expected["catalog_objects"] if row["id"] == "legacy-network"
+    )
+    legacy_network["kind"] = "network"
+    for audit_event in expected["audit_events"]:
+        audit_event["summary"] = "legacy"
     assert after == expected
     command.check(config)
     assert check_database_revision(database_url) == HEAD_REVISION
@@ -360,6 +367,204 @@ def test_canonical_placement_migration_converts_legacy_sources_losslessly(
     ]
     assert after["audit_events"] == before["audit_events"]
     assert _revision(database_url) == HEAD_REVISION
+
+
+def test_english_contract_migration_is_lossless_and_canonicalizes_references(
+    tmp_path: Path,
+) -> None:
+    database_path = tmp_path / "english-contract.sqlite3"
+    database_url = _database_url(database_path)
+    config = build_alembic_config(database_url)
+    command.upgrade(config, "20260726_0006")
+
+    connection = sqlite3.connect(database_path)
+    try:
+        connection.executemany(
+            "INSERT INTO catalog_objects "
+            "(id, kind, label, status, lifecycle, health, summary, data_json, "
+            "provenance_json, created_at, updated_at) "
+            "VALUES (?, ?, ?, 'active', 'active', 'unknown', ?, ?, ?, ?, ?)",
+            [
+                (
+                    "legacy-network",
+                    "netzwerk",
+                    "Legacy Network",
+                    "preserve network object",
+                    '{"schema_version":1,"netzwerk":{"owner_ref":"netzwerk:legacy-network"},'
+                    '"references":["netzwerk:legacy-network"],'
+                    '"future":{"keep":["all","values"]}}',
+                    '{"source_type":"import","source_ref":"netzwerk:legacy-network",'
+                    '"manual_override":false}',
+                    "2026-01-01 01:02:03",
+                    "2026-02-02 02:03:04",
+                ),
+                (
+                    "consumer",
+                    "service",
+                    "Consumer",
+                    "preserve consumer",
+                    '{"schema_version":1,"target_ref":"network:legacy-network"}',
+                    '{"source_type":"unknown","manual_override":false}',
+                    "2026-01-01 01:02:03",
+                    "2026-02-02 02:03:04",
+                ),
+            ],
+        )
+        connection.execute(
+            "INSERT INTO relationships (from_ref, relation_type, to_ref) "
+            "VALUES ('service:consumer', 'uses', 'netzwerk:legacy-network')"
+        )
+        connection.execute(
+            "INSERT INTO audit_events "
+            "(object_id, action, actor, summary, created_at) "
+            "VALUES ('legacy-network', 'update', 'legacy-ui', "
+            "'Feld CPU Hersteller wurde geändert', '2026-02-02 02:03:05')"
+        )
+        connection.commit()
+        before_counts = {
+            table: connection.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
+            for table in ("catalog_objects", "relationships", "audit_events")
+        }
+    finally:
+        connection.close()
+
+    command.upgrade(config, "head")
+    command.check(config)
+
+    connection = sqlite3.connect(database_path)
+    connection.row_factory = sqlite3.Row
+    try:
+        after_counts = {
+            table: connection.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
+            for table in ("catalog_objects", "relationships", "audit_events")
+        }
+        objects = {
+            str(row["id"]): dict(row)
+            for row in connection.execute(
+                "SELECT id, kind, summary, data_json, provenance_json, "
+                "created_at, updated_at FROM catalog_objects ORDER BY id"
+            )
+        }
+        relationship = dict(
+            connection.execute(
+                "SELECT from_ref, relation_type, to_ref FROM relationships"
+            ).fetchone()
+        )
+        audit = dict(
+            connection.execute(
+                "SELECT action, actor, summary, details_json, created_at "
+                "FROM audit_events"
+            ).fetchone()
+        )
+        with pytest.raises(sqlite3.IntegrityError):
+            connection.execute(
+                "INSERT INTO catalog_objects "
+                "(id, kind, label, status, lifecycle, health, data_json) "
+                "VALUES ('forbidden-legacy-kind', 'netzwerk', 'Legacy', "
+                "'active', 'active', 'unknown', '{}')"
+            )
+    finally:
+        connection.close()
+
+    assert after_counts == before_counts
+    assert objects["legacy-network"]["kind"] == "network"
+    assert json.loads(objects["legacy-network"]["data_json"]) == {
+        "schema_version": 1,
+        "network": {"owner_ref": "network:legacy-network"},
+        "references": ["network:legacy-network"],
+        "future": {"keep": ["all", "values"]},
+    }
+    assert json.loads(objects["legacy-network"]["provenance_json"]) == {
+        "source_type": "import",
+        "source_ref": "network:legacy-network",
+        "manual_override": False,
+    }
+    assert json.loads(objects["consumer"]["data_json"])["target_ref"] == (
+        "network:legacy-network"
+    )
+    assert relationship == {
+        "from_ref": "service:consumer",
+        "relation_type": "uses",
+        "to_ref": "network:legacy-network",
+    }
+    assert audit["summary"] == "legacy"
+    assert json.loads(audit["details_json"]) == {
+        "event": "legacy",
+        "legacy_summary": "Feld CPU Hersteller wurde geändert",
+        "version": 1,
+    }
+    assert objects["legacy-network"]["summary"] == "preserve network object"
+    assert (
+        objects["legacy-network"]["created_at"],
+        objects["legacy-network"]["updated_at"],
+    ) == ("2026-01-01 01:02:03", "2026-02-02 02:03:04")
+    assert _revision(database_url) == HEAD_REVISION
+
+
+def test_english_contract_migration_rejects_invalid_data_before_first_write(
+    tmp_path: Path,
+) -> None:
+    database_path = tmp_path / "invalid-english-contract.sqlite3"
+    database_url = _database_url(database_path)
+    config = build_alembic_config(database_url)
+    command.upgrade(config, "20260726_0006")
+    connection = sqlite3.connect(database_path)
+    try:
+        connection.execute(
+            "INSERT INTO catalog_objects "
+            "(id, kind, label, status, lifecycle, health, data_json, provenance_json) "
+            "VALUES ('legacy-network', 'netzwerk', 'Legacy Network', "
+            "'active', 'active', 'unknown', '{\"schema_version\":1}', "
+            "'{\"source_type\":\"unknown\",\"manual_override\":false}')"
+        )
+        connection.execute(
+            "INSERT INTO relationships (from_ref, relation_type, to_ref) "
+            "VALUES ('netzwerk:missing', 'related_to', 'netzwerk:legacy-network')"
+        )
+        connection.commit()
+        before_objects = list(
+            connection.execute(
+                "SELECT id, kind, data_json, provenance_json "
+                "FROM catalog_objects ORDER BY id"
+            )
+        )
+        before_relationships = list(
+            connection.execute(
+                "SELECT id, from_ref, relation_type, to_ref "
+                "FROM relationships ORDER BY id"
+            )
+        )
+    finally:
+        connection.close()
+
+    with pytest.raises(RuntimeError, match="dangling reference"):
+        command.upgrade(config, "head")
+
+    connection = sqlite3.connect(database_path)
+    try:
+        after_objects = list(
+            connection.execute(
+                "SELECT id, kind, data_json, provenance_json "
+                "FROM catalog_objects ORDER BY id"
+            )
+        )
+        after_relationships = list(
+            connection.execute(
+                "SELECT id, from_ref, relation_type, to_ref "
+                "FROM relationships ORDER BY id"
+            )
+        )
+        audit_columns = {
+            str(row[1])
+            for row in connection.execute("PRAGMA table_info(audit_events)")
+        }
+    finally:
+        connection.close()
+
+    assert after_objects == before_objects
+    assert after_relationships == before_relationships
+    assert "details_json" not in audit_columns
+    assert _revision(database_url) == "20260726_0006"
 
 
 def test_canonical_placement_migration_rejects_conflicts_before_writing(

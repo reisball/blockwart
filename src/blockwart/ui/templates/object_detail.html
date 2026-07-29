@@ -1,25 +1,27 @@
 <!doctype html>
-<html lang="de">
+<html lang="{{ locale }}">
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <link rel="icon" href="data:," />
     <title>{{ title }}</title>
     <script>
       if (localStorage.getItem("blockwart-theme") === "light") {
         document.documentElement.dataset.theme = "light";
       }
     </script>
-    <link rel="stylesheet" href="/static/app.css?v=058" />
+    <link rel="stylesheet" href="/static/app.css?v=061" />
     <script src="/static/theme.js?v=054" defer></script>
   </head>
   <body>
     <header class="topbar">
       <div class="topbar-inner detail-topbar-inner">
-        <a class="breadcrumb" href="/">Zur Suche</a>
+        <a class="breadcrumb" href="/">{{ t("detail.back") }}</a>
         <div class="top-actions">
-          <div class="theme-toggle" role="group" aria-label="Farbschema">
-            <button class="theme-option" type="button" data-theme-value="dark">Dark</button>
-            <button class="theme-option" type="button" data-theme-value="light">Light</button>
+          {% include "_language_switcher.html" %}
+          <div class="theme-toggle" role="group" aria-label="{{ t('nav.theme') }}">
+            <button class="theme-option" type="button" data-theme-value="dark">{{ t("nav.dark") }}</button>
+            <button class="theme-option" type="button" data-theme-value="light">{{ t("nav.light") }}</button>
           </div>
           {% include "_admin_controls.html" %}
         </div>
@@ -29,12 +31,12 @@
       <section class="stack">
         <section class="panel">
           <div class="panel-head">
-            <h2 class="section-title">Überblick</h2>
+            <h2 class="section-title">{{ t("detail.overview") }}</h2>
             {% if can_write %}
               {% if edit_section == "overview" %}
-                <a class="button button-small button-muted" href="/objects/{{ object.id }}">Abbrechen</a>
+                <a class="button button-small button-muted" href="/objects/{{ object.id }}">{{ t("detail.cancel") }}</a>
               {% else %}
-                <a class="button button-small button-muted" href="/objects/{{ object.id }}?edit=overview">Edit</a>
+                <a class="button button-small button-muted" href="/objects/{{ object.id }}?edit=overview">{{ t("detail.edit") }}</a>
               {% endif %}
             {% endif %}
           </div>
@@ -44,52 +46,52 @@
             {% endif %}
             <form class="form-grid" method="post" action="/objects/{{ object.id }}">
               <div class="fact fact-small">
-                <div class="fact-label">ID</div>
+                <div class="fact-label">{{ t("detail.id") }}</div>
                 <div class="fact-value">{{ object.id }}</div>
               </div>
               <label>{{ ui_schema.primary_name_label }}
                 <input name="primary_name" value="{{ primary_name_value }}" autocomplete="off" />
               </label>
-              <label>Typ
+              <label>{{ t("asset.type") }}
                 <select name="kind">
                   {% for object_kind in object_kinds %}
-                    <option value="{{ object_kind }}" {% if object_kind == object.kind %}selected{% endif %}>{{ object_kind }}</option>
+                    <option value="{{ object_kind }}" {% if object_kind == object.kind %}selected{% endif %}>{{ t("kind." ~ object_kind) }}</option>
                   {% endfor %}
                 </select>
               </label>
-              <label>Status
+              <label>{{ t("asset.status") }}
                 <select name="status">
                   {% for object_status in object_statuses %}
-                    <option value="{{ object_status }}" {% if object_status == object.status %}selected{% endif %}>{{ object_status }}</option>
+                    <option value="{{ object_status }}"{% if object_status == object.status %} selected{% endif %}>{{ t("status." ~ object_status) }}</option>
                   {% endfor %}
                 </select>
               </label>
               {% if ui_schema.supports_platform %}
-                <label>Plattform
+                <label>{{ t("asset.platform") }}
                   <select name="platform">
-                    <option value="">Keine Plattform</option>
+                    <option value="">{{ t("asset.none_platform") }}</option>
                     {% for platform_type in platform_types %}
                       <option value="{{ platform_type }}" {% if platform_type == object.data.platform %}selected{% endif %}>{{ platform_type }}</option>
                     {% endfor %}
                   </select>
                 </label>
               {% endif %}
-              <label>Kurzbeschreibung
-                <textarea class="summary-input" name="summary" placeholder="Kurzbeschreibung">{{ object.summary or "" }}</textarea>
+              <label>{{ t("asset.summary") }}
+                <textarea class="summary-input" name="summary" placeholder="{{ t('field.summary.placeholder') }}">{{ object.summary or "" }}</textarea>
               </label>
               <div class="overview-times">
                 <div class="fact fact-small">
-                  <div class="fact-label">CREATED AT</div>
-                  <div class="fact-value">{{ object.created_at|metadata_timestamp }}</div>
+                  <div class="fact-label">{{ t("detail.created_at")|upper }}</div>
+                  <div class="fact-value">{{ created_at_display }}</div>
                 </div>
                 <div class="fact fact-small">
-                  <div class="fact-label">LAST CHANGED</div>
-                  <div class="fact-value">{{ (object.last_changed or object.updated_at)|metadata_timestamp }}</div>
+                  <div class="fact-label">{{ t("detail.last_changed")|upper }}</div>
+                  <div class="fact-value">{{ updated_at_display }}</div>
                 </div>
               </div>
               <div class="button-row">
-                <button type="submit">Speichern</button>
-                <a class="button button-muted" href="/objects/{{ object.id }}">Abbrechen</a>
+                <button type="submit">{{ t("detail.save") }}</button>
+                <a class="button button-muted" href="/objects/{{ object.id }}">{{ t("detail.cancel") }}</a>
               </div>
             </form>
           {% else %}
@@ -100,37 +102,37 @@
               </div>
               <div class="overview-labels">
                 <div class="overview-label">
-                  <span>ID</span>
+                  <span>{{ t("detail.id") }}</span>
                   <strong>{{ object.id }}</strong>
                 </div>
                 <div class="overview-label">
-                  <span>Typ</span>
-                  <strong>{{ object.kind }}</strong>
+                  <span>{{ t("asset.type") }}</span>
+                  <strong>{{ t("kind." ~ object.kind) }}</strong>
                 </div>
                 <div class="overview-label">
-                  <span>Status</span>
-                  <strong>{{ object.status }}</strong>
+                  <span>{{ t("asset.status") }}</span>
+                  <strong>{{ t("status." ~ object.status) }}</strong>
                 </div>
                 {% if ui_schema.supports_platform %}
                   <div class="overview-label">
-                    <span>Plattform</span>
+                    <span>{{ t("asset.platform") }}</span>
                     <strong>{{ object.data.platform or "-" }}</strong>
                   </div>
                 {% endif %}
                 <div class="overview-label">
-                  <span>Relationships</span>
+                  <span>{{ t("detail.relationship_count") }}</span>
                   <strong>{{ relationships|length }}</strong>
                 </div>
               </div>
             </div>
             <div class="overview-times">
               <div class="fact fact-small">
-                <div class="fact-label">CREATED AT</div>
-                <div class="fact-value">{{ object.created_at|metadata_timestamp }}</div>
+                <div class="fact-label">{{ t("detail.created_at")|upper }}</div>
+                <div class="fact-value">{{ created_at_display }}</div>
               </div>
               <div class="fact fact-small">
-                <div class="fact-label">LAST CHANGED</div>
-                <div class="fact-value">{{ (object.last_changed or object.updated_at)|metadata_timestamp }}</div>
+                <div class="fact-label">{{ t("detail.last_changed")|upper }}</div>
+                <div class="fact-value">{{ updated_at_display }}</div>
               </div>
             </div>
           {% endif %}
@@ -139,12 +141,12 @@
         {% if supports_hardware %}
           <section class="panel">
             <div class="panel-head">
-              <h2 class="section-title">Hardware</h2>
+              <h2 class="section-title">{{ t("detail.hardware") }}</h2>
               {% if can_write %}
                 {% if edit_section == "hardware" %}
-                  <a class="button button-small button-muted" href="/objects/{{ object.id }}">Abbrechen</a>
+                  <a class="button button-small button-muted" href="/objects/{{ object.id }}">{{ t("detail.cancel") }}</a>
                 {% else %}
-                  <a class="button button-small button-muted" href="/objects/{{ object.id }}?edit=hardware">Edit</a>
+                  <a class="button button-small button-muted" href="/objects/{{ object.id }}?edit=hardware">{{ t("detail.edit") }}</a>
                 {% endif %}
               {% endif %}
             </div>
@@ -159,8 +161,8 @@
                   </label>
                 {% endfor %}
                 <div class="button-row">
-                  <button type="submit">Speichern</button>
-                  <a class="button button-muted" href="/objects/{{ object.id }}">Abbrechen</a>
+                  <button type="submit">{{ t("detail.save") }}</button>
+                  <a class="button button-muted" href="/objects/{{ object.id }}">{{ t("detail.cancel") }}</a>
                 </div>
               </form>
             {% else %}
@@ -180,11 +182,11 @@
         {% if supports_service_information %}
           <section class="panel">
             <div class="panel-head">
-              <h2 class="section-title">Service Information</h2>
+              <h2 class="section-title">{{ t("detail.service_information") }}</h2>
               {% if edit_section == "service-information" %}
-                <a class="button button-small button-muted" href="/objects/{{ object.id }}">Abbrechen</a>
+                <a class="button button-small button-muted" href="/objects/{{ object.id }}">{{ t("detail.cancel") }}</a>
               {% else %}
-                <a class="button button-small button-muted" href="/objects/{{ object.id }}?edit=service-information">Edit</a>
+                <a class="button button-small button-muted" href="/objects/{{ object.id }}?edit=service-information">{{ t("detail.edit") }}</a>
               {% endif %}
             </div>
             {% if edit_section == "service-information" %}
@@ -202,8 +204,8 @@
                   </label>
                 {% endfor %}
                 <div class="button-row">
-                  <button type="submit">Speichern</button>
-                  <a class="button button-muted" href="/objects/{{ object.id }}">Abbrechen</a>
+                  <button type="submit">{{ t("detail.save") }}</button>
+                  <a class="button button-muted" href="/objects/{{ object.id }}">{{ t("detail.cancel") }}</a>
                 </div>
               </form>
             {% else %}
@@ -233,18 +235,18 @@
 
         <section class="panel">
             <div class="panel-head">
-              <h2 class="section-title">Netzwerk</h2>
+              <h2 class="section-title">{{ t("panel.network") }}</h2>
               {% if can_write %}
-                <a class="button button-small button-muted" href="/objects/{{ object.id }}?edit=network">Edit</a>
+                <a class="button button-small button-muted" href="/objects/{{ object.id }}?edit=network">{{ t("detail.edit") }}</a>
               {% endif %}
             </div>
             {% if edit_section == "network" %}
               <form class="form-grid" method="post" action="/objects/{{ object.id }}/network">
                 {% if can_edit_network_addresses %}
-                  <h3>Adressen</h3>
+                  <h3>{{ t("network.addresses") }}</h3>
                   <div class="table-wrap">
                     <table class="table edit-table">
-                      <thead><tr><th>IP</th><th>Interface</th><th>Scope</th></tr></thead>
+                      <thead><tr><th>{{ t("network.ip") }}</th><th>{{ t("network.interface") }}</th><th>{{ t("network.scope") }}</th></tr></thead>
                       <tbody>
                         {% for address in network_address_rows %}
                           <tr>
@@ -258,10 +260,10 @@
                   </div>
                 {% endif %}
                 {% if can_edit_network_ports %}
-                  <h3>Ports</h3>
+                  <h3>{{ t("network.ports") }}</h3>
                   <div class="table-wrap">
                     <table class="table edit-table">
-                      <thead><tr><th>Port</th><th>Protokoll</th><th>Zweck</th><th>Exposure</th></tr></thead>
+                      <thead><tr><th>{{ t("network.port") }}</th><th>{{ t("network.protocol") }}</th><th>{{ t("network.purpose") }}</th><th>{{ t("network.exposure") }}</th></tr></thead>
                       <tbody>
                         {% for port in port_rows %}
                           <tr>
@@ -276,7 +278,7 @@
                   </div>
                 {% endif %}
                 {% if can_edit_network_endpoints %}
-                  <h3>Endpoints</h3>
+                  <h3>{{ t("asset.endpoint") }}</h3>
                   <div class="table-wrap">
                     <table class="table edit-table">
                       <thead>
@@ -307,16 +309,16 @@
                   </div>
                 {% endif %}
                 <div class="button-row">
-                  <button type="submit">Speichern</button>
-                  <a class="button button-muted" href="/objects/{{ object.id }}">Abbrechen</a>
+                  <button type="submit">{{ t("detail.save") }}</button>
+                  <a class="button button-muted" href="/objects/{{ object.id }}">{{ t("detail.cancel") }}</a>
                 </div>
               </form>
             {% else %}
               {% if network.addresses %}
-                <h3>Adressen</h3>
+                <h3>{{ t("network.addresses") }}</h3>
                 <div class="table-wrap">
                   <table class="table">
-                    <thead><tr><th>IP</th><th>Interface</th><th>Scope</th></tr></thead>
+                    <thead><tr><th>{{ t("network.ip") }}</th><th>{{ t("network.interface") }}</th><th>{{ t("network.scope") }}</th></tr></thead>
                     <tbody>
                       {% for address in network.addresses %}
                         <tr>
@@ -330,10 +332,10 @@
                 </div>
               {% endif %}
               {% if ports and can_edit_network_ports %}
-                <h3>Ports</h3>
+                <h3>{{ t("network.ports") }}</h3>
                 <div class="table-wrap">
                   <table class="table">
-                    <thead><tr><th>Port</th><th>Zweck</th><th>Exposure</th></tr></thead>
+                    <thead><tr><th>{{ t("network.port") }}</th><th>{{ t("network.purpose") }}</th><th>{{ t("network.exposure") }}</th></tr></thead>
                     <tbody>
                       {% for port in ports %}
                         <tr>
@@ -347,7 +349,7 @@
                 </div>
               {% endif %}
               {% if endpoints %}
-                <h3>Endpoints</h3>
+                <h3>{{ t("asset.endpoint") }}</h3>
                 <div class="table-wrap">
                   <table class="table">
                     <thead>
@@ -360,7 +362,7 @@
                     <tbody>
                       {% for endpoint in endpoints %}
                         <tr>
-                          <td>{{ endpoint.type or endpoint.name or endpoint.label or "endpoint" }}</td>
+                          <td>{{ endpoint.type or endpoint.name or endpoint.label or t("asset.endpoint") }}</td>
                           <td>{{ endpoint.url or endpoint.endpoint or endpoint.host or "-" }}</td>
                           <td>{{ endpoint.port or "" }}</td>
                         </tr>
@@ -370,23 +372,23 @@
                 </div>
               {% endif %}
               {% if not network.addresses and (not ports or not can_edit_network_ports) and not endpoints %}
-                <div class="meta">Keine Netzwerkdaten erfasst.</div>
+                <div class="meta">{{ t("network.empty") }}</div>
               {% endif %}
             {% endif %}
         </section>
 
         <section class="panel">
             <div class="panel-head">
-              <h2 class="section-title">Zugriff</h2>
+              <h2 class="section-title">{{ t("panel.access") }}</h2>
               {% if can_write %}
-                <a class="button button-small button-muted" href="/objects/{{ object.id }}?edit=access">Edit</a>
+                <a class="button button-small button-muted" href="/objects/{{ object.id }}?edit=access">{{ t("detail.edit") }}</a>
               {% endif %}
             </div>
             {% if edit_section == "access" %}
               <form class="form-grid" method="post" action="/objects/{{ object.id }}/access">
                 <div class="table-wrap">
                   <table class="table edit-table">
-                    <thead><tr><th>Quelle</th><th>Typ</th><th>Endpoint</th><th>Auth</th></tr></thead>
+                    <thead><tr><th>{{ t("access.source") }}</th><th>{{ t("access.type") }}</th><th>{{ t("access.endpoint") }}</th><th>{{ t("access.auth") }}</th></tr></thead>
                     <tbody>
                       {% for method in access_method_rows %}
                         <tr>
@@ -404,14 +406,14 @@
                   </table>
                 </div>
                 <div class="button-row">
-                  <button type="submit">Speichern</button>
-                  <a class="button button-muted" href="/objects/{{ object.id }}">Abbrechen</a>
+                  <button type="submit">{{ t("detail.save") }}</button>
+                  <a class="button button-muted" href="/objects/{{ object.id }}">{{ t("detail.cancel") }}</a>
                 </div>
               </form>
             {% else %}
               <div class="table-wrap">
                 <table class="table">
-                  <thead><tr><th>Quelle</th><th>Typ</th><th>Endpoint</th><th>Auth</th></tr></thead>
+                  <thead><tr><th>{{ t("access.source") }}</th><th>{{ t("access.type") }}</th><th>{{ t("access.endpoint") }}</th><th>{{ t("access.auth") }}</th></tr></thead>
                   <tbody>
                     {% for method in access_methods %}
                       <tr>
@@ -425,21 +427,21 @@
                 </table>
               </div>
               {% if not access_methods %}
-                <div class="meta">Keine Zugriffsdaten erfasst.</div>
+                <div class="meta">{{ t("access.empty") }}</div>
               {% endif %}
             {% endif %}
           </section>
 
         <section class="panel">
           <div class="panel-head">
-            <h2 class="section-title">Relationships</h2>
+            <h2 class="section-title">{{ t("panel.relationships") }}</h2>
             {% if can_write %}
-              <a class="button button-small" href="/objects/{{ object.id }}?edit=relationship-add">Add</a>
+              <a class="button button-small" href="/objects/{{ object.id }}?edit=relationship-add">{{ t("detail.add") }}</a>
             {% endif %}
           </div>
           {% if relationships %}
             {% for direction, items in relationship_groups.items() %}
-              <h3>{{ "Ausgehend" if direction == "outbound" else "Eingehend" }}</h3>
+              <h3>{{ t("relationship.outbound") if direction == "outbound" else t("relationship.inbound") }}</h3>
               <ul class="rel">
                 {% for relationship in items %}
                   <li>
@@ -454,14 +456,14 @@
               </ul>
             {% endfor %}
           {% else %}
-            <div class="meta">Keine Relationships.</div>
+            <div class="meta">{{ t("relationship.empty") }}</div>
           {% endif %}
           {% if edit_section == "relationship-add" %}
             <form class="form-grid relation-form" method="post" action="/objects/{{ object.id }}/relationships">
-              <h3>Relationship anlegen</h3>
+              <h3>{{ t("relationship.create") }}</h3>
               <input type="hidden" name="direction" value="{{ 'inbound' if object.kind == 'service' else 'outbound' }}" />
               <input type="hidden" name="relation_type" value="hosts" />
-              <label>Zielobjekt
+              <label>{{ t("relationship.target") }}
                 <select name="target_ref" required>
                   {% for target in relationship_targets %}
                     <option value="{{ target.kind }}:{{ target.id }}" {% if object.kind == "service" and loop.first %}selected{% endif %}>{{ target.kind }} · {{ target.label }} · {{ target.id }}</option>
@@ -469,38 +471,38 @@
                 </select>
               </label>
               <div class="button-row">
-                <button type="submit">Relationship speichern</button>
-                <a class="button button-muted" href="/objects/{{ object.id }}">Abbrechen</a>
+                <button type="submit">{{ t("relationship.save") }}</button>
+                <a class="button button-muted" href="/objects/{{ object.id }}">{{ t("detail.cancel") }}</a>
               </div>
             </form>
           {% endif %}
         </section>
 
         <section class="panel">
-          <h2 class="section-title">Kommentar</h2>
+          <h2 class="section-title">{{ t("comment.title") }}</h2>
           {% if can_write %}
             <form class="form-grid comment-form" method="post" action="/objects/{{ object.id }}/comment">
-              <label>Kommentar
-                <textarea name="comment" placeholder="Kommentar zum Objekt">{{ comment }}</textarea>
+              <label>{{ t("comment.label") }}
+                <textarea name="comment" placeholder="{{ t('comment.placeholder') }}">{{ comment }}</textarea>
               </label>
               <div class="button-row">
-                <button type="submit">Kommentar speichern</button>
+                <button type="submit">{{ t("comment.save") }}</button>
               </div>
             </form>
           {% else %}
-            <p class="meta">{{ comment or "Kein Kommentar erfasst." }}</p>
+            <p class="meta">{{ comment or t("comment.empty") }}</p>
           {% endif %}
         </section>
 
         <section class="panel">
-          <h2 class="section-title">Audit</h2>
+          <h2 class="section-title">{{ t("audit.title") }}</h2>
           {% if audit_events %}
             <ul class="audit-log">
               {% for event in audit_events %}
                 <li>
                   <time class="audit-time">{{ event.created_at }}</time>
                   <ul class="audit-summary-lines">
-                    {% for line in event.summary|audit_summary_lines %}
+                    {% for line in event.summary_lines %}
                       <li>{{ line }}</li>
                     {% endfor %}
                   </ul>
@@ -509,7 +511,7 @@
               {% endfor %}
             </ul>
           {% else %}
-            <div class="meta">Keine Audit-Einträge.</div>
+            <div class="meta">{{ t("audit.empty_state") }}</div>
           {% endif %}
         </section>
       </section>

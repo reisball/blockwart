@@ -16,16 +16,16 @@ from blockwart.domain.security import find_secret_violations
 ObjectKind = Literal[
     "host",
     "system",
-    "netzwerk",
+    "network",
     "service",
     "credential_reference",
     "runbook",
     "decision",
     "project",
 ]
-PublicObjectKind = Literal["host", "system", "netzwerk", "service"]
+PublicObjectKind = Literal["host", "system", "network", "service"]
 ObjectStatus = Literal["active", "inactive", "deleted"]
-PUBLIC_OBJECT_KINDS: tuple[PublicObjectKind, ...] = ("host", "system", "netzwerk", "service")
+PUBLIC_OBJECT_KINDS: tuple[PublicObjectKind, ...] = ("host", "system", "network", "service")
 OBJECT_STATUSES: tuple[ObjectStatus, ...] = ("active", "inactive", "deleted")
 
 ENDPOINT_TYPE_OPTIONS = ("Web", "REST API", "MCP", "HEC", "SSH")

@@ -66,6 +66,11 @@ python -m compileall -q src tests scripts
 The dependency update process, reviewed OpenAPI snapshot, installed-wheel smoke, container smoke,
 and Gitea Actions contract are documented in `docs/ci.md`.
 
+The backend uses one canonical English vocabulary. The UI defaults to English
+and ships complete English/German catalogs with a persistent language switcher.
+The database, audit, schema-override, deployment, and rollback contracts are
+documented in `docs/internationalization.md`.
+
 ## Agent Read API
 
 The first agent-facing surface is read-only and lives under /api/agent:
@@ -144,6 +149,7 @@ blockwart-db check
 blockwart-db integrity
 blockwart-db interfaces
 blockwart-db placements
+blockwart-schema-overrides
 ```
 
 Both use an explicitly supplied `--database-url` first, then `BLOCKWART_DATABASE_URL`, then the
@@ -152,6 +158,8 @@ automatic downgrade; restore the matching pre-upgrade database backup when rolli
 code back. `blockwart-db placements` is read-only by default and lists deliberately unassigned
 systems and services; `--apply` only records the explicit unassigned marker and requires the normal
 pre-change database backup. See `docs/deployment.md`.
+`blockwart-schema-overrides` is also dry-run by default and migrates legacy UI
+metadata to locale-specific version 2 only with `--apply`.
 
 ## Deployment Readiness
 

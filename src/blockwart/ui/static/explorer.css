@@ -112,6 +112,29 @@
   letter-spacing: 0.16em;
 }
 
+.explorer-body .language-switcher {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 4px;
+  border: 1px solid var(--explorer-border-soft);
+  border-radius: 8px;
+  background: var(--explorer-raised);
+}
+
+.explorer-body .language-switcher a {
+  padding: 6px 8px;
+  border-radius: 5px;
+  color: var(--explorer-muted);
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.explorer-body .language-switcher a.active {
+  color: var(--explorer-text);
+  background: var(--explorer-panel-3);
+}
+
 .mode-nav {
   display: flex;
   align-items: center;
@@ -201,9 +224,18 @@
 }
 
 .explorer-top-actions .primary-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
   padding: 0 15px;
   background: linear-gradient(180deg, #78a6ff, #5c89ee);
   color: #08101e;
+  white-space: nowrap;
+}
+
+.asset-create-short {
+  display: none;
 }
 
 .explorer-top-actions .icon-button {
@@ -277,7 +309,7 @@
   color: #c5a9ff;
 }
 
-.node-icon.netzwerk {
+.node-icon.network {
   border-color: #27645e;
   background: #193c3a;
   color: #64e5d5;
@@ -1338,6 +1370,24 @@ button.map-node {
   .explorer-top-actions {
     grid-column: 2;
     grid-row: 1;
+  }
+
+  .explorer-body .language-switcher {
+    gap: 1px;
+    padding: 2px;
+  }
+
+  .explorer-body .language-switcher a {
+    padding: 5px;
+    font-size: 10px;
+  }
+
+  .asset-create-full {
+    display: none;
+  }
+
+  .asset-create-short {
+    display: inline;
   }
 
   .catalog-shell {

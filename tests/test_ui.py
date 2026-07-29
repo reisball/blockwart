@@ -1,6 +1,8 @@
+import json
 import re
 from collections.abc import Generator
 from pathlib import Path
+from string import Formatter
 
 import pytest
 from fastapi.testclient import TestClient
@@ -23,6 +25,7 @@ from blockwart.schemas.catalog import PUBLIC_OBJECT_KINDS, CatalogObjectIn
 from blockwart.services.catalog import get_object
 from blockwart.services.catalog import upsert_object as flush_object
 from blockwart.services.seeds import import_seed_file
+from blockwart.ui.i18n import load_catalog, validate_locale_catalogs
 
 SEED_PATH = Path(__file__).resolve().parents[1] / "seeds" / "pilot_objects.yaml"
 TEST_ADMIN_TOKEN = "test-admin-token-with-at-least-32-characters"
@@ -89,8 +92,8 @@ def test_ui_assets_resolve_from_package_outside_repo_root(
 
 def test_index_uses_english_as_the_fallback_locale(client: TestClient) -> None:
     response = client.get(
-        "/?lang=de",
-        headers={"Accept-Language": "de-DE,de;q=0.9"},
+        "/",
+        headers={"Accept-Language": "fr-FR,fr;q=0.9"},
     )
 
     assert response.status_code == 200
@@ -99,12 +102,82 @@ def test_index_uses_english_as_the_fallback_locale(client: TestClient) -> None:
     assert "Asset-Katalog" not in response.text
 
 
+def test_explicit_german_locale_translates_the_explorer(client: TestClient) -> None:
+    response = client.get(
+        "/?lang=de",
+        headers={"Accept-Language": "en-US,en;q=0.9"},
+    )
+
+    assert response.status_code == 200
+    assert '<html lang="de" data-view="catalog">' in response.text
+    assert "Objektkatalog" in response.text
+    assert "Netzwerke" in response.text
+    assert "Asset catalog" not in response.text
+    assert response.cookies["blockwart-language"] == "de"
+
+
+def test_language_cookie_covers_all_ui_surfaces(client: TestClient) -> None:
+    client.get("/?lang=de")
+
+    schema = client.get("/settings/schema?kind=host")
+    detail = client.get("/objects/fabrik")
+    admin = client.get("/admin")
+
+    assert '<html lang="de">' in schema.text
+    assert "Schema-Einstellungen" in schema.text
+    assert "CPU-Hersteller" in schema.text
+    assert '<html lang="de">' in detail.text
+    assert "Zurück zum Katalog" in detail.text
+    assert "Netzwerk" in detail.text
+    assert "Aktiv" in detail.text
+    assert '<html lang="de">' in admin.text
+    assert "Schreibzugriff aktiv" in admin.text
+
+    english = client.get("/?lang=en")
+    assert '<html lang="en" data-view="catalog">' in english.text
+    assert "Asset catalog" in english.text
+
+
+def test_german_ui_localizes_status_and_lifecycle_values(
+    client: TestClient,
+) -> None:
+    catalog = client.get("/?lang=de&view=topology")
+    detail = client.get("/objects/fabrik?lang=de")
+    edit = client.get("/objects/fabrik?lang=de&edit=overview")
+
+    assert "AKTIV" in catalog.text
+    assert "<strong>Aktiv</strong>" in detail.text
+    assert '<option value="active" selected>Aktiv</option>' in edit.text
+    assert '<option value="inactive">Inaktiv</option>' in edit.text
+    assert '<option value="deleted">Gelöscht</option>' in edit.text
+
+
+def test_locale_catalogs_have_identical_keys_and_format_contracts() -> None:
+    validate_locale_catalogs()
+    english = load_catalog("en")
+    german = load_catalog("de")
+
+    assert set(english) == set(german)
+    for key in english:
+        english_fields = {
+            field_name
+            for _, field_name, _, _ in Formatter().parse(english[key])
+            if field_name is not None
+        }
+        german_fields = {
+            field_name
+            for _, field_name, _, _ in Formatter().parse(german[key])
+            if field_name is not None
+        }
+        assert german_fields == english_fields, key
+
+
 def test_topology_is_a_real_second_view(client: TestClient) -> None:
     response = client.get("/?view=topology")
 
     assert response.status_code == 200
     assert '<html lang="en" data-view="topology">' in response.text
-    assert "Hardware, runtime hosts, and services" in response.text
+    assert "Hardware, hosts, and services" in response.text
     assert 'class="topology-canvas"' in response.text
     assert 'data-asset-ref="system:fabrik"' in response.text
     assert 'data-asset-ref="service:fabrik-proxmox"' in response.text
@@ -120,7 +193,7 @@ def test_topology_keeps_network_assets_visible(
             session,
             CatalogObjectIn(
                 id="topology-network",
-                kind="netzwerk",
+                kind="network",
                 label="Topology Network",
                 data={
                     "schema_version": 1,
@@ -137,12 +210,12 @@ def test_topology_keeps_network_assets_visible(
             ),
         )
 
-    response = client.get("/?view=topology&kind=netzwerk")
+    response = client.get("/?view=topology&kind=network")
 
     assert response.status_code == 200
     assert "Network inventory" in response.text
     assert "Network segments: 1" in response.text
-    assert 'data-asset-ref="netzwerk:topology-network"' in response.text
+    assert 'data-asset-ref="network:topology-network"' in response.text
     assert "No matching placement topology." not in response.text
 
 
@@ -155,7 +228,7 @@ def test_index_shows_kind_counts(client: TestClient) -> None:
     assert "All assets" in response.text
     assert "<b>25</b>" in response.text
     assert "system" in response.text
-    assert "netzwerk" in response.text
+    assert "network" in response.text
     assert "service" in response.text
     assert "host" in response.text
     assert 'value="decision"' not in response.text
@@ -181,7 +254,7 @@ def test_create_object_form_is_hidden_behind_button(client: TestClient) -> None:
     assert 'data-asset-ref="system:fabrik"' in response.text
     assert 'class="asset-table"' in response.text
     assert 'data-inspector' in response.text
-    assert "Runtime host" in response.text
+    assert "Host" in response.text
     assert "Service" in response.text
     assert "/static/index.js" in response.text
     assert "/static/explorer.css" in response.text
@@ -218,11 +291,11 @@ def test_create_form_schema_gates_fields_by_type(client: TestClient) -> None:
     assert 'data-create-field="kind"' in response.text
     assert 'data-create-field="platform"' in response.text
     assert 'data-create-field="relationship"' in response.text
-    assert set(UI_SCHEMAS) == {"host", "system", "netzwerk", "service"}
+    assert set(UI_SCHEMAS) == {"host", "system", "network", "service"}
     assert "platform" in UI_SCHEMAS["system"].create_fields
     assert "platform" not in UI_SCHEMAS["service"].create_fields
     assert "platform" not in UI_SCHEMAS["host"].create_fields
-    assert "platform" not in UI_SCHEMAS["netzwerk"].create_fields
+    assert "platform" not in UI_SCHEMAS["network"].create_fields
     for schema in UI_SCHEMAS.values():
         assert schema.create_fields[0] == "kind"
         assert "object_id" in schema.create_fields
@@ -234,21 +307,21 @@ def test_schema_settings_page_shows_selected_type_schema(client: TestClient) -> 
     response = client.get("/settings/schema?kind=service")
 
     assert response.status_code == 200
-    assert "Schema Settings" in response.text
+    assert "Schema settings" in response.text
     assert '<option value="service" selected' in response.text
-    assert "service Schema" in response.text
-    assert "Service-Name" in response.text
+    assert "Service · Schema settings" in response.text
+    assert "Service name" in response.text
     assert "primary_name_storage" in response.text
     assert "primary_name_storage_path" in response.text
-    assert "Storage-Pfad" in response.text
+    assert "Storage path" in response.text
     assert "catalog_objects.label" in response.text
     assert "data_json.platform" not in response.text
-    assert "Storage-Konvention" in response.text
+    assert "Storage convention" in response.text
     assert "data_json.hardware.*" in response.text
-    assert "Sichtbarkeit" in response.text
-    assert "Create-Felder" in response.text
-    assert "Schema-Felder" in response.text
-    assert "Detail-Panels" in response.text
+    assert "Visibility" in response.text
+    assert "Create fields" in response.text
+    assert "Schema fields" in response.text
+    assert "Detail panels" in response.text
     assert "<code>kind</code>" in response.text
     assert "<code>primary_name</code>" in response.text
     assert "<code>platform</code>" not in response.text
@@ -261,7 +334,7 @@ def test_schema_settings_page_shows_selected_type_schema(client: TestClient) -> 
     assert "<code>overview</code>" in response.text
     assert "<code>network</code>" in response.text
     assert 'method="post"' in response.text
-    assert "Speichern" in response.text
+    assert "Save" in response.text
     assert 'name="field_label_primary_name"' in response.text
     assert 'name="field_placeholder_summary"' in response.text
     assert 'name="field_order_kind"' in response.text
@@ -275,7 +348,7 @@ def test_schema_settings_page_falls_back_to_system_for_invalid_kind(
 
     assert response.status_code == 200
     assert '<option value="system" selected' in response.text
-    assert "system Schema" in response.text
+    assert "Host · Schema settings" in response.text
     assert "Hostname" in response.text
 
 
@@ -284,8 +357,8 @@ def test_schema_settings_page_falls_back_to_system_for_invalid_kind(
     [
         ("host", "Hostname", "network_hostname", False),
         ("system", "Hostname", "network_hostname", True),
-        ("netzwerk", "Name", "label", False),
-        ("service", "Service-Name", "label", False),
+        ("network", "Name", "label", False),
+        ("service", "Service name", "label", False),
     ],
 )
 def test_schema_settings_type_matrix(
@@ -316,7 +389,7 @@ def test_ui_schema_payload_matches_public_object_kinds() -> None:
         assert all(field["visible_in_create"] is True for field in fields)
         assert all(field["storage_path"] for field in fields)
         primary_field = next(field for field in fields if field["key"] == "primary_name")
-        assert primary_field["label"] == schema.primary_name_label
+        assert primary_field["label_key"] == schema.primary_name_label_key
         assert primary_field["storage_path"] == schema.as_dict()["primary_name_storage_path"]
 
 
@@ -349,9 +422,9 @@ def test_service_schema_includes_service_information_fields(client: TestClient) 
 
     assert response.status_code == 200
     for expected in (
-        "Service Information",
+        "Service information",
         "Sources",
-        "Running Version",
+        "Running version",
         "data_json.service_information.sources[]",
         "data_json.service_information.running_version",
     ):
@@ -365,7 +438,7 @@ def test_service_schema_includes_service_information_fields(client: TestClient) 
     ]
     assert all(field["visible_in_create"] is False for field in service_fields)
 
-    for kind in ("host", "system", "netzwerk"):
+    for kind in ("host", "system", "network"):
         fields = schema_field_payload(UI_SCHEMAS[kind])
         assert not any(str(field["key"]).startswith("service_") for field in fields)
 
@@ -374,13 +447,13 @@ def test_host_and_system_schema_include_hardware_fields(client: TestClient) -> N
     host_response = client.get("/settings/schema?kind=host")
     assert host_response.status_code == 200
     for expected in (
-        "Modell",
-        "CPU Hersteller",
-        "CPU Name",
-        "CPU Cores",
+        "Model",
+        "CPU vendor",
+        "CPU name",
+        "CPU cores",
         "Memory",
         "GPU",
-        "Storage / HDD",
+        "Storage",
         "data_json.hardware.model",
         "data_json.hardware.cpu.vendor",
         "data_json.hardware.cpu.name",
@@ -394,10 +467,10 @@ def test_host_and_system_schema_include_hardware_fields(client: TestClient) -> N
     system_response = client.get("/settings/schema?kind=system")
     assert system_response.status_code == 200
     for expected in (
-        "CPU Cores",
+        "CPU cores",
         "Memory",
         "GPU",
-        "Storage / HDD",
+        "Storage",
         "data_json.hardware.cpu.cores",
         "data_json.hardware.memory",
         "data_json.hardware.gpu",
@@ -405,9 +478,9 @@ def test_host_and_system_schema_include_hardware_fields(client: TestClient) -> N
     ):
         assert expected in system_response.text
     for inherited in (
-        "Modell",
-        "CPU Hersteller",
-        "CPU Name",
+        "Model",
+        "CPU vendor",
+        "CPU name",
         "data_json.hardware.model",
         "data_json.hardware.cpu.vendor",
         "data_json.hardware.cpu.name",
@@ -423,7 +496,7 @@ def test_host_and_system_schema_include_hardware_fields(client: TestClient) -> N
         assert all(field["visible_in_create"] is False for field in hardware_fields)
         assert all(field["visible_in_detail"] is True for field in hardware_fields)
 
-    for kind in ("netzwerk", "service"):
+    for kind in ("network", "service"):
         fields = schema_field_payload(UI_SCHEMAS[kind])
         assert not any(str(field["key"]).startswith("hardware_") for field in fields)
 
@@ -440,8 +513,11 @@ def test_schema_settings_saves_safe_metadata_overrides(
     for index, field in enumerate(fields, start=1):
         key = str(field["key"])
         data[f"field_order_{key}"] = str(index)
-        data[f"field_label_{key}"] = str(field["label"])
-        data[f"field_placeholder_{key}"] = str(field["placeholder"] or "")
+        data[f"field_label_{key}"] = load_catalog("en")[str(field["label_key"])]
+        placeholder_key = str(field["placeholder_key"])
+        data[f"field_placeholder_{key}"] = (
+            load_catalog("en")[placeholder_key] if placeholder_key else ""
+        )
         if field["required"]:
             data[f"field_required_{key}"] = "1"
         if field["visible_in_detail"]:
@@ -452,7 +528,7 @@ def test_schema_settings_saves_safe_metadata_overrides(
     response = client.post("/settings/schema", data=data, follow_redirects=False)
 
     assert response.status_code == 303
-    assert response.headers["location"] == "/settings/schema?kind=system&saved=1"
+    assert response.headers["location"] == "/settings/schema?kind=system&saved=1&lang=en"
     settings = client.get("/settings/schema?kind=system")
     detail = client.get("/objects/fabrik")
     edit = client.get("/objects/fabrik?edit=hardware")
@@ -476,8 +552,11 @@ def test_service_endpoint_schema_metadata_drives_endpoint_table(
     for index, field in enumerate(fields, start=1):
         key = str(field["key"])
         data[f"field_order_{key}"] = str(index)
-        data[f"field_label_{key}"] = str(field["label"])
-        data[f"field_placeholder_{key}"] = str(field["placeholder"] or "")
+        data[f"field_label_{key}"] = load_catalog("en")[str(field["label_key"])]
+        placeholder_key = str(field["placeholder_key"])
+        data[f"field_placeholder_{key}"] = (
+            load_catalog("en")[placeholder_key] if placeholder_key else ""
+        )
         if field["required"]:
             data[f"field_required_{key}"] = "1"
         if field["visible_in_detail"]:
@@ -521,11 +600,11 @@ def test_host_detail_can_edit_host_hardware_fields(
 
     assert detail.status_code == 200
     assert "Hardware" in detail.text
-    assert "Modell" in detail.text
-    assert "CPU Hersteller" in detail.text
-    assert "CPU Name" in detail.text
-    assert "CPU Cores" in detail.text
-    assert "Storage / HDD" in detail.text
+    assert "Model" in detail.text
+    assert "CPU vendor" in detail.text
+    assert "CPU name" in detail.text
+    assert "CPU cores" in detail.text
+    assert "Storage" in detail.text
     assert edit.status_code == 200
     assert 'name="hardware_model"' in edit.text
     assert 'name="hardware_cpu_vendor"' in edit.text
@@ -558,13 +637,13 @@ def test_host_detail_can_edit_host_hardware_fields(
     assert "64 GB" in updated.text
     assert "Radeon 780M" in updated.text
     assert "2 TB NVMe" in updated.text
-    assert "Feld Modell wurde von leer auf Beelink SER5 geändert" in updated.text
-    assert "Feld CPU Hersteller wurde von leer auf AMD geändert" in updated.text
-    assert "Feld CPU Name wurde von leer auf Ryzen 7 7840U geändert" in updated.text
-    assert "Feld CPU Cores wurde von leer auf 8 geändert" in updated.text
-    assert "Feld Memory wurde von leer auf 64 GB geändert" in updated.text
-    assert "Feld GPU wurde von leer auf Radeon 780M geändert" in updated.text
-    assert "Feld Storage / HDD wurde von leer auf 2 TB NVMe geändert" in updated.text
+    assert "Changed Model from empty to Beelink SER5" in updated.text
+    assert "Changed CPU vendor from empty to AMD" in updated.text
+    assert "Changed CPU name from empty to Ryzen 7 7840U" in updated.text
+    assert "Changed CPU cores from empty to 8" in updated.text
+    assert "Changed Memory from empty to 64 GB" in updated.text
+    assert "Changed GPU from empty to Radeon 780M" in updated.text
+    assert "Changed Storage from empty to 2 TB NVMe" in updated.text
     with session_factory() as session:
         catalog_object = get_object(session, object_id)
     assert catalog_object is not None
@@ -606,11 +685,11 @@ def test_system_detail_can_edit_resource_hardware_fields(
 
     assert detail.status_code == 200
     assert "Hardware" in detail.text
-    assert "Modell" not in detail.text
-    assert "CPU Hersteller" not in detail.text
-    assert "CPU Name" not in detail.text
-    assert "CPU Cores" in detail.text
-    assert "Storage / HDD" in detail.text
+    assert "Model" not in detail.text
+    assert "CPU vendor" not in detail.text
+    assert "CPU name" not in detail.text
+    assert "CPU cores" in detail.text
+    assert "Storage" in detail.text
     assert edit.status_code == 200
     assert 'name="hardware_model"' not in edit.text
     assert 'name="hardware_cpu_vendor"' not in edit.text
@@ -643,10 +722,10 @@ def test_system_detail_can_edit_resource_hardware_fields(
     assert "16 GB" in updated.text
     assert "Shared GPU" in updated.text
     assert "500 GB" in updated.text
-    assert "Feld CPU Cores wurde von leer auf 4 geändert" in updated.text
-    assert "Feld Memory wurde von leer auf 16 GB geändert" in updated.text
-    assert "Feld GPU wurde von leer auf Shared GPU geändert" in updated.text
-    assert "Feld Storage / HDD wurde von leer auf 500 GB geändert" in updated.text
+    assert "Changed CPU cores from empty to 4" in updated.text
+    assert "Changed Memory from empty to 16 GB" in updated.text
+    assert "Changed GPU from empty to Shared GPU" in updated.text
+    assert "Changed Storage from empty to 500 GB" in updated.text
     with session_factory() as session:
         catalog_object = get_object(session, object_id)
     assert catalog_object is not None
@@ -658,7 +737,7 @@ def test_system_detail_can_edit_resource_hardware_fields(
     }
 
 
-@pytest.mark.parametrize("kind", ["host", "system", "service", "netzwerk"])
+@pytest.mark.parametrize("kind", ["host", "system", "service", "network"])
 def test_object_data_updates_write_object_audit_for_public_kinds(
     session_factory,
     kind: str,
@@ -693,7 +772,20 @@ def test_object_data_updates_write_object_audit_for_public_kinds(
 
     assert event is not None
     assert event.action == "update"
-    assert event.summary == f"Feld Kommentar wurde von leer auf {kind} changed geändert"
+    assert event.summary == "update"
+    assert json.loads(event.details_json) == {
+        "changes": [
+            {
+                "field": "comment",
+                "new": f"{kind} changed",
+                "old": "",
+                "value_change": True,
+            }
+        ],
+        "event": "update",
+        "object_ref": f"{kind}:{object_id}",
+        "version": 1,
+    }
 
 
 def test_object_detail_renders_multi_change_audit_summary_as_lines(
@@ -730,12 +822,12 @@ def test_object_detail_renders_multi_change_audit_summary_as_lines(
     audit_match = re.search(r"<ul class=\"audit-summary-lines\">(.*?)</ul>", response.text, re.S)
     assert audit_match is not None
     audit_summary = audit_match.group(1)
-    assert "Feld Kurzbeschreibung wurde von Before auf After geändert" in audit_summary
-    assert "Feld Kommentar wurde von leer auf Readable geändert" in audit_summary
+    assert "Changed Summary from Before to After" in audit_summary
+    assert "Changed Comment from empty to Readable" in audit_summary
     assert "</li>" in audit_summary
 
 
-@pytest.mark.parametrize("kind", ["netzwerk", "service"])
+@pytest.mark.parametrize("kind", ["network", "service"])
 def test_network_and_service_detail_do_not_show_hardware_panel(
     client: TestClient,
     session_factory,
@@ -760,7 +852,7 @@ def test_network_and_service_detail_do_not_show_hardware_panel(
     assert detail.status_code == 200
     assert edit.status_code == 200
     assert 'name="hardware_cpu_name"' not in edit.text
-    assert "Storage / HDD" not in detail.text
+    assert '<th>Storage</th>' not in detail.text
 
 
 def test_service_result_keeps_service_on_right_side(client: TestClient) -> None:
@@ -842,25 +934,26 @@ def test_object_detail_shows_data_and_relationships(client: TestClient) -> None:
     assert "CREATED AT" in response.text
     assert "LAST CHANGED" in response.text
     assert re.search(
-        r"\d{2}\.\d{2}\.\d{4}, \d{2}:\d{2} Uhr - (vor|gerade eben)",
+        r"\d{4}-\d{2}-\d{2} \d{2}:\d{2} UTC · "
+        r"(just now|\d+ (minute|minutes|hour|hours|day|days) ago)",
         response.text,
     )
     assert "Hostname" in response.text
     assert "Hostnames" not in response.text
     assert "n8n" in response.text
-    assert "Ausgehend" in response.text
-    assert "Zugriff" in response.text
+    assert "Outbound" in response.text
+    assert "Access" in response.text
     assert "Credential-Referenzen" not in response.text
     assert "credential_references" not in response.text
     assert "/objects/n8n-api-credential" not in response.text
-    assert "Kommentar" in response.text
+    assert "Comment" in response.text
     assert "Audit" in response.text
     assert "Referenzdoku" not in response.text
     assert "references/n8n.md" not in response.text
     assert "Daten JSON" not in response.text
     assert "Bearbeiten" not in response.text
     assert 'href="/objects/n8n?edit=overview"' in response.text
-    assert "Relationship anlegen" not in response.text
+    assert "Create relationship" not in response.text
     assert 'data-theme-value="dark"' in response.text
     assert 'data-theme-value="light"' in response.text
     assert "/static/theme.js" in response.text
@@ -876,12 +969,12 @@ def test_object_detail_header_only_shows_navigation_and_theme(
     assert header_match is not None
     header = header_match.group(1)
 
-    assert "Zur Suche" in header
+    assert "Back to catalog" in header
     assert 'data-theme-value="dark"' in header
     assert 'data-theme-value="light"' in header
     assert "n8n Web UI" not in header
     assert "system:n8n" not in header
-    assert "active" not in header
+    assert "n8n Web UI" not in header
 
 
 def test_comment_form_updates_object_and_audit(
@@ -898,7 +991,7 @@ def test_comment_form_updates_object_and_audit(
     assert response.headers["location"] == "/objects/n8n"
     detail = client.get("/objects/n8n")
     assert "Interner Kommentar" in detail.text
-    assert "Feld Kommentar wurde von leer auf Interner Kommentar geändert" in detail.text
+    assert "Changed Comment from empty to Interner Kommentar" in detail.text
     with session_factory() as session:
         catalog_object = get_object(session, "n8n")
     assert catalog_object is not None
@@ -916,13 +1009,13 @@ def test_relationship_add_form_is_hidden_behind_add_button(client: TestClient) -
 
     assert response.status_code == 200
     assert 'href="/objects/n8n?edit=relationship-add"' in response.text
-    assert "Relationship anlegen" not in response.text
+    assert "Create relationship" not in response.text
     assert add_response.status_code == 200
-    assert "Relationship anlegen" in add_response.text
+    assert "Create relationship" in add_response.text
     form_start = add_response.text.find('<form class="form-grid relation-form"')
     form_end = add_response.text.find("</form>", form_start)
     form_html = add_response.text[form_start:form_end]
-    assert "Zielobjekt" in form_html
+    assert "Target asset" in form_html
     assert '<select name="direction"' not in form_html
     assert '<select name="relation_type"' not in form_html
     assert ">Richtung" not in form_html
@@ -970,8 +1063,8 @@ def test_create_object_form_redirects_to_detail(
     [
         ("host", "Hostname", True, False),
         ("system", "Hostname", True, True),
-        ("netzwerk", "Name", False, False),
-        ("service", "Service-Name", False, False),
+        ("network", "Name", False, False),
+        ("service", "Service name", False, False),
     ],
 )
 def test_ui_schema_drives_primary_name_storage_by_kind(
@@ -1116,7 +1209,7 @@ def test_overview_edit_updates_object_metadata(client: TestClient, session_facto
     assert response.status_code == 303
     detail = client.get("/objects/n8n")
     assert "n8n-main" in detail.text
-    assert "inactive" in detail.text
+    assert "Inactive" in detail.text
     assert "Updated through overview." in detail.text
     with session_factory() as session:
         catalog_object = get_object(session, "n8n")
@@ -1461,7 +1554,7 @@ def test_service_network_edit_only_exposes_and_updates_endpoints(
     edit_response = client.get("/objects/service-network-scope?edit=network")
 
     assert edit_response.status_code == 200
-    assert "ENDPOINT TYPE" in edit_response.text
+    assert "Endpoint type" in edit_response.text
     assert '<select name="endpoint_type">' in edit_response.text
     for endpoint_type in ("Web", "REST API", "MCP", "HEC", "SSH"):
         assert f'<option value="{endpoint_type}"' in edit_response.text
@@ -1549,8 +1642,8 @@ def test_service_detail_can_edit_service_information_fields(
     detail_response = client.get(f"/objects/{object_id}")
 
     assert detail_response.status_code == 200
-    service_info_index = detail_response.text.index("Service Information")
-    network_index = detail_response.text.index("Netzwerk")
+    service_info_index = detail_response.text.index("Service information")
+    network_index = detail_response.text.index("Network")
     assert service_info_index < network_index
     assert "https://github.com/example/service" in detail_response.text
     assert "0.0.1 beta rc-1" in detail_response.text
@@ -1588,7 +1681,7 @@ def test_service_detail_can_edit_service_information_fields(
     ]
 
 
-@pytest.mark.parametrize("kind", ["host", "system", "netzwerk"])
+@pytest.mark.parametrize("kind", ["host", "system", "network"])
 def test_public_network_edit_exposes_and_updates_endpoints(
     client: TestClient,
     session_factory,
@@ -1618,7 +1711,7 @@ def test_public_network_edit_exposes_and_updates_endpoints(
     edit_response = client.get(f"/objects/{object_id}?edit=network")
 
     assert edit_response.status_code == 200
-    assert "ENDPOINT TYPE" in edit_response.text
+    assert "Endpoint type" in edit_response.text
     assert '<select name="endpoint_type">' in edit_response.text
     assert '<option value="SSH"' in edit_response.text
     assert 'value="Web" selected' in edit_response.text

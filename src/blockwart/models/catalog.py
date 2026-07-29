@@ -29,9 +29,9 @@ class CatalogObject(Base):
             name="ck_catalog_objects_health",
         ),
         CheckConstraint(
-            "(kind IN ('host','system','netzwerk','service') "
+            "(kind IN ('host','system','network','service') "
             "AND lifecycle IS NOT NULL AND health IS NOT NULL) OR "
-            "(kind NOT IN ('host','system','netzwerk','service') "
+            "(kind NOT IN ('host','system','network','service') "
             "AND lifecycle IS NULL AND health IS NULL)",
             name="ck_catalog_objects_asset_state",
         ),
@@ -108,4 +108,9 @@ class AuditEvent(Base):
     action: Mapped[str] = mapped_column(String(96))
     actor: Mapped[str] = mapped_column(String(128), default="system")
     summary: Mapped[str] = mapped_column(Text)
+    details_json: Mapped[str] = mapped_column(
+        Text,
+        default='{"event":"legacy","version":1}',
+        server_default='{"event":"legacy","version":1}',
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())

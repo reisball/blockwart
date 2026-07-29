@@ -83,6 +83,7 @@ class ExplorerAssetReadModel(TypedDict):
     id: str
     kind: str
     label: str
+    labels: list[str]
     summary: str
     status: str
     lifecycle: str
@@ -122,6 +123,7 @@ class AuditEventReadModel(TypedDict):
     action: str
     actor: str
     summary: str
+    details: dict[str, Any]
     created_at: str
 
 
@@ -291,6 +293,7 @@ def query_catalog_detail(
                 "action": event["action"],
                 "actor": event["actor"],
                 "summary": event["summary"],
+                "details": event["details"],
                 "created_at": event["created_at"],
             }
             for event in audit_events
@@ -514,7 +517,7 @@ def build_explorer_read_model(
     ]
     networks = [
         assets[network_ref]
-        for network_ref in _refs_for_kind(objects, "netzwerk")
+        for network_ref in _refs_for_kind(objects, "network")
         if is_included(network_ref)
     ]
     visible_refs = set(included_refs or assets)
@@ -888,11 +891,18 @@ def _explorer_asset(
         or catalog_object.data.get("type")
         or ""
     )
+    raw_labels = catalog_object.data.get("labels")
+    labels = (
+        [str(label) for label in raw_labels if isinstance(label, str)]
+        if isinstance(raw_labels, list)
+        else []
+    )
     return {
         "ref": f"{catalog_object.kind}:{catalog_object.id}",
         "id": catalog_object.id,
         "kind": catalog_object.kind,
         "label": primary_name_value(catalog_object),
+        "labels": labels,
         "summary": catalog_object.summary or "",
         "status": catalog_object.status,
         "lifecycle": str(catalog_object.lifecycle or ""),

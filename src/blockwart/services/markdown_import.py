@@ -482,7 +482,7 @@ def _object_kind_from_type(typ: str) -> str:
     if text == "host" or "raspberry pi" in text:
         return "host"
     if text == "network":
-        return "netzwerk"
+        return "network"
     if "service" in text:
         return "service"
     return "system"

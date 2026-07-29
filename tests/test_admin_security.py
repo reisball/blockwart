@@ -205,8 +205,8 @@ def test_locked_ui_hides_write_controls(anonymous_client: TestClient) -> None:
     assert 'action="/objects"' not in response.text
     assert "Unlock admin" in response.text
     assert 'action="/objects/protected-object"' not in detail.text
-    assert "Kommentar speichern" not in detail.text
-    assert "?edit=overview" not in detail.text
+    assert "Save comment" not in detail.text
+    assert 'href="/objects/protected-object?edit=overview"' not in detail.text
     assert '<form method="post" action="/settings/schema">' not in schema.text
 
 
@@ -242,7 +242,7 @@ def test_missing_admin_token_keeps_application_read_only(
     )
 
     assert admin_page.status_code == 200
-    assert "Nur-Lesen-Modus" in admin_page.text
+    assert "Read-only mode" in admin_page.text
     assert unlock.status_code == 403
     assert write.status_code == 403
     assert ADMIN_COOKIE_NAME not in read_only_client.cookies

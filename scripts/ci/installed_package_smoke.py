@@ -86,7 +86,7 @@ def main() -> None:
     search = fetch_json("/api/agent/search?limit=1")
     service = fetch_json("/api/agent/objects/n8n-web-ui")["objects"][0]
 
-    assert readiness["revision"] == "20260726_0006"
+    assert readiness["revision"] == "20260729_0007"
     assert "Blockwart" in index
     assert static_content_type == "text/css"
     assert not any(
