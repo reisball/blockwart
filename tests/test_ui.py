@@ -925,6 +925,90 @@ def test_host_result_groups_systems_and_services_in_one_relation_row(
     assert response.text.count('class="topology-cluster') == 1
 
 
+def test_catalog_tree_starts_collapsed_and_keeps_filtered_results_visible(
+    client: TestClient,
+    session_factory,
+) -> None:
+    with session_factory() as session:
+        with transaction(session):
+            for payload in (
+                CatalogObjectIn(
+                    id="tree-hardware",
+                    kind="host",
+                    label="Tree Hardware",
+                    data={"schema_version": 1},
+                ),
+                CatalogObjectIn(
+                    id="tree-host",
+                    kind="system",
+                    label="Tree Host",
+                    data={"schema_version": 1},
+                ),
+                CatalogObjectIn(
+                    id="tree-service",
+                    kind="service",
+                    label="Tree Service",
+                    data={"schema_version": 1},
+                ),
+            ):
+                flush_object(session, payload)
+            session.add_all(
+                [
+                    Relationship(
+                        from_ref="host:tree-hardware",
+                        relation_type="hosts",
+                        to_ref="system:tree-host",
+                    ),
+                    Relationship(
+                        from_ref="system:tree-host",
+                        relation_type="hosts",
+                        to_ref="service:tree-service",
+                    ),
+                ]
+            )
+
+    catalog = client.get("/")
+
+    assert catalog.status_code == 200
+    assert "tree-controls" in catalog.text
+    assert "Collapse all" in catalog.text
+    assert "Expand through hosts" in catalog.text
+    assert "Expand through services" in catalog.text
+    assert re.search(
+        r'data-asset-ref="host:tree-hardware"\s+data-tree-node="host:tree-hardware"',
+        catalog.text,
+    )
+    assert re.search(
+        r'data-asset-ref="system:tree-host"\s+data-tree-row '
+        r'data-tree-parent="host:tree-hardware" data-tree-depth="1" hidden\s+'
+        r'data-tree-node="system:tree-host"',
+        catalog.text,
+    )
+    assert re.search(
+        r'data-asset-ref="service:tree-service"\s+data-tree-row '
+        r'data-tree-parent="system:tree-host" data-tree-depth="2" hidden',
+        catalog.text,
+    )
+
+    filtered = client.get("/?q=tree-service")
+
+    assert filtered.status_code == 200
+    assert 'data-tree-level="0"' not in filtered.text
+    assert 'data-asset-ref="service:tree-service"' in filtered.text
+    assert 'data-tree-parent="system:tree-host"' not in filtered.text
+
+
+def test_catalog_tree_localizes_its_controls_in_german(client: TestClient) -> None:
+    response = client.get("/?lang=de")
+
+    assert response.status_code == 200
+    assert "Alles zuklappen" in response.text
+    assert "Bis Hosts aufklappen" in response.text
+    assert "Bis Dienste aufklappen" in response.text
+    assert 'aria-label="Nicht zugeordnet einklappen"' not in response.text
+    assert 'aria-label="Nicht zugeordnet aufklappen"' in response.text
+
+
 def test_object_detail_shows_data_and_relationships(client: TestClient) -> None:
     response = client.get("/objects/n8n")
 

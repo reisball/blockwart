@@ -268,6 +268,12 @@
   "topology.system_column": "HOSTS",
   "topology.title": "Topologie",
   "topology.unassigned_assets": "{count} Objekte ohne Zuordnung",
+  "tree.collapse": "{label} einklappen",
+  "tree.collapse_all": "Alles zuklappen",
+  "tree.controls": "Sichtbarkeit des Objektbaums",
+  "tree.expand": "{label} aufklappen",
+  "tree.expand_hosts": "Bis Hosts aufklappen",
+  "tree.expand_services": "Bis Dienste aufklappen",
   "value.no": "Nein",
   "value.yes": "Ja"
 }
