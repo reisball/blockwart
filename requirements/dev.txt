@@ -177,8 +177,10 @@ wheel==0.47.0
     #   pip-tools
 
 # The following packages are considered to be unsafe in a requirements file:
-pip==26.2
-    # via pip-tools
+pip==26.1.2
+    # via
+    #   blockwart (pyproject.toml)
+    #   pip-tools
 setuptools==83.0.0
     # via
     #   blockwart (pyproject.toml)
