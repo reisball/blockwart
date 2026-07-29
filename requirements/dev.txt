@@ -37,7 +37,7 @@ click==8.4.2
     #   uvicorn
 cryptography==49.0.0
     # via pyjwt
-fastapi==0.140.13
+fastapi==0.141.0
     # via blockwart (pyproject.toml)
 greenlet==3.5.4
     # via sqlalchemy

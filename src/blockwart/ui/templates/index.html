@@ -9,14 +9,28 @@
   </span>
 {%- endmacro %}
 
-{% macro asset_row(asset, depth=0) -%}
+{% macro tree_toggle(tree_id, label) -%}
+  <button
+    class="tree-toggle"
+    type="button"
+    data-tree-toggle
+    data-tree-target="{{ tree_id }}"
+    aria-expanded="false"
+    aria-label="{{ t('tree.expand', label=label) }}"
+  ><span aria-hidden="true"></span></button>
+{%- endmacro %}
+
+{% macro asset_row(asset, depth=0, tree_parent="", tree_depth=0, has_children=false) -%}
   <tr
     class="asset-row depth-{{ depth }} {% if asset.ref == selected_asset_ref %}selected{% endif %}"
     tabindex="0"
     data-asset-ref="{{ asset.ref }}"
+    {% if tree_parent %}data-tree-row data-tree-parent="{{ tree_parent }}" data-tree-depth="{{ tree_depth }}" hidden{% endif %}
+    {% if has_children %}data-tree-node="{{ asset.ref }}" data-tree-label="{{ asset.label }}"{% endif %}
   >
     <td>
       {% if depth > 0 %}<span class="tree-line"></span>{% endif %}
+      {% if has_children %}{{ tree_toggle(asset.ref, asset.label) }}{% endif %}
       <span class="node-icon {{ asset.kind }}">{{ node_icon(asset.kind) }}</span>
       <span class="asset-name">
         <strong>{{ asset.label }}</strong>
@@ -42,8 +56,12 @@
     class="group-row {{ extra_class }} {% if asset.ref == selected_asset_ref %}selected{% endif %}"
     tabindex="0"
     data-asset-ref="{{ asset.ref }}"
+    data-tree-node="{{ asset.ref }}"
+    data-tree-label="{{ asset.label }}"
+    data-tree-depth="0"
   >
     <td colspan="8">
+      {{ tree_toggle(asset.ref, asset.label) }}
       <span class="node-icon {{ asset.kind }}">{{ node_icon(asset.kind) }}</span>
       <strong>{{ asset.label }}</strong>
       <span class="path-copy">{{ t("kind." ~ asset.kind) }}{% if asset.summary %} · {{ asset.summary }}{% endif %}</span>
@@ -87,7 +105,7 @@
       }
     </script>
     <link rel="stylesheet" href="/static/app.css?v=061" />
-    <link rel="stylesheet" href="/static/explorer.css?v=006" />
+    <link rel="stylesheet" href="/static/explorer.css?v=007" />
     <script>
       window.BLOCKWART_UI_SCHEMAS = {{ ui_schemas|tojson }};
       window.BLOCKWART_EXPLORER_ASSETS = {{ explorer.assets|tojson }};
@@ -100,6 +118,10 @@
         selectAsset: {{ t("catalog.select_asset")|tojson }},
         noValue: {{ t("asset.no_value")|tojson }},
         details: {{ t("asset.details")|tojson }},
+        tree: {
+          expand: {{ t("tree.expand", label="{label}")|tojson }},
+          collapse: {{ t("tree.collapse", label="{label}")|tojson }}
+        },
         lifecycle: {
           "planned": {{ t("lifecycle.planned")|tojson }},
           "active": {{ t("lifecycle.active")|tojson }},
@@ -120,7 +142,7 @@
       };
     </script>
     <script src="/static/theme.js?v=054" defer></script>
-    <script src="/static/index.js?v=057" defer></script>
+    <script src="/static/index.js?v=058" defer></script>
   </head>
   <body class="explorer-body explorer-{{ view }}">
     <header class="explorer-topbar">
@@ -286,6 +308,13 @@
                 <a class="query-pill {% if kind == object_kind %}active{% endif %}" href="/?view=catalog&q={{ q|urlencode }}&kind={{ object_kind }}">{{ t("kind." ~ object_kind) }} <b>{{ object_counts[object_kind] or 0 }}</b></a>
               {% endfor %}
             </div>
+            {% if objects and not is_filtered %}
+              <div class="tree-controls" role="group" aria-label="{{ t('tree.controls') }}">
+                <button type="button" data-tree-level="0">{{ t("tree.collapse_all") }}</button>
+                <button type="button" data-tree-level="1">{{ t("tree.expand_hosts") }}</button>
+                <button type="button" data-tree-level="2">{{ t("tree.expand_services") }}</button>
+              </div>
+            {% endif %}
           </div>
 
           <div class="table-wrap">
@@ -315,14 +344,15 @@
                       {% for branch in cluster.systems %}{% set service_counter.value = service_counter.value + branch.services|length %}{% endfor %}
                       {{ group_row(cluster.host, service_counter.value) }}
                       {% for branch in cluster.systems %}
-                        {{ asset_row(branch.system, 1) }}
-                        {% for service in branch.services %}{{ asset_row(service, 2) }}{% endfor %}
+                        {{ asset_row(branch.system, 1, cluster.host.ref, 1, branch.services|length > 0) }}
+                        {% for service in branch.services %}{{ asset_row(service, 2, branch.system.ref, 2) }}{% endfor %}
                       {% endfor %}
-                      {% for service in cluster.direct_services %}{{ asset_row(service, 1) }}{% endfor %}
+                      {% for service in cluster.direct_services %}{{ asset_row(service, 1, cluster.host.ref, 2) }}{% endfor %}
                     {% endfor %}
                     {% if explorer.standalone_systems or explorer.standalone_services %}
-                      <tr class="group-row unassigned-group">
+                      <tr class="group-row unassigned-group" data-tree-node="unassigned" data-tree-label="{{ t('catalog.unassigned') }}" data-tree-depth="0">
                         <td colspan="8">
+                          {{ tree_toggle("unassigned", t("catalog.unassigned")) }}
                           <span class="node-icon unknown">?</span>
                           <strong>{{ t("catalog.unassigned") }}</strong>
                           <span class="path-copy">{{ t("catalog.placement_missing") }}</span>
@@ -330,20 +360,21 @@
                         </td>
                       </tr>
                       {% for branch in explorer.standalone_systems %}
-                        {{ asset_row(branch.system, 1) }}
-                        {% for service in branch.services %}{{ asset_row(service, 2) }}{% endfor %}
+                        {{ asset_row(branch.system, 1, "unassigned", 1, branch.services|length > 0) }}
+                        {% for service in branch.services %}{{ asset_row(service, 2, branch.system.ref, 2) }}{% endfor %}
                       {% endfor %}
-                      {% for service in explorer.standalone_services %}{{ asset_row(service, 1) }}{% endfor %}
+                      {% for service in explorer.standalone_services %}{{ asset_row(service, 1, "unassigned", 2) }}{% endfor %}
                     {% endif %}
                     {% if explorer.networks %}
-                      <tr class="group-row secondary-group">
+                      <tr class="group-row secondary-group" data-tree-node="networks" data-tree-label="{{ t('catalog.networks') }}" data-tree-depth="0">
                         <td colspan="8">
+                          {{ tree_toggle("networks", t("catalog.networks")) }}
                           <span class="node-icon network">⌁</span>
                           <strong>{{ t("catalog.networks") }}</strong>
                           <span class="group-count">{{ t("catalog.asset_count", count=explorer.networks|length) }}</span>
                         </td>
                       </tr>
-                      {% for network in explorer.networks %}{{ asset_row(network, 1) }}{% endfor %}
+                      {% for network in explorer.networks %}{{ asset_row(network, 1, "networks", 1) }}{% endfor %}
                     {% endif %}
                   {% endif %}
                 {% else %}

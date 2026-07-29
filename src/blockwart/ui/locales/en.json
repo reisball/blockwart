@@ -268,6 +268,12 @@
   "topology.system_column": "HOSTS",
   "topology.title": "Topology",
   "topology.unassigned_assets": "{count} assets without placement",
+  "tree.collapse": "Collapse {label}",
+  "tree.collapse_all": "Collapse all",
+  "tree.controls": "Asset tree visibility",
+  "tree.expand": "Expand {label}",
+  "tree.expand_hosts": "Expand through hosts",
+  "tree.expand_services": "Expand through services",
   "value.no": "No",
   "value.yes": "Yes"
 }

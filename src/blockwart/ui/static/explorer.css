@@ -519,6 +519,9 @@
 
 .query-bar {
   display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
   min-height: 46px;
   padding: 6px 8px;
   border: 1px solid var(--explorer-border);
@@ -531,6 +534,33 @@
   display: flex;
   align-items: center;
   gap: 4px;
+}
+
+.tree-controls {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 4px;
+}
+
+.tree-controls button {
+  min-height: 27px;
+  padding: 4px 7px;
+  border: 1px solid var(--explorer-border);
+  border-radius: 5px;
+  background: var(--explorer-panel-2);
+  color: var(--explorer-muted);
+  cursor: pointer;
+  font: inherit;
+  font-size: 8px;
+  font-weight: 750;
+}
+
+.tree-controls button:hover,
+.tree-controls button:focus-visible,
+.tree-controls button.active {
+  border-color: var(--explorer-blue);
+  background: rgb(64 105 193 / 16%);
+  color: var(--explorer-text);
 }
 
 .query-pill {
@@ -654,6 +684,41 @@
   vertical-align: middle;
 }
 
+.tree-toggle {
+  display: inline-grid;
+  width: 19px;
+  height: 19px;
+  margin: 0 2px 0 -2px;
+  padding: 0;
+  place-items: center;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--explorer-faint);
+  cursor: pointer;
+  vertical-align: middle;
+}
+
+.tree-toggle:hover,
+.tree-toggle:focus-visible {
+  background: rgb(64 105 193 / 16%);
+  color: var(--explorer-text);
+  outline: none;
+}
+
+.tree-toggle span {
+  width: 0;
+  height: 0;
+  border-top: 4px solid transparent;
+  border-bottom: 4px solid transparent;
+  border-left: 5px solid currentcolor;
+  transition: transform 120ms ease;
+}
+
+.tree-toggle[aria-expanded="true"] span {
+  transform: rotate(90deg);
+}
+
 .path-copy {
   margin-left: 8px;
   color: var(--explorer-faint);
@@ -692,6 +757,11 @@
   display: flex;
   align-items: center;
   gap: 8px;
+}
+
+.asset-row .tree-toggle {
+  flex: 0 0 19px;
+  margin-right: -2px;
 }
 
 .asset-row.depth-1 td:first-child {

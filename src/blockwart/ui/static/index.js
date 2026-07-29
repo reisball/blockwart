@@ -64,7 +64,7 @@
 
   for (const node of selectableNodes) {
     node.addEventListener("click", (event) => {
-      if (event.target.closest("a")) {
+      if (event.target.closest("a, button")) {
         return;
       }
       selectAsset(node.dataset.assetRef);
@@ -80,9 +80,94 @@
     }
   }
 
+  const treeRows = Array.from(document.querySelectorAll("[data-tree-row]"));
+  const treeNodes = new Map(
+    Array.from(document.querySelectorAll("[data-tree-node]")).map((node) => [
+      node.dataset.treeNode,
+      node,
+    ]),
+  );
+  const treeExpanded = new Map(
+    Array.from(treeNodes.keys()).map((treeNode) => [treeNode, false]),
+  );
+  const treeToggles = Array.from(document.querySelectorAll("[data-tree-toggle]"));
+  const treeLevelButtons = Array.from(document.querySelectorAll("[data-tree-level]"));
+  let maximumTreeDepth = 0;
+
+  function treeNodeIsExpanded(treeNode) {
+    return treeExpanded.get(treeNode) === true;
+  }
+
+  function treeRowIsVisible(row) {
+    if (Number(row.dataset.treeDepth) > maximumTreeDepth) {
+      return false;
+    }
+    let parent = row.dataset.treeParent;
+    while (parent) {
+      if (!treeNodeIsExpanded(parent)) {
+        return false;
+      }
+      parent = treeNodes.get(parent)?.dataset.treeParent;
+    }
+    return true;
+  }
+
+  function updateTreeToggle(toggle) {
+    const treeNode = toggle.dataset.treeTarget;
+    const node = treeNodes.get(treeNode);
+    const expanded = treeNodeIsExpanded(treeNode);
+    const label = node?.dataset.treeLabel || "";
+    toggle.setAttribute("aria-expanded", String(expanded));
+    toggle.setAttribute(
+      "aria-label",
+      ((expanded ? copy.tree?.collapse : copy.tree?.expand) || "{label}")
+        .replace("{label}", label),
+    );
+  }
+
+  function applyTreeState() {
+    for (const row of treeRows) {
+      row.hidden = !treeRowIsVisible(row);
+    }
+    for (const toggle of treeToggles) {
+      updateTreeToggle(toggle);
+    }
+    for (const button of treeLevelButtons) {
+      button.classList.toggle(
+        "active",
+        Number(button.dataset.treeLevel) === maximumTreeDepth,
+      );
+    }
+  }
+
+  function setTreeLevel(level) {
+    maximumTreeDepth = level;
+    for (const [treeNode, node] of treeNodes) {
+      treeExpanded.set(treeNode, Number(node.dataset.treeDepth) < level);
+    }
+    applyTreeState();
+  }
+
+  for (const toggle of treeToggles) {
+    toggle.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      const treeNode = toggle.dataset.treeTarget;
+      maximumTreeDepth = 2;
+      treeExpanded.set(treeNode, !treeNodeIsExpanded(treeNode));
+      applyTreeState();
+    });
+  }
+  for (const button of treeLevelButtons) {
+    button.addEventListener("click", () => setTreeLevel(Number(button.dataset.treeLevel)));
+  }
+  if (treeNodes.size) {
+    setTreeLevel(0);
+  }
+
   const initiallySelected = selectableNodes.find((node) => (
-    node.classList.contains("selected") && assets[node.dataset.assetRef]
-  )) || selectableNodes.find((node) => assets[node.dataset.assetRef]);
+    !node.hidden && node.classList.contains("selected") && assets[node.dataset.assetRef]
+  )) || selectableNodes.find((node) => !node.hidden && assets[node.dataset.assetRef]);
   if (initiallySelected) {
     selectAsset(initiallySelected.dataset.assetRef);
   }
