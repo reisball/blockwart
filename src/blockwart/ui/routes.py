@@ -2,6 +2,7 @@ import json
 import re
 from collections.abc import Mapping
 from datetime import UTC, datetime
+from ipaddress import ip_address
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, Form, HTTPException, Request
@@ -453,6 +454,7 @@ def _detail_template_context(
     edit_section: str,
     can_write_enabled: bool,
     data_json_override: str | None = None,
+    form_rows: Mapping[str, list[Mapping[str, Any]]] | None = None,
 ) -> dict[str, Any]:
     i18n = translation_context(request)
     translator = i18n["t"]
@@ -476,6 +478,30 @@ def _detail_template_context(
         schema_fields,
         service_information,
     )
+    can_edit_network_addresses = catalog_object.kind in NETWORK_ADDRESS_EDIT_KINDS
+    can_edit_network_ports = catalog_object.kind in NETWORK_PORT_EDIT_KINDS
+    can_edit_network_endpoints = catalog_object.kind in NETWORK_ENDPOINT_EDIT_KINDS
+    submitted_rows = form_rows or {}
+    network_address_rows = _mapping_rows_override(
+        submitted_rows.get("network_addresses"),
+        _padded_mappings(
+            network["addresses"],
+            max(1, len(network["addresses"])),
+        ),
+    )
+    port_rows = _mapping_rows_override(
+        submitted_rows.get("network_ports"),
+        _padded_mappings(ports, max(1, len(ports))),
+    )
+    endpoint_rows = _mapping_rows_override(
+        submitted_rows.get("network_endpoints"),
+        _endpoint_edit_rows(endpoints),
+    )
+    access_method_rows = _mapping_rows_override(
+        submitted_rows.get("access_methods"),
+        _access_method_rows(catalog_object, access_methods),
+    )
+    own_access_method_count = len(_list_of_mappings(object_data.get("access_methods")))
     audit_events = [
         {
             **event,
@@ -507,22 +533,30 @@ def _detail_template_context(
         ),
         "ports": ports,
         "endpoints": endpoints,
-        "network_address_rows": _padded_mappings(
-            network["addresses"],
-            max(1, len(network["addresses"])),
-        ),
-        "port_rows": _padded_mappings(ports, max(1, len(ports))),
-        "endpoint_rows": _endpoint_edit_rows(endpoints),
+        "network_address_rows": network_address_rows,
+        "port_rows": port_rows,
+        "endpoint_rows": endpoint_rows,
         "endpoint_types": ENDPOINT_TYPES,
-        "can_edit_network_addresses": (
-            catalog_object.kind in NETWORK_ADDRESS_EDIT_KINDS
-        ),
-        "can_edit_network_ports": catalog_object.kind in NETWORK_PORT_EDIT_KINDS,
-        "can_edit_network_endpoints": (
-            catalog_object.kind in NETWORK_ENDPOINT_EDIT_KINDS
+        "can_edit_network_addresses": can_edit_network_addresses,
+        "can_edit_network_ports": can_edit_network_ports,
+        "can_edit_network_endpoints": can_edit_network_endpoints,
+        "network_has_editable_rows": bool(
+            (can_edit_network_addresses and network["addresses"])
+            or (can_edit_network_ports and ports)
+            or (can_edit_network_endpoints and endpoints)
         ),
         "access_methods": access_methods,
-        "access_method_rows": _access_method_rows(catalog_object, access_methods),
+        "access_method_rows": access_method_rows,
+        "access_has_rows": bool(access_methods),
+        "access_add_row": {
+            "type": "",
+            "endpoint": "",
+            "auth_mode": "",
+            "source_kind": catalog_object.kind,
+            "source_label": catalog_object.label,
+            "source_ref": f"{catalog_object.kind}:{catalog_object.id}",
+            "index": own_access_method_count,
+        },
         "credential_references": [],
         "data_json": (
             data_json_override
@@ -928,73 +962,61 @@ async def update_network(
     if existing_object is None:
         raise HTTPException(status_code=404, detail="Catalog object not found")
     form = await request.form()
-    data = _editable_data_copy(existing_object.data)
-    network = dict(data.get("network") if isinstance(data.get("network"), Mapping) else {})
-    if existing_object.kind in NETWORK_ADDRESS_EDIT_KINDS:
-        network["addresses"] = [
-            {
-                **address,
-                "ip": ip,
-                "interface": interface,
-                "scope": scope,
-            }
-            for address, ip, interface, scope in zip(
-                _padded_mappings(network.get("addresses"), len(form.getlist("address_ip"))),
-                form.getlist("address_ip"),
-                form.getlist("address_interface"),
-                form.getlist("address_scope"),
-                strict=False,
-            )
-            if str(ip).strip()
-        ]
-        data["network"] = network
-    if existing_object.kind in NETWORK_PORT_EDIT_KINDS:
-        data["ports"] = [
-            {
-                **port,
-                "port": int(port_value),
-                "protocol": protocol or "tcp",
-                "purpose": purpose,
-                "exposure": exposure,
-            }
-            for port, port_value, protocol, purpose, exposure in zip(
-                _padded_mappings(data.get("ports"), len(form.getlist("port_value"))),
-                form.getlist("port_value"),
-                form.getlist("port_protocol"),
-                form.getlist("port_purpose"),
-                form.getlist("port_exposure"),
-                strict=False,
-            )
-            if str(port_value).strip()
-        ]
-    if existing_object.kind in NETWORK_ENDPOINT_EDIT_KINDS:
-        try:
-            data["endpoints"] = [
-                _endpoint_payload(endpoint, endpoint_type, url, port_value)
-                for endpoint, endpoint_type, url, port_value in zip(
-                    _padded_mappings(data.get("endpoints"), len(form.getlist("endpoint_type"))),
-                    form.getlist("endpoint_type"),
-                    form.getlist("endpoint_url"),
-                    form.getlist("endpoint_port"),
-                    strict=False,
-                )
-                if str(endpoint_type).strip() or str(url).strip() or str(port_value).strip()
-            ]
-        except ValueError as exc:
-            raise HTTPException(status_code=422, detail=str(exc)) from exc
-    _reject_secret_shaped_form_data(data)
-    with transaction(session):
-        upsert_object(
-            session,
-            CatalogObjectIn(
-                id=existing_object.id,
-                kind=existing_object.kind,
-                label=existing_object.label,
-                status=existing_object.status,
-                summary=existing_object.summary,
-                data=data,
-            ),
+    submitted_rows = _network_form_rows(form)
+    translator = translation_context(request)["t"]
+    try:
+        data = _editable_data_copy(existing_object.data)
+        network = dict(
+            data.get("network")
+            if isinstance(data.get("network"), Mapping)
+            else {}
         )
+        if existing_object.kind in NETWORK_ADDRESS_EDIT_KINDS:
+            addresses = _validated_address_rows(
+                network.get("addresses"),
+                submitted_rows["network_addresses"],
+                translator,
+            )
+            if addresses:
+                network["addresses"] = addresses
+            else:
+                network.pop("addresses", None)
+            if network:
+                data["network"] = network
+            else:
+                data.pop("network", None)
+        if existing_object.kind in NETWORK_PORT_EDIT_KINDS:
+            data["ports"] = _validated_port_rows(
+                data.get("ports"),
+                submitted_rows["network_ports"],
+                translator,
+            )
+        if existing_object.kind in NETWORK_ENDPOINT_EDIT_KINDS:
+            data["endpoints"] = _validated_endpoint_rows(
+                data.get("endpoints"),
+                submitted_rows["network_endpoints"],
+                translator,
+            )
+        _reject_secret_shaped_form_data(data)
+        payload = CatalogObjectIn(
+            id=existing_object.id,
+            kind=existing_object.kind,
+            label=existing_object.label,
+            status=existing_object.status,
+            summary=existing_object.summary,
+            data=data,
+        )
+    except (ValidationError, ValueError) as exc:
+        return _detail_form_error_response(
+            request,
+            session,
+            object_id,
+            error=_safe_error_message(exc),
+            edit_section="network",
+            form_rows=submitted_rows,
+        )
+    with transaction(session):
+        upsert_object(session, payload)
     return RedirectResponse(url=f"/objects/{object_id}", status_code=303)
 
 
@@ -1008,60 +1030,95 @@ async def update_access(
     object_id: str,
     session: Annotated[Session, Depends(get_session)],
 ):
-    if get_object(session, object_id) is None:
+    read_model = query_catalog_detail(session, object_id)
+    if read_model is None:
         raise HTTPException(status_code=404, detail="Catalog object not found")
     form = await request.form()
-    refs = [str(value) for value in form.getlist("method_ref")]
-    indexes = [str(value) for value in form.getlist("method_index")]
-    types = [str(value) for value in form.getlist("method_type")]
-    endpoints = [str(value) for value in form.getlist("method_endpoint")]
-    auth_modes = [str(value) for value in form.getlist("method_auth_mode")]
+    submitted_rows = _access_form_rows(form, read_model)
+    translator = translation_context(request)["t"]
+    allowed_sources = {
+        str(method["source_ref"])
+        for method in _access_method_rows(
+            read_model.catalog_object,
+            _display_access_methods(
+                read_model.catalog_object,
+                read_model.relationship_groups,
+                read_model.object_map,
+            ),
+        )
+    }
+    allowed_sources.add(
+        f"{read_model.catalog_object.kind}:{read_model.catalog_object.id}"
+    )
     changed_objects: dict[str, CatalogObjectOut] = {}
     changed_data: dict[str, dict[str, Any]] = {}
-    for ref, index_text, method_type, endpoint, auth_mode in zip(
-        refs,
-        indexes,
-        types,
-        endpoints,
-        auth_modes,
-        strict=False,
-    ):
-        if ":" not in ref:
-            continue
-        kind, target_id = ref.split(":", 1)
-        target = changed_objects.get(ref) or get_object(session, target_id)
-        if target is None or target.kind != kind:
-            continue
-        changed_objects[ref] = target
-        data = changed_data.setdefault(ref, _editable_data_copy(target.data))
-        methods = data.get("access_methods")
-        if not isinstance(methods, list):
-            methods = []
-            data["access_methods"] = methods
-        try:
-            index = int(index_text)
-        except ValueError:
-            continue
-        if index < 0:
-            continue
-        while len(methods) <= index:
-            methods.append({})
-        if not isinstance(methods[index], dict):
-            methods[index] = {}
-        if not method_type.strip() and not endpoint.strip() and not auth_mode.strip():
-            continue
-        methods[index] = {
-            **methods[index],
-            "type": method_type,
-            "endpoint": endpoint,
-            "auth_mode": auth_mode,
-        }
-    with transaction(session):
+    seen_rows: set[tuple[str, int]] = set()
+    try:
+        for row_number, row in enumerate(submitted_rows, start=1):
+            ref = str(row["source_ref"])
+            method_type = str(row["type"]).strip()
+            endpoint = str(row["endpoint"]).strip()
+            auth_mode = str(row["auth_mode"]).strip()
+            if not method_type and not endpoint and not auth_mode:
+                continue
+            if ref not in allowed_sources or ":" not in ref:
+                raise ValueError(
+                    translator("validation.access_source_invalid", row=row_number)
+                )
+            if not method_type:
+                raise ValueError(
+                    translator("validation.access_type_required", row=row_number)
+                )
+            if not endpoint:
+                raise ValueError(
+                    translator("validation.access_endpoint_required", row=row_number)
+                )
+            try:
+                index = int(str(row["index"]))
+            except ValueError as exc:
+                raise ValueError(
+                    translator("validation.access_row_invalid", row=row_number)
+                ) from exc
+            if index < 0 or (ref, index) in seen_rows:
+                raise ValueError(
+                    translator("validation.access_row_invalid", row=row_number)
+                )
+            seen_rows.add((ref, index))
+            kind, target_id = ref.split(":", 1)
+            target = changed_objects.get(ref) or get_object(session, target_id)
+            if target is None or target.kind != kind:
+                raise ValueError(
+                    translator("validation.access_source_invalid", row=row_number)
+                )
+            changed_objects[ref] = target
+            data = changed_data.setdefault(ref, _editable_data_copy(target.data))
+            methods = data.get("access_methods")
+            if not isinstance(methods, list):
+                methods = []
+                data["access_methods"] = methods
+            if index > len(methods):
+                raise ValueError(
+                    translator("validation.access_row_invalid", row=row_number)
+                )
+            if index == len(methods):
+                methods.append({})
+            if not isinstance(methods[index], dict):
+                methods[index] = {}
+            method_payload = {
+                **methods[index],
+                "type": method_type,
+                "endpoint": endpoint,
+            }
+            if auth_mode:
+                method_payload["auth_mode"] = auth_mode
+            else:
+                method_payload.pop("auth_mode", None)
+            methods[index] = method_payload
+        payloads: list[CatalogObjectIn] = []
         for ref, data in changed_data.items():
             _reject_secret_shaped_form_data(data)
             target = changed_objects[ref]
-            upsert_object(
-                session,
+            payloads.append(
                 CatalogObjectIn(
                     id=target.id,
                     kind=target.kind,
@@ -1069,9 +1126,272 @@ async def update_access(
                     status=target.status,
                     summary=target.summary,
                     data=data,
-                ),
+                )
             )
+    except (ValidationError, ValueError) as exc:
+        return _detail_form_error_response(
+            request,
+            session,
+            object_id,
+            error=_safe_error_message(exc),
+            edit_section="access",
+            form_rows={"access_methods": submitted_rows},
+        )
+    with transaction(session):
+        for payload in payloads:
+            upsert_object(session, payload)
     return RedirectResponse(url=f"/objects/{object_id}", status_code=303)
+
+
+def _detail_form_error_response(
+    request: Request,
+    session: Session,
+    object_id: str,
+    *,
+    error: str,
+    edit_section: str,
+    form_rows: Mapping[str, list[Mapping[str, Any]]],
+):
+    read_model = query_catalog_detail(session, object_id)
+    if read_model is None:
+        raise HTTPException(status_code=404, detail="Catalog object not found")
+    return templates.TemplateResponse(
+        request,
+        "object_detail.html",
+        context=_detail_template_context(
+            request,
+            read_model,
+            error=error,
+            edit_section=edit_section,
+            can_write_enabled=True,
+            form_rows=form_rows,
+        ),
+        status_code=422,
+    )
+
+
+def _network_form_rows(form: Any) -> dict[str, list[dict[str, Any]]]:
+    return {
+        "network_addresses": _submitted_form_rows(
+            form,
+            {
+                "ip": "address_ip",
+                "interface": "address_interface",
+                "scope": "address_scope",
+            },
+        ),
+        "network_ports": _submitted_form_rows(
+            form,
+            {
+                "port": "port_value",
+                "protocol": "port_protocol",
+                "purpose": "port_purpose",
+                "exposure": "port_exposure",
+            },
+        ),
+        "network_endpoints": _submitted_form_rows(
+            form,
+            {
+                "type": "endpoint_type",
+                "url": "endpoint_url",
+                "port": "endpoint_port",
+            },
+        ),
+    }
+
+
+def _access_form_rows(form: Any, read_model: Any) -> list[dict[str, Any]]:
+    rows = _submitted_form_rows(
+        form,
+        {
+            "source_ref": "method_ref",
+            "index": "method_index",
+            "type": "method_type",
+            "endpoint": "method_endpoint",
+            "auth_mode": "method_auth_mode",
+        },
+    )
+    catalog_object = read_model.catalog_object
+    source_details = {
+        str(method["source_ref"]): (
+            str(method["source_kind"]),
+            str(method["source_label"]),
+        )
+        for method in _display_access_methods(
+            catalog_object,
+            read_model.relationship_groups,
+            read_model.object_map,
+        )
+    }
+    source_details[f"{catalog_object.kind}:{catalog_object.id}"] = (
+        catalog_object.kind,
+        catalog_object.label,
+    )
+    for row in rows:
+        source_kind, source_label = source_details.get(
+            str(row["source_ref"]),
+            ("?", str(row["source_ref"])),
+        )
+        row["source_kind"] = source_kind
+        row["source_label"] = source_label
+    return rows
+
+
+def _submitted_form_rows(
+    form: Any,
+    field_names: Mapping[str, str],
+) -> list[dict[str, Any]]:
+    values = {
+        output_name: [str(value) for value in form.getlist(input_name)]
+        for output_name, input_name in field_names.items()
+    }
+    count = max((len(items) for items in values.values()), default=0)
+    return [
+        {
+            output_name: items[index] if index < len(items) else ""
+            for output_name, items in values.items()
+        }
+        for index in range(count)
+    ]
+
+
+def _validated_address_rows(
+    existing: Any,
+    rows: list[Mapping[str, Any]],
+    translator: Any,
+) -> list[dict[str, Any]]:
+    originals = _padded_mappings(existing, len(rows))
+    validated: list[dict[str, Any]] = []
+    for row_number, (original, row) in enumerate(
+        zip(originals, rows, strict=True),
+        start=1,
+    ):
+        ip_value = str(row.get("ip") or "").strip()
+        interface = str(row.get("interface") or "").strip()
+        scope = str(row.get("scope") or "").strip()
+        if not ip_value and not interface and not scope:
+            continue
+        if not ip_value:
+            raise ValueError(
+                translator("validation.network_ip_required", row=row_number)
+            )
+        try:
+            ip_address(ip_value)
+        except ValueError as exc:
+            raise ValueError(
+                translator("validation.network_ip_invalid", row=row_number)
+            ) from exc
+        payload = dict(original)
+        payload["ip"] = ip_value
+        payload.pop("network", None)
+        for key, value in {"interface": interface, "scope": scope}.items():
+            if value:
+                payload[key] = value
+            else:
+                payload.pop(key, None)
+        validated.append(payload)
+    return validated
+
+
+def _validated_port_rows(
+    existing: Any,
+    rows: list[Mapping[str, Any]],
+    translator: Any,
+) -> list[dict[str, Any]]:
+    originals = _padded_mappings(existing, len(rows))
+    validated: list[dict[str, Any]] = []
+    for row_number, (original, row) in enumerate(
+        zip(originals, rows, strict=True),
+        start=1,
+    ):
+        port_text = str(row.get("port") or "").strip()
+        protocol = str(row.get("protocol") or "").strip()
+        purpose = str(row.get("purpose") or "").strip()
+        exposure = str(row.get("exposure") or "").strip()
+        if (
+            not port_text
+            and protocol in {"", "tcp"}
+            and not purpose
+            and not exposure
+        ):
+            continue
+        port = _validated_port(port_text, translator, row_number)
+        payload = {
+            **original,
+            "port": port,
+            "protocol": protocol or "tcp",
+        }
+        for key, value in {"purpose": purpose, "exposure": exposure}.items():
+            if value:
+                payload[key] = value
+            else:
+                payload.pop(key, None)
+        validated.append(payload)
+    return validated
+
+
+def _validated_endpoint_rows(
+    existing: Any,
+    rows: list[Mapping[str, Any]],
+    translator: Any,
+) -> list[dict[str, Any]]:
+    originals = _padded_mappings(existing, len(rows))
+    validated: list[dict[str, Any]] = []
+    for row_number, (original, row) in enumerate(
+        zip(originals, rows, strict=True),
+        start=1,
+    ):
+        endpoint_type = str(row.get("type") or "").strip()
+        url = str(row.get("url") or "").strip()
+        port_text = str(row.get("port") or "").strip()
+        if not endpoint_type and not url and not port_text:
+            continue
+        if not endpoint_type:
+            raise ValueError(
+                translator("validation.endpoint_type_required", row=row_number)
+            )
+        if not _normalize_endpoint_type(endpoint_type):
+            raise ValueError(
+                translator(
+                    "validation.endpoint_type_invalid",
+                    row=row_number,
+                    allowed=", ".join(ENDPOINT_TYPES),
+                )
+            )
+        if not url:
+            raise ValueError(
+                translator("validation.endpoint_url_required", row=row_number)
+            )
+        port = (
+            _validated_port(
+                port_text,
+                translator,
+                row_number,
+                message_key="validation.endpoint_port_invalid",
+            )
+            if port_text
+            else ""
+        )
+        validated.append(
+            _endpoint_payload(original, endpoint_type, url, port)
+        )
+    return validated
+
+
+def _validated_port(
+    value: str,
+    translator: Any,
+    row_number: int,
+    *,
+    message_key: str = "validation.port_invalid",
+) -> int:
+    try:
+        port = int(value)
+    except ValueError as exc:
+        raise ValueError(translator(message_key, row=row_number)) from exc
+    if not 1 <= port <= 65535:
+        raise ValueError(translator(message_key, row=row_number))
+    return port
 
 
 def _empty_form() -> dict[str, str]:
@@ -1122,6 +1442,8 @@ def _reject_secret_shaped_form_data(data: object) -> None:
 def _safe_error_message(exc: Exception) -> str:
     if isinstance(exc, json.JSONDecodeError):
         return f"data_json is not valid JSON: {exc.msg}"
+    if isinstance(exc, ValidationError):
+        return "Invalid catalog object payload."
     if isinstance(exc, ValueError):
         return str(exc)
     return "Invalid catalog object payload."
@@ -1432,7 +1754,10 @@ def _endpoint_payload(
         raise ValueError(f"endpoint type must be one of: {allowed}")
     payload["type"] = normalized_type
     payload["url"] = str(url).strip()
-    payload["port"] = int(port_value) if str(port_value).strip() else ""
+    if str(port_value).strip():
+        payload["port"] = int(port_value)
+    else:
+        payload.pop("port", None)
     return payload
 
 
@@ -1468,6 +1793,15 @@ def _padded_mappings(value: Any, count: int) -> list[dict[str, Any]]:
     while len(items) < count:
         items.append({})
     return items[:count]
+
+
+def _mapping_rows_override(
+    override: list[Mapping[str, Any]] | None,
+    fallback: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    if not override:
+        return fallback
+    return [dict(row) for row in override]
 
 
 def _fields_by_key(fields: list[Mapping[str, Any]]) -> dict[str, Mapping[str, Any]]:

@@ -236,7 +236,19 @@ def test_multi_object_access_update_rolls_back_first_object(
     )
     with session_factory() as session:
         _add_object(session, object_id="access-a", data_json=old_data)
-        _add_object(session, object_id="access-b", data_json=old_data)
+        _add_object(
+            session,
+            object_id="access-b",
+            kind="service",
+            data_json=old_data,
+        )
+        session.add(
+            Relationship(
+                from_ref="system:access-a",
+                relation_type="hosts",
+                to_ref="service:access-b",
+            )
+        )
         session.commit()
 
     calls = 0
@@ -255,7 +267,7 @@ def test_multi_object_access_update_rolls_back_first_object(
             client.post(
                 "/objects/access-a/access",
                 data={
-                    "method_ref": ["system:access-a", "system:access-b"],
+                    "method_ref": ["system:access-a", "service:access-b"],
                     "method_index": ["0", "0"],
                     "method_type": ["ssh", "ssh"],
                     "method_endpoint": ["ssh://new-a", "ssh://new-b"],

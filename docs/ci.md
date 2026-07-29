@@ -29,12 +29,16 @@ Use Python 3.12 on Linux and the exact compiler version:
 
 ```bash
 python3.12 -m venv /tmp/blockwart-lock-venv
-/tmp/blockwart-lock-venv/bin/python -m pip install "pip-tools==7.6.0"
+/tmp/blockwart-lock-venv/bin/python -m pip install "pip==26.1.2" "pip-tools==7.6.0"
 PYTHON_BIN=/tmp/blockwart-lock-venv/bin/python \
   ./scripts/update-dependency-locks.sh
 PYTHON_BIN=/tmp/blockwart-lock-venv/bin/python \
   ./scripts/update-dependency-locks.sh --check
 ```
+
+The bootstrap and development extra currently pin or constrain pip below 26.2 because
+`pip-tools 7.6.0` imports a pip compatibility symbol removed in pip 26.2. Keep both
+guards until the pinned compiler version supports pip 26.2 or newer.
 
 Review the complete dependency diff, run the full proof below, and commit `pyproject.toml` and both
 generated files together. A dependency update is not a deployment.

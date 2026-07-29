@@ -1607,6 +1607,378 @@ def test_panel_edit_forms_update_existing_network_and_access(
     assert "key-only" in detail.text
 
 
+def test_empty_detail_panels_offer_explicit_first_row_actions(
+    client: TestClient,
+    session_factory,
+) -> None:
+    with session_factory() as session:
+        upsert_object(
+            session,
+            CatalogObjectIn(
+                id="empty-detail-panels",
+                kind="service",
+                label="Empty Detail Panels",
+                status="active",
+                summary="No endpoint or access rows yet.",
+                data={"schema_version": 1},
+            ),
+        )
+
+    detail = client.get("/objects/empty-detail-panels")
+    network_edit = client.get("/objects/empty-detail-panels?edit=network")
+    access_edit = client.get("/objects/empty-detail-panels?edit=access")
+
+    assert detail.status_code == 200
+    assert "No network data recorded." in detail.text
+    assert "No access data recorded." in detail.text
+    assert re.search(
+        r'href="/objects/empty-detail-panels\?edit=network"[^>]*>Add</a>',
+        detail.text,
+    )
+    assert re.search(
+        r'href="/objects/empty-detail-panels\?edit=access"[^>]*>Add</a>',
+        detail.text,
+    )
+    assert "/static/detail.js" in network_edit.text
+    assert 'data-row-list="network-endpoints"' in network_edit.text
+    assert 'data-add-row="network-endpoints"' in network_edit.text
+    assert "Add endpoint" in network_edit.text
+    assert 'name="endpoint_type" data-required-when-row-filled' in network_edit.text
+    assert '<span class="required-marker" aria-hidden="true">*</span>' in network_edit.text
+    assert '<span class="visually-hidden">Required</span>' in network_edit.text
+    assert 'data-row-list="access-methods"' in access_edit.text
+    assert 'data-add-row="access-methods"' in access_edit.text
+    assert "Add access method" in access_edit.text
+    assert 'href="/objects/empty-detail-panels">Cancel</a>' in access_edit.text
+
+
+def test_first_endpoint_and_access_rows_persist_from_empty_panels(
+    client: TestClient,
+    session_factory,
+) -> None:
+    object_id = "first-detail-rows"
+    with session_factory() as session:
+        upsert_object(
+            session,
+            CatalogObjectIn(
+                id=object_id,
+                kind="service",
+                label="First Detail Rows",
+                status="active",
+                data={"schema_version": 1},
+            ),
+        )
+
+    network_response = client.post(
+        f"/objects/{object_id}/network",
+        data={
+            "endpoint_type": "REST API",
+            "endpoint_url": "https://first-detail-rows.example/api",
+            "endpoint_port": "",
+        },
+        follow_redirects=False,
+    )
+    access_response = client.post(
+        f"/objects/{object_id}/access",
+        data={
+            "method_ref": f"service:{object_id}",
+            "method_index": "0",
+            "method_type": "admin_web",
+            "method_endpoint": "https://first-detail-rows.example",
+            "method_auth_mode": "",
+        },
+        follow_redirects=False,
+    )
+
+    assert network_response.status_code == 303
+    assert access_response.status_code == 303
+    with session_factory() as session:
+        updated = get_object(session, object_id)
+    assert updated is not None
+    assert updated.data["endpoints"] == [
+        {
+            "type": "REST API",
+            "url": "https://first-detail-rows.example/api",
+        }
+    ]
+    assert len(updated.data["access_methods"]) == 1
+    assert updated.data["access_methods"][0]["type"] == "admin_web"
+    assert (
+        updated.data["access_methods"][0]["endpoint"]
+        == "https://first-detail-rows.example"
+    )
+    assert "auth_mode" not in updated.data["access_methods"][0]
+
+    detail = client.get(f"/objects/{object_id}")
+    assert "https://first-detail-rows.example/api" in detail.text
+    assert "https://first-detail-rows.example" in detail.text
+    assert re.search(
+        rf'href="/objects/{object_id}\?edit=network"[^>]*>Edit</a>',
+        detail.text,
+    )
+    assert re.search(
+        rf'href="/objects/{object_id}\?edit=access"[^>]*>Edit</a>',
+        detail.text,
+    )
+
+
+def test_network_address_edit_preserves_unrelated_network_fields(
+    client: TestClient,
+    session_factory,
+) -> None:
+    object_id = "preserve-network-fields"
+    with session_factory() as session:
+        upsert_object(
+            session,
+            CatalogObjectIn(
+                id=object_id,
+                kind="system",
+                label="Preserve Network Fields",
+                status="active",
+                data={
+                    "schema_version": 1,
+                    "network": {
+                        "addresses": [{"ip": "192.0.2.10", "scope": "test"}],
+                        "dns": ["192.0.2.53"],
+                    },
+                },
+            ),
+        )
+
+    response = client.post(
+        f"/objects/{object_id}/network",
+        data={
+            "address_ip": "",
+            "address_interface": "",
+            "address_scope": "",
+        },
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 303
+    with session_factory() as session:
+        updated = get_object(session, object_id)
+    assert updated is not None
+    assert updated.data["network"]["dns"] == ["192.0.2.53"]
+    assert "addresses" not in updated.data["network"]
+
+
+def test_access_edit_preserves_existing_rows_and_appends_next_row(
+    client: TestClient,
+    session_factory,
+) -> None:
+    object_id = "multi-access-rows"
+    object_ref = f"service:{object_id}"
+    endpoints = [
+        "ssh://multi-access.example:22",
+        "https://multi-access.example",
+        "https://multi-access.example/api",
+    ]
+    with session_factory() as session:
+        upsert_object(
+            session,
+            CatalogObjectIn(
+                id=object_id,
+                kind="service",
+                label="Multi Access Rows",
+                status="active",
+                data={
+                    "schema_version": 1,
+                    "access_methods": [
+                        {
+                            "type": "ssh",
+                            "endpoint": endpoints[0],
+                            "auth_mode": "key",
+                        },
+                        {
+                            "type": "admin_web",
+                            "endpoint": endpoints[1],
+                            "auth_mode": "session",
+                        },
+                    ],
+                },
+            ),
+        )
+
+    response = client.post(
+        f"/objects/{object_id}/access",
+        data={
+            "method_ref": [object_ref, object_ref, object_ref],
+            "method_index": ["0", "1", "2"],
+            "method_type": ["ssh", "admin_web", "admin_api"],
+            "method_endpoint": endpoints,
+            "method_auth_mode": ["key-only", "session", "token"],
+        },
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 303
+    with session_factory() as session:
+        updated = get_object(session, object_id)
+    assert updated is not None
+    assert [
+        (method["type"], method["endpoint"], method.get("auth_mode"))
+        for method in updated.data["access_methods"]
+    ] == [
+        ("ssh", endpoints[0], "key-only"),
+        ("admin_web", endpoints[1], "session"),
+        ("admin_api", endpoints[2], "token"),
+    ]
+
+
+def test_access_edit_rejects_out_of_range_index_without_mutation(
+    client: TestClient,
+    session_factory,
+) -> None:
+    object_id = "invalid-access-index"
+    object_ref = f"service:{object_id}"
+    original_method = {
+        "type": "admin_web",
+        "endpoint": "https://invalid-access-index.example",
+        "auth_mode": "session",
+    }
+    with session_factory() as session:
+        upsert_object(
+            session,
+            CatalogObjectIn(
+                id=object_id,
+                kind="service",
+                label="Invalid Access Index",
+                status="active",
+                data={
+                    "schema_version": 1,
+                    "access_methods": [original_method],
+                },
+            ),
+        )
+
+    response = client.post(
+        f"/objects/{object_id}/access",
+        data={
+            "method_ref": object_ref,
+            "method_index": "5",
+            "method_type": "ssh",
+            "method_endpoint": "ssh://must-not-persist.example",
+            "method_auth_mode": "key",
+        },
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 422
+    assert "Access row 1 is invalid." in response.text
+    assert "ssh://must-not-persist.example" in response.text
+    with session_factory() as session:
+        unchanged = get_object(session, object_id)
+    assert unchanged is not None
+    assert unchanged.data["access_methods"] == [original_method]
+
+
+@pytest.mark.parametrize(
+    ("path", "data", "message", "preserved_value"),
+    [
+        (
+            "/objects/invalid-first-rows/network",
+            {
+                "endpoint_type": "",
+                "endpoint_url": "https://preserved.example",
+                "endpoint_port": "",
+            },
+            "Endpoint row 1: Type is required.",
+            "https://preserved.example",
+        ),
+        (
+            "/objects/invalid-first-rows/access",
+            {
+                "method_ref": "service:invalid-first-rows",
+                "method_index": "0",
+                "method_type": "",
+                "method_endpoint": "ssh://preserved.example",
+                "method_auth_mode": "key",
+            },
+            "Access row 1: Type is required.",
+            "ssh://preserved.example",
+        ),
+        (
+            "/objects/invalid-first-rows/network",
+            {
+                "endpoint_type": "REST API",
+                "endpoint_url": "https://preserved.example",
+                "endpoint_port": "70000",
+            },
+            "Endpoint row 1: Port must be an integer from 1 to 65535.",
+            "70000",
+        ),
+    ],
+)
+def test_first_row_validation_preserves_submitted_values(
+    client: TestClient,
+    session_factory,
+    path: str,
+    data: dict[str, str],
+    message: str,
+    preserved_value: str,
+) -> None:
+    with session_factory() as session:
+        upsert_object(
+            session,
+            CatalogObjectIn(
+                id="invalid-first-rows",
+                kind="service",
+                label="Invalid First Rows",
+                status="active",
+                data={"schema_version": 1},
+            ),
+        )
+
+    response = client.post(path, data=data, follow_redirects=False)
+
+    assert response.status_code == 422
+    assert message in response.text
+    assert preserved_value in response.text
+    assert 'role="alert"' in response.text
+    with session_factory() as session:
+        unchanged = get_object(session, "invalid-first-rows")
+    assert unchanged is not None
+    assert "endpoints" not in unchanged.data
+    assert "access_methods" not in unchanged.data
+
+
+def test_invalid_first_address_row_is_rejected_without_mutation(
+    client: TestClient,
+    session_factory,
+) -> None:
+    object_id = "invalid-first-address"
+    with session_factory() as session:
+        upsert_object(
+            session,
+            CatalogObjectIn(
+                id=object_id,
+                kind="system",
+                label="Invalid First Address",
+                status="active",
+                data={"schema_version": 1},
+            ),
+        )
+
+    response = client.post(
+        f"/objects/{object_id}/network",
+        data={
+            "address_ip": "not-an-ip",
+            "address_interface": "eth0",
+            "address_scope": "lan",
+        },
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 422
+    assert "Address row 1: IP must be a valid IPv4 or IPv6 address." in response.text
+    assert "not-an-ip" in response.text
+    with session_factory() as session:
+        unchanged = get_object(session, object_id)
+    assert unchanged is not None
+    assert "network" not in unchanged.data
+
+
 def test_service_network_edit_only_exposes_and_updates_endpoints(
     client: TestClient,
     session_factory,
@@ -1639,7 +2011,7 @@ def test_service_network_edit_only_exposes_and_updates_endpoints(
 
     assert edit_response.status_code == 200
     assert "Endpoint type" in edit_response.text
-    assert '<select name="endpoint_type">' in edit_response.text
+    assert '<select name="endpoint_type" data-required-when-row-filled>' in edit_response.text
     for endpoint_type in ("Web", "REST API", "MCP", "HEC", "SSH"):
         assert f'<option value="{endpoint_type}"' in edit_response.text
     assert 'name="endpoint_type"' in edit_response.text
@@ -1689,7 +2061,10 @@ def test_service_network_edit_only_exposes_and_updates_endpoints(
     )
 
     assert invalid_response.status_code == 422
-    assert "endpoint type must be one of: Web, REST API, MCP, HEC, SSH" in invalid_response.text
+    assert (
+        "Endpoint row 1: Type must be one of: Web, REST API, MCP, HEC, SSH."
+        in invalid_response.text
+    )
 
 
 def test_service_detail_can_edit_service_information_fields(
@@ -1796,7 +2171,7 @@ def test_public_network_edit_exposes_and_updates_endpoints(
 
     assert edit_response.status_code == 200
     assert "Endpoint type" in edit_response.text
-    assert '<select name="endpoint_type">' in edit_response.text
+    assert '<select name="endpoint_type" data-required-when-row-filled>' in edit_response.text
     assert '<option value="SSH"' in edit_response.text
     assert 'value="Web" selected' in edit_response.text
     assert 'name="endpoint_name"' not in edit_response.text
