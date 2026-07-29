@@ -1,6 +1,7 @@
 import json
 import re
 from collections.abc import Generator
+from html import unescape
 from pathlib import Path
 from string import Formatter
 
@@ -29,6 +30,12 @@ from blockwart.ui.i18n import load_catalog, validate_locale_catalogs
 
 SEED_PATH = Path(__file__).resolve().parents[1] / "seeds" / "pilot_objects.yaml"
 TEST_ADMIN_TOKEN = "test-admin-token-with-at-least-32-characters"
+
+
+def integrated_detail_html(document: str) -> str:
+    marker = 'class="integrated-detail"'
+    assert marker in document
+    return unescape(document.split(marker, maxsplit=1)[1])
 
 
 def upsert_object(session: Session, payload: CatalogObjectIn):
@@ -97,7 +104,7 @@ def test_index_uses_english_as_the_fallback_locale(client: TestClient) -> None:
     )
 
     assert response.status_code == 200
-    assert '<html lang="en" data-view="catalog">' in response.text
+    assert '<html lang="en" data-view="catalog" data-page="catalog">' in response.text
     assert "Asset catalog" in response.text
     assert "Asset-Katalog" not in response.text
 
@@ -109,7 +116,7 @@ def test_explicit_german_locale_translates_the_explorer(client: TestClient) -> N
     )
 
     assert response.status_code == 200
-    assert '<html lang="de" data-view="catalog">' in response.text
+    assert '<html lang="de" data-view="catalog" data-page="catalog">' in response.text
     assert "Objektkatalog" in response.text
     assert "Netzwerke" in response.text
     assert "Asset catalog" not in response.text
@@ -126,7 +133,7 @@ def test_language_cookie_covers_all_ui_surfaces(client: TestClient) -> None:
     assert '<html lang="de">' in schema.text
     assert "Schema-Einstellungen" in schema.text
     assert "CPU-Hersteller" in schema.text
-    assert '<html lang="de">' in detail.text
+    assert '<html lang="de" data-view="catalog" data-page="detail">' in detail.text
     assert "Zurück zum Katalog" in detail.text
     assert "Netzwerk" in detail.text
     assert "Aktiv" in detail.text
@@ -134,7 +141,7 @@ def test_language_cookie_covers_all_ui_surfaces(client: TestClient) -> None:
     assert "Schreibzugriff aktiv" in admin.text
 
     english = client.get("/?lang=en")
-    assert '<html lang="en" data-view="catalog">' in english.text
+    assert '<html lang="en" data-view="catalog" data-page="catalog">' in english.text
     assert "Asset catalog" in english.text
 
 
@@ -176,7 +183,7 @@ def test_topology_is_a_real_second_view(client: TestClient) -> None:
     response = client.get("/?view=topology")
 
     assert response.status_code == 200
-    assert '<html lang="en" data-view="topology">' in response.text
+    assert '<html lang="en" data-view="topology" data-page="topology">' in response.text
     assert "Hardware, hosts, and services" in response.text
     assert 'class="topology-canvas"' in response.text
     assert 'data-asset-ref="system:fabrik"' in response.text
@@ -223,7 +230,7 @@ def test_index_shows_kind_counts(client: TestClient) -> None:
     response = client.get("/")
 
     assert response.status_code == 200
-    assert '<html lang="en" data-view="catalog">' in response.text
+    assert '<html lang="en" data-view="catalog" data-page="catalog">' in response.text
     assert "Asset catalog" in response.text
     assert "All assets" in response.text
     assert "<b>25</b>" in response.text
@@ -682,14 +689,15 @@ def test_system_detail_can_edit_resource_hardware_fields(
 
     detail = client.get(f"/objects/{object_id}")
     edit = client.get(f"/objects/{object_id}?edit=hardware")
+    detail_content = integrated_detail_html(detail.text)
 
     assert detail.status_code == 200
-    assert "Hardware" in detail.text
-    assert "Model" not in detail.text
-    assert "CPU vendor" not in detail.text
-    assert "CPU name" not in detail.text
-    assert "CPU cores" in detail.text
-    assert "Storage" in detail.text
+    assert "Hardware" in detail_content
+    assert "Model" not in detail_content
+    assert "CPU vendor" not in detail_content
+    assert "CPU name" not in detail_content
+    assert "CPU cores" in detail_content
+    assert "Storage" in detail_content
     assert edit.status_code == 200
     assert 'name="hardware_model"' not in edit.text
     assert 'name="hardware_cpu_vendor"' not in edit.text
@@ -859,7 +867,7 @@ def test_service_result_keeps_service_on_right_side(client: TestClient) -> None:
     response = client.get("/?view=topology&q=n8n-web-ui")
 
     assert response.status_code == 200
-    assert '<html lang="en" data-view="topology">' in response.text
+    assert '<html lang="en" data-view="topology" data-page="topology">' in response.text
     assert "Infrastructure Map" not in response.text
     assert "Topology" in response.text
     assert response.text.find('data-asset-ref="system:n8n"') < response.text.find(
@@ -1036,29 +1044,172 @@ def test_object_detail_shows_data_and_relationships(client: TestClient) -> None:
     assert "references/n8n.md" not in response.text
     assert "Daten JSON" not in response.text
     assert "Bearbeiten" not in response.text
-    assert 'href="/objects/n8n?edit=overview"' in response.text
+    assert (
+        'href="/objects/n8n?view=catalog&q=&kind=&edit=overview"'
+        in unescape(response.text)
+    )
     assert "Create relationship" not in response.text
     assert 'data-theme-value="dark"' in response.text
     assert 'data-theme-value="light"' in response.text
     assert "/static/theme.js" in response.text
 
 
-def test_object_detail_header_only_shows_navigation_and_theme(
+def test_object_detail_is_integrated_into_the_explorer_shell(
     client: TestClient,
 ) -> None:
     response = client.get("/objects/n8n")
 
     assert response.status_code == 200
-    header_match = re.search(r"<header class=\"topbar\">(.*?)</header>", response.text, re.S)
-    assert header_match is not None
-    header = header_match.group(1)
+    document = unescape(response.text)
 
-    assert "Back to catalog" in header
-    assert 'data-theme-value="dark"' in header
-    assert 'data-theme-value="light"' in header
-    assert "n8n Web UI" not in header
-    assert "system:n8n" not in header
-    assert "n8n Web UI" not in header
+    assert '<html lang="en" data-view="catalog" data-page="detail">' in document
+    assert '<header class="explorer-topbar">' in document
+    assert 'class="filter-rail"' in document
+    assert 'class="asset-inspector"' in document
+    assert 'class="integrated-detail"' in document
+    assert 'href="/?view=catalog&q=&kind="' in document
+    assert "← Back to catalog" in document
+    assert 'data-theme-value="dark"' in document
+    assert 'data-theme-value="light"' in document
+    assert '<header class="topbar">' not in document
+
+
+def test_object_detail_preserves_catalog_context_in_links_and_forms(
+    client: TestClient,
+) -> None:
+    state_token = "CatalogState_123456"
+    response = client.get(
+        "/objects/n8n"
+        f"?view=catalog&q=n8n&kind=system&return_state={state_token}"
+    )
+
+    assert response.status_code == 200
+    document = unescape(response.text)
+    assert 'data-return-state="CatalogState_123456"' in document
+    assert (
+        'href="/?view=catalog&q=n8n&kind=system&restore=CatalogState_123456"'
+        in document
+    )
+    assert (
+        'href="/objects/n8n?view=catalog&q=n8n&kind=system'
+        '&return_state=CatalogState_123456&edit=overview"'
+        in document
+    )
+    assert (
+        'action="/objects/n8n/comment?view=catalog&q=n8n&kind=system'
+        '&return_state=CatalogState_123456"'
+        in document
+    )
+    assert (
+        'href="/objects/fabrik?view=catalog&q=n8n&kind=system'
+        '&return_state=CatalogState_123456"'
+        in document
+    )
+
+
+def test_object_detail_replaces_only_the_topology_middle_region(
+    client: TestClient,
+) -> None:
+    state_token = "TopologyState_12345"
+    response = client.get(
+        "/objects/n8n"
+        f"?view=topology&q=n8n&kind=system&return_state={state_token}"
+    )
+
+    assert response.status_code == 200
+    document = unescape(response.text)
+    assert '<html lang="en" data-view="topology" data-page="detail">' in document
+    assert 'class="topology-shell"' in document
+    assert 'class="map-heading"' in document
+    assert 'class="map-workbench"' in document
+    assert 'class="topology-detail-main"' in document
+    assert 'class="map-inspector"' in document
+    assert 'class="topology-canvas"' not in document
+    assert "← Back to topology" in document
+    assert (
+        'href="/?view=topology&q=n8n&kind=system&restore=TopologyState_12345"'
+        in document
+    )
+
+
+def test_object_detail_normalizes_untrusted_navigation_context(
+    client: TestClient,
+) -> None:
+    response = client.get(
+        "/objects/n8n"
+        "?view=https%3A%2F%2Fevil.example"
+        "&kind=credential"
+        "&q=needle"
+        "&return_state=..%2F..%2Fevil"
+    )
+
+    assert response.status_code == 200
+    document = unescape(response.text)
+    assert 'data-view="catalog" data-page="detail"' in document
+    assert 'href="/?view=catalog&q=needle&kind="' in document
+    assert "restore=" not in integrated_detail_html(response.text)
+    assert 'href="https://evil.example' not in document
+    assert 'action="https://evil.example' not in document
+
+
+def test_detail_validation_error_stays_in_topology_context(
+    client: TestClient,
+) -> None:
+    state_token = "ValidationState_12"
+    response = client.post(
+        "/objects/fabrik"
+        f"?view=topology&q=fabrik&kind=host&return_state={state_token}",
+        data={"platform": "unsupported-platform"},
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 422
+    document = unescape(response.text)
+    assert 'data-view="topology" data-page="detail"' in document
+    assert "Unsupported platform" in document
+    assert 'name="platform"' in integrated_detail_html(response.text)
+    assert (
+        'href="/?view=topology&q=fabrik&kind=host'
+        '&restore=ValidationState_12"'
+        in document
+    )
+
+
+def test_explorer_history_state_is_small_and_session_scoped() -> None:
+    source = (
+        Path(__file__).resolve().parents[1]
+        / "src"
+        / "blockwart"
+        / "ui"
+        / "static"
+        / "index.js"
+    ).read_text()
+
+    assert 'const stateStoragePrefix = "blockwart-explorer-state:"' in source
+    assert "sessionStorage.setItem" in source
+    assert "history.replaceState" in source
+    assert 'target.searchParams.set("return_state", token)' in source
+    assert "selectedRef: triggerAsset" in source
+    assert "maximumTreeDepth" in source
+    assert "expandedTreeNodes" in source
+    assert "scrollTop" in source
+    assert "windowScrollY" in source
+    assert "detailHeading?.focus" in source
+    assert 'searchParams.set("state"' not in source
+
+
+def test_topology_asset_buttons_are_not_blocked_by_nested_control_guard() -> None:
+    source = (
+        Path(__file__).resolve().parents[1]
+        / "src"
+        / "blockwart"
+        / "ui"
+        / "static"
+        / "index.js"
+    ).read_text()
+
+    assert "const interactiveTarget = event.target.closest" in source
+    assert "interactiveTarget && interactiveTarget !== node" in source
 
 
 def test_comment_form_updates_object_and_audit(
@@ -1066,13 +1217,18 @@ def test_comment_form_updates_object_and_audit(
     session_factory,
 ) -> None:
     response = client.post(
-        "/objects/n8n/comment",
+        "/objects/n8n/comment"
+        "?view=topology&q=n8n&kind=system&return_state=CommentState_123",
         data={"comment": "Interner Kommentar"},
         follow_redirects=False,
     )
 
     assert response.status_code == 303
-    assert response.headers["location"] == "/objects/n8n"
+    assert (
+        response.headers["location"]
+        == "/objects/n8n?view=topology&q=n8n&kind=system"
+        "&return_state=CommentState_123"
+    )
     detail = client.get("/objects/n8n")
     assert "Interner Kommentar" in detail.text
     assert "Changed Comment from empty to Interner Kommentar" in detail.text
@@ -1092,7 +1248,10 @@ def test_relationship_add_form_is_hidden_behind_add_button(client: TestClient) -
     add_response = client.get("/objects/n8n?edit=relationship-add")
 
     assert response.status_code == 200
-    assert 'href="/objects/n8n?edit=relationship-add"' in response.text
+    assert (
+        'href="/objects/n8n?view=catalog&q=&kind=&edit=relationship-add"'
+        in unescape(response.text)
+    )
     assert "Create relationship" not in response.text
     assert add_response.status_code == 200
     assert "Create relationship" in add_response.text
@@ -1126,7 +1285,10 @@ def test_create_object_form_redirects_to_detail(
     )
 
     assert response.status_code == 303
-    assert response.headers["location"] == "/objects/test-system"
+    assert (
+        response.headers["location"]
+        == "/objects/test-system?view=catalog&q=&kind="
+    )
     detail = client.get("/objects/test-system")
     assert "Test System" in detail.text
     index = client.get("/?q=test-system")
@@ -1444,7 +1606,11 @@ def test_detail_form_rejects_second_placement_parent(
     )
 
     assert response.status_code == 422
-    assert "already has placement parent system:n8n" in response.json()["detail"]
+    document = unescape(response.text)
+    assert 'data-page="detail"' in document
+    assert 'class="form-grid relation-form"' in document
+    assert "already has placement parent system:n8n" in document
+    assert 'href="/?view=catalog&q=&kind="' in document
     with session_factory() as session:
         parents = session.scalars(
             select(Relationship).where(
@@ -1631,13 +1797,16 @@ def test_empty_detail_panels_offer_explicit_first_row_actions(
     assert detail.status_code == 200
     assert "No network data recorded." in detail.text
     assert "No access data recorded." in detail.text
+    detail_document = unescape(detail.text)
     assert re.search(
-        r'href="/objects/empty-detail-panels\?edit=network"[^>]*>Add</a>',
-        detail.text,
+        r'href="/objects/empty-detail-panels\?view=catalog&q=&kind=&edit=network"'
+        r"[^>]*>Add</a>",
+        detail_document,
     )
     assert re.search(
-        r'href="/objects/empty-detail-panels\?edit=access"[^>]*>Add</a>',
-        detail.text,
+        r'href="/objects/empty-detail-panels\?view=catalog&q=&kind=&edit=access"'
+        r"[^>]*>Add</a>",
+        detail_document,
     )
     assert "/static/detail.js" in network_edit.text
     assert 'data-row-list="network-endpoints"' in network_edit.text
@@ -1649,7 +1818,10 @@ def test_empty_detail_panels_offer_explicit_first_row_actions(
     assert 'data-row-list="access-methods"' in access_edit.text
     assert 'data-add-row="access-methods"' in access_edit.text
     assert "Add access method" in access_edit.text
-    assert 'href="/objects/empty-detail-panels">Cancel</a>' in access_edit.text
+    assert (
+        'href="/objects/empty-detail-panels?view=catalog&q=&kind=">Cancel</a>'
+        in unescape(access_edit.text)
+    )
 
 
 def test_first_endpoint_and_access_rows_persist_from_empty_panels(
@@ -1710,15 +1882,18 @@ def test_first_endpoint_and_access_rows_persist_from_empty_panels(
     assert "auth_mode" not in updated.data["access_methods"][0]
 
     detail = client.get(f"/objects/{object_id}")
+    detail_document = unescape(detail.text)
     assert "https://first-detail-rows.example/api" in detail.text
     assert "https://first-detail-rows.example" in detail.text
     assert re.search(
-        rf'href="/objects/{object_id}\?edit=network"[^>]*>Edit</a>',
-        detail.text,
+        rf'href="/objects/{object_id}\?view=catalog&q=&kind=&edit=network"'
+        rf"[^>]*>Edit</a>",
+        detail_document,
     )
     assert re.search(
-        rf'href="/objects/{object_id}\?edit=access"[^>]*>Edit</a>',
-        detail.text,
+        rf'href="/objects/{object_id}\?view=catalog&q=&kind=&edit=access"'
+        rf"[^>]*>Edit</a>",
+        detail_document,
     )
 
 
@@ -2101,8 +2276,9 @@ def test_service_detail_can_edit_service_information_fields(
     detail_response = client.get(f"/objects/{object_id}")
 
     assert detail_response.status_code == 200
-    service_info_index = detail_response.text.index("Service information")
-    network_index = detail_response.text.index("Network")
+    detail_content = integrated_detail_html(detail_response.text)
+    service_info_index = detail_content.index("Service information")
+    network_index = detail_content.index("Network")
     assert service_info_index < network_index
     assert "https://github.com/example/service" in detail_response.text
     assert "0.0.1 beta rc-1" in detail_response.text

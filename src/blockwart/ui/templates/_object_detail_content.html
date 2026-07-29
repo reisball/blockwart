@@ -1,43 +1,32 @@
-<!doctype html>
-<html lang="{{ locale }}">
-  <head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <link rel="icon" href="data:," />
-    <title>{{ title }}</title>
-    <script>
-      if (localStorage.getItem("blockwart-theme") === "light") {
-        document.documentElement.dataset.theme = "light";
-      }
-    </script>
-    <link rel="stylesheet" href="/static/app.css?v=062" />
-    <script src="/static/theme.js?v=054" defer></script>
-    <script src="/static/detail.js?v=001" defer></script>
-  </head>
-  <body>
-    <header class="topbar">
-      <div class="topbar-inner detail-topbar-inner">
-        <a class="breadcrumb" href="/">{{ t("detail.back") }}</a>
-        <div class="top-actions">
-          {% include "_language_switcher.html" %}
-          <div class="theme-toggle" role="group" aria-label="{{ t('nav.theme') }}">
-            <button class="theme-option" type="button" data-theme-value="dark">{{ t("nav.dark") }}</button>
-            <button class="theme-option" type="button" data-theme-value="light">{{ t("nav.light") }}</button>
-          </div>
-          {% include "_admin_controls.html" %}
-        </div>
-      </div>
-    </header>
-    <main class="page detail-grid">
+<section
+  class="integrated-detail"
+  aria-labelledby="asset-detail-title"
+  data-integrated-detail
+  data-return-state="{{ return_state }}"
+  data-return-view="{{ view }}"
+>
+  <header class="integrated-detail-heading">
+    <a
+      class="detail-back-button"
+      href="{{ detail_return_href }}"
+      data-detail-back
+    >← {{ detail_back_label }}</a>
+    <div>
+      <p class="eyebrow">{{ t("detail.asset_details") }}</p>
+      <h1 id="asset-detail-title" tabindex="-1" data-detail-heading>{{ object.label }}</h1>
+      <span>{{ object.kind }}:{{ object.id }}</span>
+    </div>
+  </header>
+  <div class="page detail-grid integrated-detail-grid">
       <section class="stack">
         <section class="panel">
           <div class="panel-head">
             <h2 class="section-title">{{ t("detail.overview") }}</h2>
             {% if can_write %}
               {% if edit_section == "overview" %}
-                <a class="button button-small button-muted" href="/objects/{{ object.id }}">{{ t("detail.cancel") }}</a>
+                <a class="button button-small button-muted" href="{{ detail_href }}">{{ t("detail.cancel") }}</a>
               {% else %}
-                <a class="button button-small button-muted" href="/objects/{{ object.id }}?edit=overview">{{ t("detail.edit") }}</a>
+                <a class="button button-small button-muted" href="{{ detail_edit_hrefs.overview }}">{{ t("detail.edit") }}</a>
               {% endif %}
             {% endif %}
           </div>
@@ -45,7 +34,7 @@
             {% if error %}
               <div class="error">{{ error }}</div>
             {% endif %}
-            <form class="form-grid" method="post" action="/objects/{{ object.id }}">
+            <form class="form-grid" method="post" action="{{ detail_post_urls.overview }}">
               <div class="fact fact-small">
                 <div class="fact-label">{{ t("detail.id") }}</div>
                 <div class="fact-value">{{ object.id }}</div>
@@ -92,7 +81,7 @@
               </div>
               <div class="button-row">
                 <button type="submit">{{ t("detail.save") }}</button>
-                <a class="button button-muted" href="/objects/{{ object.id }}">{{ t("detail.cancel") }}</a>
+                <a class="button button-muted" href="{{ detail_href }}">{{ t("detail.cancel") }}</a>
               </div>
             </form>
           {% else %}
@@ -145,9 +134,9 @@
               <h2 class="section-title">{{ t("detail.hardware") }}</h2>
               {% if can_write %}
                 {% if edit_section == "hardware" %}
-                  <a class="button button-small button-muted" href="/objects/{{ object.id }}">{{ t("detail.cancel") }}</a>
+                  <a class="button button-small button-muted" href="{{ detail_href }}">{{ t("detail.cancel") }}</a>
                 {% else %}
-                  <a class="button button-small button-muted" href="/objects/{{ object.id }}?edit=hardware">{{ t("detail.edit") }}</a>
+                  <a class="button button-small button-muted" href="{{ detail_edit_hrefs.hardware }}">{{ t("detail.edit") }}</a>
                 {% endif %}
               {% endif %}
             </div>
@@ -155,7 +144,7 @@
               {% if error %}
                 <div class="error">{{ error }}</div>
               {% endif %}
-              <form class="form-grid" method="post" action="/objects/{{ object.id }}">
+              <form class="form-grid" method="post" action="{{ detail_post_urls.overview }}">
                 {% for field in hardware_fields %}
                   <label>{{ field.label }}
                     <input name="{{ field.key }}" value="{{ field.value }}" autocomplete="off" placeholder="{{ field.placeholder }}" />
@@ -163,7 +152,7 @@
                 {% endfor %}
                 <div class="button-row">
                   <button type="submit">{{ t("detail.save") }}</button>
-                  <a class="button button-muted" href="/objects/{{ object.id }}">{{ t("detail.cancel") }}</a>
+                  <a class="button button-muted" href="{{ detail_href }}">{{ t("detail.cancel") }}</a>
                 </div>
               </form>
             {% else %}
@@ -185,16 +174,16 @@
             <div class="panel-head">
               <h2 class="section-title">{{ t("detail.service_information") }}</h2>
               {% if edit_section == "service-information" %}
-                <a class="button button-small button-muted" href="/objects/{{ object.id }}">{{ t("detail.cancel") }}</a>
+                <a class="button button-small button-muted" href="{{ detail_href }}">{{ t("detail.cancel") }}</a>
               {% else %}
-                <a class="button button-small button-muted" href="/objects/{{ object.id }}?edit=service-information">{{ t("detail.edit") }}</a>
+                <a class="button button-small button-muted" href="{{ detail_edit_hrefs['service-information'] }}">{{ t("detail.edit") }}</a>
               {% endif %}
             </div>
             {% if edit_section == "service-information" %}
               {% if error %}
                 <div class="error">{{ error }}</div>
               {% endif %}
-              <form class="form-grid" method="post" action="/objects/{{ object.id }}">
+              <form class="form-grid" method="post" action="{{ detail_post_urls.overview }}">
                 {% for field in service_information_fields %}
                   <label>{{ field.label }}
                     {% if field.key == "service_sources" %}
@@ -206,7 +195,7 @@
                 {% endfor %}
                 <div class="button-row">
                   <button type="submit">{{ t("detail.save") }}</button>
-                  <a class="button button-muted" href="/objects/{{ object.id }}">{{ t("detail.cancel") }}</a>
+                  <a class="button button-muted" href="{{ detail_href }}">{{ t("detail.cancel") }}</a>
                 </div>
               </form>
             {% else %}
@@ -238,14 +227,14 @@
             <div class="panel-head">
               <h2 class="section-title">{{ t("panel.network") }}</h2>
               {% if can_write %}
-                <a class="button button-small button-muted" href="/objects/{{ object.id }}?edit=network">{{ t("detail.edit") if network_has_editable_rows else t("detail.add") }}</a>
+                <a class="button button-small button-muted" href="{{ detail_edit_hrefs.network }}">{{ t("detail.edit") if network_has_editable_rows else t("detail.add") }}</a>
               {% endif %}
             </div>
             {% if edit_section == "network" %}
               {% if error %}
                 <div class="error" role="alert">{{ error }}</div>
               {% endif %}
-              <form class="form-grid" method="post" action="/objects/{{ object.id }}/network">
+              <form class="form-grid" method="post" action="{{ detail_post_urls.network }}">
                 {% if can_edit_network_addresses %}
                   <h3>{{ t("network.addresses") }}</h3>
                   <div class="table-wrap">
@@ -359,7 +348,7 @@
                 {% endif %}
                 <div class="button-row">
                   <button type="submit">{{ t("detail.save") }}</button>
-                  <a class="button button-muted" href="/objects/{{ object.id }}">{{ t("detail.cancel") }}</a>
+                  <a class="button button-muted" href="{{ detail_href }}">{{ t("detail.cancel") }}</a>
                 </div>
               </form>
             {% else %}
@@ -430,14 +419,14 @@
             <div class="panel-head">
               <h2 class="section-title">{{ t("panel.access") }}</h2>
               {% if can_write %}
-                <a class="button button-small button-muted" href="/objects/{{ object.id }}?edit=access">{{ t("detail.edit") if access_has_rows else t("detail.add") }}</a>
+                <a class="button button-small button-muted" href="{{ detail_edit_hrefs.access }}">{{ t("detail.edit") if access_has_rows else t("detail.add") }}</a>
               {% endif %}
             </div>
             {% if edit_section == "access" %}
               {% if error %}
                 <div class="error" role="alert">{{ error }}</div>
               {% endif %}
-              <form class="form-grid" method="post" action="/objects/{{ object.id }}/access">
+              <form class="form-grid" method="post" action="{{ detail_post_urls.access }}">
                 <div class="table-wrap">
                   <table class="table edit-table">
                     <thead>
@@ -479,7 +468,7 @@
                 <button class="button button-small button-muted row-add-button" type="button" data-add-row="access-methods">{{ t("access.add_method") }}</button>
                 <div class="button-row">
                   <button type="submit">{{ t("detail.save") }}</button>
-                  <a class="button button-muted" href="/objects/{{ object.id }}">{{ t("detail.cancel") }}</a>
+                  <a class="button button-muted" href="{{ detail_href }}">{{ t("detail.cancel") }}</a>
                 </div>
               </form>
             {% else %}
@@ -508,7 +497,7 @@
           <div class="panel-head">
             <h2 class="section-title">{{ t("panel.relationships") }}</h2>
             {% if can_write %}
-              <a class="button button-small" href="/objects/{{ object.id }}?edit=relationship-add">{{ t("detail.add") }}</a>
+              <a class="button button-small" href="{{ detail_edit_hrefs['relationship-add'] }}">{{ t("detail.add") }}</a>
             {% endif %}
           </div>
           {% if relationships %}
@@ -518,7 +507,7 @@
                 {% for relationship in items %}
                   <li>
                     <strong>{{ relationship.relation_type }}</strong>
-                    <a href="/objects/{{ relationship.other_id }}">{{ relationship.other_label }}</a>
+                    <a href="/objects/{{ relationship.other_id }}?{{ detail_query_string }}">{{ relationship.other_label }}</a>
                     <span class="meta">{{ relationship.other_ref }}</span>
                     {% for port in relationship.service_ports %}
                       <span class="badge">{{ port.label }} {{ port.value }}</span>
@@ -531,7 +520,10 @@
             <div class="meta">{{ t("relationship.empty") }}</div>
           {% endif %}
           {% if edit_section == "relationship-add" %}
-            <form class="form-grid relation-form" method="post" action="/objects/{{ object.id }}/relationships">
+            {% if error %}
+              <div class="error" role="alert">{{ error }}</div>
+            {% endif %}
+            <form class="form-grid relation-form" method="post" action="{{ detail_post_urls.relationships }}">
               <h3>{{ t("relationship.create") }}</h3>
               <input type="hidden" name="direction" value="{{ 'inbound' if object.kind == 'service' else 'outbound' }}" />
               <input type="hidden" name="relation_type" value="hosts" />
@@ -544,7 +536,7 @@
               </label>
               <div class="button-row">
                 <button type="submit">{{ t("relationship.save") }}</button>
-                <a class="button button-muted" href="/objects/{{ object.id }}">{{ t("detail.cancel") }}</a>
+                <a class="button button-muted" href="{{ detail_href }}">{{ t("detail.cancel") }}</a>
               </div>
             </form>
           {% endif %}
@@ -553,7 +545,7 @@
         <section class="panel">
           <h2 class="section-title">{{ t("comment.title") }}</h2>
           {% if can_write %}
-            <form class="form-grid comment-form" method="post" action="/objects/{{ object.id }}/comment">
+            <form class="form-grid comment-form" method="post" action="{{ detail_post_urls.comment }}">
               <label>{{ t("comment.label") }}
                 <textarea name="comment" placeholder="{{ t('comment.placeholder') }}">{{ comment }}</textarea>
               </label>
@@ -587,6 +579,5 @@
           {% endif %}
         </section>
       </section>
-    </main>
-  </body>
-</html>
+  </div>
+</section>

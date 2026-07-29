@@ -493,6 +493,83 @@
   padding: 28px 24px 22px;
 }
 
+.catalog-main-detail {
+  padding: 0;
+  overflow: auto;
+}
+
+.integrated-detail {
+  --surface: var(--explorer-panel);
+  --surface-muted: var(--explorer-panel-2);
+  --surface-raised: var(--explorer-panel);
+  --text: var(--explorer-text);
+  --muted: var(--explorer-muted);
+  --faint: var(--explorer-faint);
+  --border: var(--explorer-border);
+  --border-strong: var(--explorer-border);
+  --primary: var(--explorer-blue);
+  --primary-strong: var(--explorer-text);
+  --accent: var(--explorer-cyan);
+  --danger: var(--explorer-red);
+  --danger-bg: color-mix(in srgb, var(--explorer-red) 12%, transparent);
+  --hover-bg: var(--explorer-panel-2);
+  --active-bg: var(--explorer-panel-3);
+  --active-border: var(--explorer-blue);
+  min-width: 0;
+  padding: 28px 24px 38px;
+  color: var(--explorer-text);
+}
+
+.integrated-detail-heading {
+  display: grid;
+  gap: 18px;
+  margin-bottom: 22px;
+}
+
+.integrated-detail-heading > div {
+  display: grid;
+  gap: 5px;
+}
+
+.integrated-detail-heading h1 {
+  margin: 0;
+  color: var(--explorer-text);
+  font-size: clamp(24px, 3vw, 34px);
+  letter-spacing: -0.035em;
+}
+
+.integrated-detail-heading h1:focus {
+  outline: none;
+}
+
+.integrated-detail-heading > div > span {
+  color: var(--explorer-muted);
+  font-family: var(--mono);
+  font-size: 11px;
+}
+
+.detail-back-button {
+  width: max-content;
+  color: var(--explorer-muted);
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.detail-back-button:hover {
+  color: var(--explorer-text);
+}
+
+.integrated-detail-grid.page {
+  width: 100%;
+  max-width: none;
+  padding: 0;
+}
+
+.topology-detail-main {
+  min-width: 0;
+  overflow: auto;
+}
+
 .content-heading,
 .map-heading {
   display: flex;
@@ -1496,6 +1573,14 @@ button.map-node {
   .catalog-main,
   .topology-shell {
     padding: 19px 14px 30px;
+  }
+
+  .catalog-main-detail {
+    padding: 0;
+  }
+
+  .integrated-detail {
+    padding: 22px 14px 30px;
   }
 
   .query-bar {
