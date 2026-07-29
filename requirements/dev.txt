@@ -161,7 +161,7 @@ typing-inspection==0.4.2
     #   mcp
     #   pydantic
     #   pydantic-settings
-uvicorn==0.51.0
+uvicorn==0.52.0
     # via
     #   blockwart (pyproject.toml)
     #   mcp
