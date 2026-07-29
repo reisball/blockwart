@@ -40,6 +40,11 @@ from blockwart.schemas.catalog import (
     CatalogObjectOut,
     CatalogRecordDiagnostic,
 )
+from blockwart.services.audit import (
+    add_audit_event,
+    load_audit_details,
+    render_audit_summary_english,
+)
 from blockwart.services.record_integrity import read_catalog_record_data
 
 
@@ -148,36 +153,48 @@ def _now() -> datetime:
     return datetime.now(UTC).replace(tzinfo=None)
 
 
-def _write_audit(session: Session, object_id: str | None, action: str, summary: str) -> None:
-    session.add(
-        AuditEvent(
-            object_id=object_id,
-            action=action,
-            actor="system",
-            summary=summary,
-        )
+def _write_audit(
+    session: Session,
+    object_id: str | None,
+    action: str,
+    details: Mapping[str, object] | None = None,
+) -> None:
+    add_audit_event(
+        session,
+        object_id=object_id,
+        action=action,
+        actor="system",
+        details=details,
     )
 
 
 def list_audit_events_for_object(
     session: Session,
     object_id: str,
-) -> list[dict[str, str | int]]:
+) -> list[dict[str, object]]:
     statement = (
         select(AuditEvent)
         .where(AuditEvent.object_id == object_id)
         .order_by(AuditEvent.created_at.desc(), AuditEvent.id.desc())
     )
-    return [
-        {
-            "id": row.id,
-            "action": row.action,
-            "actor": row.actor,
-            "summary": _audit_summary(row.summary),
-            "created_at": _format_log_timestamp(row.created_at),
-        }
-        for row in session.scalars(statement).all()
-    ]
+    events: list[dict[str, object]] = []
+    for row in session.scalars(statement).all():
+        details = load_audit_details(row)
+        events.append(
+            {
+                "id": row.id,
+                "action": row.action,
+                "actor": row.actor,
+                "summary": render_audit_summary_english(
+                    row.action,
+                    details,
+                    legacy_summary=row.summary,
+                ),
+                "details": details,
+                "created_at": _format_log_timestamp(row.created_at),
+            }
+        )
+    return events
 
 
 def list_objects(
@@ -319,7 +336,11 @@ def create_relationship(
         session,
         None,
         "relationship_create",
-        f"Create relationship {from_ref} {relation_type} {to_ref}",
+        {
+            "from_ref": from_ref,
+            "relation_type": relation_type,
+            "to_ref": to_ref,
+        },
     )
     _touch_objects_for_refs(session, [from_ref, to_ref], changed_at)
     session.flush()
@@ -346,7 +367,7 @@ def _clear_explicit_unassigned_state(
         session,
         child_id,
         "placement_assign",
-        f"Assign placement parent for {child_ref}",
+        {"child_ref": child_ref},
     )
 
 
@@ -419,7 +440,9 @@ def upsert_object(
     changed_at = _now()
     if row is None:
         action = "create"
-        audit_summary = f"Objekt erstellt: {payload.kind}:{payload.id}"
+        audit_details: dict[str, object] = {
+            "object_ref": f"{payload.kind}:{payload.id}",
+        }
         row = CatalogObject(
             id=payload.id,
             kind=payload.kind,
@@ -436,7 +459,7 @@ def upsert_object(
         session.add(row)
     else:
         action = "update"
-        audit_summary = _update_summary(
+        audit_details = _update_audit_details(
             row,
             payload,
             data_json,
@@ -454,7 +477,7 @@ def upsert_object(
         row.provenance_json = provenance_json
         row.updated_at = changed_at
 
-    _write_audit(session, payload.id, action, audit_summary)
+    _write_audit(session, payload.id, action, audit_details)
     session.flush()
     session.refresh(row)
     return _to_schema(row)
@@ -481,7 +504,7 @@ def _object_matches_target(
     )
 
 
-def _update_summary(
+def _update_audit_details(
     row: CatalogObject,
     payload: CatalogObjectIn,
     data_json: str,
@@ -489,8 +512,8 @@ def _update_summary(
     *,
     target_state: AssetState | None,
     target_status: str,
-) -> str:
-    changes: list[str] = []
+) -> dict[str, object]:
+    changes: list[dict[str, object]] = []
     current_state = state_from_record(
         kind=row.kind,
         status=row.status,
@@ -498,9 +521,9 @@ def _update_summary(
         health=row.health,
     )
     if row.kind != payload.kind:
-        changes.append(_field_change("Typ", row.kind, payload.kind))
+        changes.append(_field_change("kind", row.kind, payload.kind))
     if row.label != payload.label:
-        changes.append(_field_change("Hostname", row.label, payload.label))
+        changes.append(_field_change("label", row.label, payload.label))
     if current_state is not None or target_state is not None:
         if (
             current_state is None
@@ -509,7 +532,7 @@ def _update_summary(
         ):
             changes.append(
                 _field_change(
-                    "Lifecycle",
+                    "lifecycle",
                     current_state.lifecycle if current_state is not None else "",
                     target_state.lifecycle if target_state is not None else "",
                 )
@@ -521,47 +544,44 @@ def _update_summary(
         ):
             changes.append(
                 _field_change(
-                    "Health",
+                    "health",
                     current_state.health if current_state is not None else "",
                     target_state.health if target_state is not None else "",
                 )
             )
     elif _normalize_status(row.status) != _normalize_status(target_status):
         changes.append(
-            _field_change("Status", _normalize_status(row.status), target_status)
+            _field_change("status", _normalize_status(row.status), target_status)
         )
     if (row.summary or "") != (payload.summary or ""):
-        changes.append(_field_change("Kurzbeschreibung", row.summary or "", payload.summary or ""))
+        changes.append(_field_change("summary", row.summary or "", payload.summary or ""))
 
     old_data = json.loads(row.data_json or "{}")
     if old_data != payload.data:
         changes.extend(_data_changes(old_data, payload.data))
     if not changes and row.data_json != data_json:
-        changes.append("Daten wurden geändert")
+        changes.append({"field": "data", "value_change": False})
     if row.provenance_json != provenance_json:
-        changes.append("Herkunft wurde geändert")
-    return "; ".join(changes) if changes else f"Objekt aktualisiert: {payload.kind}:{payload.id}"
+        changes.append({"field": "provenance", "value_change": False})
+    return {
+        "object_ref": f"{payload.kind}:{payload.id}",
+        "changes": changes,
+    }
 
 
 def _format_log_timestamp(value: datetime | None) -> str:
     return format_rfc3339_utc(value) or ""
 
 
-def _audit_summary(summary: str) -> str:
-    if summary.startswith("Create catalog object "):
-        return f"Objekt erstellt: {summary.removeprefix('Create catalog object ')}"
-    if summary.startswith("Update catalog object "):
-        return f"Objekt aktualisiert: {summary.removeprefix('Update catalog object ')}"
-    if summary.startswith("Delete catalog object "):
-        return f"Objekt gelöscht: {summary.removeprefix('Delete catalog object ')}"
-    return summary
-
-
-def _data_changes(old_data: dict, new_data: dict) -> list[str]:
+def _data_changes(old_data: dict, new_data: dict) -> list[dict[str, object]]:
     return _nested_data_changes(old_data, new_data)
 
 
-def _nested_data_changes(old_value: object, new_value: object, path: str = "") -> list[str]:
+def _nested_data_changes(
+    old_value: object,
+    new_value: object,
+    path: str = "",
+) -> list[dict[str, object]]:
     if old_value == new_value:
         return []
     if isinstance(old_value, dict) and new_value is None:
@@ -569,7 +589,7 @@ def _nested_data_changes(old_value: object, new_value: object, path: str = "") -
     if old_value is None and isinstance(new_value, dict):
         return _nested_data_changes({}, new_value, path)
     if isinstance(old_value, dict) and isinstance(new_value, dict):
-        changes: list[str] = []
+        changes: list[dict[str, object]] = []
         for key in sorted(set(old_value) | set(new_value)):
             child_path = f"{path}.{key}" if path else str(key)
             changes.extend(
@@ -580,10 +600,15 @@ def _nested_data_changes(old_value: object, new_value: object, path: str = "") -
                 )
             )
         return changes
-    label = _data_field_label(path)
     if _is_scalar_audit_value(old_value) and _is_scalar_audit_value(new_value):
-        return [_field_change(label, _audit_scalar(old_value), _audit_scalar(new_value))]
-    return [f"Feld {label} wurde geändert"]
+        return [
+            _field_change(
+                path or "data",
+                _audit_scalar(old_value),
+                _audit_scalar(new_value),
+            )
+        ]
+    return [{"field": path or "data", "value_change": False}]
 
 
 def _is_scalar_audit_value(value: object) -> bool:
@@ -596,44 +621,21 @@ def _audit_scalar(value: object) -> str:
     return str(value)
 
 
-def _data_field_label(path: str) -> str:
-    labels = {
-        "access_methods": "Zugriff",
-        "comment": "Kommentar",
-        "container": "Container",
-        "container.id": "Container ID",
-        "container.label": "Container Label",
-        "endpoints": "Endpoints",
-        "hardware": "Hardware",
-        "hardware.cpu": "CPU",
-        "hardware.cpu.cores": "CPU Cores",
-        "hardware.cpu.name": "CPU Name",
-        "hardware.cpu.vendor": "CPU Hersteller",
-        "hardware.gpu": "GPU",
-        "hardware.memory": "Memory",
-        "hardware.model": "Modell",
-        "hardware.storage": "Storage / HDD",
-        "labels": "Label",
-        "network": "Netzwerk",
-        "network.addresses": "Netzwerkadressen",
-        "network.hostnames": "Hostname",
-        "network.interfaces": "Netzwerkinterfaces",
-        "platform": "Plattform",
-        "ports": "Ports",
+def _field_change(
+    field: str,
+    old_value: str | None,
+    new_value: str | None,
+) -> dict[str, object]:
+    return {
+        "field": field,
+        "old": _audit_display_value(old_value),
+        "new": _audit_display_value(new_value),
+        "value_change": True,
     }
-    return labels.get(path, path or "Daten")
 
 
-def _field_change(field: str, old_value: str | None, new_value: str | None) -> str:
-    old_display = _display_value(old_value)
-    new_display = _display_value(new_value)
-    return f"Feld {field} wurde von {old_display} auf {new_display} geändert"
-
-
-def _display_value(value: str | None) -> str:
+def _audit_display_value(value: str | None) -> str:
     text = (value or "").strip()
-    if not text:
-        return "leer"
     if len(text) > 80:
         return f"{text[:77]}..."
     return text
@@ -653,7 +655,7 @@ def delete_object(session: Session, object_id: str) -> bool:
             f"cannot delete {object_ref}: {len(blockers)} typed reference(s) still exist",
         )
     session.delete(row)
-    _write_audit(session, object_id, "delete", f"Objekt gelöscht: {object_ref}")
+    _write_audit(session, object_id, "delete", {"object_ref": object_ref})
     session.flush()
     return True
 

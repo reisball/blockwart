@@ -36,7 +36,10 @@
     setInspectorValue(root, "[data-inspector-summary]", asset.summary);
     setInspectorValue(root, "[data-inspector-address]", asset.address);
     setInspectorValue(root, "[data-inspector-platform]", asset.platform);
-    setInspectorValue(root, "[data-inspector-lifecycle]", asset.lifecycle || asset.status);
+    const lifecycle = asset.lifecycle
+      ? (copy.lifecycle?.[asset.lifecycle] || asset.lifecycle)
+      : (copy.status?.[asset.status] || asset.status);
+    setInspectorValue(root, "[data-inspector-lifecycle]", lifecycle);
     setInspectorValue(root, "[data-inspector-endpoint]", asset.endpoint);
     setInspectorValue(root, "[data-inspector-ref]", asset.ref);
     updateHealth(root, asset.health);

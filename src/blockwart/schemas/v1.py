@@ -47,6 +47,7 @@ class V1AuditEventOut(BaseModel):
     action: str
     actor: str
     summary: str
+    details: dict[str, Any] = Field(default_factory=dict)
     created_at: str
 
 

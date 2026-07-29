@@ -494,8 +494,8 @@ BUILTIN_SCHEMAS: Mapping[str, TypeSchema] = MappingProxyType(
             *NETWORK_FIELDS,
             *REFERENCE_FIELDS,
         ),
-        "netzwerk": _schema(
-            "netzwerk",
+        "network": _schema(
+            "network",
             *INTERFACE_FIELDS,
             *NETWORK_FIELDS,
         ),

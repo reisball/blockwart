@@ -49,7 +49,7 @@ def test_import_pilot_seed_into_fresh_db(session: Session) -> None:
             CatalogObject.status,
             CatalogObject.lifecycle,
             CatalogObject.health,
-        ).where(CatalogObject.kind.in_({"host", "system", "netzwerk", "service"}))
+        ).where(CatalogObject.kind.in_({"host", "system", "network", "service"}))
     ).all()
     assert asset_states
     assert all(

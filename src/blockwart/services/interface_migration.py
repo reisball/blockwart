@@ -13,7 +13,8 @@ from blockwart.domain.interfaces import (
     InterfaceDiagnostic,
     normalize_interface_data,
 )
-from blockwart.models import AuditEvent, CatalogObject
+from blockwart.models import CatalogObject
+from blockwart.services.audit import add_audit_event
 
 
 class InterfaceMigrationError(RuntimeError):
@@ -116,16 +117,15 @@ def apply_interface_migration_plan(
             sort_keys=True,
         )
         row.updated_at = changed_at
-        session.add(
-            AuditEvent(
-                object_id=row.id,
-                action="interface_normalize",
-                actor="interface-migration",
-                summary=(
-                    f"Normalize interface contract for {row.kind}:{row.id} "
-                    f"({len(change.diagnostics)} diagnostics)"
-                ),
-            )
+        add_audit_event(
+            session,
+            object_id=row.id,
+            action="interface_normalize",
+            actor="interface-migration",
+            details={
+                "object_ref": f"{row.kind}:{row.id}",
+                "diagnostic_count": len(change.diagnostics),
+            },
         )
     session.flush()
     return len(plan.changes)

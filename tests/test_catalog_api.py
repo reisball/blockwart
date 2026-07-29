@@ -1,3 +1,4 @@
+import json
 from collections.abc import Generator
 from datetime import datetime
 
@@ -227,8 +228,20 @@ def test_asset_state_changes_have_distinct_audit_fields(session_factory) -> None
         ).all()
 
     assert len(audits) == 2
-    assert "Feld Health wurde von unknown auf degraded geändert" in audits[-1].summary
-    assert "Lifecycle" not in audits[-1].summary
+    assert audits[-1].summary == "update"
+    assert json.loads(audits[-1].details_json) == {
+        "changes": [
+            {
+                "field": "health",
+                "new": "degraded",
+                "old": "unknown",
+                "value_change": True,
+            }
+        ],
+        "event": "update",
+        "object_ref": "service:state-audit",
+        "version": 1,
+    }
 
 
 def test_identical_object_upsert_is_noop(
@@ -361,7 +374,10 @@ def test_delete_catalog_object_writes_audit_event(session_factory) -> None:
         events = session.scalars(select(AuditEvent).order_by(AuditEvent.id)).all()
     assert [event.action for event in events] == ["create", "create", "delete"]
     assert events[-1].object_id == "rotate-vaultwarden"
-    assert "runbook:rotate-vaultwarden" in events[-1].summary
+    assert events[-1].summary == "delete"
+    assert json.loads(events[-1].details_json)["object_ref"] == (
+        "runbook:rotate-vaultwarden"
+    )
 
 
 def test_delete_catalog_object_blocks_existing_relationship_edges(

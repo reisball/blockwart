@@ -19,7 +19,6 @@ from blockwart.domain.relationships import (
 )
 from blockwart.domain.security import find_secret_violations
 from blockwart.domain.ui_schema import (
-    create_field_payload,
     get_ui_schema,
     load_editable_schema_settings,
     save_editable_schema_settings,
@@ -59,27 +58,24 @@ RELATION_TYPES = RELATIONSHIP_TYPES
 PLATFORM_TYPES = ("LXC", "VM", "WSL")
 SAFE_DATA_JSON_FALLBACK = "{\n  \"schema_version\": 1\n}"
 HARDWARE_OBJECT_KINDS = {"host", "system"}
-NETWORK_ADDRESS_EDIT_KINDS = {"host", "system", "netzwerk"}
+NETWORK_ADDRESS_EDIT_KINDS = {"host", "system", "network"}
 NETWORK_PORT_EDIT_KINDS: set[str] = set()
-NETWORK_ENDPOINT_EDIT_KINDS = {"host", "system", "netzwerk", "service"}
+NETWORK_ENDPOINT_EDIT_KINDS = {"host", "system", "network", "service"}
 SERVICE_INFORMATION_OBJECT_KINDS = {"service"}
 ENDPOINT_TYPES = ENDPOINT_TYPE_OPTIONS
 
 
-def _metadata_timestamp(value: str | None) -> str:
+def _metadata_timestamp(value: str | None, translator: Any) -> str:
     if not value:
         return "-"
     parsed = _parse_timestamp(value)
     if parsed is None:
         return value
-    exact = parsed.strftime("%d.%m.%Y, %H:%M Uhr")
-    return f"{exact} - {_relative_timestamp(parsed)}"
-
-
-def _audit_summary_lines(value: str | None) -> list[str]:
-    if not value:
-        return []
-    return [line.strip() for line in value.split("; ") if line.strip()]
+    exact = translator(
+        "timestamp.exact",
+        value=parsed.strftime("%Y-%m-%d %H:%M"),
+    )
+    return f"{exact} · {_relative_timestamp(parsed, translator)}"
 
 
 def _parse_timestamp(value: str) -> datetime | None:
@@ -95,28 +91,102 @@ def _parse_timestamp(value: str) -> datetime | None:
     return parsed
 
 
-def _relative_timestamp(value: datetime) -> str:
+def _relative_timestamp(value: datetime, translator: Any) -> str:
     now = datetime.now(UTC).replace(tzinfo=None)
     delta_seconds = int((now - value).total_seconds())
     if delta_seconds < 0:
-        return "gerade eben"
+        return translator("timestamp.just_now")
     minute = 60
     hour = 60 * minute
     day = 24 * hour
     if delta_seconds < minute:
-        return "gerade eben"
+        return translator("timestamp.just_now")
     if delta_seconds < hour:
         minutes = delta_seconds // minute
-        return f"vor {minutes} Minute" if minutes == 1 else f"vor {minutes} Minuten"
+        return translator(
+            "timestamp.minute_ago" if minutes == 1 else "timestamp.minutes_ago",
+            count=minutes,
+        )
     if delta_seconds < day:
         hours = delta_seconds // hour
-        return f"vor {hours} Stunde" if hours == 1 else f"vor {hours} Stunden"
+        return translator(
+            "timestamp.hour_ago" if hours == 1 else "timestamp.hours_ago",
+            count=hours,
+        )
     days = delta_seconds // day
-    return f"vor {days} Tag" if days == 1 else f"vor {days} Tagen"
+    return translator(
+        "timestamp.day_ago" if days == 1 else "timestamp.days_ago",
+        count=days,
+    )
 
 
-templates.env.filters["metadata_timestamp"] = _metadata_timestamp
-templates.env.filters["audit_summary_lines"] = _audit_summary_lines
+def _localized_audit_lines(
+    event: Mapping[str, Any],
+    translator: Any,
+) -> list[str]:
+    details = event.get("details")
+    if not isinstance(details, Mapping):
+        return [str(event.get("summary") or event.get("action") or "")]
+    action = str(details.get("event") or event.get("action") or "")
+    if action == "legacy":
+        return [str(details.get("legacy_summary") or event.get("summary") or "")]
+    if action == "update":
+        changes = details.get("changes")
+        lines = (
+            [
+                _localized_audit_change(change, translator)
+                for change in changes
+                if isinstance(change, Mapping)
+            ]
+            if isinstance(changes, list)
+            else []
+        )
+        return lines or [
+            translator(
+                "audit.update",
+                object_ref=str(details.get("object_ref") or ""),
+            )
+        ]
+    template_key = {
+        "create": "audit.create",
+        "delete": "audit.delete",
+        "relationship_create": "audit.relationship_create",
+        "placement_assign": "audit.placement_assign",
+        "seed_create": "audit.seed_create",
+        "seed_update": "audit.seed_update",
+        "seed_relationship_create": "audit.seed_relationship_create",
+        "seed_skip_manual_override": "audit.seed_skip_manual_override",
+        "interface_normalize": "audit.interface_normalize",
+        "placement_state_normalize": "audit.placement_state_normalize",
+    }.get(action)
+    if template_key is None:
+        return [str(event.get("summary") or action)]
+    values = {
+        key: value
+        for key, value in details.items()
+        if isinstance(value, str | int | float)
+    }
+    return [translator(template_key, **values)]
+
+
+def _localized_audit_change(
+    change: Mapping[str, Any],
+    translator: Any,
+) -> str:
+    field = str(change.get("field") or "data")
+    field_label = translator(f"audit.field.{field}")
+    if field_label == f"audit.field.{field}":
+        field_label = field
+    if change.get("value_change") is True:
+        old_value = str(change.get("old") or translator("audit.empty"))
+        new_value = str(change.get("new") or translator("audit.empty"))
+        return translator(
+            "audit.field_change",
+            field=field_label,
+            old=old_value,
+            new=new_value,
+        )
+    return translator("audit.field_changed", field=field_label)
 
 
 def _index_template_context(
@@ -134,7 +204,10 @@ def _index_template_context(
 ) -> dict[str, Any]:
     i18n = translation_context(request)
     translator = i18n["t"]
-    localized_schemas = _localized_ui_schema_payload(translator)
+    localized_schemas = _localized_ui_schema_payload(
+        str(i18n["locale"]),
+        translator,
+    )
     selected_form_kind = (
         form_kind
         if form_kind in OBJECT_KINDS
@@ -206,29 +279,38 @@ def _index_template_context(
     }
 
 
-def _localized_ui_schema_payload(translator: Any) -> dict[str, dict[str, Any]]:
+def _localized_ui_schema_payload(
+    locale: str,
+    translator: Any,
+) -> dict[str, dict[str, Any]]:
     payload = ui_schema_payload()
-    placeholder_keys = {
-        "object_id",
-        "primary_name",
-        "labels",
-        "summary",
-    }
-    for kind, schema in payload.items():
-        primary_name_label = translator(f"field.primary_name.{kind}.label")
-        schema["primary_name_label"] = primary_name_label
-        for field in schema["create_field_definitions"]:
-            key = str(field["key"])
-            label_key = (
-                f"field.primary_name.{kind}.label"
-                if key == "primary_name"
-                else f"field.{key}.label"
-            )
-            field["label"] = translator(label_key)
-            if key in placeholder_keys:
-                field["placeholder"] = translator(
-                    f"field.{key}.placeholder"
+    for schema in payload.values():
+        for collection in ("schema_fields", "create_field_definitions"):
+            for field in schema[collection]:
+                labels = field.get("localized_labels")
+                placeholders = field.get("localized_placeholders")
+                field["label"] = (
+                    labels.get(locale)
+                    if isinstance(labels, dict) and labels.get(locale)
+                    else translator(str(field["label_key"]))
                 )
+                field["placeholder"] = (
+                    placeholders.get(locale, "")
+                    if isinstance(placeholders, dict) and locale in placeholders
+                    else (
+                        translator(str(field["placeholder_key"]))
+                        if field.get("placeholder_key")
+                        else ""
+                    )
+                )
+        primary_field = next(
+            field
+            for field in schema["schema_fields"]
+            if field["key"] == "primary_name"
+        )
+        schema["primary_name_label"] = primary_field["label"]
+        for panel in schema["panels"]:
+            panel["label"] = translator(str(panel["label_key"]))
     return payload
 
 
@@ -274,24 +356,16 @@ def schema_settings(
 ):
     write_enabled = can_write(request)
     selected_kind = kind if kind in OBJECT_KINDS else "system"
-    schema = get_ui_schema(selected_kind)
-    schema_fields = schema_field_payload(schema)
     return templates.TemplateResponse(
         request,
         "schema_settings.html",
-        context={
-            "title": "Schema Settings - Blockwart",
-            "object_kinds": OBJECT_KINDS,
-            "selected_kind": selected_kind,
-            "ui_schema": schema,
-            "schema_fields": schema_fields,
-            "schema_fields_by_key": _fields_by_key(schema_fields),
-            "create_fields": create_field_payload(schema),
-            "ui_schemas": ui_schema_payload(),
-            "saved": saved == "1",
-            "error": None,
-            "can_write": write_enabled,
-        },
+        context=_schema_settings_context(
+            request,
+            selected_kind=selected_kind,
+            saved=saved == "1",
+            error=None,
+            can_write_enabled=write_enabled,
+        ),
     )
 
 
@@ -309,36 +383,172 @@ async def update_schema_settings(
         selected_kind = "system"
     current = load_editable_schema_settings(selected_kind)
     field_keys = [str(key) for key in current["field_order"]]
+    i18n = translation_context(request)
+    locale = str(i18n["locale"])
     try:
         field_order = _schema_field_order_from_form(form, field_keys)
-        fields = _schema_fields_from_form(form, field_keys)
+        fields = _schema_fields_from_form(
+            form,
+            field_keys,
+            current_fields=list(current["fields"]),
+            locale=locale,
+        )
         save_editable_schema_settings(
             selected_kind,
             field_order=field_order,
             fields=fields,
         )
     except ValueError as exc:
-        schema = get_ui_schema(selected_kind)
-        schema_fields = schema_field_payload(schema)
         return templates.TemplateResponse(
             request,
             "schema_settings.html",
-            context={
-                "title": "Schema Settings - Blockwart",
-                "object_kinds": OBJECT_KINDS,
-                "selected_kind": selected_kind,
-                "ui_schema": schema,
-                "schema_fields": schema_fields,
-                "schema_fields_by_key": _fields_by_key(schema_fields),
-                "create_fields": create_field_payload(schema),
-                "ui_schemas": ui_schema_payload(),
-                "saved": False,
-                "error": _safe_error_message(exc),
-                "can_write": True,
-            },
+            context=_schema_settings_context(
+                request,
+                selected_kind=selected_kind,
+                saved=False,
+                error=_safe_error_message(exc),
+                can_write_enabled=True,
+            ),
             status_code=422,
         )
-    return RedirectResponse(url=f"/settings/schema?kind={selected_kind}&saved=1", status_code=303)
+    return RedirectResponse(
+        url=f"/settings/schema?kind={selected_kind}&saved=1&lang={locale}",
+        status_code=303,
+    )
+
+
+def _schema_settings_context(
+    request: Request,
+    *,
+    selected_kind: str,
+    saved: bool,
+    error: str | None,
+    can_write_enabled: bool,
+) -> dict[str, Any]:
+    i18n = translation_context(request)
+    schemas = _localized_ui_schema_payload(str(i18n["locale"]), i18n["t"])
+    schema = schemas[selected_kind]
+    schema_fields = list(schema["schema_fields"])
+    return {
+        "title": i18n["t"]("schema.title"),
+        "object_kinds": OBJECT_KINDS,
+        "selected_kind": selected_kind,
+        "ui_schema": schema,
+        "schema_fields": schema_fields,
+        "schema_fields_by_key": _fields_by_key(schema_fields),
+        "create_fields": list(schema["create_field_definitions"]),
+        "ui_schemas": schemas,
+        "saved": saved,
+        "error": error,
+        "can_write": can_write_enabled,
+        **i18n,
+    }
+
+
+def _detail_template_context(
+    request: Request,
+    read_model: Any,
+    *,
+    error: str | None,
+    edit_section: str,
+    can_write_enabled: bool,
+    data_json_override: str | None = None,
+) -> dict[str, Any]:
+    i18n = translation_context(request)
+    translator = i18n["t"]
+    catalog_object = read_model.catalog_object
+    object_data = catalog_object.data
+    schemas = _localized_ui_schema_payload(str(i18n["locale"]), translator)
+    ui_schema = schemas[catalog_object.kind]
+    schema_fields = list(ui_schema["schema_fields"])
+    access_methods = _display_access_methods(
+        catalog_object,
+        read_model.relationship_groups,
+        read_model.object_map,
+    )
+    network = _network_summary(object_data)
+    hardware = _hardware_summary(object_data)
+    hardware_fields = _hardware_schema_fields(schema_fields, hardware)
+    ports = _list_of_mappings(object_data.get("ports"))
+    endpoints = _list_of_mappings(object_data.get("endpoints"))
+    service_information = _service_information_summary(object_data)
+    service_information_fields = _service_information_schema_fields(
+        schema_fields,
+        service_information,
+    )
+    audit_events = [
+        {
+            **event,
+            "summary_lines": _localized_audit_lines(event, translator),
+        }
+        for event in read_model.audit_events
+    ]
+    return {
+        "title": f"{catalog_object.label} - Blockwart",
+        "object": catalog_object,
+        "relationships": read_model.relationships,
+        "relationship_groups": read_model.relationship_groups,
+        "relationship_targets": read_model.relationship_targets,
+        "relation_types": RELATION_TYPES,
+        "comment": str(object_data.get("comment") or ""),
+        "audit_events": audit_events,
+        "ui_schema": ui_schema,
+        "schema_fields_by_key": _fields_by_key(schema_fields),
+        "primary_name_value": primary_name_value(catalog_object),
+        "network": network,
+        "hardware": hardware,
+        "hardware_fields": hardware_fields,
+        "supports_hardware": catalog_object.kind in HARDWARE_OBJECT_KINDS,
+        "container": _container_summary(object_data),
+        "service_information": service_information,
+        "service_information_fields": service_information_fields,
+        "supports_service_information": (
+            catalog_object.kind in SERVICE_INFORMATION_OBJECT_KINDS
+        ),
+        "ports": ports,
+        "endpoints": endpoints,
+        "network_address_rows": _padded_mappings(
+            network["addresses"],
+            max(1, len(network["addresses"])),
+        ),
+        "port_rows": _padded_mappings(ports, max(1, len(ports))),
+        "endpoint_rows": _endpoint_edit_rows(endpoints),
+        "endpoint_types": ENDPOINT_TYPES,
+        "can_edit_network_addresses": (
+            catalog_object.kind in NETWORK_ADDRESS_EDIT_KINDS
+        ),
+        "can_edit_network_ports": catalog_object.kind in NETWORK_PORT_EDIT_KINDS,
+        "can_edit_network_endpoints": (
+            catalog_object.kind in NETWORK_ENDPOINT_EDIT_KINDS
+        ),
+        "access_methods": access_methods,
+        "access_method_rows": _access_method_rows(catalog_object, access_methods),
+        "credential_references": [],
+        "data_json": (
+            data_json_override
+            if data_json_override is not None
+            else json.dumps(
+                _without_credential_references(catalog_object.data),
+                indent=2,
+                sort_keys=True,
+            )
+        ),
+        "created_at_display": _metadata_timestamp(
+            catalog_object.created_at,
+            translator,
+        ),
+        "updated_at_display": _metadata_timestamp(
+            catalog_object.last_changed or catalog_object.updated_at,
+            translator,
+        ),
+        "object_kinds": OBJECT_KINDS,
+        "object_statuses": OBJECT_STATUSES_UI,
+        "platform_types": PLATFORM_TYPES,
+        "error": error,
+        "edit_section": edit_section,
+        "can_write": can_write_enabled,
+        **i18n,
+    }
 
 
 @router.get("/objects/{object_id}", response_class=HTMLResponse)
@@ -352,71 +562,16 @@ def object_detail(
     read_model = query_catalog_detail(session, object_id)
     if read_model is None:
         raise HTTPException(status_code=404, detail="Catalog object not found")
-    catalog_object = read_model.catalog_object
-    object_data = catalog_object.data
-    ui_schema = get_ui_schema(catalog_object.kind)
-    access_methods = _display_access_methods(
-        catalog_object,
-        read_model.relationship_groups,
-        read_model.object_map,
-    )
-    network = _network_summary(object_data)
-    hardware = _hardware_summary(object_data)
-    hardware_fields = _hardware_schema_fields(ui_schema, hardware)
-    ports = _list_of_mappings(object_data.get("ports"))
-    endpoints = _list_of_mappings(object_data.get("endpoints"))
-    service_information = _service_information_summary(object_data)
-    service_information_fields = _service_information_schema_fields(ui_schema, service_information)
     return templates.TemplateResponse(
         request,
         "object_detail.html",
-        context={
-            "title": f"{catalog_object.label} - Blockwart",
-            "object": catalog_object,
-            "relationships": read_model.relationships,
-            "relationship_groups": read_model.relationship_groups,
-            "relationship_targets": read_model.relationship_targets,
-            "relation_types": RELATION_TYPES,
-            "comment": str(object_data.get("comment") or ""),
-            "audit_events": read_model.audit_events,
-            "ui_schema": ui_schema,
-            "schema_fields_by_key": _fields_by_key(schema_field_payload(ui_schema)),
-            "primary_name_value": primary_name_value(catalog_object),
-            "network": network,
-            "hardware": hardware,
-            "hardware_fields": hardware_fields,
-            "supports_hardware": catalog_object.kind in HARDWARE_OBJECT_KINDS,
-            "container": _container_summary(object_data),
-            "service_information": service_information,
-            "service_information_fields": service_information_fields,
-            "supports_service_information": catalog_object.kind in SERVICE_INFORMATION_OBJECT_KINDS,
-            "ports": ports,
-            "endpoints": endpoints,
-            "network_address_rows": _padded_mappings(
-                network["addresses"],
-                max(1, len(network["addresses"])),
-            ),
-            "port_rows": _padded_mappings(ports, max(1, len(ports))),
-            "endpoint_rows": _endpoint_edit_rows(endpoints),
-            "endpoint_types": ENDPOINT_TYPES,
-            "can_edit_network_addresses": catalog_object.kind in NETWORK_ADDRESS_EDIT_KINDS,
-            "can_edit_network_ports": catalog_object.kind in NETWORK_PORT_EDIT_KINDS,
-            "can_edit_network_endpoints": catalog_object.kind in NETWORK_ENDPOINT_EDIT_KINDS,
-            "access_methods": access_methods,
-            "access_method_rows": _access_method_rows(catalog_object, access_methods),
-            "credential_references": [],
-            "data_json": json.dumps(
-                _without_credential_references(catalog_object.data),
-                indent=2,
-                sort_keys=True,
-            ),
-            "object_kinds": OBJECT_KINDS,
-            "object_statuses": OBJECT_STATUSES_UI,
-            "platform_types": PLATFORM_TYPES,
-            "error": None,
-            "edit_section": edit if write_enabled else "",
-            "can_write": write_enabled,
-        },
+        context=_detail_template_context(
+            request,
+            read_model,
+            error=None,
+            edit_section=edit if write_enabled else "",
+            can_write_enabled=write_enabled,
+        ),
     )
 
 
@@ -739,75 +894,21 @@ def update_object(
         read_model = query_catalog_detail(session, object_id)
         if read_model is None:
             raise HTTPException(status_code=404, detail="Catalog object not found") from exc
-        catalog_object = read_model.catalog_object
-        object_data = catalog_object.data
-        ui_schema = get_ui_schema(catalog_object.kind)
-        network = _network_summary(object_data)
-        hardware = _hardware_summary(object_data)
-        hardware_fields = _hardware_schema_fields(ui_schema, hardware)
-        ports = _list_of_mappings(object_data.get("ports"))
-        endpoints = _list_of_mappings(object_data.get("endpoints"))
-        service_information = _service_information_summary(object_data)
-        service_information_fields = _service_information_schema_fields(
-            ui_schema, service_information
-        )
-        access_methods = _display_access_methods(
-            catalog_object,
-            read_model.relationship_groups,
-            read_model.object_map,
-        )
         return templates.TemplateResponse(
             request,
             "object_detail.html",
-            context={
-                "title": f"{catalog_object.label} - Blockwart",
-                "object": catalog_object,
-                "relationships": read_model.relationships,
-                "relationship_groups": read_model.relationship_groups,
-                "relationship_targets": read_model.relationship_targets,
-                "relation_types": RELATION_TYPES,
-                "comment": str(object_data.get("comment") or ""),
-                "audit_events": read_model.audit_events,
-                "ui_schema": ui_schema,
-                "schema_fields_by_key": _fields_by_key(schema_field_payload(ui_schema)),
-                "primary_name_value": primary_name_value(catalog_object),
-                "network": network,
-                "hardware": hardware,
-                "hardware_fields": hardware_fields,
-                "supports_hardware": catalog_object.kind in HARDWARE_OBJECT_KINDS,
-                "container": _container_summary(object_data),
-                "service_information": service_information,
-                "service_information_fields": service_information_fields,
-                "supports_service_information": (
-                    catalog_object.kind in SERVICE_INFORMATION_OBJECT_KINDS
-                ),
-                "ports": ports,
-                "endpoints": endpoints,
-                "network_address_rows": _padded_mappings(
-                    network["addresses"],
-                    max(1, len(network["addresses"])),
-                ),
-                "port_rows": _padded_mappings(ports, max(1, len(ports))),
-                "endpoint_rows": _endpoint_edit_rows(endpoints),
-                "endpoint_types": ENDPOINT_TYPES,
-                "can_edit_network_addresses": catalog_object.kind in NETWORK_ADDRESS_EDIT_KINDS,
-                "can_edit_network_ports": catalog_object.kind in NETWORK_PORT_EDIT_KINDS,
-                "can_edit_network_endpoints": catalog_object.kind in NETWORK_ENDPOINT_EDIT_KINDS,
-                "access_methods": access_methods,
-                "access_method_rows": _access_method_rows(catalog_object, access_methods),
-                "credential_references": [],
-                "data_json": SAFE_DATA_JSON_FALLBACK,
-                "object_kinds": OBJECT_KINDS,
-                "object_statuses": OBJECT_STATUSES_UI,
-                "platform_types": PLATFORM_TYPES,
-                "error": _safe_error_message(exc),
-                "edit_section": (
+            context=_detail_template_context(
+                request,
+                read_model,
+                error=_safe_error_message(exc),
+                edit_section=(
                     "service-information"
                     if submitted_service_information
                     else "hardware" if submitted_hardware else "overview"
                 ),
-                "can_write": True,
-            },
+                can_write_enabled=True,
+                data_json_override=SAFE_DATA_JSON_FALLBACK,
+            ),
             status_code=422,
         )
     return RedirectResponse(url=f"/objects/{payload.id}", status_code=303)
@@ -1139,7 +1240,10 @@ def _hardware_summary(data: Mapping[str, Any]) -> dict[str, str]:
     }
 
 
-def _hardware_schema_fields(ui_schema: Any, hardware: Mapping[str, str]) -> list[dict[str, str]]:
+def _hardware_schema_fields(
+    schema_fields: list[dict[str, object]],
+    hardware: Mapping[str, str],
+) -> list[dict[str, str]]:
     hardware_values = {
         "hardware_model": hardware.get("model", ""),
         "hardware_cpu_vendor": hardware.get("cpu_vendor", ""),
@@ -1156,7 +1260,7 @@ def _hardware_schema_fields(ui_schema: Any, hardware: Mapping[str, str]) -> list
             "placeholder": str(field["placeholder"] or ""),
             "value": hardware_values.get(str(field["key"]), ""),
         }
-        for field in schema_field_payload(ui_schema)
+        for field in schema_fields
         if str(field["key"]).startswith("hardware_")
     ]
 
@@ -1184,7 +1288,7 @@ def _service_information_summary(data: Mapping[str, Any]) -> dict[str, Any]:
 
 
 def _service_information_schema_fields(
-    ui_schema: Any,
+    schema_fields: list[dict[str, object]],
     service_information: Mapping[str, Any],
 ) -> list[dict[str, str]]:
     service_information_values = {
@@ -1198,7 +1302,7 @@ def _service_information_schema_fields(
             "placeholder": str(field["placeholder"] or ""),
             "value": service_information_values.get(str(field["key"]), ""),
         }
-        for field in schema_field_payload(ui_schema)
+        for field in schema_fields
         if str(field["key"]).startswith("service_")
     ]
 
@@ -1385,15 +1489,29 @@ def _schema_field_order_from_form(form: Any, field_keys: list[str]) -> list[str]
 def _schema_fields_from_form(
     form: Any,
     field_keys: list[str],
-) -> dict[str, dict[str, str | bool]]:
-    fields: dict[str, dict[str, str | bool]] = {}
+    *,
+    current_fields: list[dict[str, object]],
+    locale: str,
+) -> dict[str, dict[str, object]]:
+    current_by_key = {
+        str(field["key"]): field
+        for field in current_fields
+    }
+    fields: dict[str, dict[str, object]] = {}
     for key in field_keys:
         label = str(form.get(f"field_label_{key}") or "").strip()
         if not label:
             raise ValueError(f"{key}.label must not be empty")
+        current = current_by_key[key]
+        labels = dict(current.get("localized_labels") or {})
+        placeholders = dict(current.get("localized_placeholders") or {})
+        labels[locale] = label
+        placeholders[locale] = str(
+            form.get(f"field_placeholder_{key}") or ""
+        ).strip()
         fields[key] = {
-            "label": label,
-            "placeholder": str(form.get(f"field_placeholder_{key}") or "").strip(),
+            "labels": labels,
+            "placeholders": placeholders,
             "required": form.get(f"field_required_{key}") == "1",
             "visible_in_detail": form.get(f"field_visible_in_detail_{key}") == "1",
         }

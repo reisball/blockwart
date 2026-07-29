@@ -10,7 +10,12 @@ Blockwart version 1 models concrete infrastructure assets:
   is represented by multiple service objects until an explicit grouping model
   is introduced.
 
-`netzwerk` and the non-public catalog kinds are not placement levels.
+`network` and the non-public catalog kinds are not placement levels.
+
+English identifiers are the canonical backend contract. Alembic revision
+`20260729_0007` migrates the former `netzwerk` identifier and every valid typed
+reference to `network` before the application starts. UI labels are localized
+independently; see `internationalization.md`.
 
 ## Lifecycle and operational health
 
@@ -19,7 +24,7 @@ Infrastructure assets use two independent, closed dimensions:
 - `lifecycle`: `planned`, `active`, or `retired`
 - `health`: `unknown`, `healthy`, `degraded`, `down`, or `maintenance`
 
-The values are stored in dedicated `catalog_objects` columns for `host`, `system`, `netzwerk`, and
+The values are stored in dedicated `catalog_objects` columns for `host`, `system`, `network`, and
 `service`. They are absent for knowledge objects such as runbooks and decisions. Free-form
 `data.lifecycle` and `data.health` fields are rejected.
 

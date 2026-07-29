@@ -108,7 +108,7 @@ def test_supported_placement_pairs(parent_kind: str, child_kind: str) -> None:
     [
         ("system", "system"),
         ("service", "service"),
-        ("netzwerk", "system"),
+        ("network", "system"),
         ("host", "host"),
     ],
 )
@@ -139,7 +139,7 @@ def test_placement_state_distinguishes_root_assigned_unassigned_and_unknown() ->
         == "unassigned"
     )
     assert placement_state(kind="service", parent_ref=None, data={}) == "unknown"
-    assert placement_state(kind="netzwerk", parent_ref=None, data={}) is None
+    assert placement_state(kind="network", parent_ref=None, data={}) is None
 
 
 def test_placement_metadata_accepts_only_explicit_unassigned_assets() -> None:

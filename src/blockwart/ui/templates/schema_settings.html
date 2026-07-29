@@ -1,44 +1,46 @@
 <!doctype html>
-<html lang="de">
+<html lang="{{ locale }}">
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <link rel="icon" href="data:," />
     <title>{{ title }}</title>
     <script>
       if (localStorage.getItem("blockwart-theme") === "light") {
         document.documentElement.dataset.theme = "light";
       }
     </script>
-    <link rel="stylesheet" href="/static/app.css?v=054" />
+    <link rel="stylesheet" href="/static/app.css?v=061" />
     <script src="/static/theme.js?v=054" defer></script>
   </head>
   <body>
     <header class="topbar">
       <div class="topbar-inner">
-        <a class="breadcrumb" href="/">Zur Suche</a>
+        <a class="breadcrumb" href="/">{{ t("detail.back") }}</a>
         <div class="title-row">
           <div>
-            <h1>Schema Settings</h1>
-            <div class="subtle">Aktuelles UI-Schema pro Objekt-Typ.</div>
+            <h1>{{ t("schema.title") }}</h1>
+            <div class="subtle">{{ t("schema.subtitle") }}</div>
           </div>
           <div class="top-actions">
-            <div class="theme-toggle" role="group" aria-label="Farbschema">
-              <button class="theme-option" type="button" data-theme-value="dark">Dark</button>
-              <button class="theme-option" type="button" data-theme-value="light">Light</button>
+            {% include "_language_switcher.html" %}
+            <div class="theme-toggle" role="group" aria-label="{{ t('nav.theme') }}">
+              <button class="theme-option" type="button" data-theme-value="dark">{{ t("nav.dark") }}</button>
+              <button class="theme-option" type="button" data-theme-value="light">{{ t("nav.light") }}</button>
             </div>
             {% include "_admin_controls.html" %}
           </div>
         </div>
         <form class="toolbar" method="get" action="/settings/schema">
           <label>
-            Typ
-            <select name="kind" aria-label="Typ" onchange="this.form.submit()">
+            {{ t("schema.kind") }}
+            <select name="kind" aria-label="{{ t('schema.kind') }}" onchange="this.form.submit()">
               {% for object_kind in object_kinds %}
-                <option value="{{ object_kind }}" {% if object_kind == selected_kind %}selected{% endif %}>{{ object_kind }}</option>
+                <option value="{{ object_kind }}" {% if object_kind == selected_kind %}selected{% endif %}>{{ t("kind." ~ object_kind) }}</option>
               {% endfor %}
             </select>
           </label>
-          <button type="submit">Anzeigen</button>
+          <button type="submit">{{ t("schema.show") }}</button>
         </form>
       </div>
     </header>
@@ -47,32 +49,32 @@
       <section class="stack">
         <section class="panel">
           <div class="panel-head">
-            <h2 class="section-title">{{ selected_kind }} Schema</h2>
+            <h2 class="section-title">{{ t("kind." ~ selected_kind) }} · {{ t("schema.title") }}</h2>
           </div>
           <div class="overview-card">
             <div class="overview-primary">
-              <div class="fact-label">Primärname</div>
+              <div class="fact-label">{{ t("schema.primary_name") }}</div>
               <div class="overview-hostname">{{ ui_schema.primary_name_label }}</div>
             </div>
             <div class="overview-labels">
               <div class="overview-label">
-                <span>Storage-Art</span>
+                <span>{{ t("schema.storage_type") }}</span>
                 <strong>{{ ui_schema.primary_name_storage }}</strong>
               </div>
               <div class="overview-label">
-                <span>Storage-Pfad</span>
+                <span>{{ t("schema.storage_path") }}</span>
                 <strong>{{ ui_schemas[selected_kind].primary_name_storage_path }}</strong>
               </div>
               <div class="overview-label">
-                <span>Platform</span>
-                <strong>{{ "ja" if ui_schema.supports_platform else "nein" }}</strong>
+                <span>{{ t("schema.platform") }}</span>
+                <strong>{{ t("value.yes") if ui_schema.supports_platform else t("value.no") }}</strong>
               </div>
               <div class="overview-label">
-                <span>Create-Felder</span>
+                <span>{{ t("schema.create_fields") }}</span>
                 <strong>{{ create_fields|length }}</strong>
               </div>
               <div class="overview-label">
-                <span>Panels</span>
+                <span>{{ t("schema.panels") }}</span>
                 <strong>{{ ui_schema.panels|length }}</strong>
               </div>
             </div>
@@ -81,10 +83,10 @@
 
         <section class="panel">
           <div class="panel-head">
-            <h2 class="section-title">Schema-Felder</h2>
+            <h2 class="section-title">{{ t("schema.fields") }}</h2>
           </div>
           {% if saved %}
-            <div class="success">Schema-Metadaten gespeichert.</div>
+            <div class="success">{{ t("schema.saved") }}</div>
           {% endif %}
           {% if error %}
             <div class="error">{{ error }}</div>
@@ -97,15 +99,15 @@
               <table class="table edit-table">
                 <thead>
                   <tr>
-                    <th>Reihenfolge</th>
-                    <th>Feld-Key</th>
-                    <th>Label</th>
-                    <th>Input</th>
-                    <th>Storage-Pfad</th>
-                    <th>Create</th>
-                    <th>Required</th>
-                    <th>Detail</th>
-                    <th>Placeholder</th>
+                    <th>{{ t("schema.order") }}</th>
+                    <th>{{ t("schema.field_key") }}</th>
+                    <th>{{ t("schema.label") }}</th>
+                    <th>{{ t("schema.input") }}</th>
+                    <th>{{ t("schema.storage_path") }}</th>
+                    <th>{{ t("schema.create_fields") }}</th>
+                    <th>{{ t("schema.required") }}</th>
+                    <th>{{ t("schema.detail_view") }}</th>
+                    <th>{{ t("schema.placeholder") }}</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -128,19 +130,19 @@
                       </td>
                       <td>{{ field.input_type }}</td>
                       <td><code>{{ field.storage_path }}</code></td>
-                      <td>{{ "ja" if field.visible_in_create else "nein" }}</td>
+                      <td>{{ t("value.yes") if field.visible_in_create else t("value.no") }}</td>
                       <td>
                         {% if can_write %}
                           <input type="checkbox" name="field_required_{{ field.key }}" value="1" {% if field.required %}checked{% endif %} />
                         {% else %}
-                          {{ "ja" if field.required else "nein" }}
+                          {{ t("value.yes") if field.required else t("value.no") }}
                         {% endif %}
                       </td>
                       <td>
                         {% if can_write %}
                           <input type="checkbox" name="field_visible_in_detail_{{ field.key }}" value="1" {% if field.visible_in_detail %}checked{% endif %} />
                         {% else %}
-                          {{ "ja" if field.visible_in_detail else "nein" }}
+                          {{ t("value.yes") if field.visible_in_detail else t("value.no") }}
                         {% endif %}
                       </td>
                       <td>
@@ -157,7 +159,7 @@
             </div>
             {% if can_write %}
               <div class="button-row">
-                <button type="submit">Speichern</button>
+                <button type="submit">{{ t("schema.save") }}</button>
               </div>
             </form>
             {% endif %}
@@ -165,18 +167,18 @@
 
         <section class="panel">
           <div class="panel-head">
-            <h2 class="section-title">Detail-Panels</h2>
+            <h2 class="section-title">{{ t("schema.detail_panels") }}</h2>
           </div>
           <div class="table-wrap">
             <table class="table">
               <thead>
                 <tr>
-                  <th>Reihenfolge</th>
-                  <th>Panel-Key</th>
-                  <th>Label</th>
-                  <th>Route Section</th>
-                  <th>Sichtbarkeit</th>
-                  <th>Immer sichtbar</th>
+                  <th>{{ t("schema.order") }}</th>
+                  <th>{{ t("schema.panel_key") }}</th>
+                  <th>{{ t("schema.label") }}</th>
+                  <th>{{ t("schema.route_section") }}</th>
+                  <th>{{ t("schema.visibility") }}</th>
+                  <th>{{ t("schema.always_visible") }}</th>
                 </tr>
               </thead>
               <tbody>
@@ -186,8 +188,8 @@
                     <td><code>{{ panel.key }}</code></td>
                     <td>{{ panel.label }}</td>
                     <td><code>{{ panel.route_section }}</code></td>
-                    <td>Detail-Ansicht</td>
-                    <td>{{ "ja" if panel.always_visible else "nein" }}</td>
+                    <td>{{ t("schema.detail_view") }}</td>
+                    <td>{{ t("value.yes") if panel.always_visible else t("value.no") }}</td>
                   </tr>
                 {% endfor %}
               </tbody>
@@ -198,14 +200,14 @@
 
       <aside class="stack">
         <section class="panel">
-          <h2 class="section-title">Storage-Konvention</h2>
+          <h2 class="section-title">{{ t("schema.storage_convention") }}</h2>
           <div class="table-wrap">
             <table class="table compact-table">
               <tbody>
                 {% for path, description in ui_schemas[selected_kind].storage_conventions.items() %}
                   <tr>
                     <td><code>{{ path }}</code></td>
-                    <td>{{ description }}</td>
+                    <td>{{ t("schema.storage." ~ path) }}</td>
                   </tr>
                 {% endfor %}
               </tbody>
@@ -213,13 +215,11 @@
           </div>
         </section>
         <section class="panel">
-          <h2 class="section-title">Hinweis</h2>
-          <p class="meta">
-            Editierbar sind nur sichere UI-Metadaten: Label, Placeholder, Required, Detail-Sichtbarkeit und Reihenfolge. Feld-Keys, Input-Typen und Storage-Pfade sind bewusst gesperrt.
-          </p>
+          <h2 class="section-title">{{ t("schema.notice") }}</h2>
+          <p class="meta">{{ t("schema.notice_body") }}</p>
         </section>
         <section class="panel">
-          <h2 class="section-title">Schema JSON</h2>
+          <h2 class="section-title">{{ t("schema.json") }}</h2>
           <pre class="code-block">{{ ui_schemas[selected_kind]|tojson(indent=2) }}</pre>
         </section>
       </aside>

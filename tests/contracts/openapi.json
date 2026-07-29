@@ -11,7 +11,7 @@
             "enum": [
               "host",
               "system",
-              "netzwerk",
+              "network",
               "service",
               "credential_reference",
               "runbook",
@@ -129,7 +129,7 @@
             "enum": [
               "host",
               "system",
-              "netzwerk",
+              "network",
               "service",
               "credential_reference",
               "runbook",
@@ -321,7 +321,7 @@
             "enum": [
               "host",
               "system",
-              "netzwerk",
+              "network",
               "service",
               "credential_reference",
               "runbook",
@@ -460,7 +460,7 @@
                 "enum": [
                   "host",
                   "system",
-                  "netzwerk",
+                  "network",
                   "service",
                   "credential_reference",
                   "runbook",
@@ -652,7 +652,7 @@
                 "enum": [
                   "host",
                   "system",
-                  "netzwerk",
+                  "network",
                   "service",
                   "credential_reference",
                   "runbook",
@@ -775,7 +775,7 @@
             "enum": [
               "host",
               "system",
-              "netzwerk",
+              "network",
               "service",
               "credential_reference",
               "runbook",
@@ -860,7 +860,7 @@
             "enum": [
               "host",
               "system",
-              "netzwerk",
+              "network",
               "service",
               "credential_reference",
               "runbook",
@@ -1208,6 +1208,11 @@
             "title": "Created At",
             "type": "string"
           },
+          "details": {
+            "additionalProperties": true,
+            "title": "Details",
+            "type": "object"
+          },
           "id": {
             "title": "Id",
             "type": "integer"
@@ -1514,7 +1519,7 @@
             "enum": [
               "host",
               "system",
-              "netzwerk",
+              "network",
               "service",
               "credential_reference",
               "runbook",
@@ -1632,7 +1637,7 @@
                   "enum": [
                     "host",
                     "system",
-                    "netzwerk",
+                    "network",
                     "service",
                     "credential_reference",
                     "runbook",
@@ -2065,7 +2070,7 @@
                   "enum": [
                     "host",
                     "system",
-                    "netzwerk",
+                    "network",
                     "service",
                     "credential_reference",
                     "runbook",
@@ -2707,7 +2712,7 @@
                   "enum": [
                     "host",
                     "system",
-                    "netzwerk",
+                    "network",
                     "service",
                     "credential_reference",
                     "runbook",
@@ -3126,7 +3131,7 @@
                   "enum": [
                     "host",
                     "system",
-                    "netzwerk",
+                    "network",
                     "service",
                     "credential_reference",
                     "runbook",

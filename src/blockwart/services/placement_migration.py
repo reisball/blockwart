@@ -16,7 +16,8 @@ from blockwart.domain.placement import (
     validate_placement_metadata,
 )
 from blockwart.domain.relationships import diagnose_relationship_integrity
-from blockwart.models import AuditEvent, CatalogObject, Relationship
+from blockwart.models import CatalogObject, Relationship
+from blockwart.services.audit import add_audit_event
 
 DEFAULT_UNASSIGNED_REASON = "No canonical placement parent has been assigned."
 
@@ -193,15 +194,15 @@ def apply_placement_migration_plan(
             sort_keys=True,
         )
         row.updated_at = changed_at
-        session.add(
-            AuditEvent(
-                object_id=row.id,
-                action="placement_state_normalize",
-                actor="placement-migration",
-                summary=(
-                    f"{change.action} for {object_ref}"
-                ),
-            )
+        add_audit_event(
+            session,
+            object_id=row.id,
+            action="placement_state_normalize",
+            actor="placement-migration",
+            details={
+                "object_ref": object_ref,
+                "operation": change.action,
+            },
         )
     session.flush()
     return len(plan.changes)

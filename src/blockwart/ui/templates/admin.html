@@ -1,8 +1,9 @@
 <!doctype html>
-<html lang="de">
+<html lang="{{ locale }}">
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <link rel="icon" href="data:," />
     <meta name="referrer" content="no-referrer" />
     <title>{{ title }}</title>
     <script>
@@ -10,22 +11,23 @@
         document.documentElement.dataset.theme = "light";
       }
     </script>
-    <link rel="stylesheet" href="/static/app.css?v=060" />
+    <link rel="stylesheet" href="/static/app.css?v=061" />
     <script src="/static/theme.js?v=054" defer></script>
   </head>
   <body>
     <header class="topbar">
       <div class="topbar-inner">
-        <a class="breadcrumb" href="/">Zur Suche</a>
+        <a class="breadcrumb" href="/">{{ t("detail.back") }}</a>
         <div class="title-row">
           <div>
-            <h1>Admin-Freigabe</h1>
-            <div class="subtle">Lesen bleibt offen. Schreiben benötigt eine kurzlebige Admin-Session.</div>
+            <h1>{{ t("admin.title") }}</h1>
+            <div class="subtle">{{ t("admin.subtitle") }}</div>
           </div>
           <div class="top-actions">
-            <div class="theme-toggle" role="group" aria-label="Farbschema">
-              <button class="theme-option" type="button" data-theme-value="dark">Dark</button>
-              <button class="theme-option" type="button" data-theme-value="light">Light</button>
+            {% include "_language_switcher.html" %}
+            <div class="theme-toggle" role="group" aria-label="{{ t('nav.theme') }}">
+              <button class="theme-option" type="button" data-theme-value="dark">{{ t("nav.dark") }}</button>
+              <button class="theme-option" type="button" data-theme-value="light">{{ t("nav.light") }}</button>
             </div>
           </div>
         </div>
@@ -39,15 +41,15 @@
         {% endif %}
 
         {% if can_write %}
-          <h2 class="section-title">Schreibzugriff aktiv</h2>
-          <p class="meta">Die Session ist zeitlich begrenzt und gilt nur für die UI-Schreibpfade.</p>
+          <h2 class="section-title">{{ t("admin.active_title") }}</h2>
+          <p class="meta">{{ t("admin.active_body") }}</p>
           <form method="post" action="/admin/lock">
-            <button type="submit">Admin sperren</button>
+            <button type="submit">{{ t("admin.lock") }}</button>
           </form>
         {% elif admin_configured %}
-          <h2 class="section-title">Schreibzugriff gesperrt</h2>
+          <h2 class="section-title">{{ t("admin.locked_title") }}</h2>
           <form class="form-grid" method="post" action="/admin/unlock" autocomplete="off">
-            <label>Admin-Token
+            <label>{{ t("admin.token") }}
               <input
                 type="password"
                 name="admin_token"
@@ -56,15 +58,13 @@
               />
             </label>
             <div class="button-row">
-              <button type="submit">Freigeben</button>
-              <a class="button button-muted" href="/">Abbrechen</a>
+              <button type="submit">{{ t("admin.unlock_submit") }}</button>
+              <a class="button button-muted" href="/">{{ t("admin.cancel") }}</a>
             </div>
           </form>
         {% else %}
-          <h2 class="section-title">Nur-Lesen-Modus</h2>
-          <p class="meta">
-            Es ist kein Admin-Token konfiguriert. Alle UI- und API-Schreibzugriffe bleiben gesperrt.
-          </p>
+          <h2 class="section-title">{{ t("admin.read_only_title") }}</h2>
+          <p class="meta">{{ t("admin.read_only_body") }}</p>
         {% endif %}
       </section>
     </main>

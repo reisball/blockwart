@@ -1,5 +1,5 @@
 {% macro node_icon(kind) -%}
-  {% if kind == "host" %}□{% elif kind == "system" %}⬡{% elif kind == "service" %}◆{% elif kind == "netzwerk" %}⌁{% else %}?{% endif %}
+  {% if kind == "host" %}□{% elif kind == "system" %}⬡{% elif kind == "service" %}◆{% elif kind == "network" %}⌁{% else %}?{% endif %}
 {%- endmacro %}
 
 {% macro health_badge(asset) -%}
@@ -60,7 +60,10 @@
   >
     <span class="node-icon {{ asset.kind }} large-icon">{{ node_icon(asset.kind) }}</span>
     <span class="map-node-copy">
-      <small>{{ t("kind." ~ asset.kind) }} · {{ (asset.lifecycle or asset.status)|upper }}</small>
+      <small>
+        {{ t("kind." ~ asset.kind) }} ·
+        {% if asset.lifecycle %}{{ t("lifecycle." ~ asset.lifecycle)|upper }}{% else %}{{ t("status." ~ asset.status)|upper }}{% endif %}
+      </small>
       <strong>{{ asset.label }}</strong>
       <em>{{ asset.summary or asset.ref }}</em>
     </span>
@@ -76,14 +79,15 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <link rel="icon" href="data:," />
     <title>{{ title }}</title>
     <script>
       if (localStorage.getItem("blockwart-theme") === "light") {
         document.documentElement.dataset.theme = "light";
       }
     </script>
-    <link rel="stylesheet" href="/static/app.css?v=056" />
-    <link rel="stylesheet" href="/static/explorer.css?v=001" />
+    <link rel="stylesheet" href="/static/app.css?v=061" />
+    <link rel="stylesheet" href="/static/explorer.css?v=006" />
     <script>
       window.BLOCKWART_UI_SCHEMAS = {{ ui_schemas|tojson }};
       window.BLOCKWART_EXPLORER_ASSETS = {{ explorer.assets|tojson }};
@@ -96,6 +100,16 @@
         selectAsset: {{ t("catalog.select_asset")|tojson }},
         noValue: {{ t("asset.no_value")|tojson }},
         details: {{ t("asset.details")|tojson }},
+        lifecycle: {
+          "planned": {{ t("lifecycle.planned")|tojson }},
+          "active": {{ t("lifecycle.active")|tojson }},
+          "retired": {{ t("lifecycle.retired")|tojson }}
+        },
+        status: {
+          "active": {{ t("status.active")|tojson }},
+          "inactive": {{ t("status.inactive")|tojson }},
+          "deleted": {{ t("status.deleted")|tojson }}
+        },
         health: {
           "healthy": {{ t("health.healthy")|tojson }},
           "degraded": {{ t("health.degraded")|tojson }},
@@ -106,7 +120,7 @@
       };
     </script>
     <script src="/static/theme.js?v=054" defer></script>
-    <script src="/static/index.js?v=056" defer></script>
+    <script src="/static/index.js?v=057" defer></script>
   </head>
   <body class="explorer-body explorer-{{ view }}">
     <header class="explorer-topbar">
@@ -140,13 +154,16 @@
       </form>
 
       <div class="explorer-top-actions">
+        {% include "_language_switcher.html" %}
         <div class="theme-toggle compact-theme-toggle" role="group" aria-label="{{ t('nav.theme') }}">
           <button class="theme-option" type="button" data-theme-value="dark">{{ t("nav.dark") }}</button>
           <button class="theme-option" type="button" data-theme-value="light">{{ t("nav.light") }}</button>
         </div>
         <a class="icon-button" href="/settings/schema" aria-label="{{ t('nav.settings') }}">⚙</a>
         {% if can_write %}
-          <a class="primary-button" href="/?view={{ view }}&q={{ q|urlencode }}&kind={{ kind }}&create=1">＋ {{ t("asset.create") }}</a>
+          <a class="primary-button" href="/?view={{ view }}&q={{ q|urlencode }}&kind={{ kind }}&create=1" aria-label="{{ t('asset.create') }}">
+            ＋ <span class="asset-create-full">{{ t("asset.create") }}</span><span class="asset-create-short">{{ t("asset.create_short") }}</span>
+          </a>
         {% endif %}
         {% include "_admin_controls.html" %}
       </div>
@@ -189,7 +206,7 @@
             <label data-create-field="status"><span data-field-label="status">{{ create_fields_by_key.status.label }}</span>
               <select name="status">
                 {% for object_status in object_statuses %}
-                  <option value="{{ object_status }}" {% if object_status == form.status %}selected{% endif %}>{{ object_status }}</option>
+                  <option value="{{ object_status }}" {% if object_status == form.status %}selected{% endif %}>{{ t("status." ~ object_status) }}</option>
                 {% endfor %}
               </select>
             </label>
@@ -238,8 +255,8 @@
             <a class="{% if kind == 'service' %}active{% endif %}" href="/?view=catalog&q={{ q|urlencode }}&kind=service">
               <span class="rail-icon diamond">◆</span>{{ t("catalog.services") }}<b>{{ object_counts.service or 0 }}</b>
             </a>
-            <a class="{% if kind == 'netzwerk' %}active{% endif %}" href="/?view=catalog&q={{ q|urlencode }}&kind=netzwerk">
-              <span class="rail-icon network">⌁</span>{{ t("catalog.networks") }}<b>{{ object_counts.netzwerk or 0 }}</b>
+            <a class="{% if kind == 'network' %}active{% endif %}" href="/?view=catalog&q={{ q|urlencode }}&kind=network">
+              <span class="rail-icon network">⌁</span>{{ t("catalog.networks") }}<b>{{ object_counts.network or 0 }}</b>
             </a>
           </nav>
           <div class="rail-heading rail-heading-spaced"><span>{{ t("asset.health") }}</span></div>
@@ -321,7 +338,7 @@
                     {% if explorer.networks %}
                       <tr class="group-row secondary-group">
                         <td colspan="8">
-                          <span class="node-icon netzwerk">⌁</span>
+                          <span class="node-icon network">⌁</span>
                           <strong>{{ t("catalog.networks") }}</strong>
                           <span class="group-count">{{ t("catalog.asset_count", count=explorer.networks|length) }}</span>
                         </td>
@@ -453,9 +470,9 @@
             {% if explorer.networks %}
               <article class="topology-cluster network-topology-cluster">
                 <div class="hardware-node map-node network-root">
-                  <span class="node-icon netzwerk large-icon">⌁</span>
+                  <span class="node-icon network large-icon">⌁</span>
                   <span class="map-node-copy">
-                    <small>{{ t("kind.netzwerk")|upper }}</small>
+                    <small>{{ t("kind.network")|upper }}</small>
                     <strong>{{ t("topology.network_inventory") }}</strong>
                     <em>{{ t("topology.network_count", count=explorer.networks|length) }}</em>
                   </span>

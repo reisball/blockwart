@@ -20,7 +20,7 @@ def test_builtin_schema_registry_is_fixed_and_complete() -> None:
     assert set(BUILTIN_SCHEMAS) == {
         "host",
         "system",
-        "netzwerk",
+        "network",
         "service",
         "credential_reference",
         "runbook",

@@ -127,6 +127,31 @@ a:hover {
   justify-content: flex-end;
 }
 
+.language-switcher {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  min-height: 34px;
+  padding: 3px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: var(--surface-muted);
+}
+
+.language-switcher a {
+  padding: 5px 8px;
+  border-radius: 5px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.language-switcher a.active {
+  color: var(--text);
+  background: var(--surface);
+}
+
 .theme-toggle {
   display: inline-flex;
   gap: 3px;

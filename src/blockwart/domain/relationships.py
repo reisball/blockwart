@@ -12,7 +12,7 @@ from blockwart.domain.placement import (
 )
 from blockwart.domain.references import VALID_REFERENCE_KINDS, TypedReference
 
-ASSET_KINDS = frozenset({"host", "system", "netzwerk", "service"})
+ASSET_KINDS = frozenset({"host", "system", "network", "service"})
 ALL_KINDS = frozenset(VALID_REFERENCE_KINDS)
 
 
