@@ -12,6 +12,7 @@
     </script>
     <link rel="stylesheet" href="/static/app.css?v=061" />
     <script src="/static/theme.js?v=054" defer></script>
+    <script src="/static/detail.js?v=001" defer></script>
   </head>
   <body>
     <header class="topbar">
@@ -237,20 +238,29 @@
             <div class="panel-head">
               <h2 class="section-title">{{ t("panel.network") }}</h2>
               {% if can_write %}
-                <a class="button button-small button-muted" href="/objects/{{ object.id }}?edit=network">{{ t("detail.edit") }}</a>
+                <a class="button button-small button-muted" href="/objects/{{ object.id }}?edit=network">{{ t("detail.edit") if network_has_editable_rows else t("detail.add") }}</a>
               {% endif %}
             </div>
             {% if edit_section == "network" %}
+              {% if error %}
+                <div class="error" role="alert">{{ error }}</div>
+              {% endif %}
               <form class="form-grid" method="post" action="/objects/{{ object.id }}/network">
                 {% if can_edit_network_addresses %}
                   <h3>{{ t("network.addresses") }}</h3>
                   <div class="table-wrap">
                     <table class="table edit-table">
-                      <thead><tr><th>{{ t("network.ip") }}</th><th>{{ t("network.interface") }}</th><th>{{ t("network.scope") }}</th></tr></thead>
-                      <tbody>
+                      <thead>
+                        <tr>
+                          <th>{{ t("network.ip") }} <span class="required-marker" aria-hidden="true">*</span><span class="visually-hidden">{{ t("form.required") }}</span></th>
+                          <th>{{ t("network.interface") }} <span class="field-optional">{{ t("form.optional") }}</span></th>
+                          <th>{{ t("network.scope") }} <span class="field-optional">{{ t("form.optional") }}</span></th>
+                        </tr>
+                      </thead>
+                      <tbody data-row-list="network-addresses">
                         {% for address in network_address_rows %}
                           <tr>
-                            <td><input name="address_ip" value="{{ address.ip or '' }}" autocomplete="off" /></td>
+                            <td><input name="address_ip" value="{{ address.ip or '' }}" autocomplete="off" data-required-when-row-filled /></td>
                             <td><input name="address_interface" value="{{ address.interface or '' }}" autocomplete="off" /></td>
                             <td><input name="address_scope" value="{{ address.scope or address.network or '' }}" autocomplete="off" /></td>
                           </tr>
@@ -258,17 +268,32 @@
                       </tbody>
                     </table>
                   </div>
+                  <template data-row-template="network-addresses">
+                    <tr>
+                      <td><input name="address_ip" value="" autocomplete="off" data-required-when-row-filled /></td>
+                      <td><input name="address_interface" value="" autocomplete="off" /></td>
+                      <td><input name="address_scope" value="" autocomplete="off" /></td>
+                    </tr>
+                  </template>
+                  <button class="button button-small button-muted row-add-button" type="button" data-add-row="network-addresses">{{ t("network.add_address") }}</button>
                 {% endif %}
                 {% if can_edit_network_ports %}
                   <h3>{{ t("network.ports") }}</h3>
                   <div class="table-wrap">
                     <table class="table edit-table">
-                      <thead><tr><th>{{ t("network.port") }}</th><th>{{ t("network.protocol") }}</th><th>{{ t("network.purpose") }}</th><th>{{ t("network.exposure") }}</th></tr></thead>
-                      <tbody>
+                      <thead>
+                        <tr>
+                          <th>{{ t("network.port") }} <span class="required-marker" aria-hidden="true">*</span><span class="visually-hidden">{{ t("form.required") }}</span></th>
+                          <th>{{ t("network.protocol") }} <span class="field-optional">{{ t("form.optional") }}</span></th>
+                          <th>{{ t("network.purpose") }} <span class="field-optional">{{ t("form.optional") }}</span></th>
+                          <th>{{ t("network.exposure") }} <span class="field-optional">{{ t("form.optional") }}</span></th>
+                        </tr>
+                      </thead>
+                      <tbody data-row-list="network-ports">
                         {% for port in port_rows %}
                           <tr>
-                            <td><input name="port_value" value="{{ port.port or '' }}" inputmode="numeric" /></td>
-                            <td><input name="port_protocol" value="{{ port.protocol or 'tcp' }}" autocomplete="off" /></td>
+                            <td><input name="port_value" value="{{ port.port or '' }}" inputmode="numeric" data-required-when-row-filled /></td>
+                            <td><input name="port_protocol" value="{{ port.protocol or 'tcp' }}" autocomplete="off" data-empty-value="tcp" /></td>
                             <td><input name="port_purpose" value="{{ port.purpose or '' }}" autocomplete="off" /></td>
                             <td><input name="port_exposure" value="{{ port.exposure or '' }}" autocomplete="off" /></td>
                           </tr>
@@ -276,6 +301,15 @@
                       </tbody>
                     </table>
                   </div>
+                  <template data-row-template="network-ports">
+                    <tr>
+                      <td><input name="port_value" value="" inputmode="numeric" data-required-when-row-filled /></td>
+                      <td><input name="port_protocol" value="tcp" autocomplete="off" data-empty-value="tcp" /></td>
+                      <td><input name="port_purpose" value="" autocomplete="off" /></td>
+                      <td><input name="port_exposure" value="" autocomplete="off" /></td>
+                    </tr>
+                  </template>
+                  <button class="button button-small button-muted row-add-button" type="button" data-add-row="network-ports">{{ t("network.add_port") }}</button>
                 {% endif %}
                 {% if can_edit_network_endpoints %}
                   <h3>{{ t("asset.endpoint") }}</h3>
@@ -283,16 +317,16 @@
                     <table class="table edit-table">
                       <thead>
                         <tr>
-                          <th>{{ schema_fields_by_key.endpoint_type.label }}</th>
-                          <th>{{ schema_fields_by_key.endpoint_url.label }}</th>
-                          <th>{{ schema_fields_by_key.endpoint_port.label }}</th>
+                          <th>{{ schema_fields_by_key.endpoint_type.label }} <span class="required-marker" aria-hidden="true">*</span><span class="visually-hidden">{{ t("form.required") }}</span></th>
+                          <th>{{ schema_fields_by_key.endpoint_url.label }} <span class="required-marker" aria-hidden="true">*</span><span class="visually-hidden">{{ t("form.required") }}</span></th>
+                          <th>{{ schema_fields_by_key.endpoint_port.label }} <span class="field-optional">{{ t("form.optional") }}</span></th>
                         </tr>
                       </thead>
-                      <tbody>
+                      <tbody data-row-list="network-endpoints">
                         {% for endpoint in endpoint_rows %}
                           <tr>
                             <td>
-                              <select name="endpoint_type">
+                              <select name="endpoint_type" data-required-when-row-filled>
                                 <option value=""></option>
                                 {% set selected_endpoint_type = endpoint.type or endpoint.name or endpoint.label or '' %}
                                 {% for option in endpoint_types %}
@@ -300,13 +334,28 @@
                                 {% endfor %}
                               </select>
                             </td>
-                            <td><input name="endpoint_url" value="{{ endpoint.url or endpoint.endpoint or endpoint.host or '' }}" autocomplete="off" placeholder="{{ schema_fields_by_key.endpoint_url.placeholder }}" /></td>
+                            <td><input name="endpoint_url" value="{{ endpoint.url or endpoint.endpoint or endpoint.host or '' }}" autocomplete="off" placeholder="{{ schema_fields_by_key.endpoint_url.placeholder }}" data-required-when-row-filled /></td>
                             <td><input name="endpoint_port" value="{{ endpoint.port or '' }}" inputmode="numeric" placeholder="{{ schema_fields_by_key.endpoint_port.placeholder }}" /></td>
                           </tr>
                         {% endfor %}
                       </tbody>
                     </table>
                   </div>
+                  <template data-row-template="network-endpoints">
+                    <tr>
+                      <td>
+                        <select name="endpoint_type" data-required-when-row-filled>
+                          <option value=""></option>
+                          {% for option in endpoint_types %}
+                            <option value="{{ option }}">{{ option }}</option>
+                          {% endfor %}
+                        </select>
+                      </td>
+                      <td><input name="endpoint_url" value="" autocomplete="off" placeholder="{{ schema_fields_by_key.endpoint_url.placeholder }}" data-required-when-row-filled /></td>
+                      <td><input name="endpoint_port" value="" inputmode="numeric" placeholder="{{ schema_fields_by_key.endpoint_port.placeholder }}" /></td>
+                    </tr>
+                  </template>
+                  <button class="button button-small button-muted row-add-button" type="button" data-add-row="network-endpoints">{{ t("network.add_endpoint") }}</button>
                 {% endif %}
                 <div class="button-row">
                   <button type="submit">{{ t("detail.save") }}</button>
@@ -381,15 +430,25 @@
             <div class="panel-head">
               <h2 class="section-title">{{ t("panel.access") }}</h2>
               {% if can_write %}
-                <a class="button button-small button-muted" href="/objects/{{ object.id }}?edit=access">{{ t("detail.edit") }}</a>
+                <a class="button button-small button-muted" href="/objects/{{ object.id }}?edit=access">{{ t("detail.edit") if access_has_rows else t("detail.add") }}</a>
               {% endif %}
             </div>
             {% if edit_section == "access" %}
+              {% if error %}
+                <div class="error" role="alert">{{ error }}</div>
+              {% endif %}
               <form class="form-grid" method="post" action="/objects/{{ object.id }}/access">
                 <div class="table-wrap">
                   <table class="table edit-table">
-                    <thead><tr><th>{{ t("access.source") }}</th><th>{{ t("access.type") }}</th><th>{{ t("access.endpoint") }}</th><th>{{ t("access.auth") }}</th></tr></thead>
-                    <tbody>
+                    <thead>
+                      <tr>
+                        <th>{{ t("access.source") }}</th>
+                        <th>{{ t("access.type") }} <span class="required-marker" aria-hidden="true">*</span><span class="visually-hidden">{{ t("form.required") }}</span></th>
+                        <th>{{ t("access.endpoint") }} <span class="required-marker" aria-hidden="true">*</span><span class="visually-hidden">{{ t("form.required") }}</span></th>
+                        <th>{{ t("access.auth") }} <span class="field-optional">{{ t("form.optional") }}</span></th>
+                      </tr>
+                    </thead>
+                    <tbody data-row-list="access-methods">
                       {% for method in access_method_rows %}
                         <tr>
                           <td>
@@ -397,14 +456,27 @@
                             <input type="hidden" name="method_ref" value="{{ method.source_ref }}" />
                             <input type="hidden" name="method_index" value="{{ method.index }}" />
                           </td>
-                          <td><input name="method_type" value="{{ method.type or '' }}" autocomplete="off" /></td>
-                          <td><input name="method_endpoint" value="{{ method.endpoint or '' }}" autocomplete="off" /></td>
+                          <td><input name="method_type" value="{{ method.type or '' }}" autocomplete="off" data-required-when-row-filled /></td>
+                          <td><input name="method_endpoint" value="{{ method.endpoint or '' }}" autocomplete="off" data-required-when-row-filled /></td>
                           <td><input name="method_auth_mode" value="{{ method.auth_mode or '' }}" autocomplete="off" /></td>
                         </tr>
                       {% endfor %}
                     </tbody>
                   </table>
                 </div>
+                <template data-row-template="access-methods">
+                  <tr>
+                    <td>
+                      <span class="badge">{{ access_add_row.source_kind }}</span> {{ access_add_row.source_label }}
+                      <input type="hidden" name="method_ref" value="{{ access_add_row.source_ref }}" />
+                      <input type="hidden" name="method_index" value="{{ access_add_row.index }}" />
+                    </td>
+                    <td><input name="method_type" value="" autocomplete="off" data-required-when-row-filled /></td>
+                    <td><input name="method_endpoint" value="" autocomplete="off" data-required-when-row-filled /></td>
+                    <td><input name="method_auth_mode" value="" autocomplete="off" /></td>
+                  </tr>
+                </template>
+                <button class="button button-small button-muted row-add-button" type="button" data-add-row="access-methods">{{ t("access.add_method") }}</button>
                 <div class="button-row">
                   <button type="submit">{{ t("detail.save") }}</button>
                   <a class="button button-muted" href="/objects/{{ object.id }}">{{ t("detail.cancel") }}</a>
