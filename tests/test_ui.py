@@ -1194,7 +1194,8 @@ def test_explorer_history_state_is_small_and_session_scoped() -> None:
     assert "expandedTreeNodes" in source
     assert "scrollTop" in source
     assert "windowScrollY" in source
-    assert "detailHeading?.focus" in source
+    assert "focusDetailHeading()" in source
+    assert 'window.addEventListener("pageshow"' in source
     assert 'searchParams.set("state"' not in source
 
 
