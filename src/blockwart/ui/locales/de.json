@@ -28,6 +28,7 @@
   "auth.logout": "Abmelden",
   "auth.password": "Passwort",
   "auth.principal_id": "Principal-ID",
+  "auth.rate_limited": "Zu viele Anmeldeversuche. Bitte vor dem nächsten Versuch kurz warten.",
   "auth.subtitle": "Menschen und Service-Accounts verwenden einen gemeinsamen stabilen Autorisierungs-Principal.",
   "auth.title": "Identitätszugriff",
   "app.catalog_tagline": "BETRIEBSKATALOG",

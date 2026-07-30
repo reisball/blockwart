@@ -53,6 +53,10 @@ closed with `credential_configuration_error`. Token values are never MCP tool
 arguments and never appear in tool output. File re-reading allows credential
 rotation without restarting the MCP process.
 
+Bearer credentials may use plain HTTP only for loopback targets. Non-loopback
+targets require HTTPS, and the MCP client rejects redirects instead of risking
+credential forwarding across an origin or scheme boundary.
+
 ## Secret Handling
 
 The MCP wrapper never resolves credential values. It only returns whatever the read-only v1 API

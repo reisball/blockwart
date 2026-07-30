@@ -24,6 +24,7 @@ from blockwart.services.identity import (
     issue_browser_session,
     issue_login_challenge,
     issue_service_token,
+    prune_security_events,
     record_security_event,
     revoke_browser_session,
     revoke_service_token,
@@ -337,6 +338,90 @@ def test_browser_session_csrf_logout_expiry_and_password_rotation(
                 )
             ).all()
         )
+        rotation_event = session.scalar(
+            select(SecurityEvent).where(
+                SecurityEvent.event_type == "password_credential_rotated"
+            )
+        )
+        assert rotation_event is not None
+        assert rotation_event.principal_id == principal.id
+        assert rotation_event.details_json == "{}"
+
+
+def test_password_rotation_event_and_hash_roll_back_together(
+    alembic_session_factory,
+) -> None:
+    with alembic_session_factory() as session:
+        with transaction(session):
+            principal = create_human_principal(
+                session,
+                login="rollback.password",
+                display_name="Rollback Password",
+                password=HUMAN_PASSWORD,
+            )
+        original_hash = session.get(PasswordCredential, principal.id).password_hash
+
+        with pytest.raises(RuntimeError, match="force rollback"):
+            with transaction(session):
+                set_human_password(
+                    session,
+                    principal_id=principal.id,
+                    password=ROTATED_PASSWORD,
+                )
+                raise RuntimeError("force rollback")
+
+        credential = session.get(PasswordCredential, principal.id)
+        assert credential is not None
+        assert credential.password_hash == original_hash
+        assert (
+            session.scalar(
+                select(SecurityEvent).where(
+                    SecurityEvent.event_type == "password_credential_rotated"
+                )
+            )
+            is None
+        )
+
+
+def test_security_event_retention_removes_expired_and_oldest_overflow(
+    alembic_session_factory,
+) -> None:
+    now = utc_now()
+    with alembic_session_factory() as session:
+        with transaction(session):
+            for index, created_at in enumerate(
+                [
+                    now - timedelta(days=2),
+                    now - timedelta(minutes=3),
+                    now - timedelta(minutes=2),
+                    now - timedelta(minutes=1),
+                ]
+            ):
+                record_security_event(
+                    session,
+                    event_type=f"retention_{index}",
+                    outcome="failure",
+                    channel="system",
+                    details={},
+                    now=created_at,
+                )
+        with transaction(session):
+            assert (
+                prune_security_events(
+                    session,
+                    retention_days=1,
+                    max_rows=2,
+                    now=now,
+                )
+                == 2
+            )
+
+        assert [
+            event.event_type
+            for event in session.scalars(
+                select(SecurityEvent).order_by(SecurityEvent.created_at)
+            ).all()
+        ] == ["retention_2", "retention_3"]
 
 
 def test_login_challenge_is_one_time_and_expiring(

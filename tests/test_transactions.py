@@ -386,6 +386,55 @@ def test_markdown_replace_rolls_back_on_database_error(
         assert session.get(CatalogObject, "partial-replacement") is None
 
 
+def test_markdown_replace_preserves_same_id_revision_monotonicity(
+    tmp_path,
+    alembic_database_factory,
+) -> None:
+    database = alembic_database_factory("replace-revision.db")
+    with database.sessions() as session:
+        _add_object(
+            session,
+            object_id="revision-demo",
+            kind="service",
+        )
+        session.flush()
+        session.get(CatalogObject, "revision-demo").revision = 7
+        session.commit()
+
+    tools_path = tmp_path / "TOOLS.md"
+    tools_path.write_text(
+        "\n".join(
+            [
+                "| System | Typ | IP:Port | Status | Access | Auth | Nutzung | Ref | Skill |",
+                "|--------|-----|---------|--------|--------|------|---------|-----|-------|",
+                "| Revision Demo | Service | 192.0.2.12:443 | ✅ | Web | none | Demo | - | - |",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    assert (
+        import_markdown_cli.main(
+            [
+                "--database-url",
+                database.database_url,
+                "--tools",
+                str(tools_path),
+                "--references-root",
+                str(tmp_path),
+                "--apply",
+                "--replace",
+            ]
+        )
+        == 0
+    )
+
+    with database.sessions() as session:
+        row = session.get(CatalogObject, "revision-demo")
+        assert row is not None
+        assert row.revision >= 8
+
+
 def test_seed_cli_rolls_back_and_redacts_database_error(
     tmp_path,
     monkeypatch,

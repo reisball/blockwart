@@ -35,6 +35,13 @@ server-stored pre-authentication challenge. Authenticated browser sessions are
 opaque, revocable, time-limited, `HttpOnly`, and `SameSite=Strict`; state
 changes require the session-bound CSRF value.
 
+Password work is bounded before Argon2 verification by configurable global,
+per-source, and per-account-fingerprint limits plus a per-process concurrency
+cap. Challenge issuance has separate global and per-source limits so anonymous
+GET requests cannot grow the challenge table without bound. The deployment
+uses one application process by default; multi-process deployments must size
+the documented limits per worker or add an external shared limiter.
+
 ## Roles and scope
 
 An object grant assigns one role to one principal at one object with either
@@ -66,7 +73,9 @@ reparenting changes access without a stale application cache.
 Every object has a positive monotone `revision`. Object and relationship
 mutations advance the affected revision. Grant creation and revocation advance
 the anchor object's revision and append an object audit event. A last active
-subtree owner cannot be removed accidentally.
+subtree owner cannot be removed accidentally. The same effective-owner guard
+applies when a principal is deactivated or a placement edge is removed, so an
+existing object or descendant cannot be orphaned through a lifecycle shortcut.
 
 ## Bootstrap and credential operations
 
@@ -117,6 +126,11 @@ security-event stream. Successful service-token use updates only its
 contain stable event codes, channel, principal where known, request ID, and
 redacted structured details. User-supplied login names, passwords, tokens,
 cookies, and hashes are not recorded.
+
+Security events are immutable while retained. Periodic login-path maintenance
+removes events older than the configured retention and caps the remaining row
+count; repeated throttle denials are aggregated to at most one event per
+limiter bucket and window.
 
 Object and grant mutations use the existing object audit stream and record the
 actor principal, channel, request ID, old/new revision, and structured

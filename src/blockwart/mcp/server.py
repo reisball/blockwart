@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import ipaddress
 import json
 import logging
 import os
@@ -9,8 +10,8 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 from urllib.error import HTTPError, URLError
-from urllib.parse import quote, urlencode
-from urllib.request import Request, urlopen
+from urllib.parse import quote, urlencode, urlsplit
+from urllib.request import HTTPRedirectHandler, Request, build_opener
 
 import mcp.server.stdio
 import mcp.types as types
@@ -50,6 +51,11 @@ class UpstreamError(RuntimeError):
         self.code = code
         self.public_message = public_message
         self.correlation_id = correlation_id
+
+
+class _RejectRedirectHandler(HTTPRedirectHandler):
+    def redirect_request(self, request, file_pointer, code, message, headers, new_url):
+        return None
 
 
 READ_ONLY_ANNOTATIONS: JSON = {
@@ -222,10 +228,11 @@ def fetch_json(path: str, params: JSON, *, base_url: str | None = None) -> JSON:
     headers = {}
     api_token = _api_token()
     if api_token is not None:
+        _require_safe_token_transport(url)
         headers["Authorization"] = f"Bearer {api_token}"
     request = Request(url, headers=headers, method="GET")
     try:
-        with urlopen(request, timeout=10) as response:
+        with build_opener(_RejectRedirectHandler()).open(request, timeout=10) as response:
             try:
                 return json.loads(response.read().decode("utf-8"))
             except (UnicodeDecodeError, json.JSONDecodeError) as exc:
@@ -240,6 +247,29 @@ def fetch_json(path: str, params: JSON, *, base_url: str | None = None) -> JSON:
             "upstream_unavailable",
             "Blockwart Agent API is unavailable.",
         ) from exc
+
+
+def _require_safe_token_transport(url: str) -> None:
+    parsed = urlsplit(url)
+    hostname = parsed.hostname
+    if parsed.scheme == "https":
+        return
+    if parsed.scheme == "http" and hostname is not None and _is_loopback_host(hostname):
+        return
+    raise UpstreamError(
+        "credential_configuration_error",
+        "Blockwart MCP bearer credentials require HTTPS outside loopback.",
+    )
+
+
+def _is_loopback_host(hostname: str) -> bool:
+    normalized = hostname.rstrip(".").casefold()
+    if normalized == "localhost" or normalized.endswith(".localhost"):
+        return True
+    try:
+        return ipaddress.ip_address(normalized).is_loopback
+    except ValueError:
+        return False
 
 
 def _api_token() -> str | None:

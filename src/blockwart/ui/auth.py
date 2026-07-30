@@ -18,10 +18,12 @@ from blockwart.services.identity import (
     consume_login_challenge,
     issue_browser_session,
     issue_login_challenge,
+    prune_security_events,
     record_security_event,
     revoke_browser_session,
     verify_browser_csrf,
 )
+from blockwart.services.login_protection import LoginProtector
 from blockwart.ui.i18n import translation_context
 from blockwart.ui.paths import TEMPLATE_DIR
 
@@ -61,7 +63,16 @@ def auth_page(
             csrf_token=csrf_cookie,
         )
 
+    protector = _login_protector(request)
+    if not protector.allow_challenge(source=_request_source(request)):
+        return _rate_limited_response(request, settings=settings)
     with transaction(session):
+        if protector.security_event_prune_due():
+            prune_security_events(
+                session,
+                retention_days=settings.auth_security_event_retention_days,
+                max_rows=settings.auth_security_event_max_rows,
+            )
         challenge = issue_login_challenge(
             session,
             ttl_seconds=settings.auth_login_challenge_ttl_seconds,
@@ -89,54 +100,79 @@ def login(
     session: Annotated[Session, Depends(get_session)],
 ):
     settings = _settings(request)
+    protector = _login_protector(request)
+    source = _request_source(request)
     request_id = str(uuid4())
     challenge_cookie = request.cookies.get(LOGIN_CHALLENGE_COOKIE_NAME)
-    with transaction(session):
-        challenge_valid = consume_login_challenge(
-            session,
-            cookie_value=challenge_cookie,
-            form_value=login_challenge,
-        )
-        if not challenge_valid:
-            record_security_event(
+    with protector.acquire_password_attempt(source=source, login=login) as attempt:
+        if not attempt.allowed:
+            if attempt.event_due:
+                with transaction(session):
+                    record_security_event(
+                        session,
+                        event_type="password_authentication_throttled",
+                        outcome="denied",
+                        channel="ui",
+                        request_id=request_id,
+                        details={"reason": "rate_limited"},
+                    )
+            return _rate_limited_response(request, settings=settings)
+
+        with transaction(session):
+            challenge_valid = consume_login_challenge(
                 session,
-                event_type="login_csrf",
-                outcome="denied",
-                channel="ui",
-                request_id=request_id,
-                details={"reason": "invalid_challenge"},
+                cookie_value=challenge_cookie,
+                form_value=login_challenge,
             )
-            replacement = issue_login_challenge(
-                session,
-                ttl_seconds=settings.auth_login_challenge_ttl_seconds,
-            )
-            principal = None
-            issued_session = None
-        else:
-            principal = authenticate_password(
-                session,
-                login=login,
-                password=password,
-                channel="ui",
-                request_id=request_id,
-            )
-            replacement = (
-                issue_login_challenge(
+            if not challenge_valid:
+                record_security_event(
                     session,
-                    ttl_seconds=settings.auth_login_challenge_ttl_seconds,
+                    event_type="login_csrf",
+                    outcome="denied",
+                    channel="ui",
+                    request_id=request_id,
+                    details={"reason": "invalid_challenge"},
                 )
-                if principal is None
-                else None
-            )
-            issued_session = (
-                issue_browser_session(
+                replacement = (
+                    issue_login_challenge(
+                        session,
+                        ttl_seconds=settings.auth_login_challenge_ttl_seconds,
+                    )
+                    if protector.allow_challenge(source=source)
+                    else None
+                )
+                principal = None
+                issued_session = None
+
+        if challenge_valid:
+            with transaction(session):
+                principal = authenticate_password(
                     session,
-                    principal_id=principal.id,
-                    ttl_seconds=settings.auth_session_ttl_seconds,
+                    login=login,
+                    password=password,
+                    channel="ui",
+                    request_id=request_id,
                 )
-                if principal is not None
-                else None
-            )
+                replacement = (
+                    issue_login_challenge(
+                        session,
+                        ttl_seconds=settings.auth_login_challenge_ttl_seconds,
+                    )
+                    if (
+                        principal is None
+                        and protector.allow_challenge(source=source)
+                    )
+                    else None
+                )
+                issued_session = (
+                    issue_browser_session(
+                        session,
+                        principal_id=principal.id,
+                        ttl_seconds=settings.auth_session_ttl_seconds,
+                    )
+                    if principal is not None
+                    else None
+                )
 
     if issued_session is not None:
         response = RedirectResponse(url="/", status_code=303)
@@ -168,7 +204,8 @@ def login(
         response.headers["Cache-Control"] = "no-store"
         return response
 
-    assert replacement is not None
+    if replacement is None:
+        return _rate_limited_response(request, settings=settings)
     i18n = translation_context(request)
     response = _auth_response(
         request,
@@ -272,6 +309,21 @@ def _auth_response(
     return response
 
 
+def _rate_limited_response(
+    request: Request,
+    *,
+    settings: Settings,
+) -> HTMLResponse:
+    i18n = translation_context(request)
+    response = _auth_response(
+        request,
+        error=i18n["t"]("auth.rate_limited"),
+        status_code=429,
+    )
+    response.headers["Retry-After"] = str(settings.auth_login_rate_window_seconds)
+    return response
+
+
 def _set_login_challenge_cookie(
     response: HTMLResponse,
     *,
@@ -309,3 +361,14 @@ def _settings(request: Request) -> Settings:
     if not isinstance(settings, Settings):
         raise RuntimeError("Blockwart settings are not initialized")
     return settings
+
+
+def _login_protector(request: Request) -> LoginProtector:
+    protector = getattr(request.app.state, "login_protector", None)
+    if not isinstance(protector, LoginProtector):
+        raise RuntimeError("Blockwart login protection is not initialized")
+    return protector
+
+
+def _request_source(request: Request) -> str:
+    return request.client.host if request.client is not None else "unknown"

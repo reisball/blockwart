@@ -10,7 +10,7 @@ from blockwart.api.deps import get_session
 from blockwart.config import Settings
 from blockwart.db.session import transaction
 from blockwart.main import create_app
-from blockwart.models import BrowserSession, SecurityEvent
+from blockwart.models import BrowserSession, LoginChallenge, SecurityEvent
 from blockwart.services.identity import create_human_principal
 from blockwart.ui.auth import (
     AUTH_CSRF_COOKIE_NAME,
@@ -222,3 +222,102 @@ def test_https_mode_marks_all_identity_cookies_secure(
         "Secure" in header
         for header in login.headers.get_list("set-cookie")
     )
+
+
+def test_login_throttle_is_generic_and_aggregates_denial_events(
+    identity_session_factory,
+) -> None:
+    session_factory, _ = identity_session_factory
+    app = create_app(
+        settings=Settings(
+            auth_login_source_attempt_limit=1,
+            auth_login_account_attempt_limit=10,
+            auth_login_global_attempt_limit=10,
+        )
+    )
+
+    def override_get_session() -> Generator[Session, None, None]:
+        with session_factory() as session:
+            yield session
+
+    app.dependency_overrides[get_session] = override_get_session
+    with TestClient(app) as client:
+        page = client.get("/auth")
+        challenge = _hidden(page, "login_challenge")
+        first = client.post(
+            "/auth/login",
+            data={
+                "login": "missing.first",
+                "password": "invalid password candidate",
+                "login_challenge": challenge,
+            },
+        )
+        replacement = _hidden(first, "login_challenge")
+        second = client.post(
+            "/auth/login",
+            data={
+                "login": "missing.second",
+                "password": "another invalid candidate",
+                "login_challenge": replacement,
+            },
+        )
+        third = client.post(
+            "/auth/login",
+            data={
+                "login": "missing.third",
+                "password": "third invalid candidate",
+                "login_challenge": replacement,
+            },
+        )
+
+    assert first.status_code == 401
+    assert second.status_code == 429
+    assert third.status_code == 429
+    assert second.headers["retry-after"] == "60"
+    assert 'name="login"' not in second.text
+    combined = f"{second.text}\n{third.text}"
+    assert "missing.second" not in combined
+    assert "missing.third" not in combined
+    with session_factory() as session:
+        password_failures = session.scalars(
+            select(SecurityEvent).where(
+                SecurityEvent.event_type == "password_authentication"
+            )
+        ).all()
+        throttled = session.scalars(
+            select(SecurityEvent).where(
+                SecurityEvent.event_type == "password_authentication_throttled"
+            )
+        ).all()
+        assert len(password_failures) == 1
+        assert len(throttled) == 1
+        serialized = "\n".join(event.details_json for event in throttled)
+        assert "missing.second" not in serialized
+        assert "missing.third" not in serialized
+
+
+def test_login_challenge_issuance_is_bounded_before_database_write(
+    identity_session_factory,
+) -> None:
+    session_factory, _ = identity_session_factory
+    app = create_app(
+        settings=Settings(
+            auth_login_source_challenge_limit=1,
+            auth_login_global_challenge_limit=1,
+        )
+    )
+
+    def override_get_session() -> Generator[Session, None, None]:
+        with session_factory() as session:
+            yield session
+
+    app.dependency_overrides[get_session] = override_get_session
+    with TestClient(app) as client:
+        first = client.get("/auth")
+        second = client.get("/auth")
+
+    assert first.status_code == 200
+    assert second.status_code == 429
+    assert 'name="login"' not in second.text
+    with session_factory() as session:
+        assert len(session.scalars(select(LoginChallenge)).all()) == 1

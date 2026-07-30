@@ -106,6 +106,32 @@ def _agent_api_server():
         thread.join(timeout=5)
 
 
+@contextmanager
+def _redirect_server(location: str):
+    requests: list[str | None] = []
+
+    class RedirectHandler(BaseHTTPRequestHandler):
+        def do_GET(self) -> None:
+            requests.append(self.headers.get("Authorization"))
+            self.send_response(302)
+            self.send_header("Location", location)
+            self.end_headers()
+
+        def log_message(self, format: str, *args: object) -> None:
+            pass
+
+    httpd = ThreadingHTTPServer(("127.0.0.1", 0), RedirectHandler)
+    thread = threading.Thread(target=httpd.serve_forever, daemon=True)
+    thread.start()
+    try:
+        host, port = httpd.server_address
+        yield f"http://{host}:{port}", requests
+    finally:
+        httpd.shutdown()
+        httpd.server_close()
+        thread.join(timeout=5)
+
+
 def test_mcp_console_entrypoint_uses_newline_delimited_jsonrpc() -> None:
     process = subprocess.Popen(
         [str(_installed_entrypoint())],
@@ -327,6 +353,49 @@ def test_mcp_forwards_bearer_only_from_runtime_environment(
         "token" not in tool["inputSchema"].get("properties", {})
         for tool in TOOLS
     )
+
+
+def test_mcp_rejects_redirect_without_forwarding_bearer_to_second_origin(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    runtime_token = "bwst_00000000-0000-0000-0000-000000000001.redirect-secret"
+    monkeypatch.setenv("BLOCKWART_API_TOKEN", runtime_token)
+    monkeypatch.delenv("BLOCKWART_API_TOKEN_FILE", raising=False)
+
+    with _agent_api_server() as (target_url, target_requests):
+        with _redirect_server(f"{target_url}/api/v1/objects") as (
+            redirect_url,
+            redirect_requests,
+        ):
+            with pytest.raises(mcp_server.UpstreamError) as exc_info:
+                mcp_server.fetch_json(
+                    "/api/v1/objects",
+                    {},
+                    base_url=redirect_url,
+                )
+
+    assert exc_info.value.code == "upstream_http_error"
+    assert redirect_requests == [f"Bearer {runtime_token}"]
+    assert target_requests == []
+
+
+def test_mcp_requires_https_for_non_loopback_bearer_transport(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv(
+        "BLOCKWART_API_TOKEN",
+        "bwst_00000000-0000-0000-0000-000000000001.transport-secret",
+    )
+    monkeypatch.delenv("BLOCKWART_API_TOKEN_FILE", raising=False)
+
+    with pytest.raises(mcp_server.UpstreamError) as exc_info:
+        mcp_server.fetch_json(
+            "/api/v1/objects",
+            {},
+            base_url="http://blockwart.example.test",
+        )
+
+    assert exc_info.value.code == "credential_configuration_error"
 
 
 def test_mcp_token_file_is_reloaded_and_ambiguous_configuration_fails(

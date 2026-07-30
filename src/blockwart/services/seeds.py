@@ -1,6 +1,7 @@
 import json
 from copy import deepcopy
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -24,7 +25,7 @@ from blockwart.domain.relationships import (
 from blockwart.models import CatalogObject, Relationship
 from blockwart.schemas.catalog import CatalogObjectIn
 from blockwart.services.audit import add_audit_event
-from blockwart.services.catalog import ensure_kind_change_allowed
+from blockwart.services.catalog import create_relationship, ensure_kind_change_allowed
 
 
 @dataclass(frozen=True)
@@ -140,14 +141,39 @@ def import_seed_payload(
             continue
 
         ensure_kind_change_allowed(session, row, obj.kind)
-        row.kind = obj.kind
-        row.label = obj.label
-        row.status = target_status
-        row.lifecycle = target_state.lifecycle if target_state is not None else None
-        row.health = target_state.health if target_state is not None else None
-        row.summary = obj.summary
-        row.data_json = data_json
-        row.provenance_json = provenance_json
+        target_values = (
+            obj.kind,
+            obj.label,
+            target_status,
+            target_state.lifecycle if target_state is not None else None,
+            target_state.health if target_state is not None else None,
+            obj.summary,
+            data_json,
+            provenance_json,
+        )
+        current_values = (
+            row.kind,
+            row.label,
+            row.status,
+            row.lifecycle,
+            row.health,
+            row.summary,
+            row.data_json,
+            row.provenance_json,
+        )
+        if current_values != target_values:
+            (
+                row.kind,
+                row.label,
+                row.status,
+                row.lifecycle,
+                row.health,
+                row.summary,
+                row.data_json,
+                row.provenance_json,
+            ) = target_values
+            row.revision += 1
+            row.updated_at = datetime.now(UTC).replace(tzinfo=None)
         _write_seed_audit(
             session,
             obj.id,
@@ -156,6 +182,7 @@ def import_seed_payload(
         )
         imported_objects += 1
 
+    session.flush()
     inserted_relationships = 0
     for relationship in relationships:
         exists = session.scalar(
@@ -166,14 +193,15 @@ def import_seed_payload(
             )
         )
         if exists is None:
-            session.add(Relationship(**relationship))
-            inserted_relationships += 1
-            _write_seed_audit(
+            create_relationship(
                 session,
-                None,
-                "seed_relationship_create",
-                relationship,
+                from_ref=relationship["from_ref"],
+                relation_type=relationship["relation_type"],
+                to_ref=relationship["to_ref"],
+                audit_action="seed_relationship_create",
+                audit_actor="seed-import",
             )
+            inserted_relationships += 1
 
     session.flush()
     return SeedImportResult(

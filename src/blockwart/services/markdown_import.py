@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from sqlalchemy import delete, select
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from blockwart.domain.asset_state import AssetState
@@ -15,10 +15,15 @@ from blockwart.domain.provenance import (
 )
 from blockwart.models import CatalogObject, Relationship
 from blockwart.schemas.catalog import CatalogObjectIn
+from blockwart.services.access import (
+    active_owner_covered_object_ids,
+    ensure_owner_coverage_preserved,
+)
 from blockwart.services.catalog import (
     create_relationship,
     current_object_kinds,
     delete_object,
+    delete_relationship,
     upsert_object,
 )
 from blockwart.services.seeds import SeedImportResult
@@ -253,6 +258,7 @@ def import_tools_markdown(
     *,
     references_root: str | Path | None = None,
 ) -> SeedImportResult:
+    previously_covered_ids = active_owner_covered_object_ids(session)
     plan = build_tools_import_plan(tools_path, references_root=references_root)
     objects = plan.payload["objects"]
     relationships = plan.payload["relationships"]
@@ -307,6 +313,10 @@ def import_tools_markdown(
         if existing is None:
             inserted_relationships += 1
 
+    ensure_owner_coverage_preserved(
+        session,
+        previously_covered_ids=previously_covered_ids,
+    )
     return SeedImportResult(
         objects_imported=imported_objects,
         relationships_imported=inserted_relationships,
@@ -341,12 +351,19 @@ def _remove_stale_workspace_services(session: Session, objects: list[dict[str, A
         if not _is_workspace_import(row):
             continue
         stale_ref = f"service:{row.id}"
-        session.execute(
-            delete(Relationship).where(
+        stale_relationships = session.scalars(
+            select(Relationship).where(
                 (Relationship.from_ref == stale_ref) | (Relationship.to_ref == stale_ref)
             )
-        )
-        session.flush()
+        ).all()
+        for stale_relationship in stale_relationships:
+            delete_relationship(
+                session,
+                stale_relationship.id,
+                audit_action="markdown_relationship_delete",
+                audit_actor="markdown-import",
+                enforce_owner_coverage=False,
+            )
         delete_object(session, row.id)
     session.flush()
 
@@ -373,8 +390,13 @@ def _remove_stale_workspace_host_relationships(
             continue
         if not _is_workspace_import(stale_object):
             continue
-        session.delete(stale_relationship)
-        session.flush()
+        delete_relationship(
+            session,
+            stale_relationship.id,
+            audit_action="markdown_relationship_delete",
+            audit_actor="markdown-import",
+            enforce_owner_coverage=False,
+        )
         remaining_relationship = session.scalar(
             select(Relationship).where(
                 (Relationship.from_ref == stale_relationship.from_ref)

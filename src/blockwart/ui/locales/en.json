@@ -28,6 +28,7 @@
   "auth.logout": "Sign out",
   "auth.password": "Password",
   "auth.principal_id": "Principal ID",
+  "auth.rate_limited": "Too many sign-in requests. Please wait before trying again.",
   "auth.subtitle": "Human and service identities share one stable authorization principal.",
   "auth.title": "Identity access",
   "app.catalog_tagline": "OPS CATALOG",

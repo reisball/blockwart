@@ -12,7 +12,7 @@ from uuid import UUID, uuid4
 from argon2 import PasswordHasher
 from argon2.exceptions import InvalidHashError, VerificationError
 from argon2.low_level import Type
-from sqlalchemy import delete, or_, select
+from sqlalchemy import delete, func, or_, select
 from sqlalchemy.orm import Session
 
 from blockwart.domain.auth import PrincipalContext, PrincipalType
@@ -24,6 +24,9 @@ from blockwart.models import (
     Principal,
     SecurityEvent,
     ServiceToken,
+)
+from blockwart.services.access import (
+    ensure_principal_deactivation_preserves_owner_coverage,
 )
 
 LOGIN_PATTERN = re.compile(r"^[a-z0-9][a-z0-9._-]{1,126}[a-z0-9]$")
@@ -223,6 +226,15 @@ def set_human_password(
     revoke_all_browser_sessions(
         session,
         principal_id=principal_id,
+        now=timestamp,
+    )
+    record_security_event(
+        session,
+        event_type="password_credential_rotated",
+        outcome="success",
+        channel="cli",
+        principal_id=principal_id,
+        details={},
         now=timestamp,
     )
     principal.updated_at = timestamp
@@ -666,6 +678,10 @@ def deactivate_principal(
         raise IdentityNotFound("principal not found")
     if not principal.active:
         return False
+    ensure_principal_deactivation_preserves_owner_coverage(
+        session,
+        principal_id=principal_id,
+    )
     timestamp = now or utc_now()
     principal.active = False
     principal.updated_at = timestamp
@@ -695,6 +711,36 @@ def deactivate_principal(
     )
     session.flush()
     return True
+
+
+def prune_security_events(
+    session: Session,
+    *,
+    retention_days: int,
+    max_rows: int,
+    now: datetime | None = None,
+) -> int:
+    if retention_days < 1:
+        raise IdentityError("security event retention must be at least one day")
+    if max_rows < 1:
+        raise IdentityError("security event maximum must be positive")
+    timestamp = now or utc_now()
+    cutoff = timestamp - timedelta(days=retention_days)
+    expired = session.execute(
+        delete(SecurityEvent).where(SecurityEvent.created_at < cutoff)
+    ).rowcount
+    remaining = session.scalar(select(func.count()).select_from(SecurityEvent)) or 0
+    overflow = max(remaining - max_rows, 0)
+    if overflow:
+        oldest_ids = select(SecurityEvent.id).order_by(
+            SecurityEvent.created_at,
+            SecurityEvent.id,
+        ).limit(overflow)
+        session.execute(
+            delete(SecurityEvent).where(SecurityEvent.id.in_(oldest_ids))
+        )
+    session.flush()
+    return int(expired or 0) + overflow
 
 
 def record_security_event(

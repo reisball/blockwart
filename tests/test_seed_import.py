@@ -149,6 +149,44 @@ def test_seed_accepts_explicit_asset_state_and_derives_compatibility_status(
     )
 
 
+def test_seed_object_and_relationship_mutations_advance_revisions(
+    session: Session,
+) -> None:
+    payload = {
+        "schema_version": 1,
+        "objects": [
+            {"id": "seed-host", "kind": "host", "label": "Seed Host", "data": {}},
+            {
+                "id": "seed-service",
+                "kind": "service",
+                "label": "Seed Service",
+                "data": {},
+            },
+        ],
+        "relationships": [
+            {
+                "from_ref": "host:seed-host",
+                "relation_type": "hosts",
+                "to_ref": "service:seed-service",
+            }
+        ],
+    }
+
+    import_seed_payload(session, payload, source_ref="revision-seed")
+    host = session.get(CatalogObject, "seed-host")
+    service = session.get(CatalogObject, "seed-service")
+    assert host is not None
+    assert service is not None
+    assert (host.revision, service.revision) == (2, 2)
+
+    payload["objects"][0]["label"] = "Updated Seed Host"
+    import_seed_payload(session, payload, source_ref="revision-seed")
+    assert (host.revision, service.revision) == (3, 2)
+
+    import_seed_payload(session, payload, source_ref="revision-seed")
+    assert (host.revision, service.revision) == (3, 2)
+
+
 def test_pilot_seed_imports_core_ids_and_kinds(session: Session) -> None:
     import_seed_file(session, SEED_PATH)
 

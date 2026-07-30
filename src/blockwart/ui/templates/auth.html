@@ -53,7 +53,7 @@
             <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
             <button type="submit">{{ t("auth.logout") }}</button>
           </form>
-        {% else %}
+        {% elif login_challenge %}
           <h2 class="section-title">{{ t("auth.login_title") }}</h2>
           <form class="form-grid" method="post" action="/auth/login" autocomplete="off">
             <input type="hidden" name="login_challenge" value="{{ login_challenge }}" />
