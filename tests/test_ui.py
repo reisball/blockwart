@@ -998,6 +998,24 @@ def test_catalog_tree_starts_collapsed_and_keeps_filtered_results_visible(
     assert 'data-tree-parent="system:tree-host"' not in filtered.text
 
 
+def test_catalog_tree_toggle_overrides_global_button_minimum_size(
+    client: TestClient,
+) -> None:
+    catalog_response = client.get("/")
+    stylesheet_response = client.get("/static/explorer.css")
+
+    assert catalog_response.status_code == 200
+    assert '/static/explorer.css?v=008"' in catalog_response.text
+    assert stylesheet_response.status_code == 200
+    tree_toggle_rule = re.search(
+        r"\.tree-toggle\s*\{(?P<body>[^}]*)\}",
+        stylesheet_response.text,
+    )
+    assert tree_toggle_rule is not None
+    assert re.search(r"\bmin-width:\s*19px;", tree_toggle_rule["body"])
+    assert re.search(r"\bmin-height:\s*19px;", tree_toggle_rule["body"])
+
+
 def test_catalog_tree_localizes_its_controls_in_german(client: TestClient) -> None:
     response = client.get("/?lang=de")
 
