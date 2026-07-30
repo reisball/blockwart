@@ -1,9 +1,9 @@
 # Authentication and object authorization
 
-Blockwart has a dormant authentication and object-authorization foundation. It
-does not yet replace the legacy global UI admin gate, authorize catalog reads,
-or expose catalog mutation APIs. Those integrations are delivered separately
-so that a partially migrated deployment stays fail-closed.
+Blockwart authenticates every catalog read and authorizes it against current
+object grants. The legacy global UI admin gate still owns catalog mutations;
+writable API/MCP and grant-management surfaces are delivered separately so a
+partially migrated deployment stays fail-closed.
 
 ## Principals and credentials
 
@@ -27,8 +27,8 @@ GET /api/v1/auth/me
 Authorization: Bearer <service-account token>
 ```
 
-It returns only the authenticated principal's stable identity fields. It does
-not grant access to existing catalog endpoints yet.
+It returns only the authenticated principal's stable identity fields. The same
+bearer credential is required by `/api/objects`, `/api/agent`, and `/api/v1`.
 
 The browser identity page is available at `/auth`. Login uses a one-time,
 server-stored pre-authentication challenge. Authenticated browser sessions are
@@ -56,9 +56,9 @@ An object grant assigns one role to one principal at one object with either
 | `access_manager` | `discover`, `read`, `manage_access` |
 | `owner` | all permissions, including `delete` |
 
-`discover` exposes only a future safe stub projection. `read` permits the
-future full object projection. Grants are additive, do not imply access to
-parents or siblings, and never live inside `data_json`.
+`discover` exposes only the safe stub projection. `read` permits the full
+object projection. Grants are additive, do not imply access to parents or
+siblings, and never live inside `data_json`.
 
 `subtree` follows only the canonical placement graph:
 
@@ -69,6 +69,34 @@ parents or siblings, and never live inside `data_json`.
 Other relationship types do not propagate grants. Effective authorization is
 calculated from the current graph in one recursive database query, so
 reparenting changes access without a stale application cache.
+
+## Authorized read projection
+
+Human UI reads require a valid browser identity session. Machine reads under
+`/api/objects`, `/api/agent`, and `/api/v1` require a valid service-account
+bearer token. UI, REST, Agent API, and MCP apply the same effective policy:
+
+- no `discover`: omit the object from lists, search, topology,
+  relationships, counts, and MCP; direct access returns the same `404` as a
+  missing object;
+- `discover` without `read`: return only `visibility`, stable ID, kind,
+  display label, released placement path/state, and the principal's own
+  capabilities;
+- `read`: return the existing detail projection and the object's released
+  audit history.
+
+Placement `hosts` edges are visible only when both endpoints are discoverable.
+Other relationship types require `read` on both endpoints. Detail filters such
+as lifecycle, health, IP, endpoint, provenance, or freshness never evaluate
+discover-only stubs; text search on a stub is restricted to ID, kind, and
+label. Counts and pagination are computed after authorization. Opaque cursors
+are bound to both the principal and the exact effective policy, so they cannot
+be reused after a grant change or by another identity.
+
+Principal-scoped UI and API responses use `Cache-Control: private, no-store`,
+`Pragma: no-cache`, and `Vary: Authorization, Cookie`. Health/readiness,
+static assets, OpenAPI documentation, `/auth`, and the separately protected
+legacy `/admin` flow remain outside catalog-read authorization.
 
 Every object has a positive monotone `revision`. Object and relationship
 mutations advance the affected revision. Grant creation and revocation advance
@@ -133,15 +161,16 @@ count; repeated throttle denials are aggregated to at most one event per
 limiter bucket and window.
 
 Object and grant mutations use the existing object audit stream and record the
-actor principal, channel, request ID, old/new revision, and structured
-change. Authorization denials belong to the security stream once the
-read/write integrations are enabled.
+actor principal, channel, request ID, old/new revision, and structured change.
+Invalid authentication is recorded in the security stream. Concealed object
+denials intentionally use stable not-found responses and do not include object
+details.
 
 ## Transition contract
 
-The legacy `BLOCKWART_ADMIN_TOKEN` mechanism remains the only gate for current
-UI catalog mutations until the migration rollout is completed. New identities
-and grants do not enable those routes. Existing REST and MCP catalog
-operations also remain read-only and are not yet filtered by object grants.
-Do not bootstrap production identities or inject tokens before the dedicated
-authorization integration and rollout have been reviewed and approved.
+The legacy `BLOCKWART_ADMIN_TOKEN` mechanism remains the additional gate for
+current UI catalog mutations until writable object authorization is completed.
+Identity sessions do not by themselves enable writes. REST and MCP catalog
+operations remain read-only, but are now authenticated and filtered by object
+grants. Production identity bootstrap, token injection, writable surfaces, and
+runtime rollout still require their dedicated approval.

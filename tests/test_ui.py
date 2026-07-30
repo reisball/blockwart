@@ -54,8 +54,12 @@ def session_factory(alembic_session_factory):
 
 
 @pytest.fixture
-def client(session_factory) -> Generator[TestClient, None, None]:
+def client(
+    session_factory,
+    install_unrestricted_read_access,
+) -> Generator[TestClient, None, None]:
     app = create_app(settings=Settings(admin_token=TEST_ADMIN_TOKEN))
+    install_unrestricted_read_access(app)
 
     def override_get_session() -> Generator[Session, None, None]:
         with session_factory() as session:

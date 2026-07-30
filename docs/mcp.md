@@ -17,6 +17,8 @@ as kinds. Both tools also forward v1's structured `parent`, `ip`, `port`,
 filters plus canonical `source_type` and computed `stale`, `cursor`, `sort`,
 `direction`, and optional `include_total`.
 Resolved context comes from the same service implementation used by REST.
+All three tools require a service-account token and receive exactly that
+principal's authorized detail/stub projection.
 
 For compatibility, MCP output retains the established `results` and `objects`
 fields. It additionally returns v1 `next_cursor`, `total`, `sort`, and
@@ -64,10 +66,11 @@ returns: sanitized object context, relationships, and credential-reference IDs.
 Canonical provenance is returned unchanged from v1; secret-shaped stored
 provenance is handled by the same safe record-integrity boundary.
 
-The optional bearer token currently authenticates only endpoints that demand
-it, such as `/api/v1/auth/me`. Existing catalog tools remain read-only and are
-not yet object-filtered. Writable tools, credential resolution, and Gateway
-registration require their dedicated implementation and approval.
+The bearer token authenticates every catalog tool call. Existing catalog tools
+remain read-only and are object-filtered: no-discover objects are concealed,
+discover-only objects are strict stubs, and readable objects return sanitized
+detail. Writable tools, credential resolution, and Gateway registration
+require their dedicated implementation and approval.
 
 ## Error Contract
 

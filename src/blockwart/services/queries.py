@@ -1,26 +1,33 @@
 from __future__ import annotations
 
+import json
 from collections import Counter
 from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Any, Literal, TypedDict
+from typing import Any, Literal, NotRequired, TypedDict
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from blockwart.domain.asset_state import AssetHealth, AssetLifecycle
+from blockwart.domain.auth import ObjectVisibility, Permission
 from blockwart.domain.placement import PlacementGraph
 from blockwart.domain.ui_schema import get_ui_schema
-from blockwart.models import CatalogObject, Relationship
+from blockwart.models import Relationship
 from blockwart.schemas.catalog import (
     PUBLIC_OBJECT_KINDS,
+    CatalogAssetNode,
+    CatalogAssetReadNode,
+    CatalogAssetStubNode,
     CatalogObjectOut,
+    CatalogObjectReadOut,
+    CatalogObjectStubOut,
 )
 from blockwart.services.catalog import (
-    get_object,
     list_audit_events_for_object,
     list_objects,
 )
+from blockwart.services.read_access import ReadAccess
 
 PUBLIC_KIND_PRIORITY = {
     kind: index for index, kind in enumerate(PUBLIC_OBJECT_KINDS)
@@ -52,9 +59,11 @@ class TopologyNodeReadModel(TypedDict):
     id: str
     kind: str
     label: str
-    status: str
-    data: dict[str, Any]
-    ports: list[RelationshipPortReadModel]
+    visibility: Literal["stub", "detail"]
+    capabilities: list[Permission]
+    status: NotRequired[str]
+    data: NotRequired[dict[str, Any]]
+    ports: NotRequired[list[RelationshipPortReadModel]]
 
 
 class TopologyChainReadModel(TypedDict):
@@ -78,7 +87,7 @@ class ObjectRelationshipsReadModel(TypedDict):
     topology: TopologyReadModel
 
 
-class ExplorerAssetReadModel(TypedDict):
+class ExplorerAssetDetailReadModel(TypedDict):
     ref: str
     id: str
     kind: str
@@ -92,6 +101,20 @@ class ExplorerAssetReadModel(TypedDict):
     platform: str
     endpoint: str
     updated_at: str
+    visibility: Literal["stub", "detail"]
+    capabilities: list[Permission]
+
+
+class ExplorerAssetStubReadModel(TypedDict):
+    ref: str
+    id: str
+    kind: str
+    label: str
+    visibility: Literal["stub"]
+    capabilities: list[Permission]
+
+
+ExplorerAssetReadModel = ExplorerAssetDetailReadModel | ExplorerAssetStubReadModel
 
 
 class ExplorerSystemBranchReadModel(TypedDict):
@@ -129,10 +152,10 @@ class AuditEventReadModel(TypedDict):
 
 @dataclass(frozen=True, slots=True)
 class CatalogBrowseReadModel:
-    objects: list[CatalogObjectOut]
-    all_objects: list[CatalogObjectOut]
-    systems: list[CatalogObjectOut]
-    relation_targets: list[CatalogObjectOut]
+    objects: list[CatalogObjectReadOut]
+    all_objects: list[CatalogObjectReadOut]
+    systems: list[CatalogObjectReadOut]
+    relation_targets: list[CatalogObjectReadOut]
     display_names: dict[str, str]
     object_counts: Counter[str]
     health_counts: Counter[str]
@@ -143,45 +166,71 @@ class CatalogBrowseReadModel:
 
 @dataclass(frozen=True, slots=True)
 class CatalogDetailReadModel:
-    catalog_object: CatalogObjectOut
-    all_objects: list[CatalogObjectOut]
-    object_map: dict[str, CatalogObjectOut]
+    catalog_object: CatalogObjectReadOut
+    all_objects: list[CatalogObjectReadOut]
+    object_map: dict[str, CatalogObjectReadOut]
     relationships: list[RelationshipReadModel]
     relationship_groups: dict[str, list[RelatedRelationshipReadModel]]
-    relationship_targets: list[CatalogObjectOut]
+    relationship_targets: list[CatalogObjectReadOut]
     audit_events: list[AuditEventReadModel]
 
 
 def list_catalog_objects(
     session: Session,
+    access: ReadAccess,
     *,
     lifecycle: AssetLifecycle | None = None,
     health: AssetHealth | None = None,
-) -> list[CatalogObjectOut]:
+) -> list[CatalogObjectReadOut]:
     """Return the canonical catalog read model used by the JSON API."""
-    return list_objects(session, lifecycle=lifecycle, health=health)
+    projected_objects = [
+        projected
+        for catalog_object in list_objects(session)
+        if (projected := _project_catalog_object(catalog_object, access)) is not None
+    ]
+    if lifecycle is None and health is None:
+        return projected_objects
+    return [
+        catalog_object
+        for catalog_object in projected_objects
+        if catalog_object.visibility == ObjectVisibility.DETAIL
+        and (lifecycle is None or catalog_object.lifecycle == lifecycle)
+        and (health is None or catalog_object.health == health)
+    ]
 
 
 def get_catalog_object(
     session: Session,
     object_id: str,
-) -> CatalogObjectOut | None:
+    access: ReadAccess,
+) -> CatalogObjectReadOut | None:
     """Return one canonical catalog read model used by the JSON API."""
-    return get_object(session, object_id)
+    catalog_object = next(
+        (
+            candidate
+            for candidate in list_objects(session)
+            if candidate.id == object_id
+        ),
+        None,
+    )
+    if catalog_object is None:
+        return None
+    return _project_catalog_object(catalog_object, access)
 
 
 def query_catalog_browse(
     session: Session,
+    access: ReadAccess,
     *,
     query: str | None = None,
     kind: str | None = None,
 ) -> CatalogBrowseReadModel:
     """Build the public catalog explorer model without FastAPI dependencies."""
-    all_objects = sort_for_browse(list_objects(session))
+    all_objects = sort_for_browse(list_catalog_objects(session, access))
     public_objects = visible_objects(all_objects)
     normalized_query = query.strip() if query else ""
     matching_ids = (
-        _matching_object_ids(session, normalized_query)
+        _matching_object_ids(all_objects, normalized_query)
         if normalized_query
         else None
     )
@@ -196,7 +245,7 @@ def query_catalog_browse(
         for catalog_object in all_objects
         if catalog_object.kind == "system"
     ]
-    relationships = _list_relationships(session)
+    relationships = _list_relationships(session, access)
     object_map = {
         f"{catalog_object.kind}:{catalog_object.id}": catalog_object
         for catalog_object in all_objects
@@ -205,6 +254,7 @@ def query_catalog_browse(
     health_counts = Counter(
         str(catalog_object.health or "unknown")
         for catalog_object in public_objects
+        if catalog_object.visibility == ObjectVisibility.DETAIL
     )
     included_refs = (
         {
@@ -242,9 +292,10 @@ def query_catalog_browse(
 def query_catalog_detail(
     session: Session,
     object_id: str,
+    access: ReadAccess,
 ) -> CatalogDetailReadModel | None:
     """Build the object detail model without FastAPI or template dependencies."""
-    all_objects = sort_for_browse(list_objects(session))
+    all_objects = sort_for_browse(list_catalog_objects(session, access))
     catalog_object = next(
         (
             candidate
@@ -259,7 +310,7 @@ def query_catalog_detail(
         f"{candidate.kind}:{candidate.id}": candidate
         for candidate in all_objects
     }
-    all_relationships = _list_relationships(session)
+    all_relationships = _list_relationships(session, access)
     object_ref = f"{catalog_object.kind}:{catalog_object.id}"
     relationships = [
         relationship
@@ -272,9 +323,13 @@ def query_catalog_detail(
         relationships,
         object_map,
     )
-    audit_events = list_audit_events_for_object(
-        session,
-        catalog_object.id,
+    audit_events = (
+        list_audit_events_for_object(
+            session,
+            catalog_object.id,
+        )
+        if catalog_object.visibility == ObjectVisibility.DETAIL
+        else []
     )
     return CatalogDetailReadModel(
         catalog_object=catalog_object,
@@ -304,9 +359,10 @@ def query_catalog_detail(
 def query_catalog_topology(
     session: Session,
     object_id: str,
+    access: ReadAccess,
 ) -> tuple[str, TopologyReadModel] | None:
     """Return one canonical topology resource without UI dependencies."""
-    all_objects = sort_for_browse(list_objects(session))
+    all_objects = sort_for_browse(list_catalog_objects(session, access))
     catalog_object = next(
         (
             candidate
@@ -321,7 +377,7 @@ def query_catalog_topology(
         f"{candidate.kind}:{candidate.id}": candidate
         for candidate in all_objects
     }
-    relationships = _list_relationships(session)
+    relationships = _list_relationships(session, access)
     object_ref = f"{catalog_object.kind}:{catalog_object.id}"
     return (
         object_ref,
@@ -334,9 +390,9 @@ def query_catalog_topology(
 
 
 def build_topology_read_model(
-    catalog_object: CatalogObjectOut,
+    catalog_object: CatalogObjectReadOut,
     relationships: list[RelationshipReadModel],
-    object_map: dict[str, CatalogObjectOut],
+    object_map: dict[str, CatalogObjectReadOut],
 ) -> TopologyReadModel:
     """Resolve one UI/API-neutral placement topology from the canonical graph."""
     current_ref = f"{catalog_object.kind}:{catalog_object.id}"
@@ -416,7 +472,7 @@ def build_topology_read_model(
 
 
 def build_explorer_read_model(
-    objects: list[CatalogObjectOut],
+    objects: list[CatalogObjectReadOut],
     relationships: list[RelationshipReadModel],
     *,
     included_refs: set[str] | None = None,
@@ -553,9 +609,9 @@ def build_explorer_read_model(
 
 
 def group_relationships(
-    catalog_object: CatalogObjectOut,
+    catalog_object: CatalogObjectReadOut,
     relationships: list[RelationshipReadModel],
-    object_map: dict[str, CatalogObjectOut],
+    object_map: dict[str, CatalogObjectReadOut],
 ) -> dict[str, list[RelatedRelationshipReadModel]]:
     current_ref = f"{catalog_object.kind}:{catalog_object.id}"
     grouped: dict[str, list[RelatedRelationshipReadModel]] = {}
@@ -586,14 +642,16 @@ def group_relationships(
                     if other_object
                     else other_ref
                 ),
-                "other_status": other_object.status if other_object else "",
-                "other_data": other_object.data if other_object else {},
+                "other_status": _object_status(other_object),
+                "other_data": _object_data(other_object),
             }
         )
     return grouped
 
 
-def primary_name_value(catalog_object: CatalogObjectOut) -> str:
+def primary_name_value(catalog_object: CatalogObjectReadOut) -> str:
+    if catalog_object.visibility == ObjectVisibility.STUB:
+        return catalog_object.label
     schema = get_ui_schema(catalog_object.kind)
     if schema.primary_name_storage == "network_hostname":
         network = catalog_object.data.get("network")
@@ -605,8 +663,8 @@ def primary_name_value(catalog_object: CatalogObjectOut) -> str:
 
 
 def sort_for_browse(
-    objects: list[CatalogObjectOut],
-) -> list[CatalogObjectOut]:
+    objects: list[CatalogObjectReadOut],
+) -> list[CatalogObjectReadOut]:
     return sorted(
         objects,
         key=lambda catalog_object: (
@@ -621,8 +679,8 @@ def sort_for_browse(
 
 
 def visible_objects(
-    objects: list[CatalogObjectOut],
-) -> list[CatalogObjectOut]:
+    objects: list[CatalogObjectReadOut],
+) -> list[CatalogObjectReadOut]:
     return sort_for_browse(
         [
             catalog_object
@@ -638,18 +696,38 @@ def object_id_from_ref(value: str) -> str:
     return value.split(":", 1)[1]
 
 
-def _matching_object_ids(session: Session, query: str) -> set[str]:
-    term = f"%{query.lower()}%"
-    statement = select(CatalogObject.id).where(
-        CatalogObject.id.ilike(term)
-        | CatalogObject.label.ilike(term)
-        | CatalogObject.summary.ilike(term)
-        | CatalogObject.data_json.ilike(term)
-    )
-    return set(session.scalars(statement).all())
+def _matching_object_ids(
+    objects: list[CatalogObjectReadOut],
+    query: str,
+) -> set[str]:
+    term = query.casefold()
+    matches: set[str] = set()
+    for catalog_object in objects:
+        values = [
+            catalog_object.id,
+            catalog_object.kind,
+            catalog_object.label,
+        ]
+        if catalog_object.visibility == ObjectVisibility.DETAIL:
+            values.extend(
+                [
+                    catalog_object.summary or "",
+                    json.dumps(catalog_object.data, sort_keys=True),
+                    json.dumps(
+                        catalog_object.provenance.model_dump(mode="json"),
+                        sort_keys=True,
+                    ),
+                ]
+            )
+        if any(term in value.casefold() for value in values):
+            matches.add(catalog_object.id)
+    return matches
 
 
-def _list_relationships(session: Session) -> list[RelationshipReadModel]:
+def _list_relationships(
+    session: Session,
+    access: ReadAccess,
+) -> list[RelationshipReadModel]:
     rows = session.scalars(
         select(Relationship).order_by(
             Relationship.relation_type,
@@ -657,20 +735,34 @@ def _list_relationships(session: Session) -> list[RelationshipReadModel]:
             Relationship.to_ref,
         )
     ).all()
-    return [
-        {
-            "from_ref": row.from_ref,
-            "relation_type": row.relation_type,
-            "to_ref": row.to_ref,
-        }
-        for row in rows
-    ]
+    relationships: list[RelationshipReadModel] = []
+    for row in rows:
+        from_id = object_id_from_ref(row.from_ref)
+        to_id = object_id_from_ref(row.to_ref)
+        required_permission = (
+            Permission.DISCOVER
+            if row.relation_type == "hosts"
+            else Permission.READ
+        )
+        if not (
+            access.policy.can(required_permission, from_id)
+            and access.policy.can(required_permission, to_id)
+        ):
+            continue
+        relationships.append(
+            {
+                "from_ref": row.from_ref,
+                "relation_type": row.relation_type,
+                "to_ref": row.to_ref,
+            }
+        )
+    return relationships
 
 
 def _index_relationship_cards(
-    objects: list[CatalogObjectOut],
+    objects: list[CatalogObjectReadOut],
     relationships: list[RelationshipReadModel],
-    object_map: dict[str, CatalogObjectOut],
+    object_map: dict[str, CatalogObjectReadOut],
 ) -> dict[str, ObjectRelationshipsReadModel]:
     cards: dict[str, ObjectRelationshipsReadModel] = {}
     for catalog_object in objects:
@@ -714,7 +806,7 @@ def _unique_refs(values: list[str]) -> list[str]:
 
 def _relationship_nodes(
     refs: list[str],
-    object_map: dict[str, CatalogObjectOut],
+    object_map: dict[str, CatalogObjectReadOut],
 ) -> list[TopologyNodeReadModel]:
     return [
         _relationship_node(ref, object_map.get(ref))
@@ -738,9 +830,9 @@ def _relationship_display_sort_key(
 
 
 def _relationship_display_cards(
-    catalog_object: CatalogObjectOut,
+    catalog_object: CatalogObjectReadOut,
     grouped: dict[str, list[RelatedRelationshipReadModel]],
-    object_map: dict[str, CatalogObjectOut],
+    object_map: dict[str, CatalogObjectReadOut],
 ) -> list[RelationshipCardReadModel]:
     cards: list[RelationshipCardReadModel] = []
     current_ref = f"{catalog_object.kind}:{catalog_object.id}"
@@ -781,8 +873,8 @@ def _relationship_display_cards(
 def _system_service_refs(
     from_ref: str,
     to_ref: str,
-    from_object: CatalogObjectOut | None,
-    to_object: CatalogObjectOut | None,
+    from_object: CatalogObjectReadOut | None,
+    to_object: CatalogObjectReadOut | None,
 ) -> tuple[str, str]:
     if from_object is not None and to_object is not None:
         if (
@@ -810,14 +902,14 @@ def _system_service_refs(
 
 def _relationship_node(
     ref: str,
-    catalog_object: CatalogObjectOut | None,
+    catalog_object: CatalogObjectReadOut | None,
 ) -> TopologyNodeReadModel:
     kind = (
         catalog_object.kind
         if catalog_object
         else ref.split(":", 1)[0]
     )
-    return {
+    node: TopologyNodeReadModel = {
         "ref": ref,
         "id": (
             catalog_object.id
@@ -830,16 +922,39 @@ def _relationship_node(
             if catalog_object
             else ref
         ),
-        "status": catalog_object.status if catalog_object else "",
-        "data": catalog_object.data if catalog_object else {},
-        "ports": _relationship_node_ports(catalog_object),
+        "visibility": (
+            catalog_object.visibility
+            if catalog_object is not None
+            else ObjectVisibility.STUB
+        ),
+        "capabilities": (
+            catalog_object.capabilities
+            if catalog_object is not None
+            else []
+        ),
     }
+    if (
+        catalog_object is not None
+        and catalog_object.visibility == ObjectVisibility.DETAIL
+    ):
+        node.update(
+            {
+                "status": catalog_object.status,
+                "data": catalog_object.data,
+                "ports": _relationship_node_ports(catalog_object),
+            }
+        )
+    return node
 
 
 def _relationship_node_ports(
-    catalog_object: CatalogObjectOut | None,
+    catalog_object: CatalogObjectReadOut | None,
 ) -> list[RelationshipPortReadModel]:
-    if catalog_object is None or catalog_object.kind != "service":
+    if (
+        catalog_object is None
+        or catalog_object.visibility != ObjectVisibility.DETAIL
+        or catalog_object.kind != "service"
+    ):
         return []
     ports: list[RelationshipPortReadModel] = []
     for endpoint in _list_of_mappings(
@@ -859,7 +974,7 @@ def _relationship_node_ports(
 
 
 def _refs_for_kind(
-    objects: list[CatalogObjectOut],
+    objects: list[CatalogObjectReadOut],
     kind: str,
 ) -> list[str]:
     return [
@@ -870,8 +985,17 @@ def _refs_for_kind(
 
 
 def _explorer_asset(
-    catalog_object: CatalogObjectOut,
+    catalog_object: CatalogObjectReadOut,
 ) -> ExplorerAssetReadModel:
+    if catalog_object.visibility == ObjectVisibility.STUB:
+        return {
+            "ref": f"{catalog_object.kind}:{catalog_object.id}",
+            "id": catalog_object.id,
+            "kind": catalog_object.kind,
+            "label": catalog_object.label,
+            "visibility": ObjectVisibility.STUB,
+            "capabilities": catalog_object.capabilities,
+        }
     network = catalog_object.data.get("network")
     addresses = (
         _list_of_mappings(network.get("addresses"))
@@ -913,7 +1037,93 @@ def _explorer_asset(
         "updated_at": catalog_object.last_changed
         or catalog_object.updated_at
         or "",
+        "visibility": ObjectVisibility.DETAIL,
+        "capabilities": catalog_object.capabilities,
     }
+
+
+def _project_catalog_object(
+    catalog_object: CatalogObjectOut,
+    access: ReadAccess,
+) -> CatalogObjectReadOut | None:
+    visibility = access.policy.visibility_for(catalog_object.id)
+    if visibility == ObjectVisibility.NONE:
+        return None
+    capabilities = access.capabilities_for(catalog_object.id)
+    visible_parent_path: list[CatalogAssetReadNode] = []
+    for node in reversed(catalog_object.parent_path):
+        if not access.policy.can(Permission.DISCOVER, node.id):
+            break
+        visible_parent_path.append(_project_parent_node(node, access))
+    visible_parent_path.reverse()
+    placement_state = catalog_object.placement_state
+    if (
+        placement_state == "assigned"
+        and (
+            not visible_parent_path
+            or not catalog_object.parent_path
+            or visible_parent_path[-1].id != catalog_object.parent_path[-1].id
+        )
+    ):
+        placement_state = "unknown"
+    if visibility == ObjectVisibility.DETAIL:
+        return catalog_object.model_copy(
+            update={
+                "visibility": ObjectVisibility.DETAIL,
+                "capabilities": capabilities,
+                "parent_path": visible_parent_path,
+                "placement_state": placement_state,
+            }
+        )
+    return CatalogObjectStubOut(
+        id=catalog_object.id,
+        kind=catalog_object.kind,
+        label=catalog_object.label,
+        capabilities=capabilities,
+        parent_path=visible_parent_path,
+        placement_state=placement_state,
+    )
+
+
+def _project_parent_node(
+    node: CatalogAssetReadNode,
+    access: ReadAccess,
+) -> CatalogAssetReadNode:
+    capabilities = access.capabilities_for(node.id)
+    if access.policy.can(Permission.READ, node.id):
+        return CatalogAssetNode(
+            capabilities=capabilities,
+            ref=node.ref,
+            id=node.id,
+            kind=node.kind,
+            label=node.label,
+            status=node.status if isinstance(node, CatalogAssetNode) else "",
+        )
+    return CatalogAssetStubNode(
+        capabilities=capabilities,
+        ref=node.ref,
+        id=node.id,
+        kind=node.kind,
+        label=node.label,
+    )
+
+
+def _object_status(catalog_object: CatalogObjectReadOut | None) -> str:
+    if (
+        catalog_object is not None
+        and catalog_object.visibility == ObjectVisibility.DETAIL
+    ):
+        return catalog_object.status
+    return ""
+
+
+def _object_data(catalog_object: CatalogObjectReadOut | None) -> dict[str, Any]:
+    if (
+        catalog_object is not None
+        and catalog_object.visibility == ObjectVisibility.DETAIL
+    ):
+        return catalog_object.data
+    return {}
 
 
 def _list_of_mappings(value: Any) -> list[Mapping[str, Any]]:

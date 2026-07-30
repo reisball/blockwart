@@ -17,6 +17,41 @@
       <span>{{ object.kind }}:{{ object.id }}</span>
     </div>
   </header>
+  {% if object.visibility == "stub" %}
+    <div class="page detail-grid integrated-detail-grid">
+      <section class="stack">
+        <section class="panel restricted-object-panel">
+          <h2 class="section-title">{{ t("auth.restricted_object") }}</h2>
+          <p>{{ t("auth.stub_notice") }}</p>
+          <dl class="fact-grid">
+            <div><dt>{{ t("detail.id") }}</dt><dd><code>{{ object.id }}</code></dd></div>
+            <div><dt>{{ t("asset.type") }}</dt><dd>{{ t("kind." ~ object.kind) }}</dd></div>
+            <div>
+              <dt>{{ t("detail.placement") }}</dt>
+              <dd>{{ t("placement." ~ (object.placement_state or "unknown")) }}</dd>
+            </div>
+            <div>
+              <dt>{{ t("auth.capabilities") }}</dt>
+              <dd>
+                {% for capability in object.capabilities %}
+                  <span class="badge">{{ t("permission." ~ capability) }}</span>
+                {% endfor %}
+              </dd>
+            </div>
+          </dl>
+          {% if object.parent_path %}
+            <h3>{{ t("detail.placement") }}</h3>
+            <ol class="restricted-placement-path">
+              {% for node in object.parent_path %}
+                <li><a href="/objects/{{ node.id }}?{{ detail_query_string }}">{{ node.label }}</a></li>
+              {% endfor %}
+              <li>{{ object.label }}</li>
+            </ol>
+          {% endif %}
+        </section>
+      </section>
+    </div>
+  {% else %}
   <div class="page detail-grid integrated-detail-grid">
       <section class="stack">
         <section class="panel">
@@ -580,4 +615,5 @@
         </section>
       </section>
   </div>
+  {% endif %}
 </section>

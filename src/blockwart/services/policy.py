@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import hashlib
+import json
 from collections import defaultdict
 from dataclasses import dataclass
 
@@ -75,6 +77,32 @@ class PolicySnapshot:
         if Permission.DISCOVER in permissions:
             return ObjectVisibility.STUB
         return ObjectVisibility.NONE
+
+    def fingerprint(self) -> str:
+        """Bind cursors and principal-scoped read state to this exact policy."""
+        payload = [
+            {
+                "object_id": object_id,
+                "permissions": sorted(permission.value for permission in permissions),
+                "grants": [
+                    {
+                        "anchor": grant.anchor_object_id,
+                        "grant_id": grant.grant_id,
+                        "role": grant.role.value,
+                        "scope": grant.scope.value,
+                    }
+                    for grant in self.grants_for(object_id)
+                ],
+            }
+            for object_id, permissions in sorted(self._permissions.items())
+        ]
+        serialized = json.dumps(
+            payload,
+            ensure_ascii=True,
+            separators=(",", ":"),
+            sort_keys=True,
+        )
+        return hashlib.sha256(serialized.encode("utf-8")).hexdigest()[:24]
 
 
 def policy_for_principal(

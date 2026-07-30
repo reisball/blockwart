@@ -254,8 +254,12 @@ def test_container_healthcheck_deadlines_exceed_default_sqlite_lock_wait() -> No
     assert sqlite_wait_seconds < http_timeout_seconds < docker_timeout_seconds
 
 
-def test_index_page(alembic_session_factory) -> None:
+def test_index_page(
+    alembic_session_factory,
+    install_unrestricted_read_access,
+) -> None:
     app = create_app()
+    install_unrestricted_read_access(app)
 
     def override_get_session():
         with alembic_session_factory() as session:

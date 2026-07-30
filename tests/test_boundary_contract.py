@@ -22,8 +22,12 @@ def session_factory(alembic_session_factory):
 
 
 @contextmanager
-def _client(session_factory) -> Generator[TestClient, None, None]:
+def _client(
+    session_factory,
+    install_unrestricted_read_access,
+) -> Generator[TestClient, None, None]:
     app = create_app()
+    install_unrestricted_read_access(app)
 
     def override_get_session() -> Generator[Session, None, None]:
         with session_factory() as session:
@@ -36,6 +40,7 @@ def _client(session_factory) -> Generator[TestClient, None, None]:
 
 def test_external_timestamps_are_rfc3339_utc_and_legacy_naive_values_are_utc(
     session_factory,
+    install_unrestricted_read_access,
 ) -> None:
     legacy_timestamp = datetime(2026, 7, 22, 21, 7, 38, 123456)
     with session_factory() as session:
@@ -63,7 +68,7 @@ def test_external_timestamps_are_rfc3339_utc_and_legacy_naive_values_are_utc(
         )
         session.commit()
 
-    with _client(session_factory) as client:
+    with _client(session_factory, install_unrestricted_read_access) as client:
         response = client.get("/api/objects/legacy-time")
         agent_response = client.get("/api/agent/objects/legacy-time")
 
@@ -105,6 +110,7 @@ def test_non_object_catalog_json_is_explicitly_corrupt() -> None:
 
 def test_corrupt_catalog_row_is_marked_without_breaking_catalog_or_agent_reads(
     session_factory,
+    install_unrestricted_read_access,
 ) -> None:
     with session_factory() as session:
         session.add_all(
@@ -142,7 +148,7 @@ def test_corrupt_catalog_row_is_marked_without_breaking_catalog_or_agent_reads(
         )
         session.commit()
 
-    with _client(session_factory) as client:
+    with _client(session_factory, install_unrestricted_read_access) as client:
         catalog_response = client.get("/api/objects")
         catalog_detail = client.get("/api/objects/corrupt-row")
         schema_corrupt_detail = client.get("/api/objects/schema-corrupt-row")
@@ -186,9 +192,10 @@ def test_corrupt_catalog_row_is_marked_without_breaking_catalog_or_agent_reads(
 
 def test_api_error_envelope_distinguishes_not_found_validation_and_conflict(
     session_factory,
+    install_unrestricted_read_access,
 ) -> None:
     correlation_id = "boundary-proof-47"
-    with _client(session_factory) as client:
+    with _client(session_factory, install_unrestricted_read_access) as client:
         not_found = client.get(
             "/api/objects/missing",
             headers={"X-Correlation-ID": correlation_id},
@@ -289,8 +296,11 @@ def test_unexpected_api_failure_is_stable_and_redacted() -> None:
     assert "must-not-leak" not in response.text
 
 
-def test_invalid_correlation_id_is_replaced() -> None:
+def test_invalid_correlation_id_is_replaced(
+    install_unrestricted_read_access,
+) -> None:
     app = create_app()
+    install_unrestricted_read_access(app)
     with TestClient(app) as client:
         response = client.get(
             "/api/objects/missing",

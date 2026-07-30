@@ -4,7 +4,9 @@ Blockwart exposes a read-only agent namespace under /api/agent.
 
 The namespace is intentionally separate from the catalog read API. Both API surfaces are read-only:
 agents and integrations can search and retrieve context, but they cannot create, update, delete, or
-resolve credential values. Catalog changes are restricted to authenticated UI form routes.
+resolve credential values. Every request requires a service-account bearer
+token and is filtered by its current object grants. Catalog changes are
+restricted to authenticated UI form routes.
 
 The catalog model is the faithful stored-object projection: validated data, canonical asset and
 placement state, timestamps, parent path, and safe integrity diagnostics. Agent context is a
@@ -16,6 +18,11 @@ placement graph; neither response shape is derived from the HTML UI. See `read-m
 cursor-paginated `/api/v1/objects`, `/api/v1/context`, and object-resource
 endpoints documented in `api-v1.md`. Both namespaces delegate to the same
 Agent query service.
+
+Authorization is projection-based: `read` returns the documented summary or
+context, `discover` returns only a strict identity/placement/capability stub,
+and no `discover` is indistinguishable from an absent object. Detail filters
+never evaluate stub-only objects.
 
 ## Endpoints
 
@@ -94,7 +101,9 @@ Query parameters:
   health, source_type, stale: same structured filters as search
 - limit: optional object limit, 1..20, default 5
 
-Search and context use the same resolver and filter semantics. All Agent API routes remain GET-only.
+Search and context use the same resolver and filter semantics. All Agent API
+routes remain GET-only and require
+`Authorization: Bearer <service-account token>`.
 
 All Agent timestamps use RFC3339 UTC with `Z`. Every summary and context object also exposes
 `record_state` plus `diagnostics`. A damaged `data_json` row remains discoverable by ID, label, or

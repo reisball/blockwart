@@ -43,12 +43,13 @@ protected runtime environment and unlock the UI at `/admin`. The token is never 
 database or returned to the browser; the browser receives only an HMAC-signed `HttpOnly` session
 cookie.
 
-The repository also contains the new principal, revocable credential, and
-object-grant foundation. It is deliberately dormant for catalog access while
-the authorized read/write surfaces are implemented: `/auth` and
-`/api/v1/auth/me` authenticate identities, but do not bypass or replace the
-legacy write gate. Roles, bootstrap, token lifecycle, revision, and audit
-contracts are documented in `docs/auth-rbac.md`.
+Catalog reads are object-authorized. Browser routes require an authenticated
+human session; `/api/objects`, `/api/agent`, and `/api/v1` require a
+service-account bearer token. `discover` returns a strict placement stub,
+`read` returns full detail, and objects without `discover` are concealed.
+The legacy admin token remains the separate write gate until writable RBAC
+surfaces are implemented. Roles, bootstrap, token lifecycle, projection,
+revision, and audit contracts are documented in `docs/auth-rbac.md`.
 
 Initialize or refresh a local pilot database:
 
@@ -86,6 +87,9 @@ The first agent-facing surface is read-only and lives under /api/agent:
 - GET /api/agent/objects/{object_id}
 - GET /api/agent/context
 
+Every request requires `Authorization: Bearer <service-account token>` and is
+filtered by that principal's current object grants.
+
 It returns sanitized object context, resolved parent paths, children, network/endpoint summaries,
 and credential-reference IDs only. Structured read filters are available for placement, IP, port,
 status, lifecycle, and health. It never resolves credential values. See docs/agent-api.md.
@@ -108,9 +112,11 @@ UI form routes. Catalog, Agent, and MCP boundaries share RFC3339 UTC timestamps,
 codes with correlation IDs, and explicit safe diagnostics for corrupt catalog rows. See
 `docs/api-boundary-contract.md`.
 
-Catalog JSON routes and UI reads use the same FastAPI-independent Application Query layer for
-object, Relationship, Audit, and canonical topology models. Agent context remains a separate,
-sanitized projection while sharing the canonical placement graph. See `docs/read-models.md`.
+Catalog JSON routes and UI reads use the same policy-aware, FastAPI-independent
+Application Query layer for object, Relationship, Audit, and canonical
+topology models. Agent context remains a separate sanitized projection, but
+uses the same authorization decision and safe stub contract. See
+`docs/read-models.md`.
 
 Catalog writes, seeds, Markdown imports, and stored-record integrity checks use one immutable
 in-code object-schema registry for field paths and types. Unknown extension data stays compatible,

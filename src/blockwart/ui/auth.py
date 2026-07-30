@@ -26,10 +26,11 @@ from blockwart.services.identity import (
 from blockwart.services.login_protection import LoginProtector
 from blockwart.ui.i18n import translation_context
 from blockwart.ui.paths import TEMPLATE_DIR
-
-AUTH_SESSION_COOKIE_NAME = "blockwart_identity_session"
-AUTH_CSRF_COOKIE_NAME = "blockwart_identity_csrf"
-LOGIN_CHALLENGE_COOKIE_NAME = "blockwart_login_challenge"
+from blockwart.ui.security import (
+    AUTH_CSRF_COOKIE_NAME,
+    AUTH_SESSION_COOKIE_NAME,
+    LOGIN_CHALLENGE_COOKIE_NAME,
+)
 
 templates = Jinja2Templates(directory=TEMPLATE_DIR)
 router = APIRouter(prefix="/auth", tags=["ui"], include_in_schema=False)

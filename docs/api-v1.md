@@ -1,8 +1,8 @@
 # API v1
 
 Blockwart's stable machine-readable read API lives under `/api/v1`. It is
-GET-only. Authentication and machine writes are intentionally outside this
-contract.
+GET-only. Every request requires a service-account bearer token and is
+object-authorized. Machine writes are intentionally outside this contract.
 
 ## Page contract
 
@@ -19,9 +19,10 @@ List resources return the same envelope:
 ```
 
 `next_cursor` is an opaque keyset cursor. Clients must send it back unchanged
-with the same resource, filters, sort field, and direction. A cursor from a
-different query returns `400 invalid_request`; malformed cursors do not expose
-their decoded contents. `limit` may change between requests.
+with the same authenticated principal, effective object policy, resource,
+filters, sort field, and direction. A cursor from a different principal,
+policy, or query returns `400 invalid_request`; malformed cursors do not
+expose their decoded contents. `limit` may change between requests.
 
 The cursor stores the last stable sort key and a unique tie-breaker. It does
 not represent a database snapshot: concurrent inserts or updates before the
@@ -30,7 +31,8 @@ later page. A static result set is enumerated without offsets, duplicates, or
 skipped equal-sort rows.
 
 `total` is omitted as `null` by default so enumeration does not require a full
-count. Set `include_total=true` when an exact matching count is needed.
+count. Set `include_total=true` when an exact authorized matching count is
+needed.
 
 ## Objects
 
@@ -63,21 +65,29 @@ The list accepts:
 - `source_type`: `unknown`, `manual`, `import`, or `discovery`
 - `stale`: exact computed freshness state
 
-The database applies ID/kind/status/lifecycle/health and text prefilters before
-the shared resolver evaluates placement and normalized endpoint filters. The
-resolver uses one bounded catalog/relationship snapshot rather than
-per-object queries. This is the measured-growth path for the current SQLite
-catalog; a separate full-text index is not introduced without evidence that
-the existing database search is the bottleneck.
+Objects with `read` use the full summary. Objects with only `discover` use a
+strict stub containing identity, display label, released placement, and the
+caller's capabilities. Detail-field filters exclude stubs rather than probing
+their hidden values; text search on stubs uses only ID, kind, and label.
+Objects without `discover` are absent.
+
+The resolver loads one bounded catalog/relationship snapshot, applies the
+principal's effective policy first, and then evaluates search and structured
+filters without per-object queries. Detail values are never used to prefilter
+discover-only or hidden rows. This is the measured-growth path for the current
+SQLite catalog; a separate authorization-aware index is not introduced
+without evidence that the bounded snapshot is the bottleneck.
 
 ### `GET /api/v1/objects/{object_id}`
 
-Returns one sanitized Agent context: canonical identity and state, resolved
+Returns one authorized Agent context: canonical identity and state, resolved
 parent path, children, IPs, hostnames and endpoints, direct relationships,
 dependency directions, source references, credential-reference IDs, and safe
 record-integrity diagnostics. Every object also includes the canonical
 provenance header and computed `is_stale` value described in `provenance.md`.
-Credential values are never resolved.
+Credential values are never resolved. A discover-only object returns the same
+strict stub as list/context reads. An object without `discover` returns
+`404 not_found`, indistinguishable from an absent ID.
 
 ### `GET /api/v1/context`
 
@@ -88,13 +98,17 @@ filters and sort fields, with a smaller limit of 1..20.
 
 ### `GET /api/v1/objects/{object_id}/relationships`
 
-Returns direct inbound and outbound relationship edges. The stable order is
-`relation_type`, then `from_ref`, then `to_ref`; direction defaults to `asc`.
+Returns authorized direct inbound and outbound relationship edges. Placement
+edges require discoverable endpoints; every other edge requires readable
+endpoints. The stable order is `relation_type`, then `from_ref`, then
+`to_ref`; direction defaults to `asc`.
 
 ### `GET /api/v1/objects/{object_id}/audit-events`
 
-Returns audit events with their stable numeric ID and RFC3339 UTC timestamp.
-The stable order is `created_at`, then ID; direction defaults to `desc`.
+Returns audit events only when the object is readable, with their stable
+numeric ID and RFC3339 UTC timestamp. Discover-only and undiscoverable objects
+return `404 not_found`. The stable order is `created_at`, then ID; direction
+defaults to `desc`.
 
 ### `GET /api/v1/objects/{object_id}/topology`
 
@@ -107,6 +121,10 @@ All v1 errors use the shared REST envelope and `X-Correlation-ID`. Missing
 objects return `404 not_found`, query validation returns
 `422 validation_error`, and incompatible cursors return
 `400 invalid_request`.
+
+Missing or invalid bearer credentials return `401 unauthorized` with
+`WWW-Authenticate: Bearer`. Authorized responses are private and non-cacheable
+across principals.
 
 `POST`, `PUT`, `PATCH`, and `DELETE` are not part of `/api/v1` and return
 `405 method_not_allowed`.

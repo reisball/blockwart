@@ -3,10 +3,14 @@
 {%- endmacro %}
 
 {% macro health_badge(asset) -%}
-  {% set health = asset.health or "unknown" %}
-  <span class="state-badge state-{{ health }}">
-    <i></i>{{ t("health." ~ health) }}
-  </span>
+  {% if asset.visibility == "stub" %}
+    <span class="state-badge state-restricted"><i></i>{{ t("auth.restricted_short") }}</span>
+  {% else %}
+    {% set health = asset.health or "unknown" %}
+    <span class="state-badge state-{{ health }}">
+      <i></i>{{ t("health." ~ health) }}
+    </span>
+  {% endif %}
 {%- endmacro %}
 
 {% macro tree_toggle(tree_id, label) -%}
@@ -39,14 +43,18 @@
     </td>
     <td><span class="type-tag">{{ t("kind." ~ asset.kind) }}</span></td>
     <td>{{ health_badge(asset) }}</td>
-    <td>
-      {% if asset.address %}<code>{{ asset.address }}</code>{% else %}<span class="muted">{{ t("asset.no_value") }}</span>{% endif %}
-    </td>
-    <td>{{ asset.platform or t("asset.no_value") }}</td>
-    <td>
-      {% if asset.endpoint %}<code>{{ asset.endpoint }}</code>{% else %}<span class="muted">{{ t("asset.no_value") }}</span>{% endif %}
-    </td>
-    <td class="updated-column">{{ asset.updated_at[:10] or t("asset.no_value") }}</td>
+    {% if asset.visibility == "stub" %}
+      <td colspan="4"><span class="muted">{{ t("auth.stub_notice_short") }}</span></td>
+    {% else %}
+      <td>
+        {% if asset.address %}<code>{{ asset.address }}</code>{% else %}<span class="muted">{{ t("asset.no_value") }}</span>{% endif %}
+      </td>
+      <td>{{ asset.platform or t("asset.no_value") }}</td>
+      <td>
+        {% if asset.endpoint %}<code>{{ asset.endpoint }}</code>{% else %}<span class="muted">{{ t("asset.no_value") }}</span>{% endif %}
+      </td>
+      <td class="updated-column">{{ asset.updated_at[:10] or t("asset.no_value") }}</td>
+    {% endif %}
     <td><a class="row-detail" href="/objects/{{ asset.id }}?{{ detail_query_string }}" aria-label="{{ t('asset.details') }}" data-detail-trigger>›</a></td>
   </tr>
 {%- endmacro %}
@@ -80,14 +88,14 @@
     <span class="map-node-copy">
       <small>
         {{ t("kind." ~ asset.kind) }} ·
-        {% if asset.lifecycle %}{{ t("lifecycle." ~ asset.lifecycle)|upper }}{% else %}{{ t("status." ~ asset.status)|upper }}{% endif %}
+        {% if asset.visibility == "stub" %}{{ t("auth.restricted_short")|upper }}{% elif asset.lifecycle %}{{ t("lifecycle." ~ asset.lifecycle)|upper }}{% else %}{{ t("status." ~ asset.status)|upper }}{% endif %}
       </small>
       <strong>{{ asset.label }}</strong>
-      <em>{{ asset.summary or asset.ref }}</em>
+      <em>{% if asset.visibility == "stub" %}{{ t("auth.stub_notice_short") }}{% else %}{{ asset.summary or asset.ref }}{% endif %}</em>
     </span>
     <span class="node-meta">
       <span class="status-dot {{ asset.health or 'unknown' }}"></span>
-      <code>{{ asset.address or asset.endpoint or asset.ref }}</code>
+      <code>{% if asset.visibility == "stub" %}{{ asset.ref }}{% else %}{{ asset.address or asset.endpoint or asset.ref }}{% endif %}</code>
     </span>
   </button>
 {%- endmacro %}
