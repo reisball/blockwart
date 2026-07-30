@@ -43,6 +43,15 @@ notification and ping request through the SDK protocol implementation.
 
 - BLOCKWART_API_BASE_URL: base URL for the Blockwart HTTP API
 - default: http://127.0.0.1:8000
+- BLOCKWART_API_TOKEN_FILE: protected file containing one service-account
+  bearer token; preferred for deployed runtimes and re-read on every request
+- BLOCKWART_API_TOKEN: direct bearer-token environment fallback for runtimes
+  without secret files
+
+Configure at most one token source. If both are present, the wrapper fails
+closed with `credential_configuration_error`. Token values are never MCP tool
+arguments and never appear in tool output. File re-reading allows credential
+rotation without restarting the MCP process.
 
 ## Secret Handling
 
@@ -51,7 +60,10 @@ returns: sanitized object context, relationships, and credential-reference IDs.
 Canonical provenance is returned unchanged from v1; secret-shaped stored
 provenance is handled by the same safe record-integrity boundary.
 
-Writable tools, credential resolution, and Gateway registration require separate design and approval.
+The optional bearer token currently authenticates only endpoints that demand
+it, such as `/api/v1/auth/me`. Existing catalog tools remain read-only and are
+not yet object-filtered. Writable tools, credential resolution, and Gateway
+registration require their dedicated implementation and approval.
 
 ## Error Contract
 

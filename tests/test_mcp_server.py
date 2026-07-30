@@ -59,7 +59,14 @@ def _agent_api_server():
         def do_GET(self) -> None:
             parsed = urlsplit(self.path)
             query = parse_qs(parsed.query)
-            requests.append({"method": "GET", "path": parsed.path, "query": query})
+            requests.append(
+                {
+                    "method": "GET",
+                    "path": parsed.path,
+                    "query": query,
+                    "authorization": self.headers.get("Authorization"),
+                }
+            )
 
             if query.get("q") == ["cause-upstream-error"]:
                 body = b'{"detail":"sensitive-upstream-detail"}'
@@ -297,6 +304,81 @@ def test_mcp_client_completes_handshake_and_calls_every_read_only_tool() -> None
     ]
     assert "Content-Length:" not in stderr
     assert "sensitive-upstream-detail" not in stderr
+
+
+def test_mcp_forwards_bearer_only_from_runtime_environment(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    runtime_token = "bwst_00000000-0000-0000-0000-000000000001.runtime-secret"
+    monkeypatch.setenv("BLOCKWART_API_TOKEN", runtime_token)
+    monkeypatch.delenv("BLOCKWART_API_TOKEN_FILE", raising=False)
+
+    with _agent_api_server() as (base_url, requests):
+        result = mcp_server.fetch_json(
+            "/api/v1/objects",
+            {"limit": 1},
+            base_url=base_url,
+        )
+
+    assert result["items"]
+    assert requests[0]["authorization"] == f"Bearer {runtime_token}"
+    assert runtime_token not in json.dumps(result)
+    assert all(
+        "token" not in tool["inputSchema"].get("properties", {})
+        for tool in TOOLS
+    )
+
+
+def test_mcp_token_file_is_reloaded_and_ambiguous_configuration_fails(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    token_path = tmp_path / "blockwart.token"
+    first = "bwst_00000000-0000-0000-0000-000000000001.first-secret"
+    second = "bwst_00000000-0000-0000-0000-000000000001.second-secret"
+    token_path.write_text(first, encoding="utf-8")
+    monkeypatch.delenv("BLOCKWART_API_TOKEN", raising=False)
+    monkeypatch.setenv("BLOCKWART_API_TOKEN_FILE", str(token_path))
+
+    with _agent_api_server() as (base_url, requests):
+        mcp_server.fetch_json("/api/v1/objects", {}, base_url=base_url)
+        token_path.write_text(second, encoding="utf-8")
+        mcp_server.fetch_json("/api/v1/objects", {}, base_url=base_url)
+
+    assert [request["authorization"] for request in requests] == [
+        f"Bearer {first}",
+        f"Bearer {second}",
+    ]
+
+    monkeypatch.setenv("BLOCKWART_API_TOKEN", "ambiguous")
+    with pytest.raises(
+        mcp_server.UpstreamError,
+        match="ambiguous",
+    ) as exc_info:
+        mcp_server.fetch_json("/api/v1/objects", {}, base_url="http://127.0.0.1:1")
+    assert exc_info.value.code == "credential_configuration_error"
+
+
+def test_mcp_rejects_oversized_token_file_without_an_upstream_request(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    token_path = tmp_path / "oversized.token"
+    token_path.write_text("x" * 514, encoding="utf-8")
+    monkeypatch.delenv("BLOCKWART_API_TOKEN", raising=False)
+    monkeypatch.setenv("BLOCKWART_API_TOKEN_FILE", str(token_path))
+
+    with pytest.raises(
+        mcp_server.UpstreamError,
+        match="invalid",
+    ) as exc_info:
+        mcp_server.fetch_json(
+            "/api/v1/objects",
+            {},
+            base_url="http://127.0.0.1:1",
+        )
+
+    assert exc_info.value.code == "credential_configuration_error"
 
 
 @pytest.mark.parametrize(

@@ -6,6 +6,7 @@ import logging
 import os
 import re
 from collections.abc import Callable
+from pathlib import Path
 from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.parse import quote, urlencode
@@ -19,6 +20,8 @@ from jsonschema.validators import validator_for
 from mcp.server.lowlevel import NotificationOptions, Server
 
 DEFAULT_BASE_URL = "http://127.0.0.1:8000"
+API_TOKEN_ENV = "BLOCKWART_API_TOKEN"
+API_TOKEN_FILE_ENV = "BLOCKWART_API_TOKEN_FILE"
 SERVER_NAME = "blockwart-mcp"
 SERVER_VERSION = "0.1.0"
 JSON = dict[str, Any]
@@ -216,7 +219,11 @@ def fetch_json(path: str, params: JSON, *, base_url: str | None = None) -> JSON:
     url = f"{root}{path}"
     if query:
         url = f"{url}?{query}"
-    request = Request(url, method="GET")
+    headers = {}
+    api_token = _api_token()
+    if api_token is not None:
+        headers["Authorization"] = f"Bearer {api_token}"
+    request = Request(url, headers=headers, method="GET")
     try:
         with urlopen(request, timeout=10) as response:
             try:
@@ -233,6 +240,41 @@ def fetch_json(path: str, params: JSON, *, base_url: str | None = None) -> JSON:
             "upstream_unavailable",
             "Blockwart Agent API is unavailable.",
         ) from exc
+
+
+def _api_token() -> str | None:
+    inline_token = os.environ.get(API_TOKEN_ENV)
+    token_file = os.environ.get(API_TOKEN_FILE_ENV)
+    if inline_token and token_file:
+        raise UpstreamError(
+            "credential_configuration_error",
+            "Blockwart MCP credential configuration is ambiguous.",
+        )
+    if token_file:
+        try:
+            with Path(token_file).open(encoding="utf-8") as credential_file:
+                raw_value = credential_file.read(514)
+        except (OSError, UnicodeError) as exc:
+            raise UpstreamError(
+                "credential_configuration_error",
+                "Blockwart MCP credential file is unavailable.",
+            ) from exc
+        if len(raw_value) > 513:
+            raise UpstreamError(
+                "credential_configuration_error",
+                "Blockwart MCP credential is invalid.",
+            )
+        value = raw_value.strip()
+    else:
+        value = (inline_token or "").strip()
+    if not value:
+        return None
+    if len(value) > 512 or any(character in value for character in "\r\n"):
+        raise UpstreamError(
+            "credential_configuration_error",
+            "Blockwart MCP credential is invalid.",
+        )
+    return value
 
 
 server = Server(SERVER_NAME, version=SERVER_VERSION)

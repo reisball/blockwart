@@ -47,6 +47,22 @@ class Settings(BaseSettings):
         default=False,
         description="Require HTTPS when sending the UI admin session cookie.",
     )
+    auth_session_ttl_seconds: int = Field(
+        default=3600,
+        ge=300,
+        le=86400,
+        description="Absolute lifetime of an authenticated browser session.",
+    )
+    auth_login_challenge_ttl_seconds: int = Field(
+        default=600,
+        ge=60,
+        le=3600,
+        description="Lifetime of a one-time pre-authentication CSRF challenge.",
+    )
+    auth_cookie_secure: bool = Field(
+        default=False,
+        description="Require HTTPS when sending identity and CSRF cookies.",
+    )
 
     @field_validator("admin_token", mode="before")
     @classmethod

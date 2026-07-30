@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="{{ locale }}">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <link rel="icon" href="data:," />
+    <meta name="referrer" content="no-referrer" />
+    <title>{{ title }}</title>
+    <script>
+      if (localStorage.getItem("blockwart-theme") === "light") {
+        document.documentElement.dataset.theme = "light";
+      }
+    </script>
+    <link rel="stylesheet" href="/static/app.css?v=062" />
+    <script src="/static/theme.js?v=054" defer></script>
+  </head>
+  <body>
+    <header class="topbar">
+      <div class="topbar-inner">
+        <a class="breadcrumb" href="/">{{ t("detail.back") }}</a>
+        <div class="title-row">
+          <div>
+            <h1>{{ t("auth.title") }}</h1>
+            <div class="subtle">{{ t("auth.subtitle") }}</div>
+          </div>
+          <div class="top-actions">
+            {% include "_language_switcher.html" %}
+            <div class="theme-toggle" role="group" aria-label="{{ t('nav.theme') }}">
+              <button class="theme-option" type="button" data-theme-value="dark">{{ t("nav.dark") }}</button>
+              <button class="theme-option" type="button" data-theme-value="light">{{ t("nav.light") }}</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </header>
+
+    <main class="page">
+      <section class="panel">
+        {% if error %}
+          <div class="error">{{ error }}</div>
+        {% endif %}
+
+        {% if principal %}
+          <h2 class="section-title">{{ t("auth.active_title") }}</h2>
+          <p class="meta">{{ t("auth.active_body", display_name=principal.display_name, login=principal.login) }}</p>
+          <dl class="detail-list">
+            <div>
+              <dt>{{ t("auth.principal_id") }}</dt>
+              <dd><code>{{ principal.id }}</code></dd>
+            </div>
+          </dl>
+          <form method="post" action="/auth/logout">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+            <button type="submit">{{ t("auth.logout") }}</button>
+          </form>
+        {% else %}
+          <h2 class="section-title">{{ t("auth.login_title") }}</h2>
+          <form class="form-grid" method="post" action="/auth/login" autocomplete="off">
+            <input type="hidden" name="login_challenge" value="{{ login_challenge }}" />
+            <label>{{ t("auth.login") }}
+              <input
+                type="text"
+                name="login"
+                autocomplete="username"
+                maxlength="128"
+                required
+              />
+            </label>
+            <label>{{ t("auth.password") }}
+              <input
+                type="password"
+                name="password"
+                autocomplete="current-password"
+                maxlength="1024"
+                required
+              />
+            </label>
+            <div class="button-row">
+              <button type="submit">{{ t("auth.login_submit") }}</button>
+              <a class="button button-muted" href="/">{{ t("admin.cancel") }}</a>
+            </div>
+          </form>
+        {% endif %}
+      </section>
+    </main>
+  </body>
+</html>

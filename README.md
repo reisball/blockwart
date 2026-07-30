@@ -43,6 +43,13 @@ protected runtime environment and unlock the UI at `/admin`. The token is never 
 database or returned to the browser; the browser receives only an HMAC-signed `HttpOnly` session
 cookie.
 
+The repository also contains the new principal, revocable credential, and
+object-grant foundation. It is deliberately dormant for catalog access while
+the authorized read/write surfaces are implemented: `/auth` and
+`/api/v1/auth/me` authenticate identities, but do not bypass or replace the
+legacy write gate. Roles, bootstrap, token lifecycle, revision, and audit
+contracts are documented in `docs/auth-rbac.md`.
+
 Initialize or refresh a local pilot database:
 
 ```bash
@@ -122,7 +129,8 @@ versioned Relationship, Audit, and Topology resources. Existing `/api/objects`
 and `/api/agent` routes remain compatibility surfaces. See `docs/api-v1.md`.
 
 A local MCP-compatible stdio wrapper is available as blockwart-mcp. It reads
-the v1 service layer. See docs/mcp.md.
+the v1 service layer and can attach a service-account bearer token from a
+protected file when the server requires one. See docs/mcp.md.
 
 ## Markdown Import
 

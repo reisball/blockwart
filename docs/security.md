@@ -15,4 +15,14 @@ Credential-reference records must keep:
 - `handling_rules.markdown_secret_allowed: false`
 - `handling_rules.agents_may_read_value: false`
 
-Auth, user creation, persistent services, and infrastructure exposure require separate approval.
+The authentication foundation uses Argon2id password hashes, hashed opaque
+browser sessions and service tokens, one-time login challenges, session-bound
+CSRF validation, revocation, expiry, and a separate security-event stream.
+Plaintext credential material must never enter logs, audit details, database
+rows, command-line arguments, or generated documentation. See
+`auth-rbac.md`.
+
+The foundation does not yet authorize catalog reads or writes. Production
+identity bootstrap, removal of the legacy global admin gate, writable API/MCP
+operations, persistent services, and infrastructure exposure require their
+dedicated rollout and approval.

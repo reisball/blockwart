@@ -170,6 +170,10 @@ Optional:
 - `BLOCKWART_ADMIN_TOKEN`
 - `BLOCKWART_ADMIN_SESSION_TTL_SECONDS` (default `3600`, allowed `300..86400`)
 - `BLOCKWART_ADMIN_COOKIE_SECURE` (default `false`; set `true` behind HTTPS)
+- `BLOCKWART_AUTH_SESSION_TTL_SECONDS` (default `3600`, allowed `300..86400`)
+- `BLOCKWART_AUTH_LOGIN_CHALLENGE_TTL_SECONDS` (default `600`, allowed
+  `60..3600`)
+- `BLOCKWART_AUTH_COOKIE_SECURE` (default `false`; set `true` behind HTTPS)
 - `BLOCKWART_SQLITE_BUSY_TIMEOUT_MS` (default `5000`, allowed `100..60000`)
 - `BLOCKWART_SQLITE_WAL_ENABLED` (default `true`)
 
@@ -200,9 +204,21 @@ contains no catalog mutation operation.
 The token and session cookie still traverse the network during browser use. On an untrusted network,
 serve Blockwart through HTTPS and set `BLOCKWART_ADMIN_COOKIE_SECURE=true`.
 
+The principal and object-grant foundation is intentionally dormant for
+catalog access during this transition. `/auth` uses the `BLOCKWART_AUTH_*`
+settings, and service-account bearer tokens can authenticate
+`/api/v1/auth/me`, but neither mechanism enables current catalog writes or
+filters current catalog reads yet. Do not bootstrap or activate production
+identities until the authorized read/write integration and migration rollout
+have separate approval. See `auth-rbac.md`.
+
 ## Agent Access
 
 The stable read-only API lives under `/api/v1`; `/api/agent` remains a
 compatibility namespace. The local MCP wrapper uses v1 through
 `BLOCKWART_API_BASE_URL`. Deployment of the MCP wrapper into OpenClaw/Gateway
 config is a separate approval step.
+
+For an approved future MCP deployment, inject a service-account token through
+the protected `BLOCKWART_API_TOKEN_FILE`. `BLOCKWART_API_TOKEN` is an
+environment fallback; configuring both sources is an error.

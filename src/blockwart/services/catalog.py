@@ -80,6 +80,7 @@ def _to_schema(
         summary=row.summary,
         data=data,
         provenance=provenance_for_read(provenance),
+        revision=row.revision,
         created_at=format_rfc3339_utc(row.created_at),
         updated_at=updated_at,
         last_changed=updated_at,
@@ -475,6 +476,7 @@ def upsert_object(
         row.summary = payload.summary
         row.data_json = data_json
         row.provenance_json = provenance_json
+        row.revision += 1
         row.updated_at = changed_at
 
     _write_audit(session, payload.id, action, audit_details)
@@ -661,12 +663,15 @@ def delete_object(session: Session, object_id: str) -> bool:
 
 
 def _touch_objects_for_refs(session: Session, refs: list[str], changed_at: datetime) -> None:
-    for ref in refs:
-        if ":" not in ref:
-            continue
-        _, object_id = ref.split(":", 1)
+    object_ids = {
+        ref.split(":", 1)[1]
+        for ref in refs
+        if ":" in ref
+    }
+    for object_id in object_ids:
         row = session.get(CatalogObject, object_id)
         if row is not None:
+            row.revision += 1
             row.updated_at = changed_at
 
 

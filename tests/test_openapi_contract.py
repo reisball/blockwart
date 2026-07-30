@@ -15,6 +15,7 @@ EXPECTED_OPERATIONS = {
     "/api/health/ready": {"get"},
     "/api/objects": {"get"},
     "/api/objects/{object_id}": {"get"},
+    "/api/v1/auth/me": {"get"},
     "/api/v1/context": {"get"},
     "/api/v1/objects": {"get"},
     "/api/v1/objects/{object_id}": {"get"},

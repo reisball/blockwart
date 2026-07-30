@@ -26,7 +26,9 @@ PREVIOUS_HEAD_REVISION = "20260723_0002"
 PLACEMENT_REVISION = "20260724_0003"
 RELATIONSHIP_REVISION = "20260724_0004"
 ENGLISH_CONTRACT_REVISION = "20260729_0007"
-HEAD_REVISION = ENGLISH_CONTRACT_REVISION
+IDENTITY_REVISION = "20260730_0008"
+AUTHORIZATION_REVISION = "20260730_0009"
+HEAD_REVISION = AUTHORIZATION_REVISION
 PROJECT_ALEMBIC_CONFIG = Path(__file__).resolve().parents[1] / "alembic.ini"
 LEGACY_SNAPSHOT = Path(__file__).resolve().parent / "fixtures" / "legacy_snapshot.sql"
 
@@ -135,15 +137,29 @@ def test_real_alembic_upgrade_creates_fresh_database_and_has_no_drift(
         assert set(inspect(engine).get_table_names()) == {
             "alembic_version",
             "audit_events",
+            "browser_sessions",
             "catalog_objects",
+            "login_challenges",
+            "object_grants",
+            "password_credentials",
+            "principals",
             "relationships",
+            "security_events",
+            "service_tokens",
         }
     finally:
         engine.dispose()
     assert set(Base.metadata.tables) == {
         "audit_events",
+        "browser_sessions",
         "catalog_objects",
+        "login_challenges",
+        "object_grants",
+        "password_credentials",
+        "principals",
         "relationships",
+        "security_events",
+        "service_tokens",
     }
     assert _revision(database_url) == HEAD_REVISION
 
@@ -498,6 +514,82 @@ def test_english_contract_migration_is_lossless_and_canonicalizes_references(
         objects["legacy-network"]["created_at"],
         objects["legacy-network"]["updated_at"],
     ) == ("2026-01-01 01:02:03", "2026-02-02 02:03:04")
+    assert _revision(database_url) == HEAD_REVISION
+
+
+def test_identity_and_authorization_migrations_preserve_catalog_data(
+    tmp_path: Path,
+) -> None:
+    database_path = tmp_path / "identity-authorization.sqlite3"
+    database_url = _database_url(database_path)
+    config = build_alembic_config(database_url)
+    command.upgrade(config, ENGLISH_CONTRACT_REVISION)
+
+    connection = sqlite3.connect(database_path)
+    try:
+        connection.execute(
+            "INSERT INTO catalog_objects "
+            "(id, kind, label, status, lifecycle, health, summary, data_json, "
+            "provenance_json, created_at, updated_at) "
+            "VALUES ('factory', 'host', 'Factory', 'active', 'active', "
+            "'healthy', 'production host', '{\"schema_version\":1}', "
+            "'{\"source_type\":\"manual\",\"manual_override\":false}', "
+            "'2026-01-01 01:02:03', '2026-02-02 02:03:04')"
+        )
+        connection.execute(
+            "INSERT INTO audit_events "
+            "(object_id, action, actor, summary, details_json, created_at) "
+            "VALUES ('factory', 'create', 'legacy-ui', 'legacy', "
+            "'{\"event\":\"legacy\",\"version\":1}', "
+            "'2026-02-02 02:03:05')"
+        )
+        connection.commit()
+    finally:
+        connection.close()
+    before = _existing_data_snapshot(database_path)
+
+    command.upgrade(config, IDENTITY_REVISION)
+    assert _revision(database_url) == IDENTITY_REVISION
+    assert _existing_data_snapshot(database_path) == before
+
+    command.upgrade(config, AUTHORIZATION_REVISION)
+    command.check(config)
+
+    connection = sqlite3.connect(database_path)
+    try:
+        revision = connection.execute(
+            "SELECT revision FROM catalog_objects WHERE id = 'factory'"
+        ).fetchone()
+        empty_auth_counts = {
+            table: connection.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
+            for table in (
+                "browser_sessions",
+                "login_challenges",
+                "object_grants",
+                "password_credentials",
+                "principals",
+                "security_events",
+                "service_tokens",
+            )
+        }
+        with pytest.raises(sqlite3.IntegrityError):
+            connection.execute(
+                "UPDATE catalog_objects SET revision = 0 WHERE id = 'factory'"
+            )
+    finally:
+        connection.close()
+
+    assert revision == (1,)
+    assert empty_auth_counts == {
+        "browser_sessions": 0,
+        "login_challenges": 0,
+        "object_grants": 0,
+        "password_credentials": 0,
+        "principals": 0,
+        "security_events": 0,
+        "service_tokens": 0,
+    }
+    assert _existing_data_snapshot(database_path) == before
     assert _revision(database_url) == HEAD_REVISION
 
 
@@ -1094,9 +1186,16 @@ def downgrade() -> None:
         assert set(inspect(engine).get_table_names()) == {
             "alembic_version",
             "audit_events",
+            "browser_sessions",
             "catalog_objects",
             "future_head_only",
+            "login_challenges",
+            "object_grants",
+            "password_credentials",
+            "principals",
             "relationships",
+            "security_events",
+            "service_tokens",
         }
         with engine.connect() as connection:
             assert connection.execute(
