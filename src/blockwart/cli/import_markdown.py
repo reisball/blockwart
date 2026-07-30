@@ -5,6 +5,7 @@ import sys
 from collections.abc import Sequence
 from pathlib import Path
 
+from sqlalchemy import select
 from sqlalchemy.orm import sessionmaker
 
 from blockwart.db.migrations import DatabaseMigrationError, upgrade_database
@@ -89,7 +90,13 @@ def main(argv: Sequence[str] | None = None) -> int:
     try:
         with session_factory() as session:
             with transaction(session):
+                previous_revisions: dict[str, int] = {}
                 if args.replace:
+                    previous_revisions = dict(
+                        session.execute(
+                            select(CatalogObject.id, CatalogObject.revision)
+                        ).all()
+                    )
                     session.query(AuditEvent).delete()
                     session.query(Relationship).delete()
                     session.query(CatalogObject).delete()
@@ -98,6 +105,10 @@ def main(argv: Sequence[str] | None = None) -> int:
                     tools_path,
                     references_root=Path(args.references_root),
                 )
+                for object_id, previous_revision in previous_revisions.items():
+                    row = session.get(CatalogObject, object_id)
+                    if row is not None:
+                        row.revision = max(row.revision, previous_revision + 1)
                 object_count = session.query(CatalogObject).count()
                 relationship_count = session.query(Relationship).count()
     except DatabaseTransactionError:

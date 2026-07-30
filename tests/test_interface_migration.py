@@ -89,6 +89,7 @@ def test_interface_plan_is_pure_deterministic_and_idempotent(
         audit = session.query(AuditEvent).one()
         assert audit.action == "interface_normalize"
         assert audit.actor == "interface-migration"
+        assert row.revision == 2
         assert row.updated_at > original_updated_at
         repeated = build_interface_migration_plan(session)
         assert repeated.changed_objects == 0

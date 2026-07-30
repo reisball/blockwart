@@ -82,6 +82,7 @@ class CatalogRecordDiagnostic(BaseModel):
 
 class CatalogObjectOut(CatalogObjectIn):
     provenance: CatalogProvenanceOut
+    revision: int = Field(ge=1)
     created_at: str | None = None
     updated_at: str | None = None
     last_changed: str | None = None

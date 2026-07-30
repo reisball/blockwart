@@ -91,6 +91,7 @@ def install_api_error_contract(app: FastAPI) -> None:
             return await http_exception_handler(request, exc)
         code = {
             400: "invalid_request",
+            401: "unauthorized",
             403: "forbidden",
             404: "not_found",
             405: "method_not_allowed",

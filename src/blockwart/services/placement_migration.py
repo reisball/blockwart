@@ -193,6 +193,7 @@ def apply_placement_migration_plan(
             separators=(",", ":"),
             sort_keys=True,
         )
+        row.revision += 1
         row.updated_at = changed_at
         add_audit_event(
             session,

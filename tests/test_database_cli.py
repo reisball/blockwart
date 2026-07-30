@@ -18,14 +18,14 @@ def test_database_cli_upgrades_then_checks_database(tmp_path: Path, capsys) -> N
     database_url = f"sqlite:///{tmp_path / 'cli.sqlite3'}"
 
     assert database_cli.main(["--database-url", database_url, "upgrade"]) == 0
-    assert "database_upgrade_ok revision=20260729_0007" in capsys.readouterr().out
+    assert "database_upgrade_ok revision=20260730_0009" in capsys.readouterr().out
 
     assert database_cli.main(["--database-url", database_url, "check"]) == 0
-    assert "database_check_ok revision=20260729_0007" in capsys.readouterr().out
+    assert "database_check_ok revision=20260730_0009" in capsys.readouterr().out
 
     assert database_cli.main(["--database-url", database_url, "integrity"]) == 0
     assert (
-        "database_integrity_ok revision=20260729_0007 diagnostics=0"
+        "database_integrity_ok revision=20260730_0009 diagnostics=0"
         in capsys.readouterr().out
     )
 
@@ -217,7 +217,7 @@ def test_markdown_create_schema_uses_alembic(
     engine = create_engine(database_url)
     with engine.connect() as connection:
         assert connection.execute(text("SELECT version_num FROM alembic_version")).scalar_one() == (
-            "20260729_0007"
+            "20260730_0009"
         )
     engine.dispose()
 

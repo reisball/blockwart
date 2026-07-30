@@ -40,6 +40,10 @@ from blockwart.schemas.catalog import (
     CatalogObjectOut,
     CatalogRecordDiagnostic,
 )
+from blockwart.services.access import (
+    active_owner_covered_object_ids,
+    ensure_owner_coverage_preserved,
+)
 from blockwart.services.audit import (
     add_audit_event,
     load_audit_details,
@@ -80,6 +84,7 @@ def _to_schema(
         summary=row.summary,
         data=data,
         provenance=provenance_for_read(provenance),
+        revision=row.revision,
         created_at=format_rfc3339_utc(row.created_at),
         updated_at=updated_at,
         last_changed=updated_at,
@@ -158,12 +163,14 @@ def _write_audit(
     object_id: str | None,
     action: str,
     details: Mapping[str, object] | None = None,
+    *,
+    actor: str = "system",
 ) -> None:
     add_audit_event(
         session,
         object_id=object_id,
         action=action,
-        actor="system",
+        actor=actor,
         details=details,
     )
 
@@ -294,6 +301,8 @@ def create_relationship(
     from_ref: str,
     relation_type: str,
     to_ref: str,
+    audit_action: str = "relationship_create",
+    audit_actor: str = "system",
 ) -> dict[str, str]:
     object_kinds = current_object_kinds(session)
     validate_relationship(
@@ -316,13 +325,16 @@ def create_relationship(
             child_ref=to_ref,
         )
     changed_at = _now()
+    cleared_unassigned = False
     if relation_type == CANONICAL_PLACEMENT_RELATION_TYPE:
-        _clear_explicit_unassigned_state(
+        cleared_unassigned = _clear_explicit_unassigned_state(
             session,
             child_ref=to_ref,
             changed_at=changed_at,
         )
     if existing is not None:
+        if cleared_unassigned:
+            touch_objects_for_refs(session, [to_ref], changed_at)
         session.flush()
         return {"from_ref": from_ref, "relation_type": relation_type, "to_ref": to_ref}
     session.add(
@@ -335,14 +347,15 @@ def create_relationship(
     _write_audit(
         session,
         None,
-        "relationship_create",
+        audit_action,
         {
             "from_ref": from_ref,
             "relation_type": relation_type,
             "to_ref": to_ref,
         },
+        actor=audit_actor,
     )
-    _touch_objects_for_refs(session, [from_ref, to_ref], changed_at)
+    touch_objects_for_refs(session, [from_ref, to_ref], changed_at)
     session.flush()
     return {"from_ref": from_ref, "relation_type": relation_type, "to_ref": to_ref}
 
@@ -352,14 +365,14 @@ def _clear_explicit_unassigned_state(
     *,
     child_ref: str,
     changed_at: datetime,
-) -> None:
+) -> bool:
     _, child_id = child_ref.split(":", 1)
     row = session.get(CatalogObject, child_id)
     if row is None:
-        return
+        return False
     data = json.loads(row.data_json)
     if not is_explicitly_unassigned(data):
-        return
+        return False
     data.pop("placement", None)
     row.data_json = json.dumps(data, sort_keys=True)
     row.updated_at = changed_at
@@ -369,6 +382,51 @@ def _clear_explicit_unassigned_state(
         "placement_assign",
         {"child_ref": child_ref},
     )
+    return True
+
+
+def delete_relationship(
+    session: Session,
+    relationship_id: int,
+    *,
+    audit_action: str = "relationship_delete",
+    audit_actor: str = "system",
+    enforce_owner_coverage: bool = True,
+) -> bool:
+    row = session.get(Relationship, relationship_id)
+    if row is None:
+        return False
+    previously_covered_ids = (
+        active_owner_covered_object_ids(session)
+        if (
+            enforce_owner_coverage
+            and row.relation_type == CANONICAL_PLACEMENT_RELATION_TYPE
+        )
+        else set()
+    )
+    from_ref = row.from_ref
+    relation_type = row.relation_type
+    to_ref = row.to_ref
+    session.delete(row)
+    touch_objects_for_refs(session, [from_ref, to_ref], _now())
+    _write_audit(
+        session,
+        None,
+        audit_action,
+        {
+            "from_ref": from_ref,
+            "relation_type": relation_type,
+            "to_ref": to_ref,
+        },
+        actor=audit_actor,
+    )
+    session.flush()
+    if previously_covered_ids:
+        ensure_owner_coverage_preserved(
+            session,
+            previously_covered_ids=previously_covered_ids,
+        )
+    return True
 
 
 def _validate_placement_relationship(
@@ -475,6 +533,7 @@ def upsert_object(
         row.summary = payload.summary
         row.data_json = data_json
         row.provenance_json = provenance_json
+        row.revision += 1
         row.updated_at = changed_at
 
     _write_audit(session, payload.id, action, audit_details)
@@ -660,13 +719,16 @@ def delete_object(session: Session, object_id: str) -> bool:
     return True
 
 
-def _touch_objects_for_refs(session: Session, refs: list[str], changed_at: datetime) -> None:
-    for ref in refs:
-        if ":" not in ref:
-            continue
-        _, object_id = ref.split(":", 1)
+def touch_objects_for_refs(session: Session, refs: list[str], changed_at: datetime) -> None:
+    object_ids = {
+        ref.split(":", 1)[1]
+        for ref in refs
+        if ":" in ref
+    }
+    for object_id in object_ids:
         row = session.get(CatalogObject, object_id)
         if row is not None:
+            row.revision += 1
             row.updated_at = changed_at
 
 

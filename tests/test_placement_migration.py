@@ -77,6 +77,7 @@ def test_placement_plan_marks_missing_parent_decisions_and_is_idempotent(
         audit = session.query(AuditEvent).one()
         assert audit.action == "placement_state_normalize"
         assert audit.actor == "placement-migration"
+        assert session.get(CatalogObject, "api").revision == 2
         repeated = build_placement_migration_plan(session)
         assert repeated.changed_objects == 0
         assert repeated.unassigned_refs == ("service:api",)

@@ -20,6 +20,10 @@ class CatalogObject(Base):
     __tablename__ = "catalog_objects"
     __table_args__ = (
         CheckConstraint(
+            "revision >= 1",
+            name="ck_catalog_objects_revision_positive",
+        ),
+        CheckConstraint(
             "lifecycle IS NULL OR lifecycle IN ('planned','active','retired')",
             name="ck_catalog_objects_lifecycle",
         ),
@@ -59,6 +63,11 @@ class CatalogObject(Base):
         Text,
         default='{"manual_override":false,"source_type":"unknown"}',
         server_default='{"manual_override":false,"source_type":"unknown"}',
+    )
+    revision: Mapped[int] = mapped_column(
+        Integer,
+        default=1,
+        server_default=text("1"),
     )
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(

@@ -15,6 +15,10 @@ anyio==4.14.2
     #   sse-starlette
     #   starlette
     #   watchfiles
+argon2-cffi==25.1.0
+    # via blockwart (pyproject.toml)
+argon2-cffi-bindings==25.1.0
+    # via argon2-cffi
 attrs==26.1.0
     # via
     #   jsonschema
@@ -24,7 +28,9 @@ certifi==2026.7.22
     #   httpcore
     #   httpx
 cffi==2.1.0
-    # via cryptography
+    # via
+    #   argon2-cffi-bindings
+    #   cryptography
 click==8.4.2
     # via uvicorn
 cryptography==49.0.0
