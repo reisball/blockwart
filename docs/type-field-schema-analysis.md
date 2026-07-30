@@ -20,7 +20,7 @@ Relevant hardcoded areas:
 - CRUD/persistence: `src/blockwart/services/catalog.py`
 - UI form handling and panel extraction: `src/blockwart/ui/routes.py`
 - Object list/detail templates: `src/blockwart/ui/templates/index.html`,
-  `src/blockwart/ui/templates/object_detail.html`
+  `src/blockwart/ui/templates/_object_detail_content.html`
 - Markdown/seed imports: `src/blockwart/services/markdown_import.py`,
   `src/blockwart/services/seeds.py`
 

@@ -4,6 +4,7 @@ from collections.abc import Mapping
 from datetime import UTC, datetime
 from ipaddress import ip_address
 from typing import Annotated, Any
+from urllib.parse import urlencode
 
 from fastapi import APIRouter, Depends, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
@@ -202,6 +203,9 @@ def _index_template_context(
     show_create_form: bool,
     can_write_enabled: bool,
     form_kind: str | None = None,
+    selected_asset_ref_override: str = "",
+    detail_mode: bool = False,
+    detail_query_string: str = "",
 ) -> dict[str, Any]:
     i18n = translation_context(request)
     translator = i18n["t"]
@@ -218,7 +222,7 @@ def _index_template_context(
         selected_form_kind = OBJECT_KINDS[0]
     explorer = read_model.explorer
     normalized_query = q.strip().casefold()
-    selected_asset_ref = next(
+    selected_asset_ref = selected_asset_ref_override or next(
         (
             f"{catalog_object.kind}:{catalog_object.id}"
             for catalog_object in read_model.objects
@@ -267,6 +271,15 @@ def _index_template_context(
         "index_relationships": read_model.index_relationships,
         "explorer": explorer,
         "selected_asset_ref": selected_asset_ref,
+        "detail_mode": detail_mode,
+        "detail_query_string": detail_query_string
+        or urlencode(
+            [
+                ("view", view),
+                ("q", q),
+                ("kind", kind),
+            ]
+        ),
         "unassigned_count": (
             len(explorer["standalone_systems"])
             + len(explorer["standalone_services"])
@@ -585,6 +598,139 @@ def _detail_template_context(
     }
 
 
+def _detail_navigation_context(
+    request: Request,
+    object_id: str,
+) -> dict[str, Any]:
+    view_value = request.query_params.get("view", "")
+    view = view_value if view_value in {"catalog", "topology"} else "catalog"
+    kind_value = request.query_params.get("kind", "")
+    kind = kind_value if kind_value in OBJECT_KINDS else ""
+    query = request.query_params.get("q", "")[:200]
+    state_value = request.query_params.get("return_state", "")
+    return_state = (
+        state_value
+        if re.fullmatch(r"[A-Za-z0-9_-]{12,64}", state_value)
+        else ""
+    )
+    detail_params = [
+        ("view", view),
+        ("q", query),
+        ("kind", kind),
+    ]
+    if return_state:
+        detail_params.append(("return_state", return_state))
+    detail_query_string = urlencode(detail_params)
+    detail_href = f"/objects/{object_id}?{detail_query_string}"
+    return_params = [
+        ("view", view),
+        ("q", query),
+        ("kind", kind),
+    ]
+    if return_state:
+        return_params.append(("restore", return_state))
+    return_query_string = urlencode(return_params)
+    translator = translation_context(request)["t"]
+    edit_sections = (
+        "overview",
+        "hardware",
+        "service-information",
+        "network",
+        "access",
+        "relationship-add",
+    )
+    return {
+        "view": view,
+        "q": query,
+        "kind": kind,
+        "return_state": return_state,
+        "detail_query_string": detail_query_string,
+        "detail_href": detail_href,
+        "detail_edit_hrefs": {
+            section: f"{detail_href}&edit={section}"
+            for section in edit_sections
+        },
+        "detail_post_urls": {
+            "overview": detail_href,
+            "network": f"/objects/{object_id}/network?{detail_query_string}",
+            "access": f"/objects/{object_id}/access?{detail_query_string}",
+            "relationships": (
+                f"/objects/{object_id}/relationships?{detail_query_string}"
+            ),
+            "comment": f"/objects/{object_id}/comment?{detail_query_string}",
+        },
+        "detail_return_href": f"/?{return_query_string}",
+        "detail_back_label": translator(
+            "detail.back_topology" if view == "topology" else "detail.back"
+        ),
+    }
+
+
+def _render_object_detail(
+    request: Request,
+    session: Session,
+    object_id: str,
+    *,
+    read_model: Any | None = None,
+    error: str | None,
+    edit_section: str,
+    can_write_enabled: bool,
+    data_json_override: str | None = None,
+    form_rows: Mapping[str, list[Mapping[str, Any]]] | None = None,
+    status_code: int = 200,
+) -> HTMLResponse:
+    detail_read_model = read_model or query_catalog_detail(session, object_id)
+    if detail_read_model is None:
+        raise HTTPException(status_code=404, detail="Catalog object not found")
+    navigation = _detail_navigation_context(request, object_id)
+    browse_read_model = query_catalog_browse(
+        session,
+        query=str(navigation["q"]),
+        kind=str(navigation["kind"]) or None,
+    )
+    object_ref = (
+        f"{detail_read_model.catalog_object.kind}:"
+        f"{detail_read_model.catalog_object.id}"
+    )
+    context = _index_template_context(
+        request,
+        browse_read_model,
+        q=str(navigation["q"]),
+        kind=str(navigation["kind"]),
+        view=str(navigation["view"]),
+        form=_empty_form(),
+        error=None,
+        show_create_form=False,
+        can_write_enabled=can_write_enabled,
+        selected_asset_ref_override=object_ref,
+        detail_mode=True,
+        detail_query_string=str(navigation["detail_query_string"]),
+    )
+    context.update(
+        _detail_template_context(
+            request,
+            detail_read_model,
+            error=error,
+            edit_section=edit_section,
+            can_write_enabled=can_write_enabled,
+            data_json_override=data_json_override,
+            form_rows=form_rows,
+        )
+    )
+    context.update(navigation)
+    context["detail_mode"] = True
+    return templates.TemplateResponse(
+        request,
+        "index.html",
+        context=context,
+        status_code=status_code,
+    )
+
+
+def _detail_redirect_url(request: Request, object_id: str) -> str:
+    return str(_detail_navigation_context(request, object_id)["detail_href"])
+
+
 @router.get("/objects/{object_id}", response_class=HTMLResponse)
 def object_detail(
     request: Request,
@@ -596,16 +742,14 @@ def object_detail(
     read_model = query_catalog_detail(session, object_id)
     if read_model is None:
         raise HTTPException(status_code=404, detail="Catalog object not found")
-    return templates.TemplateResponse(
+    return _render_object_detail(
         request,
-        "object_detail.html",
-        context=_detail_template_context(
-            request,
-            read_model,
-            error=None,
-            edit_section=edit if write_enabled else "",
-            can_write_enabled=write_enabled,
-        ),
+        session,
+        object_id,
+        read_model=read_model,
+        error=None,
+        edit_section=edit if write_enabled else "",
+        can_write_enabled=write_enabled,
     )
 
 
@@ -712,7 +856,10 @@ def save_object(
             ),
             status_code=422,
         )
-    return RedirectResponse(url=f"/objects/{payload.id}", status_code=303)
+    return RedirectResponse(
+        url=_detail_redirect_url(request, payload.id),
+        status_code=303,
+    )
 
 
 @router.post(
@@ -721,6 +868,7 @@ def save_object(
     dependencies=[Depends(require_admin_write)],
 )
 def save_relationship(
+    request: Request,
     object_id: str,
     session: Annotated[Session, Depends(get_session)],
     direction: Annotated[str, Form()],
@@ -730,15 +878,17 @@ def save_relationship(
     catalog_object = get_object(session, object_id)
     if catalog_object is None:
         raise HTTPException(status_code=404, detail="Catalog object not found")
-    if relation_type not in RELATION_TYPES:
-        raise HTTPException(status_code=422, detail="Unsupported relation type")
-    _require_existing_ref(session, target_ref)
-    object_ref = f"{catalog_object.kind}:{catalog_object.id}"
-    if direction == "inbound":
-        from_ref, to_ref = target_ref, object_ref
-    else:
-        from_ref, to_ref = object_ref, target_ref
     try:
+        if relation_type not in RELATION_TYPES:
+            raise ValueError("Unsupported relation type")
+        if direction not in {"inbound", "outbound"}:
+            raise ValueError("Unsupported relationship direction")
+        _require_existing_ref(session, target_ref)
+        object_ref = f"{catalog_object.kind}:{catalog_object.id}"
+        if direction == "inbound":
+            from_ref, to_ref = target_ref, object_ref
+        else:
+            from_ref, to_ref = object_ref, target_ref
         with transaction(session):
             create_relationship(
                 session,
@@ -746,9 +896,26 @@ def save_relationship(
                 relation_type=relation_type,
                 to_ref=to_ref,
             )
-    except (PlacementError, RelationshipIntegrityError) as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
-    return RedirectResponse(url=f"/objects/{object_id}", status_code=303)
+    except (
+        HTTPException,
+        PlacementError,
+        RelationshipIntegrityError,
+        ValueError,
+    ) as exc:
+        error = str(exc.detail) if isinstance(exc, HTTPException) else str(exc)
+        return _render_object_detail(
+            request,
+            session,
+            object_id,
+            error=error,
+            edit_section="relationship-add",
+            can_write_enabled=True,
+            status_code=422,
+        )
+    return RedirectResponse(
+        url=_detail_redirect_url(request, object_id),
+        status_code=303,
+    )
 
 
 @router.post(
@@ -757,6 +924,7 @@ def save_relationship(
     dependencies=[Depends(require_admin_write)],
 )
 def update_comment(
+    request: Request,
     object_id: str,
     session: Annotated[Session, Depends(get_session)],
     comment: Annotated[str, Form()] = "",
@@ -783,7 +951,10 @@ def update_comment(
                 data=data,
             ),
         )
-    return RedirectResponse(url=f"/objects/{object_id}", status_code=303)
+    return RedirectResponse(
+        url=_detail_redirect_url(request, object_id),
+        status_code=303,
+    )
 
 
 @router.post(
@@ -928,24 +1099,25 @@ def update_object(
         read_model = query_catalog_detail(session, object_id)
         if read_model is None:
             raise HTTPException(status_code=404, detail="Catalog object not found") from exc
-        return templates.TemplateResponse(
+        return _render_object_detail(
             request,
-            "object_detail.html",
-            context=_detail_template_context(
-                request,
-                read_model,
-                error=_safe_error_message(exc),
-                edit_section=(
-                    "service-information"
-                    if submitted_service_information
-                    else "hardware" if submitted_hardware else "overview"
-                ),
-                can_write_enabled=True,
-                data_json_override=SAFE_DATA_JSON_FALLBACK,
+            session,
+            object_id,
+            read_model=read_model,
+            error=_safe_error_message(exc),
+            edit_section=(
+                "service-information"
+                if submitted_service_information
+                else "hardware" if submitted_hardware else "overview"
             ),
+            can_write_enabled=True,
+            data_json_override=SAFE_DATA_JSON_FALLBACK,
             status_code=422,
         )
-    return RedirectResponse(url=f"/objects/{payload.id}", status_code=303)
+    return RedirectResponse(
+        url=_detail_redirect_url(request, payload.id),
+        status_code=303,
+    )
 
 
 @router.post(
@@ -1017,7 +1189,10 @@ async def update_network(
         )
     with transaction(session):
         upsert_object(session, payload)
-    return RedirectResponse(url=f"/objects/{object_id}", status_code=303)
+    return RedirectResponse(
+        url=_detail_redirect_url(request, object_id),
+        status_code=303,
+    )
 
 
 @router.post(
@@ -1140,7 +1315,10 @@ async def update_access(
     with transaction(session):
         for payload in payloads:
             upsert_object(session, payload)
-    return RedirectResponse(url=f"/objects/{object_id}", status_code=303)
+    return RedirectResponse(
+        url=_detail_redirect_url(request, object_id),
+        status_code=303,
+    )
 
 
 def _detail_form_error_response(
@@ -1155,17 +1333,15 @@ def _detail_form_error_response(
     read_model = query_catalog_detail(session, object_id)
     if read_model is None:
         raise HTTPException(status_code=404, detail="Catalog object not found")
-    return templates.TemplateResponse(
+    return _render_object_detail(
         request,
-        "object_detail.html",
-        context=_detail_template_context(
-            request,
-            read_model,
-            error=error,
-            edit_section=edit_section,
-            can_write_enabled=True,
-            form_rows=form_rows,
-        ),
+        session,
+        object_id,
+        read_model=read_model,
+        error=error,
+        edit_section=edit_section,
+        can_write_enabled=True,
+        form_rows=form_rows,
         status_code=422,
     )
 

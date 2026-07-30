@@ -47,7 +47,7 @@
       {% if asset.endpoint %}<code>{{ asset.endpoint }}</code>{% else %}<span class="muted">{{ t("asset.no_value") }}</span>{% endif %}
     </td>
     <td class="updated-column">{{ asset.updated_at[:10] or t("asset.no_value") }}</td>
-    <td><a class="row-detail" href="/objects/{{ asset.id }}" aria-label="{{ t('asset.details') }}">›</a></td>
+    <td><a class="row-detail" href="/objects/{{ asset.id }}?{{ detail_query_string }}" aria-label="{{ t('asset.details') }}" data-detail-trigger>›</a></td>
   </tr>
 {%- endmacro %}
 
@@ -93,7 +93,7 @@
 {%- endmacro %}
 
 <!doctype html>
-<html lang="{{ locale }}" data-view="{{ view }}">
+<html lang="{{ locale }}" data-view="{{ view }}" data-page="{{ 'detail' if detail_mode else view }}">
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
@@ -140,9 +140,17 @@
           "unknown": {{ t("health.unknown")|tojson }}
         }
       };
+      window.BLOCKWART_DETAIL_QUERY = {{ detail_query_string|tojson }};
+      window.BLOCKWART_EXPLORER_CONTEXT = {
+        view: {{ view|tojson }},
+        query: {{ q|tojson }},
+        kind: {{ kind|tojson }},
+        selectedRef: {{ selected_asset_ref|tojson }}
+      };
     </script>
     <script src="/static/theme.js?v=054" defer></script>
-    <script src="/static/index.js?v=058" defer></script>
+    <script src="/static/index.js?v=062" defer></script>
+    <script src="/static/detail.js?v=002" defer></script>
   </head>
   <body class="explorer-body explorer-{{ view }}">
     <header class="explorer-topbar">
@@ -293,7 +301,10 @@
           </div>
         </aside>
 
-        <section class="catalog-main">
+        <section class="catalog-main {% if detail_mode %}catalog-main-detail{% endif %}" data-main-scroll>
+          {% if detail_mode %}
+            {% include "_object_detail_content.html" %}
+          {% else %}
           <header class="content-heading">
             <div>
               <p class="eyebrow">{{ t("catalog.eyebrow") }}</p>
@@ -384,6 +395,7 @@
             </table>
           </div>
           <footer class="table-footer">{{ t("catalog.results", count=objects|length) }}</footer>
+          {% endif %}
         </section>
 
         <aside class="asset-inspector" data-inspector>
@@ -403,7 +415,7 @@
             </dl>
           </section>
           <footer class="inspector-footer">
-            <a class="secondary-button" href="/" data-inspector-details>{{ t("asset.details") }}</a>
+            <a class="secondary-button" href="/" data-inspector-details data-detail-trigger>{{ t("asset.details") }}</a>
           </footer>
         </aside>
       </main>
@@ -430,7 +442,12 @@
           </div>
         </div>
         <section class="map-workbench">
-          <div class="topology-canvas">
+          {% if detail_mode %}
+            <div class="topology-detail-main" data-main-scroll>
+              {% include "_object_detail_content.html" %}
+            </div>
+          {% else %}
+            <div class="topology-canvas" data-main-scroll>
             <div class="canvas-grid" aria-hidden="true"></div>
             <header class="canvas-labels">
               <span>{{ t("topology.hardware_column") }}</span>
@@ -524,7 +541,8 @@
               <span><span class="status-dot healthy"></span>{{ t("health.healthy") }}</span>
               <span><span class="status-dot degraded"></span>{{ t("health.degraded") }}</span>
             </div>
-          </div>
+            </div>
+          {% endif %}
 
           <aside class="map-inspector" data-inspector>
             <header>
@@ -546,7 +564,7 @@
               </dl>
             </section>
             <footer>
-              <a class="secondary-button" href="/" data-inspector-details>{{ t("asset.details") }}</a>
+              <a class="secondary-button" href="/" data-inspector-details data-detail-trigger>{{ t("asset.details") }}</a>
             </footer>
           </aside>
         </section>
