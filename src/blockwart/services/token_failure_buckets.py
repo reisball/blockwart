@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import ipaddress
+from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from functools import lru_cache
@@ -95,7 +96,7 @@ def record_service_token_failure(
     expires_at = window_start + timedelta(seconds=policy.window_seconds)
     specs = _bucket_specs(token, source, policy)
 
-    global_bucket = _increment_bucket(
+    global_bucket, global_reclaimed_active = _increment_bucket(
         session,
         dimension=DIMENSION_GLOBAL,
         key_hash=_GLOBAL_KEY_HASH,
@@ -103,10 +104,15 @@ def record_service_token_failure(
         expires_at=expires_at,
         limit=policy.global_limit,
         max_rows=policy.max_rows,
-        required=True,
+        now=timestamp,
+        evict_dimensions=(DIMENSION_TOKEN, DIMENSION_SOURCE),
     )
+    if global_bucket is None:
+        raise RuntimeError("Unable to allocate the global service-token failure bucket")
+    if global_reclaimed_active:
+        _saturate_bucket(global_bucket, policy.global_limit)
     source_dimension, source_hash, source_limit = specs[1]
-    source_bucket = _increment_bucket(
+    source_bucket, source_reclaimed_active = _increment_bucket(
         session,
         dimension=source_dimension,
         key_hash=source_hash,
@@ -114,14 +120,31 @@ def record_service_token_failure(
         expires_at=expires_at,
         limit=source_limit,
         max_rows=policy.max_rows,
-        required=False,
+        now=timestamp,
+        evict_dimensions=(DIMENSION_TOKEN,),
     )
+    if source_bucket is None:
+        # Losing active bucket state is safe only after the whole window fails closed.
+        _saturate_bucket(global_bucket, policy.global_limit)
+        source_bucket, source_reclaimed_active = _increment_bucket(
+            session,
+            dimension=source_dimension,
+            key_hash=source_hash,
+            window_start=window_start,
+            expires_at=expires_at,
+            limit=source_limit,
+            max_rows=policy.max_rows,
+            now=timestamp,
+            evict_dimensions=(DIMENSION_SOURCE,),
+        )
+    if source_reclaimed_active:
+        _saturate_bucket(global_bucket, policy.global_limit)
     buckets = ((global_bucket, policy.global_limit), (source_bucket, source_limit))
 
     token_bucket = None
     if global_bucket.failure_count <= policy.global_limit:
         token_dimension, token_hash, token_limit = specs[2]
-        token_bucket = _increment_bucket(
+        token_bucket, token_reclaimed_active = _increment_bucket(
             session,
             dimension=token_dimension,
             key_hash=token_hash,
@@ -129,8 +152,12 @@ def record_service_token_failure(
             expires_at=expires_at,
             limit=token_limit,
             max_rows=policy.max_rows,
-            required=False,
+            now=timestamp,
+            evict_dimensions=(DIMENSION_TOKEN,),
         )
+        # An evicted active fingerprint could otherwise retry below its threshold.
+        if token_bucket is None or token_reclaimed_active:
+            _saturate_bucket(global_bucket, policy.global_limit)
         buckets += ((token_bucket, token_limit),)
 
     denied = TokenFailureDecision(True)
@@ -197,15 +224,15 @@ def prune_service_token_failure_buckets(
 def resolve_service_token_source(
     *,
     direct_peer: str | None,
-    forwarded_for: str | None,
+    forwarded_for: Sequence[str],
     trusted_proxy_cidrs: str,
 ) -> str:
     direct = _parse_ip(direct_peer) or "unknown"
     if direct == "unknown" or not _is_trusted_proxy(direct, trusted_proxy_cidrs):
         return direct
-    if not forwarded_for or "," in forwarded_for:
+    if len(forwarded_for) != 1 or "," in forwarded_for[0]:
         return direct
-    return _parse_ip(forwarded_for.strip()) or direct
+    return _parse_ip(forwarded_for[0].strip()) or direct
 
 
 def service_token_from_authorization(authorization: str | None) -> str:
@@ -236,8 +263,9 @@ def _increment_bucket(
     expires_at: datetime,
     limit: int,
     max_rows: int,
-    required: bool,
-) -> ServiceTokenFailureBucket | None:
+    now: datetime,
+    evict_dimensions: tuple[str, ...],
+) -> tuple[ServiceTokenFailureBucket | None, bool]:
     existing = session.scalar(
         select(ServiceTokenFailureBucket).where(
             ServiceTokenFailureBucket.dimension == dimension,
@@ -245,8 +273,16 @@ def _increment_bucket(
             ServiceTokenFailureBucket.window_start == window_start,
         )
     )
-    if existing is None and not _make_bucket_room(session, max_rows=max_rows, required=required):
-        return None
+    reclaimed_active = False
+    if existing is None:
+        has_room, reclaimed_active = _make_bucket_room(
+            session,
+            max_rows=max_rows,
+            now=now,
+            evict_dimensions=evict_dimensions,
+        )
+        if not has_room:
+            return None, False
     statement = sqlite_insert(ServiceTokenFailureBucket).values(
         dimension=dimension,
         key_hash=key_hash,
@@ -269,33 +305,61 @@ def _increment_bucket(
     session.flush()
     if existing is not None:
         session.expire(existing)
-    return session.scalar(
-        select(ServiceTokenFailureBucket).where(
-            ServiceTokenFailureBucket.dimension == dimension,
-            ServiceTokenFailureBucket.key_hash == key_hash,
-            ServiceTokenFailureBucket.window_start == window_start,
-        )
+    return (
+        session.scalar(
+            select(ServiceTokenFailureBucket).where(
+                ServiceTokenFailureBucket.dimension == dimension,
+                ServiceTokenFailureBucket.key_hash == key_hash,
+                ServiceTokenFailureBucket.window_start == window_start,
+            )
+        ),
+        reclaimed_active,
     )
 
 
-def _make_bucket_room(session: Session, *, max_rows: int, required: bool) -> bool:
+def _make_bucket_room(
+    session: Session,
+    *,
+    max_rows: int,
+    now: datetime,
+    evict_dimensions: tuple[str, ...],
+) -> tuple[bool, bool]:
     row_count = session.scalar(select(func.count()).select_from(ServiceTokenFailureBucket)) or 0
     if row_count < max_rows:
-        return True
-    if not required:
-        return False
-    oldest_id = session.scalar(
+        return True, False
+    expired_id = session.scalar(
         select(ServiceTokenFailureBucket.id)
+        .where(ServiceTokenFailureBucket.expires_at <= now)
         .order_by(ServiceTokenFailureBucket.expires_at, ServiceTokenFailureBucket.id)
         .limit(1)
     )
-    if oldest_id is None:
-        return True
+    if expired_id is not None:
+        session.execute(
+            delete(ServiceTokenFailureBucket).where(
+                ServiceTokenFailureBucket.id == expired_id
+            )
+        )
+        session.flush()
+        return True, False
+    if not evict_dimensions:
+        return False, False
+    reclaim_id = session.scalar(
+        select(ServiceTokenFailureBucket.id)
+        .where(ServiceTokenFailureBucket.dimension.in_(evict_dimensions))
+        .order_by(ServiceTokenFailureBucket.expires_at, ServiceTokenFailureBucket.id)
+        .limit(1)
+    )
+    if reclaim_id is None:
+        return False, False
     session.execute(
-        delete(ServiceTokenFailureBucket).where(ServiceTokenFailureBucket.id == oldest_id)
+        delete(ServiceTokenFailureBucket).where(ServiceTokenFailureBucket.id == reclaim_id)
     )
     session.flush()
-    return True
+    return True, True
+
+
+def _saturate_bucket(bucket: ServiceTokenFailureBucket, limit: int) -> None:
+    bucket.failure_count = max(bucket.failure_count, limit + 1)
 
 
 def _emit_aggregate_event_if_due(

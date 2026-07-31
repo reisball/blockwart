@@ -190,3 +190,45 @@ def test_api_fingerprint_threshold_stops_lookup_and_aggregates_one_event(
         )
         assert len(events) == 1
         assert '"dimension":"token"' in events[0].details_json
+
+
+def test_api_rejects_duplicate_forwarded_source_fields(api_auth_state) -> None:
+    session_factory, _, _ = api_auth_state
+    app = create_app(
+        settings=Settings(auth_trusted_proxy_cidrs="192.0.2.10/32")
+    )
+
+    def override_get_session() -> Generator[Session, None, None]:
+        with session_factory() as session:
+            yield session
+
+    app.dependency_overrides[get_session] = override_get_session
+    with TestClient(app, client=("192.0.2.10", 50000)) as client:
+        first = client.get(
+            "/api/v1/auth/me",
+            headers={
+                "Authorization": "Bearer first-invalid-token",
+                "X-Forwarded-For": "198.51.100.8",
+            },
+        )
+        duplicate = client.get(
+            "/api/v1/auth/me",
+            headers=[
+                ("Authorization", "Bearer second-invalid-token"),
+                ("X-Forwarded-For", "198.51.100.8"),
+                ("X-Forwarded-For", "203.0.113.9"),
+            ],
+        )
+
+    assert first.status_code == 401
+    assert duplicate.status_code == 401
+    with session_factory() as session:
+        source_buckets = list(
+            session.scalars(
+                select(ServiceTokenFailureBucket).where(
+                    ServiceTokenFailureBucket.dimension == "source"
+                )
+            ).all()
+        )
+        assert len(source_buckets) == 2
+        assert {bucket.failure_count for bucket in source_buckets} == {1}

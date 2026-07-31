@@ -47,7 +47,7 @@ def require_api_read_access(
     token = service_token_from_authorization(authorization)
     source = resolve_service_token_source(
         direct_peer=request.client.host if request.client is not None else None,
-        forwarded_for=request.headers.get("X-Forwarded-For"),
+        forwarded_for=request.headers.getlist("X-Forwarded-For"),
         trusted_proxy_cidrs=settings.auth_trusted_proxy_cidrs,
     )
     policy = TokenFailurePolicy.from_settings(settings)

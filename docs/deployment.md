@@ -127,8 +127,9 @@ always carry `Secure`; there is no configuration downgrade for direct HTTP brows
 Blockwart does not infer trust from `Forwarded`, `X-Forwarded-Proto`, or arbitrary
 `X-Forwarded-*` headers. For service-token source limiting, `X-Forwarded-For` is used only when the
 direct transport peer belongs to `BLOCKWART_AUTH_TRUSTED_PROXY_CIDRS`, and the header contains
-exactly one valid IP address. Configure the smallest exact proxy IP/CIDR set; malformed or chained
-values are ignored in favor of the direct peer.
+exactly one valid IP address in exactly one header field. The trusted proxy must overwrite, never
+append, `X-Forwarded-For`. Configure the smallest exact proxy IP/CIDR set; duplicate, malformed, or
+chained values are ignored in favor of the direct peer.
 
 ## Authorization Rollout Checklist
 
@@ -158,6 +159,9 @@ missing, malformed, expired, revoked, unknown, or limited credential. The protec
 store emits at most one aggregate event for each global, source, or token-fingerprint bucket in a
 window. Events contain only dimension, bounded count, channel, and correlation context. Bucket keys
 are one-way digests, so neither the submitted token nor the raw network source is available there.
+If the bounded bucket table must reclaim a still-active bucket, Blockwart saturates the global
+window first. Authentication therefore fails closed until the next window instead of losing a
+source or fingerprint threshold.
 
 For an authentication-denial incident:
 
@@ -165,8 +169,8 @@ For an authentication-denial incident:
    IDs and aggregate dimensions. Never add Authorization headers, cookies, token values, request
    bodies, SQL parameters, or exception tracebacks to diagnostics.
 2. Confirm the direct peer and exact `BLOCKWART_AUTH_TRUSTED_PROXY_CIDRS` setting. A malformed,
-   chained, or untrusted forwarded address is intentionally ignored; do not widen the allowlist to
-   silence an event.
+   duplicate, chained, or untrusted forwarded address is intentionally ignored; the proxy must
+   overwrite rather than append the field. Do not widen the allowlist to silence an event.
 3. Check for expired/revoked credentials and expected client retry behavior. Rotate or revoke a
    suspected service token through `blockwart-auth`, update the protected runtime token file, and
    repeat the cross-channel authorization proof.

@@ -144,6 +144,96 @@ def test_expiry_pruning_and_row_cap_are_bounded(alembic_session_factory) -> None
         ) == 0
 
 
+def test_cap_saturation_preserves_current_source_and_fails_closed(
+    alembic_session_factory,
+) -> None:
+    now = utc_now()
+    policy = _policy(global_limit=300, source_limit=30, token_limit=10, max_rows=100)
+    target_source = "203.0.113.250"
+    target_token = "target-token"
+    with alembic_session_factory() as session:
+        with transaction(session):
+            for index in range(50):
+                record_service_token_failure(
+                    session,
+                    token=f"candidate-{index}",
+                    source=f"198.51.100.{index + 1}",
+                    policy=policy,
+                    channel="api",
+                    request_id="cap-saturation",
+                    now=now,
+                )
+            for _ in range(policy.source_limit + 1):
+                record_service_token_failure(
+                    session,
+                    token=target_token,
+                    source=target_source,
+                    policy=policy,
+                    channel="api",
+                    request_id="cap-saturation",
+                    now=now,
+                )
+
+        rows = list(session.scalars(select(ServiceTokenFailureBucket)).all())
+        assert len(rows) == policy.max_rows
+        global_bucket = next(row for row in rows if row.dimension == "global")
+        assert global_bucket.failure_count == policy.global_limit + 1
+        target_source_bucket = next(
+            row
+            for row in rows
+            if row.dimension == "source" and row.failure_count == policy.source_limit + 1
+        )
+        assert target_source_bucket.key_hash
+        decision = precheck_service_token_failure(
+            session,
+            token=target_token,
+            source=target_source,
+            policy=policy,
+            channel="api",
+            request_id="cap-saturation-check",
+            now=now,
+        )
+        assert not decision.allowed
+        assert decision.dimension == "global"
+
+
+def test_sustained_windows_reclaim_expired_capacity_without_exceeding_cap(
+    alembic_session_factory,
+) -> None:
+    policy = _policy(global_limit=300, source_limit=30, token_limit=10, max_rows=100)
+    start = utc_now()
+    with alembic_session_factory() as session:
+        for window in range(5):
+            now = start + timedelta(seconds=window * policy.window_seconds)
+            with transaction(session):
+                for index in range(80):
+                    record_service_token_failure(
+                        session,
+                        token=f"window-{window}-token-{index}",
+                        source=f"198.51.{window}.{index + 1}",
+                        policy=policy,
+                        channel="mcp",
+                        request_id="sustained-window",
+                        now=now,
+                    )
+            assert session.scalar(
+                select(func.count()).select_from(ServiceTokenFailureBucket)
+            ) <= policy.max_rows
+
+        final_now = start + timedelta(seconds=4 * policy.window_seconds)
+        decision = precheck_service_token_failure(
+            session,
+            token="new-token",
+            source="203.0.113.251",
+            policy=policy,
+            channel="mcp",
+            request_id="sustained-window-check",
+            now=final_now,
+        )
+        assert not decision.allowed
+        assert decision.dimension == "global"
+
+
 def test_parallel_failures_are_capped_and_visible_across_sessions(
     alembic_database,
 ) -> None:
@@ -230,9 +320,17 @@ def test_forwarded_source_requires_exact_trusted_peer_and_strict_header(
 ) -> None:
     assert resolve_service_token_source(
         direct_peer=direct,
-        forwarded_for=forwarded,
+        forwarded_for=(forwarded,),
         trusted_proxy_cidrs=trusted,
     ) == expected
+
+
+def test_duplicate_forwarded_source_fields_are_rejected() -> None:
+    assert resolve_service_token_source(
+        direct_peer="192.0.2.10",
+        forwarded_for=("198.51.100.8", "203.0.113.9"),
+        trusted_proxy_cidrs="192.0.2.10/32",
+    ) == "192.0.2.10"
 
 
 @pytest.mark.parametrize(
