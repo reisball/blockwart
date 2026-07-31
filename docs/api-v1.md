@@ -130,6 +130,57 @@ Requires `write` on the path object, discoverability of the peer, and current
 `If-Match`. The JSON body is `from_ref`, `relation_type`, and `to_ref`. Shared
 relationship, canonical-placement, last-owner, and rollback checks apply.
 
+## Access-control resources
+
+### `GET /api/v1/objects/{object_id}/access`
+
+Requires effective `manage_access`. The response carries the anchor object
+revision and ETag plus two explicitly separate projections:
+
+- `direct_grants`: grants stored on this exact object, including inactive
+  principals so stale assignments remain administratively visible;
+- `effective_access`: active principals that currently receive permissions on
+  this object, with additive permissions and every direct or inherited grant
+  source.
+
+Principal fields are limited to ID, login, display name, principal type, and
+active state. Credential, session, token, password, and hash fields are never
+part of this projection. Undiscoverable objects return `404`; discoverable
+objects without `manage_access` return `403`.
+
+### `GET /api/v1/objects/{object_id}/access/principals`
+
+Searches active principals by login or display name for a grant form. Query
+`q` must contain 2..100 characters and `limit` is 1..20. The response uses the
+same minimized identity projection as the access resource.
+
+### `GET /api/v1/objects/{object_id}/access/preview`
+
+Accepts `scope=self|subtree` and returns the safe object ID, kind, label, and
+direct-anchor marker for every affected object. `subtree` follows canonical
+placement only; other relationship types do not affect the preview.
+
+### Grant commands
+
+```text
+POST   /api/v1/objects/{object_id}/access/grants
+PUT    /api/v1/objects/{object_id}/access/grants/{grant_id}
+DELETE /api/v1/objects/{object_id}/access/grants/{grant_id}
+```
+
+All commands require effective `manage_access` and current `If-Match`. Create
+accepts `principal_id`, `role`, and `scope`; update accepts `role` and `scope`.
+Only an effective Owner may create, change, or revoke an Owner grant. The
+last-effective-owner and actor-self-lockout guards cover role changes, scope
+shrinks, and revocation over the canonical placement graph.
+
+An actual change returns the new revision and ETag and writes one immutable
+object audit event. An exact duplicate create or unchanged update returns
+`changed: false` without advancing the revision or writing another event.
+Concurrent writers using the same ETag have one winner; later attempts receive
+`412 precondition_failed`. Catalog object payloads and imports reject
+ACL-shaped data and cannot mutate grant rows.
+
 Every successful mutation advances the relevant object revision atomically and
 writes exactly one immutable object audit event in the same transaction. Audit
 details include principal, channel, correlation/request ID, old/new revision,

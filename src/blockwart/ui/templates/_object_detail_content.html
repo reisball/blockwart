@@ -545,6 +545,198 @@
             {% endif %}
           </section>
 
+        {% if can_manage_access %}
+          <section class="panel" aria-labelledby="object-permissions-title">
+            <div class="panel-head">
+              <div>
+                <h2 class="section-title" id="object-permissions-title">{{ t("grant.panel") }}</h2>
+                <p class="meta">{{ t("grant.panel_help") }}</p>
+              </div>
+              {% if edit_section == "permissions" %}
+                <a class="button button-small button-muted" href="{{ detail_href }}">{{ t("detail.cancel") }}</a>
+              {% else %}
+                <a class="button button-small button-muted" href="{{ detail_edit_hrefs.permissions }}">{{ t("detail.edit") }}</a>
+              {% endif %}
+            </div>
+
+            {% if edit_section == "permissions" and error %}
+              <div class="error" role="alert">{{ error }}</div>
+            {% endif %}
+
+            <h3>{{ t("grant.direct") }}</h3>
+            {% if grant_access.direct_grants %}
+              <div class="table-wrap">
+                <table class="table">
+                  <thead>
+                    <tr>
+                      <th>{{ t("grant.principal") }}</th>
+                      <th>{{ t("grant.role") }}</th>
+                      <th>{{ t("grant.scope") }}</th>
+                      {% if edit_section == "permissions" %}<th>{{ t("grant.actions") }}</th>{% endif %}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {% for grant in grant_access.direct_grants %}
+                      <tr>
+                        <td>
+                          <strong>{{ grant.principal.display_name }}</strong>
+                          <div class="meta">{{ grant.principal.login }} · {{ grant.principal.principal_type }}</div>
+                          {% if not grant.principal.active %}<span class="badge">{{ t("grant.inactive") }}</span>{% endif %}
+                        </td>
+                        {% if edit_section == "permissions" and (grant.role.value != "owner" or can_manage_owner_grants) %}
+                          <td colspan="3">
+                            <form class="form-grid" method="post" action="/objects/{{ object.id }}/permissions/grants/{{ grant.id }}?{{ detail_query_string }}">
+                              <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+                              <input type="hidden" name="if_match" value="{{ object_etag }}" />
+                              <label>{{ t("grant.role") }}
+                                <select name="role">
+                                  {% for role in grant_roles %}
+                                    {% if role.value != "owner" or can_manage_owner_grants %}
+                                      <option value="{{ role.value }}"{% if role == grant.role %} selected{% endif %}>{{ t("role." ~ role.value) }}</option>
+                                    {% endif %}
+                                  {% endfor %}
+                                </select>
+                              </label>
+                              <label>{{ t("grant.scope") }}
+                                <select name="scope">
+                                  {% for scope in grant_scopes %}
+                                    <option value="{{ scope.value }}"{% if scope == grant.scope %} selected{% endif %}>{{ t("scope." ~ scope.value) }}</option>
+                                  {% endfor %}
+                                </select>
+                              </label>
+                              <div class="button-row">
+                                <button class="button button-small" type="submit">{{ t("grant.update") }}</button>
+                              </div>
+                            </form>
+                            <form class="button-row" method="post" action="/objects/{{ object.id }}/permissions/grants/{{ grant.id }}/revoke?{{ detail_query_string }}">
+                              <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+                              <input type="hidden" name="if_match" value="{{ object_etag }}" />
+                              <button class="button button-small button-muted" type="submit">{{ t("grant.revoke") }}</button>
+                            </form>
+                          </td>
+                        {% else %}
+                          <td>{{ t("role." ~ grant.role.value) }}</td>
+                          <td>{{ t("scope." ~ grant.scope.value) }}</td>
+                          {% if edit_section == "permissions" %}<td><span class="meta">{{ t("grant.owner_only") }}</span></td>{% endif %}
+                        {% endif %}
+                      </tr>
+                    {% endfor %}
+                  </tbody>
+                </table>
+              </div>
+            {% else %}
+              <div class="meta">{{ t("grant.empty_direct") }}</div>
+            {% endif %}
+
+            {% if edit_section == "permissions" %}
+              <h3>{{ t("grant.add") }}</h3>
+              <form class="form-grid" method="get" action="/objects/{{ object.id }}">
+                <input type="hidden" name="view" value="{{ view }}" />
+                <input type="hidden" name="q" value="{{ q }}" />
+                <input type="hidden" name="kind" value="{{ kind }}" />
+                {% if return_state %}<input type="hidden" name="return_state" value="{{ return_state }}" />{% endif %}
+                <input type="hidden" name="edit" value="permissions" />
+                <label>{{ t("grant.search") }}
+                  <input name="principal_q" value="{{ grant_principal_query }}" minlength="2" maxlength="100" autocomplete="off" placeholder="{{ t('grant.search_placeholder') }}" />
+                </label>
+                <div class="button-row">
+                  <button class="button button-small" type="submit">{{ t("search.submit") }}</button>
+                </div>
+              </form>
+              <p class="meta">{{ t("grant.search_help") }}</p>
+
+              {% if grant_principal_results %}
+                <form class="form-grid" method="post" action="{{ detail_post_urls.grants }}">
+                  <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+                  <input type="hidden" name="if_match" value="{{ object_etag }}" />
+                  <label>{{ t("grant.principal") }}
+                    <select name="principal_id" required>
+                      {% for principal in grant_principal_results %}
+                        <option value="{{ principal.id }}">{{ principal.display_name }} · {{ principal.login }} · {{ principal.principal_type }}</option>
+                      {% endfor %}
+                    </select>
+                  </label>
+                  <label>{{ t("grant.role") }}
+                    <select name="role">
+                      {% for role in grant_roles %}
+                        {% if role.value != "owner" or can_manage_owner_grants %}
+                          <option value="{{ role.value }}">{{ t("role." ~ role.value) }}</option>
+                        {% endif %}
+                      {% endfor %}
+                    </select>
+                  </label>
+                  <label>{{ t("grant.scope") }}
+                    <select name="scope">
+                      {% for scope in grant_scopes %}
+                        <option value="{{ scope.value }}">{{ t("scope." ~ scope.value) }}</option>
+                      {% endfor %}
+                    </select>
+                  </label>
+                  <div class="button-row">
+                    <button type="submit">{{ t("grant.add") }}</button>
+                  </div>
+                </form>
+              {% elif grant_principal_query %}
+                <div class="meta">{{ t("grant.no_results") }}</div>
+              {% endif %}
+
+              <h3>{{ t("grant.preview") }}</h3>
+              <p class="meta">{{ t("grant.preview_help") }}</p>
+              <p><strong>{{ t("grant.affected_count", count=grant_scope_preview.affected_objects|length) }}</strong></p>
+              <ul class="rel">
+                {% for affected in grant_scope_preview.affected_objects %}
+                  <li>
+                    <span class="badge">{{ t("kind." ~ affected.kind) }}</span>
+                    {{ affected.label }}
+                    <span class="meta">{{ affected.id }}{% if affected.direct %} · {{ t("grant.direct_source") }}{% endif %}</span>
+                  </li>
+                {% endfor %}
+              </ul>
+            {% endif %}
+
+            <h3>{{ t("grant.effective") }}</h3>
+            {% if grant_access.effective_access %}
+              <div class="table-wrap">
+                <table class="table">
+                  <thead>
+                    <tr>
+                      <th>{{ t("grant.principal") }}</th>
+                      <th>{{ t("grant.permissions") }}</th>
+                      <th>{{ t("grant.source") }}</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {% for entry in grant_access.effective_access %}
+                      <tr>
+                        <td>
+                          <strong>{{ entry.principal.display_name }}</strong>
+                          <div class="meta">{{ entry.principal.login }} · {{ entry.principal.principal_type }}</div>
+                        </td>
+                        <td>
+                          {% for permission in entry.permissions %}
+                            <span class="badge">{{ t("permission." ~ permission.value) }}</span>
+                          {% endfor %}
+                        </td>
+                        <td>
+                          {% for source in entry.sources %}
+                            <div>
+                              <span class="badge">{{ t("grant.direct_source") if source.direct else t("grant.inherited_source") }}</span>
+                              {{ t("role." ~ source.role.value) }} · {{ t("scope." ~ source.scope.value) }} ·
+                              {{ source.anchor_object_label }} <span class="meta">{{ source.anchor_object_kind }}:{{ source.anchor_object_id }}</span>
+                            </div>
+                          {% endfor %}
+                        </td>
+                      </tr>
+                    {% endfor %}
+                  </tbody>
+                </table>
+              </div>
+            {% else %}
+              <div class="meta">{{ t("grant.empty_effective") }}</div>
+            {% endif %}
+          </section>
+        {% endif %}
+
         <section class="panel">
           <div class="panel-head">
             <h2 class="section-title">{{ t("panel.relationships") }}</h2>

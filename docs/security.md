@@ -24,6 +24,7 @@ rows, command-line arguments, or generated documentation. See
 
 Catalog reads are authenticated and object-authorized across UI, REST, Agent
 API, and MCP. No-discover objects are concealed and discover-only objects use
-a strict safe stub. Production identity bootstrap, removal of the legacy
-global admin gate, writable API/MCP operations, persistent services, and
-infrastructure exposure require their dedicated rollout and approval.
+a strict safe stub. Catalog and grant commands are also object-authorized.
+Production identity bootstrap, removal of the legacy global-admin
+compatibility path, persistent services, and infrastructure exposure require
+their dedicated rollout and approval.

@@ -13,6 +13,12 @@ It wraps the object-authorized v1 API:
 - blockwart.delete_object -> DELETE /api/v1/objects/{object_id}
 - blockwart.create_relationship -> POST /api/v1/objects/{object_id}/relationships
 - blockwart.delete_relationship -> DELETE /api/v1/objects/{object_id}/relationships
+- blockwart.get_object_access -> GET /api/v1/objects/{object_id}/access
+- blockwart.search_principals -> GET /api/v1/objects/{object_id}/access/principals
+- blockwart.preview_grant_scope -> GET /api/v1/objects/{object_id}/access/preview
+- blockwart.create_grant -> POST /api/v1/objects/{object_id}/access/grants
+- blockwart.update_grant -> PUT /api/v1/objects/{object_id}/access/grants/{grant_id}
+- blockwart.revoke_grant -> DELETE /api/v1/objects/{object_id}/access/grants/{grant_id}
 
 `blockwart.search` and `blockwart.get_context` accept `host`, `system`, `network`, and `service`
 as kinds. Both tools also forward v1's structured `parent`, `ip`, `port`,
@@ -28,6 +34,13 @@ and rollback implementation as REST and the browser UI. Update and delete
 arguments carry the last full-read `if_match` ETag. Child creation carries an
 `idempotency_key`; credentials remain runtime configuration and are never tool
 arguments. Delete tools publish MCP's destructive annotation.
+
+Grant read tools expose only minimized principal identity, separated direct
+grants and effective access, and safe canonical-scope previews. Grant write
+tools use the same `manage_access`, Owner-only, last-owner, self-lockout,
+revision, and audit rules as REST and UI. Their `if_match` argument carries the
+last access-resource ETag. The service token remains runtime transport
+configuration and is never accepted as a tool argument.
 
 For compatibility, MCP output retains the established `results` and `objects`
 fields. It additionally returns v1 `next_cursor`, `total`, `sort`, and

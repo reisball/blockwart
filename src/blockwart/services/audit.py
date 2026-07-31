@@ -89,6 +89,17 @@ def render_audit_summary_english(
                 return "; ".join(rendered)
         object_ref = _text(details.get("object_ref"))
         return f"Updated {object_ref}".strip()
+    if event in {"grant_create", "grant_update", "grant_revoke"}:
+        target = _text(
+            details.get("target_principal_id")
+            or details.get("principal_id")
+        )
+        verbs = {
+            "grant_create": "Granted access to principal",
+            "grant_update": "Changed access for principal",
+            "grant_revoke": "Revoked access from principal",
+        }
+        return f"{verbs[event]} {target}".strip()
     if event in {"relationship_create", "seed_relationship_create"}:
         prefix = "Created relationship"
         if event == "seed_relationship_create":

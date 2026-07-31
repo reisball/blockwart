@@ -9,6 +9,7 @@ from blockwart.api.security import require_api_read_access
 from blockwart.api.write_commands import api_write_context, execute_api_command
 from blockwart.config import Settings
 from blockwart.domain.asset_state import AssetHealth, AssetLifecycle
+from blockwart.domain.auth import GrantScope
 from blockwart.domain.provenance import SourceType
 from blockwart.schemas.agent import AgentCatalogContextRead
 from blockwart.schemas.catalog import CatalogObjectIn, ObjectKind, ObjectStatus
@@ -18,8 +19,15 @@ from blockwart.schemas.v1 import (
     V1AuditPageOut,
     V1ContextPageOut,
     V1DeleteCommandOut,
+    V1GrantCommandOut,
+    V1GrantCreateIn,
+    V1GrantScopePreviewOut,
+    V1GrantUpdateIn,
+    V1ObjectAccessOut,
     V1ObjectCommandOut,
     V1ObjectPageOut,
+    V1PrincipalSearchOut,
+    V1PrincipalSummaryOut,
     V1RelationshipCommandIn,
     V1RelationshipCommandOut,
     V1RelationshipPageOut,
@@ -37,6 +45,14 @@ from blockwart.services.commands import (
     delete_object_relationship,
     revision_etag,
     update_catalog_object,
+)
+from blockwart.services.grant_management import (
+    create_managed_grant,
+    preview_grant_scope,
+    query_object_access,
+    revoke_managed_grant,
+    search_manageable_principals,
+    update_managed_grant,
 )
 from blockwart.services.pagination import InvalidCursor
 from blockwart.services.read_access import ReadAccess
@@ -409,6 +425,181 @@ def delete_v1_relationship(
         etag=result.etag,
         changed=result.changed,
     )
+
+
+@router.get(
+    "/objects/{object_id}/access",
+    response_model=V1ObjectAccessOut,
+)
+def get_v1_object_access(
+    object_id: str,
+    request: Request,
+    response: Response,
+    session: Annotated[Session, Depends(get_session)],
+    access: Annotated[ReadAccess, Depends(require_api_read_access)],
+) -> V1ObjectAccessOut:
+    context = api_write_context(request, access)
+    result = execute_api_command(
+        session,
+        context,
+        lambda: query_object_access(
+            session,
+            context,
+            object_id=object_id,
+        ),
+    )
+    response.headers["ETag"] = result.etag
+    return V1ObjectAccessOut.model_validate(result)
+
+
+@router.get(
+    "/objects/{object_id}/access/principals",
+    response_model=V1PrincipalSearchOut,
+)
+def search_v1_access_principals(
+    object_id: str,
+    request: Request,
+    session: Annotated[Session, Depends(get_session)],
+    access: Annotated[ReadAccess, Depends(require_api_read_access)],
+    q: Annotated[str, Query(min_length=2, max_length=100)],
+    limit: Annotated[int, Query(ge=1, le=20)] = 20,
+) -> V1PrincipalSearchOut:
+    context = api_write_context(request, access)
+    principals = execute_api_command(
+        session,
+        context,
+        lambda: search_manageable_principals(
+            session,
+            context,
+            object_id=object_id,
+            query=q,
+            limit=limit,
+        ),
+    )
+    return V1PrincipalSearchOut(
+        items=[
+            V1PrincipalSummaryOut.model_validate(principal)
+            for principal in principals
+        ]
+    )
+
+
+@router.get(
+    "/objects/{object_id}/access/preview",
+    response_model=V1GrantScopePreviewOut,
+)
+def preview_v1_grant_scope(
+    object_id: str,
+    request: Request,
+    session: Annotated[Session, Depends(get_session)],
+    access: Annotated[ReadAccess, Depends(require_api_read_access)],
+    scope: GrantScope = GrantScope.SUBTREE,
+) -> V1GrantScopePreviewOut:
+    context = api_write_context(request, access)
+    result = execute_api_command(
+        session,
+        context,
+        lambda: preview_grant_scope(
+            session,
+            context,
+            object_id=object_id,
+            scope=scope,
+        ),
+    )
+    return V1GrantScopePreviewOut.model_validate(result)
+
+
+@router.post(
+    "/objects/{object_id}/access/grants",
+    response_model=V1GrantCommandOut,
+    status_code=201,
+)
+def create_v1_object_grant(
+    object_id: str,
+    payload: V1GrantCreateIn,
+    request: Request,
+    response: Response,
+    session: Annotated[Session, Depends(get_session)],
+    access: Annotated[ReadAccess, Depends(require_api_read_access)],
+    if_match: Annotated[str | None, Header(alias="If-Match")] = None,
+) -> V1GrantCommandOut:
+    context = api_write_context(request, access)
+    result = execute_api_command(
+        session,
+        context,
+        lambda: create_managed_grant(
+            session,
+            context,
+            object_id=object_id,
+            principal_id=payload.principal_id,
+            role=payload.role,
+            scope=payload.scope,
+            expected_revision=if_match,
+        ),
+    )
+    response.headers["ETag"] = result.etag
+    return V1GrantCommandOut.model_validate(result)
+
+
+@router.put(
+    "/objects/{object_id}/access/grants/{grant_id}",
+    response_model=V1GrantCommandOut,
+)
+def update_v1_object_grant(
+    object_id: str,
+    grant_id: int,
+    payload: V1GrantUpdateIn,
+    request: Request,
+    response: Response,
+    session: Annotated[Session, Depends(get_session)],
+    access: Annotated[ReadAccess, Depends(require_api_read_access)],
+    if_match: Annotated[str | None, Header(alias="If-Match")] = None,
+) -> V1GrantCommandOut:
+    context = api_write_context(request, access)
+    result = execute_api_command(
+        session,
+        context,
+        lambda: update_managed_grant(
+            session,
+            context,
+            object_id=object_id,
+            grant_id=grant_id,
+            role=payload.role,
+            scope=payload.scope,
+            expected_revision=if_match,
+        ),
+    )
+    response.headers["ETag"] = result.etag
+    return V1GrantCommandOut.model_validate(result)
+
+
+@router.delete(
+    "/objects/{object_id}/access/grants/{grant_id}",
+    response_model=V1GrantCommandOut,
+)
+def revoke_v1_object_grant(
+    object_id: str,
+    grant_id: int,
+    request: Request,
+    response: Response,
+    session: Annotated[Session, Depends(get_session)],
+    access: Annotated[ReadAccess, Depends(require_api_read_access)],
+    if_match: Annotated[str | None, Header(alias="If-Match")] = None,
+) -> V1GrantCommandOut:
+    context = api_write_context(request, access)
+    result = execute_api_command(
+        session,
+        context,
+        lambda: revoke_managed_grant(
+            session,
+            context,
+            object_id=object_id,
+            grant_id=grant_id,
+            expected_revision=if_match,
+        ),
+    )
+    response.headers["ETag"] = result.etag
+    return V1GrantCommandOut.model_validate(result)
 
 
 @router.get(

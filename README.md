@@ -37,21 +37,23 @@ blockwart-db upgrade
 uvicorn blockwart.main:app --reload
 ```
 
-Without `BLOCKWART_ADMIN_TOKEN`, Blockwart is fail-closed and the UI is read-only. To enable
-short-lived UI write sessions, inject an admin token with at least 32 characters through the
-protected runtime environment and unlock the UI at `/admin`. The token is never stored in the
-database or returned to the browser; the browser receives only an HMAC-signed `HttpOnly` session
-cookie.
+`BLOCKWART_ADMIN_TOKEN` remains a legacy compatibility gate for schema
+settings and unplaced root creation. Without it those legacy operations fail
+closed; normal catalog and access-control writes instead require the
+authenticated principal's object permissions. The token is never stored in
+the database or returned to the browser; `/admin` issues only an HMAC-signed
+`HttpOnly` compatibility-session cookie.
 
 Catalog reads are object-authorized. Browser routes require an authenticated
 human session; `/api/objects`, `/api/agent`, and `/api/v1` require a
 service-account bearer token. `discover` returns a strict placement stub,
 `read` returns full detail, and objects without `discover` are concealed.
 Catalog mutations use object-scoped `write`, `create_child`, or `delete`
-permissions. The legacy admin token remains an additional compatibility gate
-for browser mutations until the production rollout removes it. Roles,
-bootstrap, token lifecycle, projection, revision, and audit contracts are
-documented in `docs/auth-rbac.md`.
+permissions; dedicated grant management uses `manage_access` plus Owner-only
+protection for Owner grants. UI, API v1, and MCP share the same policy,
+revision, audit, and last-owner safeguards. Roles, bootstrap, token lifecycle,
+projection, revision, and audit contracts are documented in
+`docs/auth-rbac.md`.
 
 Initialize or refresh a local pilot database:
 

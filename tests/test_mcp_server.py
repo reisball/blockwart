@@ -240,6 +240,22 @@ def test_mcp_client_completes_handshake_and_calls_every_read_only_tool() -> None
                             "blockwart.get_context",
                             {"kind": "host", "limit": 2},
                         ),
+                        "blockwart.get_object_access": await session.call_tool(
+                            "blockwart.get_object_access",
+                            {"object_id": "host/fabrik"},
+                        ),
+                        "blockwart.search_principals": await session.call_tool(
+                            "blockwart.search_principals",
+                            {
+                                "object_id": "host/fabrik",
+                                "query": "kai",
+                                "limit": 3,
+                            },
+                        ),
+                        "blockwart.preview_grant_scope": await session.call_tool(
+                            "blockwart.preview_grant_scope",
+                            {"object_id": "host/fabrik", "scope": "subtree"},
+                        ),
                     }
                     upstream_error = await session.call_tool(
                         "blockwart.search",
@@ -305,6 +321,12 @@ def test_mcp_client_completes_handshake_and_calls_every_read_only_tool() -> None
         "blockwart.delete_object",
         "blockwart.create_relationship",
         "blockwart.delete_relationship",
+        "blockwart.get_object_access",
+        "blockwart.search_principals",
+        "blockwart.preview_grant_scope",
+        "blockwart.create_grant",
+        "blockwart.update_grant",
+        "blockwart.revoke_grant",
     }
     assert all(
         tools[name].annotations and tools[name].annotations.readOnlyHint
@@ -312,6 +334,9 @@ def test_mcp_client_completes_handshake_and_calls_every_read_only_tool() -> None
             "blockwart.search",
             "blockwart.get_object_context",
             "blockwart.get_context",
+            "blockwart.get_object_access",
+            "blockwart.search_principals",
+            "blockwart.preview_grant_scope",
         }
     )
     assert all(
@@ -322,6 +347,9 @@ def test_mcp_client_completes_handshake_and_calls_every_read_only_tool() -> None
             "blockwart.delete_object",
             "blockwart.create_relationship",
             "blockwart.delete_relationship",
+            "blockwart.create_grant",
+            "blockwart.update_grant",
+            "blockwart.revoke_grant",
         }
     )
     assert all(not result.isError for result in results.values())
@@ -339,6 +367,15 @@ def test_mcp_client_completes_handshake_and_calls_every_read_only_tool() -> None
     )
     assert result_payloads["blockwart.get_context"]["objects"][0]["path"] == (
         "/api/v1/context"
+    )
+    assert result_payloads["blockwart.get_object_access"]["path"] == (
+        "/api/v1/objects/host%2Ffabrik/access"
+    )
+    assert result_payloads["blockwart.search_principals"]["path"] == (
+        "/api/v1/objects/host%2Ffabrik/access/principals"
+    )
+    assert result_payloads["blockwart.preview_grant_scope"]["path"] == (
+        "/api/v1/objects/host%2Ffabrik/access/preview"
     )
 
     upstream_content = upstream_error.content[0]
@@ -373,11 +410,14 @@ def test_mcp_client_completes_handshake_and_calls_every_read_only_tool() -> None
     assert unknown_tool.isError is True
     assert json.loads(unknown_content.text)["error"]["code"] == "tool_not_found"
 
-    assert [request["method"] for request in requests] == ["GET"] * 4
+    assert [request["method"] for request in requests] == ["GET"] * 7
     assert [request["path"] for request in requests] == [
         "/api/v1/objects",
         "/api/v1/objects/host%2Ffabrik",
         "/api/v1/context",
+        "/api/v1/objects/host%2Ffabrik/access",
+        "/api/v1/objects/host%2Ffabrik/access/principals",
+        "/api/v1/objects/host%2Ffabrik/access/preview",
         "/api/v1/objects",
     ]
     assert "Content-Length:" not in stderr
@@ -445,6 +485,37 @@ def test_mcp_write_tools_forward_preconditions_without_credentials_in_arguments(
         {"object_id": "demo", "if_match": '"rev-2"'},
         requester=requester,
     )
+    call_tool(
+        "blockwart.create_grant",
+        {
+            "object_id": "demo",
+            "principal_id": "00000000-0000-0000-0000-000000000001",
+            "role": "viewer",
+            "scope": "self",
+            "if_match": '"rev-3"',
+        },
+        requester=requester,
+    )
+    call_tool(
+        "blockwart.update_grant",
+        {
+            "object_id": "demo",
+            "grant_id": 17,
+            "role": "editor",
+            "scope": "subtree",
+            "if_match": '"rev-4"',
+        },
+        requester=requester,
+    )
+    call_tool(
+        "blockwart.revoke_grant",
+        {
+            "object_id": "demo",
+            "grant_id": 17,
+            "if_match": '"rev-5"',
+        },
+        requester=requester,
+    )
 
     assert calls == [
         (
@@ -467,6 +538,28 @@ def test_mcp_write_tools_forward_preconditions_without_credentials_in_arguments(
             "/api/v1/objects/demo",
             {},
             {"If-Match": '"rev-2"', "X-Blockwart-Channel": "mcp"},
+        ),
+        (
+            "POST",
+            "/api/v1/objects/demo/access/grants",
+            {
+                "principal_id": "00000000-0000-0000-0000-000000000001",
+                "role": "viewer",
+                "scope": "self",
+            },
+            {"If-Match": '"rev-3"', "X-Blockwart-Channel": "mcp"},
+        ),
+        (
+            "PUT",
+            "/api/v1/objects/demo/access/grants/17",
+            {"role": "editor", "scope": "subtree"},
+            {"If-Match": '"rev-4"', "X-Blockwart-Channel": "mcp"},
+        ),
+        (
+            "DELETE",
+            "/api/v1/objects/demo/access/grants/17",
+            {},
+            {"If-Match": '"rev-5"', "X-Blockwart-Channel": "mcp"},
         ),
     ]
     assert all(
@@ -614,6 +707,17 @@ def test_mcp_rejects_oversized_token_file_without_an_upstream_request(
         ("blockwart.search", {"unexpected": "ignored"}),
         ("blockwart.get_context", {"port": 0}),
         ("blockwart.get_object_context", {"object_id": 123}),
+        ("blockwart.search_principals", {"object_id": "demo", "query": "x"}),
+        (
+            "blockwart.create_grant",
+            {
+                "object_id": "demo",
+                "principal_id": "principal",
+                "role": "administrator",
+                "scope": "self",
+                "if_match": '"rev-1"',
+            },
+        ),
     ],
 )
 def test_mcp_rejects_schema_invalid_arguments_without_fetching(name, arguments) -> None:
@@ -641,6 +745,12 @@ def test_mcp_tools_publish_explicit_read_write_and_delete_hints() -> None:
         "blockwart.delete_object",
         "blockwart.create_relationship",
         "blockwart.delete_relationship",
+        "blockwart.get_object_access",
+        "blockwart.search_principals",
+        "blockwart.preview_grant_scope",
+        "blockwart.create_grant",
+        "blockwart.update_grant",
+        "blockwart.revoke_grant",
     }
     tools = {tool["name"]: tool for tool in TOOLS}
     assert all(
@@ -649,11 +759,16 @@ def test_mcp_tools_publish_explicit_read_write_and_delete_hints() -> None:
             "blockwart.search",
             "blockwart.get_object_context",
             "blockwart.get_context",
+            "blockwart.get_object_access",
+            "blockwart.search_principals",
+            "blockwart.preview_grant_scope",
         }
     )
     assert tools["blockwart.delete_object"]["annotations"]["destructiveHint"]
     assert tools["blockwart.delete_relationship"]["annotations"]["destructiveHint"]
+    assert tools["blockwart.revoke_grant"]["annotations"]["destructiveHint"]
     assert not tools["blockwart.update_object"]["annotations"]["destructiveHint"]
+    assert not tools["blockwart.update_grant"]["annotations"]["destructiveHint"]
 
 
 def test_mcp_search_and_context_support_host_and_structured_filters() -> None:
@@ -780,6 +895,42 @@ def test_mcp_context_calls_read_only_agent_context_endpoint() -> None:
         )
     ]
     assert json.loads(response["content"][0]["text"])["count"] == 2
+
+
+def test_mcp_grant_read_tools_use_minimized_access_endpoints() -> None:
+    calls = []
+
+    def fake_fetch(path, params):
+        calls.append((path, params))
+        return {"path": path, "params": params}
+
+    call_tool(
+        "blockwart.get_object_access",
+        {"object_id": "fabrik/root"},
+        fetcher=fake_fetch,
+    )
+    call_tool(
+        "blockwart.search_principals",
+        {"object_id": "fabrik/root", "query": "kai", "limit": 7},
+        fetcher=fake_fetch,
+    )
+    call_tool(
+        "blockwart.preview_grant_scope",
+        {"object_id": "fabrik/root", "scope": "subtree"},
+        fetcher=fake_fetch,
+    )
+
+    assert calls == [
+        ("/api/v1/objects/fabrik%2Froot/access", {}),
+        (
+            "/api/v1/objects/fabrik%2Froot/access/principals",
+            {"q": "kai", "limit": 7},
+        ),
+        (
+            "/api/v1/objects/fabrik%2Froot/access/preview",
+            {"scope": "subtree"},
+        ),
+    ]
 
 
 def test_mcp_forwards_structured_filters_to_the_read_only_agent_api() -> None:
