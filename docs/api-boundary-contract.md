@@ -48,11 +48,13 @@ Stable codes currently include:
 - `internal_error`
 - `http_error`
 
-Every API response carries the same ID in `X-Correlation-ID`. A caller-supplied ID is
+Every UI and API request has one context ID, and every response carries the same ID in
+`X-Correlation-ID`. A caller-supplied ID is
 accepted only when it contains 1 to 64 ASCII letters, digits, dots, underscores, or
 hyphens; otherwise Blockwart generates a UUID. Database diagnostics log only this
 correlation ID, not SQL text, parameters, or exception details. Unexpected API
-failures use the redacted `internal_error` response and are correlated the same way.
+failures use the redacted `internal_error` response and are correlated the same way. UI
+security events and object audits reuse the request context instead of generating a second ID.
 
 `/api/health/ready` remains an operational status document with its existing
 `ReadinessOut` schema rather than an exception response.
@@ -87,5 +89,6 @@ its existing last-resort secret redaction remains effective. Valid records use
 The MCP wrapper keeps its local `invalid_arguments`, `tool_not_found`, and
 `internal_error` contract. When the Agent API returns a structured REST error, MCP
 copies only its public code, message, and validated correlation ID into the MCP tool
-error. Legacy or malformed upstream errors remain the generic
+error. MCP sends its validated or generated ID on every outgoing API request. Legacy or
+malformed upstream errors remain the generic
 `upstream_http_error`; arbitrary upstream response details are not forwarded.

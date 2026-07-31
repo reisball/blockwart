@@ -632,6 +632,7 @@ def test_browser_ui_uses_same_policy_etag_csrf_and_command_audit(
 
         wrong_csrf = client.post(
             "/objects/ui-editable",
+            headers={"X-Correlation-ID": "ui-csrf-correlation"},
             data={
                 "csrf_token": "wrong-csrf-token",
                 "if_match": etag,
@@ -641,6 +642,7 @@ def test_browser_ui_uses_same_policy_etag_csrf_and_command_audit(
         )
         updated = client.post(
             "/objects/ui-editable",
+            headers={"X-Correlation-ID": "ui-update-correlation"},
             data={
                 "csrf_token": browser.csrf_token,
                 "if_match": etag,
@@ -655,6 +657,7 @@ def test_browser_ui_uses_same_policy_etag_csrf_and_command_audit(
         assert "idempotency_key" in index.text
         created = client.post(
             "/objects",
+            headers={"X-Correlation-ID": "ui-create-correlation"},
             data={
                 "csrf_token": browser.csrf_token,
                 "idempotency_key": "browser-create-key-0001",
@@ -668,14 +671,33 @@ def test_browser_ui_uses_same_policy_etag_csrf_and_command_audit(
             },
             follow_redirects=False,
         )
+        unplaced = client.post(
+            "/objects",
+            headers={"X-Correlation-ID": "ui-unplaced-correlation"},
+            data={
+                "csrf_token": browser.csrf_token,
+                "idempotency_key": "browser-create-key-unplaced",
+                "object_id": "ui-unplaced",
+                "kind": "system",
+                "primary_name": "UI Unplaced",
+                "status": "active",
+                "data_json": '{"schema_version":1}',
+            },
+            follow_redirects=False,
+        )
 
     assert wrong_csrf.status_code == 403
     assert updated.status_code == 303
     assert created.status_code == 303, created.text
+    assert unplaced.status_code == 422
+    assert wrong_csrf.headers["X-Correlation-ID"] == "ui-csrf-correlation"
+    assert updated.headers["X-Correlation-ID"] == "ui-update-correlation"
+    assert created.headers["X-Correlation-ID"] == "ui-create-correlation"
     with alembic_session_factory() as session:
         row = session.get(CatalogObject, "ui-editable")
         assert row is not None
         assert (row.label, row.summary) == ("UI Updated", "after UI")
+        assert session.get(CatalogObject, "ui-unplaced") is None
         events = session.scalars(
             select(AuditEvent)
             .where(AuditEvent.object_id.in_(["ui-editable", "ui-created"]))
@@ -686,6 +708,8 @@ def test_browser_ui_uses_same_policy_etag_csrf_and_command_audit(
         ]
         assert [event.action for event in command_events] == ["update", "create"]
         assert all('"channel":"ui"' in event.details_json for event in command_events)
+        assert '"request_id":"ui-update-correlation"' in command_events[0].details_json
+        assert '"request_id":"ui-create-correlation"' in command_events[1].details_json
         denial = session.scalar(
             select(SecurityEvent)
             .where(SecurityEvent.event_type == "browser_write_csrf")
@@ -693,3 +717,4 @@ def test_browser_ui_uses_same_policy_etag_csrf_and_command_audit(
         )
         assert denial is not None
         assert denial.outcome == "denied"
+        assert denial.request_id == "ui-csrf-correlation"

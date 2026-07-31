@@ -10,16 +10,62 @@ from pathlib import Path
 
 from alembic import command
 from fastapi.testclient import TestClient
+from sqlalchemy import select
+from sqlalchemy.orm import Session
 
 from blockwart.api.deps import get_session
 from blockwart.config import Settings
 from blockwart.db.migrations import BASELINE_REVISION, build_alembic_config, upgrade_database
-from blockwart.db.session import build_engine
+from blockwart.db.session import build_engine, transaction
+from blockwart.domain.auth import GrantScope, Role
 from blockwart.main import create_app
+from blockwart.models import Principal
+from blockwart.schemas.catalog import CatalogObjectIn
+from blockwart.services.access import create_object_grant
+from blockwart.services.catalog import create_relationship, upsert_object
+from blockwart.services.identity import create_human_principal
 
 
 def _database_url(path: Path) -> str:
     return f"sqlite:///{path}"
+
+
+def _add_complete_owner_coverage(database_url: str) -> None:
+    engine = build_engine(database_url)
+    try:
+        with Session(engine) as session:
+            with transaction(session):
+                catalog_object = upsert_object(
+                    session,
+                    CatalogObjectIn(
+                        id="ready-root",
+                        kind="host",
+                        label="Ready Root",
+                        status="active",
+                        data={"schema_version": 1},
+                    ),
+                )
+                principal = create_human_principal(
+                    session,
+                    login="ready.owner",
+                    display_name="Ready Owner",
+                    password="ready-owner-password",
+                )
+                create_object_grant(
+                    session,
+                    principal_id=principal.id,
+                    object_id=catalog_object.id,
+                    role=Role.OWNER,
+                    scope=GrantScope.SELF,
+                )
+    finally:
+        engine.dispose()
+
+
+def _readiness(database_url: str):
+    return TestClient(
+        create_app(settings=Settings(database_url=database_url))
+    ).get("/api/health/ready")
 
 
 def test_liveness_endpoints_do_not_depend_on_database(tmp_path: Path) -> None:
@@ -51,6 +97,7 @@ def test_readiness_checks_database_revision_and_sqlite_runtime(tmp_path: Path) -
     database_path = tmp_path / "ready.sqlite3"
     database_url = _database_url(database_path)
     upgrade_database(database_url)
+    _add_complete_owner_coverage(database_url)
     with sqlite3.connect(database_path) as connection:
         before = {
             "revision": connection.execute("SELECT version_num FROM alembic_version").fetchall(),
@@ -88,10 +135,11 @@ def test_readiness_checks_database_revision_and_sqlite_runtime(tmp_path: Path) -
         "checks": {
             "database": "ok",
             "schema": "ok",
+            "authorization": "ok",
             "writable": "ok",
             "sqlite": "ok",
         },
-        "revision": "20260731_0010",
+        "revision": "20260731_0011",
         "error_code": None,
     }
     assert after == before
@@ -113,6 +161,105 @@ def test_readiness_rejects_missing_database_without_creating_it(tmp_path: Path) 
     assert not missing_database.exists()
 
 
+def test_readiness_rejects_empty_catalog_with_stable_safe_code(tmp_path: Path) -> None:
+    database_url = _database_url(tmp_path / "empty.sqlite3")
+    upgrade_database(database_url)
+
+    response = _readiness(database_url)
+
+    assert response.status_code == 503
+    assert response.json()["error_code"] == "owner_catalog_empty"
+    assert response.json()["checks"]["authorization"] == "error"
+    assert "object_id" not in response.text
+
+
+def test_readiness_rejects_catalog_without_owner(tmp_path: Path) -> None:
+    database_url = _database_url(tmp_path / "unowned.sqlite3")
+    upgrade_database(database_url)
+    engine = build_engine(database_url)
+    try:
+        with Session(engine) as session:
+            with transaction(session):
+                upsert_object(
+                    session,
+                    CatalogObjectIn(
+                        id="unowned",
+                        kind="host",
+                        label="Unowned",
+                        status="active",
+                        data={"schema_version": 1},
+                    ),
+                )
+    finally:
+        engine.dispose()
+
+    response = _readiness(database_url)
+
+    assert response.status_code == 503
+    assert response.json()["error_code"] == "owner_coverage_incomplete"
+    assert "unowned" not in response.text
+
+
+def test_readiness_rejects_inactive_owner(tmp_path: Path) -> None:
+    database_url = _database_url(tmp_path / "inactive.sqlite3")
+    upgrade_database(database_url)
+    _add_complete_owner_coverage(database_url)
+    engine = build_engine(database_url)
+    try:
+        with Session(engine) as session:
+            with transaction(session):
+                principal = session.scalar(
+                    select(Principal).where(Principal.login == "ready.owner")
+                )
+                assert principal is not None
+                principal.active = False
+    finally:
+        engine.dispose()
+
+    response = _readiness(database_url)
+
+    assert response.status_code == 503
+    assert response.json()["error_code"] == "owner_coverage_incomplete"
+
+
+def test_readiness_rejects_self_only_and_disconnected_partial_coverage(
+    tmp_path: Path,
+) -> None:
+    database_url = _database_url(tmp_path / "partial.sqlite3")
+    upgrade_database(database_url)
+    _add_complete_owner_coverage(database_url)
+    engine = build_engine(database_url)
+    try:
+        with Session(engine) as session:
+            with transaction(session):
+                for object_id, kind in (("child", "system"), ("disconnected", "host")):
+                    upsert_object(
+                        session,
+                        CatalogObjectIn(
+                            id=object_id,
+                            kind=kind,
+                            label=object_id.title(),
+                            status="active",
+                            data={"schema_version": 1},
+                        ),
+                    )
+                create_relationship(
+                    session,
+                    from_ref="host:ready-root",
+                    relation_type="hosts",
+                    to_ref="system:child",
+                )
+    finally:
+        engine.dispose()
+
+    response = _readiness(database_url)
+
+    assert response.status_code == 503
+    assert response.json()["error_code"] == "owner_coverage_incomplete"
+    assert "child" not in response.text
+    assert "disconnected" not in response.text
+
+
 def test_readiness_rejects_wrong_alembic_revision(tmp_path: Path) -> None:
     database_url = _database_url(tmp_path / "old.sqlite3")
     command.upgrade(build_alembic_config(database_url), BASELINE_REVISION)
@@ -131,6 +278,7 @@ def test_readiness_rejects_wrong_alembic_revision(tmp_path: Path) -> None:
 def test_readiness_rejects_locked_database_with_safe_error(tmp_path: Path) -> None:
     database_url = _database_url(tmp_path / "locked.sqlite3")
     upgrade_database(database_url)
+    _add_complete_owner_coverage(database_url)
     engine = build_engine(
         database_url,
         sqlite_busy_timeout_ms=100,
@@ -167,6 +315,7 @@ def test_readiness_rejects_files_that_allow_lock_but_not_write() -> None:
         database_path = database_directory / "read-only.sqlite3"
         database_url = _database_url(database_path)
         upgrade_database(database_url)
+        _add_complete_owner_coverage(database_url)
         keeper = sqlite3.connect(database_path)
         keeper.execute("SELECT version_num FROM alembic_version").fetchall()
         sqlite_files = (

@@ -29,6 +29,12 @@ Resolved context comes from the same service implementation used by REST.
 All tools require a service-account token and receive exactly that
 principal's authorized detail/stub projection.
 
+Each tool call validates an upstream correlation ID or generates one, then sends
+`X-Correlation-ID` on every outgoing API request. API security events and object
+audits therefore retain the same context. Production MCP errors and logs contain
+only operation, stable code, channel, and correlation ID; exception text,
+tracebacks, headers, cookies, tokens, and payloads are excluded.
+
 Write tools use the same command, validation, policy, ETag, idempotency, audit,
 and rollback implementation as REST and the browser UI. Update and delete
 arguments carry the last full-read `if_match` ETag. Child creation carries an

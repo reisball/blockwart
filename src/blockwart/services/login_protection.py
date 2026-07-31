@@ -67,6 +67,7 @@ class LoginProtector:
         self._challenge_sources: dict[str, deque[float]] = {}
         self._event_until: dict[tuple[str, str], float] = {}
         self._next_security_event_prune = 0.0
+        self._next_token_bucket_prune = 0.0
 
     def allow_challenge(self, *, source: str) -> bool:
         now = self._clock()
@@ -122,6 +123,14 @@ class LoginProtector:
             if now < self._next_security_event_prune:
                 return False
             self._next_security_event_prune = now + interval_seconds
+            return True
+
+    def token_bucket_prune_due(self, *, interval_seconds: int) -> bool:
+        now = self._clock()
+        with self._lock:
+            if now < self._next_token_bucket_prune:
+                return False
+            self._next_token_bucket_prune = now + interval_seconds
             return True
 
     def _denied(self, now: float, reason: str, key: str) -> LoginAttemptLease:

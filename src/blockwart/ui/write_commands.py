@@ -1,11 +1,11 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from uuid import uuid4
 
 from fastapi import HTTPException, Request
 from sqlalchemy.orm import Session
 
+from blockwart.api.errors import request_correlation_id
 from blockwart.db.session import transaction
 from blockwart.domain.placement import PlacementError
 from blockwart.domain.relationships import RelationshipIntegrityError
@@ -26,7 +26,7 @@ def ui_write_context(request: Request, access: ReadAccess) -> WriteContext:
     return WriteContext.from_read_access(
         access,
         channel="ui",
-        request_id=str(uuid4()),
+        request_id=request_correlation_id(request),
     )
 
 

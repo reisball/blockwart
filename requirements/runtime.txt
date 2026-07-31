@@ -33,7 +33,7 @@ cffi==2.1.0
     #   cryptography
 click==8.4.2
     # via uvicorn
-cryptography==49.0.0
+cryptography==50.0.0
     # via pyjwt
 fastapi==0.141.1
     # via blockwart (pyproject.toml)
@@ -144,5 +144,5 @@ uvloop==0.22.1
     # via uvicorn
 watchfiles==1.2.0
     # via uvicorn
-websockets==17.0
+websockets==17.0.1
     # via uvicorn

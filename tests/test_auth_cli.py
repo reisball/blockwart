@@ -156,6 +156,73 @@ def test_bootstrap_refuses_conflicting_existing_identity(
     engine.dispose()
 
 
+def test_multi_anchor_bootstrap_rolls_back_incomplete_coverage_and_is_idempotent(
+    tmp_path: Path,
+    monkeypatch,
+    capsys,
+) -> None:
+    database_url, engine = _database(tmp_path)
+    with Session(engine) as session:
+        session.add(
+            CatalogObject(
+                id="other-root",
+                kind="host",
+                label="Other Root",
+                status="active",
+                lifecycle="active",
+                health="healthy",
+                summary=None,
+                data_json="{}",
+                provenance_json='{"manual_override":false,"source_type":"unknown"}',
+            )
+        )
+        session.commit()
+
+    base_args = [
+        "--database-url",
+        database_url,
+        "bootstrap-owner",
+        "--login",
+        "multi.owner",
+        "--display-name",
+        "Multi Owner",
+        "--scope",
+        "subtree",
+        "--password-stdin",
+    ]
+    monkeypatch.setattr("sys.stdin", io.StringIO(f"{PASSWORD}\n"))
+    assert auth_cli.main([*base_args, "--object-id", "fabrik"]) == 1
+    assert capsys.readouterr().err == "auth_bootstrap_owner_error=failed\n"
+    with Session(engine) as session:
+        assert session.scalar(select(Principal)) is None
+        assert session.scalar(select(PasswordCredential)) is None
+        assert session.scalar(select(ObjectGrant)) is None
+
+    complete_args = [
+        *base_args,
+        "--object-id",
+        "fabrik",
+        "--object-id",
+        "other-root",
+    ]
+    monkeypatch.setattr("sys.stdin", io.StringIO(f"{PASSWORD}\n"))
+    assert auth_cli.main(complete_args) == 0
+    output = capsys.readouterr()
+    assert "mode=created" in output.out
+    assert "object_ids=fabrik,other-root" in output.out
+
+    monkeypatch.setattr("sys.stdin", io.StringIO(""))
+    assert auth_cli.main(complete_args) == 0
+    assert "mode=unchanged" in capsys.readouterr().out
+    with Session(engine) as session:
+        assert len(session.scalars(select(Principal)).all()) == 1
+        assert {grant.object_id for grant in session.scalars(select(ObjectGrant)).all()} == {
+            "fabrik",
+            "other-root",
+        }
+    engine.dispose()
+
+
 def test_service_token_is_written_once_to_new_mode_0600_file(
     tmp_path: Path,
     capsys,

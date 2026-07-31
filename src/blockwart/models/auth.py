@@ -196,6 +196,47 @@ class SecurityEvent(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), index=True)
 
 
+class ServiceTokenFailureBucket(Base):
+    __tablename__ = "service_token_failure_buckets"
+    __table_args__ = (
+        CheckConstraint(
+            "dimension IN ('global','source','token')",
+            name="ck_service_token_failure_buckets_dimension",
+        ),
+        CheckConstraint(
+            "failure_count >= 1",
+            name="ck_service_token_failure_buckets_count",
+        ),
+        CheckConstraint(
+            "event_emitted IN (0,1)",
+            name="ck_service_token_failure_buckets_event_boolean",
+        ),
+        UniqueConstraint(
+            "dimension",
+            "key_hash",
+            "window_start",
+            name="uq_service_token_failure_bucket_key",
+        ),
+        Index(
+            "ix_service_token_failure_buckets_expiry",
+            "expires_at",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    dimension: Mapped[str] = mapped_column(String(16), nullable=False)
+    key_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    window_start: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    failure_count: Mapped[int] = mapped_column(default=1, server_default="1", nullable=False)
+    event_emitted: Mapped[bool] = mapped_column(
+        Boolean,
+        default=False,
+        server_default=text("0"),
+        nullable=False,
+    )
+    expires_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+
+
 class IdempotencyRecord(Base):
     __tablename__ = "idempotency_records"
     __table_args__ = (

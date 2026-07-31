@@ -8,10 +8,10 @@ persistent service by itself.
 Before a real deployment, decide and document:
 
 - target host or container
-- bind address and port
+- localhost bind port and reverse-proxy address
 - backup location and retention
-- source for `BLOCKWART_ADMIN_TOKEN`
-- whether TLS is required and `BLOCKWART_ADMIN_COOKIE_SECURE` can be enabled
+- HTTPS certificate source, HSTS policy, and exact trusted-proxy network
+- fully covering Owner anchors already bootstrapped in the mounted database
 - whether agents reach Blockwart through REST, MCP, or both
 - credential reference name for runtime configuration
 
@@ -34,29 +34,26 @@ BLOCKWART_DATABASE_URL=sqlite:////tmp/blockwart.sqlite3 \
   blockwart-seed --create-schema --seed seeds/pilot_objects.yaml
 ```
 
-Run the app:
+Bootstrap one or more Owner anchors before the first start. Repeat `--object-id`
+for every disconnected canonical component and supply the password through a TTY
+or `--password-stdin`:
 
 ```bash
 BLOCKWART_DATABASE_URL=sqlite:////tmp/blockwart.sqlite3 \
-  blockwart-db upgrade
-BLOCKWART_DATABASE_URL=sqlite:////tmp/blockwart.sqlite3 \
-  uvicorn blockwart.main:app --host 127.0.0.1 --port 8000
+  blockwart-auth bootstrap-owner --login kai --display-name Kai \
+  --object-id COMPONENT_ROOT_ID --scope subtree
 ```
 
-This starts in fail-closed read-only mode. UI writes require an admin token of at least 32
-characters supplied through the protected runtime environment:
+Then run the migration/readiness-gated launcher:
 
 ```bash
 BLOCKWART_DATABASE_URL=sqlite:////tmp/blockwart.sqlite3 \
-  blockwart-db upgrade
-BLOCKWART_DATABASE_URL=sqlite:////tmp/blockwart.sqlite3 \
-BLOCKWART_ADMIN_TOKEN="$BLOCKWART_RUNTIME_ADMIN_TOKEN" \
-  uvicorn blockwart.main:app --host 127.0.0.1 --port 8000
+  blockwart-start
 ```
 
-`BLOCKWART_RUNTIME_ADMIN_TOKEN` in this example must itself come from the runtime secret store. Do
-not put its value into Git, compose files, documentation, issue comments, shell history, or the
-Blockwart database.
+Direct HTTP remains useful for local health probes, but browsers will not send Blockwart's
+unconditionally `Secure` identity cookies over it. Browser use therefore requires the HTTPS
+reverse-proxy contract below.
 
 ## Container Example
 
@@ -67,18 +64,21 @@ BLOCKWART_BUILD_REVISION="$(git rev-parse HEAD)" \
   docker compose -f compose.example.yaml build
 docker compose -f compose.example.yaml run --rm blockwart \
   blockwart-seed --create-schema --seed seeds/pilot_objects.yaml
+docker compose -f compose.example.yaml run --rm blockwart \
+  blockwart-auth bootstrap-owner --login kai --display-name Kai \
+  --object-id COMPONENT_ROOT_ID --scope subtree
 docker compose -f compose.example.yaml up
 ```
 
-This is an example only. It does not set up TLS, backups, monitoring, or service registration.
-Leave `BLOCKWART_ADMIN_TOKEN` unset for read-only use, or inject it through the deployment secret
-store before using the UI write paths.
+This is an example only. It binds the published port to `127.0.0.1` and does not set up TLS,
+backups, monitoring, or service registration.
 
 The image command is `blockwart-start`. It runs the packaged Alembic upgrade against the effective
-`BLOCKWART_DATABASE_URL`, verifies that the resulting revision equals the packaged head, and only
-then replaces itself with Uvicorn. A migration, schema-adoption, connection, or revision error
-stops startup with a redacted `startup_error=database_migration_failed`; the application is never
-served against an unchecked schema.
+`BLOCKWART_DATABASE_URL`, verifies the packaged head and full active effective Owner coverage,
+and only then replaces itself with Uvicorn with Uvicorn's implicit proxy-header processing
+disabled. Migration errors use the redacted
+`startup_error=database_migration_failed`; authorization-invariant failures use
+`startup_error=owner_catalog_empty` or `startup_error=owner_coverage_incomplete`.
 
 The image healthcheck calls `/api/health/ready`. An unhealthy result therefore means the process
 may still be alive but must not receive normal traffic.
@@ -90,7 +90,8 @@ The health endpoints have separate operational meanings:
 - `GET /api/health` and `GET /api/health/live` return `200` when the application process can
   answer HTTP. They deliberately do not touch the database.
 - `GET /api/health/ready` returns `200` only when `SELECT 1` succeeds, the current Alembic revision
-  exactly matches the packaged head, SQLite has the expected connection settings, and a
+  exactly matches the packaged head, SQLite has the expected connection settings, every object in
+  a nonempty catalog has an active effective Owner, and a
   rolled-back write against the Alembic revision succeeds without changing data. The probe first
   acquires a write lock, changes the revision only inside that transaction, and rolls it back.
 
@@ -98,7 +99,8 @@ Readiness failures return `503` with a stable `error_code`, check statuses, pack
 revision, and current schema revision where available. The public response never includes database
 paths, SQL text, driver exceptions, or credentials. Expected codes are
 `database_missing`, `database_unavailable`, `schema_revision_mismatch`,
-`sqlite_configuration_invalid`, and `database_not_writable`.
+`sqlite_configuration_invalid`, `database_not_writable`, `owner_catalog_empty`, and
+`owner_coverage_incomplete`.
 
 Example:
 
@@ -113,6 +115,74 @@ service registration remain deployment concerns.
 The default SQLite lock wait is five seconds. The image's HTTP probe waits seven seconds and
 Docker allows eight seconds for the complete healthcheck, so readiness can return its stable
 `200`/`503` result before either client deadline expires.
+
+## HTTPS Reverse Proxy Contract
+
+Production compose publishes Blockwart only on `127.0.0.1:8000`. The approved reverse proxy is
+the sole network entry point: it terminates HTTPS with a validated certificate, forwards to that
+loopback address, and adds an HSTS response such as
+`Strict-Transport-Security: max-age=31536000; includeSubDomains` only after the HTTPS domain and
+subdomains are verified. Blockwart identity, login-challenge, CSRF, and cookie-clearing responses
+always carry `Secure`; there is no configuration downgrade for direct HTTP browser sessions.
+
+Blockwart does not infer trust from `Forwarded`, `X-Forwarded-Proto`, or arbitrary
+`X-Forwarded-*` headers. For service-token source limiting, `X-Forwarded-For` is used only when the
+direct transport peer belongs to `BLOCKWART_AUTH_TRUSTED_PROXY_CIDRS`, and the header contains
+exactly one valid IP address in exactly one header field. The trusted proxy must overwrite, never
+append, `X-Forwarded-For`. Configure the smallest exact proxy IP/CIDR set; duplicate, malformed, or
+chained values are ignored in favor of the direct peer. The packaged launcher disables Uvicorn's
+own proxy-header rewriting so this explicit Blockwart allowlist is the sole source-attribution
+policy.
+
+## Authorization Rollout Checklist
+
+Perform the authorization transition against a restored candidate before changing live traffic:
+
+1. Inventory and remove the retired `BLOCKWART_ADMIN_TOKEN`,
+   `BLOCKWART_ADMIN_SESSION_TTL_SECONDS`, `BLOCKWART_ADMIN_COOKIE_SECURE`, and
+   `BLOCKWART_AUTH_COOKIE_SECURE` settings from the deployment environment and secret injection.
+2. Upgrade the candidate, inventory every disconnected catalog component privately, and run one
+   atomic `bootstrap-owner` invocation with all required anchors. Require readiness to report
+   `authorization=ok` without exposing object identifiers.
+3. Verify the public HTTPS certificate, HSTS response, localhost-only application bind, and
+   `Secure`, `HttpOnly`, and `SameSite=Strict` attributes on identity responses.
+4. Prove `/admin`, `/admin/unlock`, and `/admin/lock` are absent, schema HTTP POST is rejected, and
+   a stale `blockwart_admin_session` cookie grants no access.
+5. Run the approved anonymous, Viewer, Editor, and Owner role matrix through UI, API, and MCP;
+   correlate the resulting safe responses, security events, and object audits by request ID.
+
+Do not manufacture automatic grants to make a failed candidate ready. Correct the explicit anchor
+set while the service is stopped, repeat the candidate proof, and preserve the failed copy for
+diagnosis.
+
+## Service-Token Limiter Incident And Recovery
+
+Service-token failures return one uniform `401`; clients cannot use the response to distinguish a
+missing, malformed, expired, revoked, unknown, or limited credential. The protected security-event
+store emits at most one aggregate event for each global, source, or token-fingerprint bucket in a
+window. Events contain only dimension, bounded count, channel, and correlation context. Bucket keys
+are one-way digests, so neither the submitted token nor the raw network source is available there.
+If the bounded bucket table must reclaim a still-active bucket, Blockwart saturates the global
+window first. Authentication therefore fails closed until the next window instead of losing a
+source or fingerprint threshold.
+
+For an authentication-denial incident:
+
+1. Preserve application/proxy logs and the database backup, then correlate only allowlisted request
+   IDs and aggregate dimensions. Never add Authorization headers, cookies, token values, request
+   bodies, SQL parameters, or exception tracebacks to diagnostics.
+2. Confirm the direct peer and exact `BLOCKWART_AUTH_TRUSTED_PROXY_CIDRS` setting. A malformed,
+   duplicate, chained, or untrusted forwarded address is intentionally ignored; the proxy must
+   overwrite rather than append the field. Do not widen the allowlist to silence an event.
+3. Check for expired/revoked credentials and expected client retry behavior. Rotate or revoke a
+   suspected service token through `blockwart-auth`, update the protected runtime token file, and
+   repeat the cross-channel authorization proof.
+4. Let fixed-window buckets expire and bounded pruning remove them. Do not truncate the live table
+   or raise thresholds during an active incident. Any deliberate threshold change is a reviewed
+   configuration rollout followed by load and denial tests.
+5. Treat sustained `503` responses or SQLite lock failures as an availability incident, not an
+   authentication hint. Remove traffic, preserve evidence, verify database integrity and lock
+   ownership, and use the matching verified backup/image recovery procedure below when needed.
 
 ## SQLite Migration And Rollback
 
@@ -148,7 +218,9 @@ the current image without mutating the live database.
 
 For rollback, stop Blockwart first, preserve the failed database for diagnosis, restore the
 verified pre-upgrade backup, select the matching previous image, and start the service again. Do
-not run an automatic Alembic downgrade on live data.
+not run an automatic Alembic downgrade on live data. The `0011` downgrade drops only the transient
+service-token failure-bucket table, but primary recovery remains the matching verified pre-upgrade
+database plus pinned old image. Never supply a retired global-bypass credential to an old image.
 
 An existing unversioned Blockwart database is adopted only if Alembic finds no model/schema
 differences. The adopter stamps the known initial revision and then applies later revisions
@@ -167,9 +239,6 @@ Optional:
 - `BLOCKWART_ENV`
 - `BLOCKWART_BUILD_REVISION` (default `unknown`; inject the deployed Git commit at image build)
 - `BLOCKWART_SECRET_REFERENCE`
-- `BLOCKWART_ADMIN_TOKEN`
-- `BLOCKWART_ADMIN_SESSION_TTL_SECONDS` (default `3600`, allowed `300..86400`)
-- `BLOCKWART_ADMIN_COOKIE_SECURE` (default `false`; set `true` behind HTTPS)
 - `BLOCKWART_AUTH_SESSION_TTL_SECONDS` (default `3600`, allowed `300..86400`)
 - `BLOCKWART_AUTH_LOGIN_CHALLENGE_TTL_SECONDS` (default `600`, allowed
   `60..3600`)
@@ -182,7 +251,13 @@ Optional:
 - `BLOCKWART_AUTH_PASSWORD_MAX_CONCURRENCY` (default `2`, allowed `1..16`)
 - `BLOCKWART_AUTH_SECURITY_EVENT_RETENTION_DAYS` (default `90`)
 - `BLOCKWART_AUTH_SECURITY_EVENT_MAX_ROWS` (default `100000`)
-- `BLOCKWART_AUTH_COOKIE_SECURE` (default `false`; set `true` behind HTTPS)
+- `BLOCKWART_AUTH_SERVICE_TOKEN_RATE_WINDOW_SECONDS` (default `60`, allowed `10..3600`)
+- `BLOCKWART_AUTH_SERVICE_TOKEN_GLOBAL_FAILURE_LIMIT` (default `300`)
+- `BLOCKWART_AUTH_SERVICE_TOKEN_SOURCE_FAILURE_LIMIT` (default `30`)
+- `BLOCKWART_AUTH_SERVICE_TOKEN_FINGERPRINT_FAILURE_LIMIT` (default `10`)
+- `BLOCKWART_AUTH_SERVICE_TOKEN_FAILURE_BUCKET_MAX_ROWS` (default `10000`)
+- `BLOCKWART_AUTH_SERVICE_TOKEN_FAILURE_BUCKET_PRUNE_INTERVAL_SECONDS` (default `60`)
+- `BLOCKWART_AUTH_TRUSTED_PROXY_CIDRS` (default empty; comma-separated exact networks)
 - `BLOCKWART_SQLITE_BUSY_TIMEOUT_MS` (default `5000`, allowed `100..60000`)
 - `BLOCKWART_SQLITE_WAL_ENABLED` (default `true`)
 
@@ -202,28 +277,11 @@ document only after the written JSON and its complete structure validate. A malf
 or unreadable existing document fails diagnostically instead of silently falling back to defaults.
 The configured directory must therefore be writable by the application process.
 
-`BLOCKWART_ADMIN_TOKEN` is a legacy runtime secret for schema settings and
-unplaced root creation. It is not written to the database, logs, HTML, URLs,
-or the session cookie. Missing or empty configuration disables those
-compatibility operations; object-authorized UI catalog and grant commands use
-the human identity session instead. A successful unlock at `/admin` creates a
-time-limited HMAC-signed cookie with `HttpOnly` and `SameSite=Strict`; rotating
-the token invalidates existing sessions. Logout deletes the cookie.
-
-The compatibility catalog and agent APIs remain read-only even while the UI is
-unlocked. Authorized mutations use the `/api/v1` command routes, MCP write
-tools, or authenticated UI form routes.
-
-The token and session cookie still traverse the network during browser use. On an untrusted network,
-serve Blockwart through HTTPS and set `BLOCKWART_ADMIN_COOKIE_SECURE=true`.
-
 Catalog access now requires principals and object grants. `/auth` uses the
 `BLOCKWART_AUTH_*` settings for browser sessions; service-account bearer
 tokens authenticate and filter `/api/objects`, `/api/agent`, and `/api/v1`.
-The legacy admin token does not authorize grant management and does not
-replace identity authentication. Production bootstrap, token injection,
-writable authorization, and deployment rollout each require explicit
-approval. See `auth-rbac.md`.
+Production bootstrap, token injection, writable authorization, and deployment
+rollout each require explicit approval. See `auth-rbac.md`.
 
 ## Agent Access
 

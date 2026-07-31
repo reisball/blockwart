@@ -2,8 +2,8 @@
 
 Blockwart authenticates every catalog read and authorizes it against current
 object grants. Catalog and grant mutations use the same object-scoped command
-and policy layer across the browser UI, API v1, and MCP. The legacy global UI
-admin gate remains only as an isolated compatibility surface.
+and policy layer across the browser UI, API v1, and MCP. There is no global
+browser write bypass.
 
 ## Principals and credentials
 
@@ -32,15 +32,15 @@ bearer credential is required by `/api/objects`, `/api/agent`, and `/api/v1`.
 
 The browser identity page is available at `/auth`. Login uses a one-time,
 server-stored pre-authentication challenge. Authenticated browser sessions are
-opaque, revocable, time-limited, `HttpOnly`, and `SameSite=Strict`; state
+opaque, revocable, time-limited, `Secure`, `HttpOnly`, and `SameSite=Strict`; state
 changes require the session-bound CSRF value.
 
 Password work is bounded before Argon2 verification by configurable global,
 per-source, and per-account-fingerprint limits plus a per-process concurrency
 cap. Challenge issuance has separate global and per-source limits so anonymous
-GET requests cannot grow the challenge table without bound. The deployment
-uses one application process by default; multi-process deployments must size
-the documented limits per worker or add an external shared limiter.
+GET requests cannot grow the challenge table without bound. Failed service-token
+authentication is separately bounded in shared SQLite fixed-window buckets so API
+and MCP processes observe the same global, source, and token-fingerprint limits.
 
 ## Roles and scope
 
@@ -142,8 +142,8 @@ Inherited IP addresses and hostnames are stricter: inheritance requires
 
 Principal-scoped UI and API responses use `Cache-Control: private, no-store`,
 `Pragma: no-cache`, and `Vary: Authorization, Cookie`. Health/readiness,
-static assets, OpenAPI documentation, `/auth`, and the separately protected
-legacy `/admin` flow remain outside catalog-read authorization.
+static assets, OpenAPI documentation, and `/auth` remain outside catalog-read
+authorization.
 
 Every object has a positive monotone `revision`. Object, relationship, and
 grant mutations advance the affected revision. The same effective-owner guard
@@ -172,6 +172,11 @@ The command prompts on a TTY. Automation may use `--password-stdin`; never put
 a password in command-line arguments. Bootstrap is idempotent only when the
 complete requested principal, password credential, and Owner grant already
 exist. Any partial or conflicting identity state fails closed.
+
+Repeat `--object-id` for each disconnected canonical component. Creation of the
+principal, password credential, and all requested Owner grants is one transaction;
+the command rolls everything back unless the complete catalog satisfies the same
+Owner-coverage invariant used by startup and readiness.
 
 Service-account tokens use a protected output file:
 
@@ -211,11 +216,11 @@ Invalid authentication is recorded in the security stream. Concealed object
 denials intentionally use stable not-found responses and do not include object
 details.
 
-## Transition contract
+## Control-plane boundary
 
-The legacy `BLOCKWART_ADMIN_TOKEN` mechanism remains a compatibility bypass
-for schema settings and unplaced root creation until a dedicated migration
-removes it. It never authorizes grant management. Identity sessions do not by
-themselves enable writes: UI, REST, and MCP commands also require the matching
-object permission. Production identity bootstrap, token injection, and runtime
-rollout still require their dedicated approval.
+Identity sessions do not by themselves enable writes: UI, REST, and MCP commands
+also require the matching object permission. Schema settings are read-only over
+HTTP, and normal object creation requires an authorized placement parent through
+the shared `create_child` command. New top-level roots remain an explicit seed or
+import control-plane operation. Production identity bootstrap, token injection,
+and runtime rollout still require their dedicated approval.

@@ -37,13 +37,6 @@ blockwart-db upgrade
 uvicorn blockwart.main:app --reload
 ```
 
-`BLOCKWART_ADMIN_TOKEN` remains a legacy compatibility gate for schema
-settings and unplaced root creation. Without it those legacy operations fail
-closed; normal catalog and access-control writes instead require the
-authenticated principal's object permissions. The token is never stored in
-the database or returned to the browser; `/admin` issues only an HMAC-signed
-`HttpOnly` compatibility-session cookie.
-
 Catalog reads are object-authorized. Browser routes require an authenticated
 human session; `/api/objects`, `/api/agent`, and `/api/v1` require a
 service-account bearer token. `discover` returns a strict placement stub,
@@ -64,8 +57,9 @@ blockwart-seed --create-schema --seed seeds/pilot_objects.yaml
 `--create-schema` is retained as a compatibility flag, but it now performs a real
 `alembic upgrade head`; it never calls SQLAlchemy `create_all()` in a production path.
 Container startup uses `blockwart-start`, which completes the same upgrade and verifies the
-database revision before Uvicorn starts. An unversioned legacy Blockwart database is adopted only
-when its schema exactly matches the known initial catalog schema.
+database revision plus nonempty, active effective Owner coverage for every catalog object before
+Uvicorn starts. An unversioned legacy Blockwart database is adopted only when its schema exactly
+matches the known initial catalog schema.
 
 Run checks:
 
@@ -186,7 +180,8 @@ metadata to locale-specific version 2 only with `--apply`.
 
 Blockwart exposes process liveness at `/api/health` and `/api/health/live`. Operational readiness
 at `/api/health/ready` additionally requires a readable and writable database, the exact packaged
-Alembic head, and the expected SQLite runtime settings. Persistent SQLite databases use foreign-key
+Alembic head, the expected SQLite runtime settings, and active effective Owner coverage for every
+object in a nonempty catalog. Persistent SQLite databases use foreign-key
 enforcement, a bounded lock wait, and WAL mode so readers can continue while a writer commits. The
 container healthcheck uses readiness rather than liveness.
 

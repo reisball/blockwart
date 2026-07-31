@@ -7,7 +7,16 @@ from sqlalchemy.orm import Session
 from blockwart.api.deps import get_session
 from blockwart.db.session import transaction
 from blockwart.services.identity import authenticate_bearer_header
+from blockwart.services.login_protection import LoginProtector
 from blockwart.services.read_access import ReadAccess, read_access_for_principal
+from blockwart.services.token_failure_buckets import (
+    TokenFailurePolicy,
+    precheck_service_token_failure,
+    prune_service_token_failure_buckets,
+    record_service_token_failure,
+    resolve_service_token_source,
+    service_token_from_authorization,
+)
 
 bearer_scheme = HTTPBearer(auto_error=False)
 
@@ -25,15 +34,61 @@ def require_api_read_access(
         if credentials is not None
         else None
     )
+    settings = request.app.state.settings
+    protector = request.app.state.login_protector
+    if not isinstance(protector, LoginProtector):
+        raise RuntimeError("Blockwart login protection is not initialized")
+    request_id = getattr(request.state, "correlation_id", None)
+    channel = (
+        "mcp"
+        if request.headers.get("X-Blockwart-Channel", "").casefold() == "mcp"
+        else "api"
+    )
+    token = service_token_from_authorization(authorization)
+    source = resolve_service_token_source(
+        direct_peer=request.client.host if request.client is not None else None,
+        forwarded_for=request.headers.getlist("X-Forwarded-For"),
+        trusted_proxy_cidrs=settings.auth_trusted_proxy_cidrs,
+    )
+    policy = TokenFailurePolicy.from_settings(settings)
     with transaction(session):
-        principal = authenticate_bearer_header(
+        if protector.token_bucket_prune_due(
+            interval_seconds=(
+                settings.auth_service_token_failure_bucket_prune_interval_seconds
+            )
+        ):
+            prune_service_token_failure_buckets(
+                session,
+                max_rows=policy.max_rows,
+            )
+        decision = precheck_service_token_failure(
             session,
-            authorization=authorization,
-            channel="api",
-            request_id=getattr(request.state, "correlation_id", None),
+            token=token,
+            source=source,
+            policy=policy,
+            channel=channel,
+            request_id=request_id,
         )
-        if principal is not None:
-            access = read_access_for_principal(session, principal)
+        principal = None
+        if decision.allowed:
+            principal = authenticate_bearer_header(
+                session,
+                authorization=authorization,
+                channel=channel,
+                request_id=request_id,
+                record_failure_event=False,
+            )
+            if principal is None:
+                record_service_token_failure(
+                    session,
+                    token=token,
+                    source=source,
+                    policy=policy,
+                    channel=channel,
+                    request_id=request_id,
+                )
+            else:
+                access = read_access_for_principal(session, principal)
     if principal is None:
         raise HTTPException(
             status_code=401,

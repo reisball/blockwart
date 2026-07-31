@@ -28,7 +28,6 @@
               <button class="theme-option" type="button" data-theme-value="dark">{{ t("nav.dark") }}</button>
               <button class="theme-option" type="button" data-theme-value="light">{{ t("nav.light") }}</button>
             </div>
-            {% include "_admin_controls.html" %}
           </div>
         </div>
         <form class="toolbar" method="get" action="/settings/schema">
@@ -85,16 +84,6 @@
           <div class="panel-head">
             <h2 class="section-title">{{ t("schema.fields") }}</h2>
           </div>
-          {% if saved %}
-            <div class="success">{{ t("schema.saved") }}</div>
-          {% endif %}
-          {% if error %}
-            <div class="error">{{ error }}</div>
-          {% endif %}
-          {% if can_write %}
-            <form method="post" action="/settings/schema">
-              <input type="hidden" name="kind" value="{{ selected_kind }}" />
-          {% endif %}
             <div class="table-wrap">
               <table class="table edit-table">
                 <thead>
@@ -114,55 +103,29 @@
                   {% for field in schema_fields %}
                     <tr>
                       <td>
-                        {% if can_write %}
-                          <input name="field_order_{{ field.key }}" value="{{ loop.index }}" inputmode="numeric" />
-                        {% else %}
-                          {{ loop.index }}
-                        {% endif %}
+                        {{ loop.index }}
                       </td>
                       <td><code>{{ field.key }}</code></td>
                       <td>
-                        {% if can_write %}
-                          <input name="field_label_{{ field.key }}" value="{{ field.label }}" autocomplete="off" />
-                        {% else %}
-                          {{ field.label }}
-                        {% endif %}
+                        {{ field.label }}
                       </td>
                       <td>{{ field.input_type }}</td>
                       <td><code>{{ field.storage_path }}</code></td>
                       <td>{{ t("value.yes") if field.visible_in_create else t("value.no") }}</td>
                       <td>
-                        {% if can_write %}
-                          <input type="checkbox" name="field_required_{{ field.key }}" value="1" {% if field.required %}checked{% endif %} />
-                        {% else %}
-                          {{ t("value.yes") if field.required else t("value.no") }}
-                        {% endif %}
+                        {{ t("value.yes") if field.required else t("value.no") }}
                       </td>
                       <td>
-                        {% if can_write %}
-                          <input type="checkbox" name="field_visible_in_detail_{{ field.key }}" value="1" {% if field.visible_in_detail %}checked{% endif %} />
-                        {% else %}
-                          {{ t("value.yes") if field.visible_in_detail else t("value.no") }}
-                        {% endif %}
+                        {{ t("value.yes") if field.visible_in_detail else t("value.no") }}
                       </td>
                       <td>
-                        {% if can_write %}
-                          <input name="field_placeholder_{{ field.key }}" value="{{ field.placeholder }}" autocomplete="off" />
-                        {% else %}
-                          {{ field.placeholder or "-" }}
-                        {% endif %}
+                        {{ field.placeholder or "-" }}
                       </td>
                     </tr>
                   {% endfor %}
                 </tbody>
               </table>
             </div>
-            {% if can_write %}
-              <div class="button-row">
-                <button type="submit">{{ t("schema.save") }}</button>
-              </div>
-            </form>
-            {% endif %}
         </section>
 
         <section class="panel">

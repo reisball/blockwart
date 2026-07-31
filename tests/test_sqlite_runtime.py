@@ -1,16 +1,19 @@
 from __future__ import annotations
 
+import io
 import sqlite3
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from threading import Event
 
+import pytest
 from alembic import command
 from sqlalchemy import event, text
 
+from blockwart.cli import auth as auth_cli
 from blockwart.config import Settings
 from blockwart.db.migrations import BASELINE_REVISION, build_alembic_config, upgrade_database
-from blockwart.db.readiness import check_database_readiness
+from blockwart.db.readiness import DatabaseReadinessError, check_database_readiness
 from blockwart.db.session import build_engine
 
 
@@ -127,7 +130,10 @@ def test_wal_allows_reader_and_bounded_competing_writer(tmp_path: Path) -> None:
         engine.dispose()
 
 
-def test_backup_restore_remains_readable_and_migratable(tmp_path: Path) -> None:
+def test_backup_restore_remains_readable_and_migratable(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     source_path = tmp_path / "source.sqlite3"
     restored_path = tmp_path / "restored.sqlite3"
     source_url = _database_url(source_path)
@@ -154,7 +160,28 @@ def test_backup_restore_remains_readable_and_migratable(tmp_path: Path) -> None:
     ):
         source_connection.backup(restored_connection)
 
-    assert upgrade_database(restored_url) == "20260731_0010"
+    assert upgrade_database(restored_url) == "20260731_0011"
+    with pytest.raises(DatabaseReadinessError) as exc_info:
+        check_database_readiness(Settings(database_url=restored_url))
+    assert exc_info.value.code == "owner_coverage_incomplete"
+
+    monkeypatch.setattr("sys.stdin", io.StringIO("restore bootstrap passphrase\n"))
+    assert auth_cli.main(
+        [
+            "--database-url",
+            restored_url,
+            "bootstrap-owner",
+            "--login",
+            "restore.owner",
+            "--display-name",
+            "Restore Owner",
+            "--object-id",
+            "preserved",
+            "--scope",
+            "self",
+            "--password-stdin",
+        ]
+    ) == 0
     readiness = check_database_readiness(Settings(database_url=restored_url))
     restored_engine = build_engine(restored_url)
     try:
@@ -165,5 +192,5 @@ def test_backup_restore_remains_readable_and_migratable(tmp_path: Path) -> None:
     finally:
         restored_engine.dispose()
 
-    assert readiness.revision == "20260731_0010"
+    assert readiness.revision == "20260731_0011"
     assert set(readiness.checks.values()) == {"ok"}

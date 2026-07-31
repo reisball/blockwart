@@ -20,7 +20,7 @@ from blockwart.models import (
     PasswordCredential,
     Principal,
 )
-from blockwart.services.access import create_object_grant
+from blockwart.services.access import create_object_grant, ensure_complete_owner_coverage
 from blockwart.services.identity import (
     IdentityConflict,
     IdentityError,
@@ -52,7 +52,13 @@ def build_parser() -> argparse.ArgumentParser:
         help="Create the first human principal and object Owner grant atomically.",
     )
     _add_human_fields(bootstrap)
-    bootstrap.add_argument("--object-id", required=True)
+    bootstrap.add_argument(
+        "--object-id",
+        dest="object_ids",
+        action="append",
+        required=True,
+        help="Owner anchor object ID; repeat for disconnected catalog components.",
+    )
     bootstrap.add_argument(
         "--scope",
         choices=tuple(scope.value for scope in GrantScope),
@@ -243,26 +249,27 @@ def main(argv: Sequence[str] | None = None) -> int:
 
 
 def _bootstrap_owner(session: Session, args: argparse.Namespace) -> str:
+    object_ids = tuple(dict.fromkeys(args.object_ids))
     existing = _bootstrap_state(
         session,
         login=args.login,
         display_name=args.display_name,
-        object_id=args.object_id,
+        object_ids=object_ids,
         scope=GrantScope(args.scope),
     )
     if existing is not None:
-        principal, grant = existing
-        return (
-            "auth_bootstrap_owner_ok mode=unchanged "
-            f"principal_id={principal.id} grant_id={grant.id} "
-            f"object_id={grant.object_id} scope={grant.scope}"
+        principal, grants = existing
+        return _bootstrap_result(
+            mode="unchanged",
+            principal_id=principal.id,
+            grants=grants,
         )
 
     principal_count = session.scalar(select(func.count()).select_from(Principal)) or 0
     grant_count = session.scalar(select(func.count()).select_from(ObjectGrant)) or 0
     if principal_count or grant_count:
         raise IdentityConflict("bootstrap state conflicts with existing identities or grants")
-    if session.get(CatalogObject, args.object_id) is None:
+    if any(session.get(CatalogObject, object_id) is None for object_id in object_ids):
         raise IdentityError("bootstrap object not found")
 
     password = _read_password(args.password_stdin)
@@ -273,19 +280,23 @@ def _bootstrap_owner(session: Session, args: argparse.Namespace) -> str:
             display_name=args.display_name,
             password=password,
         )
-        grant = create_object_grant(
-            session,
-            principal_id=principal_context.id,
-            object_id=args.object_id,
-            role=Role.OWNER,
-            scope=GrantScope(args.scope),
-            actor_principal_id=principal_context.id,
-            channel="cli",
+        grants = tuple(
+            create_object_grant(
+                session,
+                principal_id=principal_context.id,
+                object_id=object_id,
+                role=Role.OWNER,
+                scope=GrantScope(args.scope),
+                actor_principal_id=principal_context.id,
+                channel="cli",
+            )
+            for object_id in object_ids
         )
-    return (
-        "auth_bootstrap_owner_ok mode=created "
-        f"principal_id={principal_context.id} grant_id={grant.id} "
-        f"object_id={grant.object_id} scope={grant.scope}"
+        ensure_complete_owner_coverage(session)
+    return _bootstrap_result(
+        mode="created",
+        principal_id=principal_context.id,
+        grants=grants,
     )
 
 
@@ -294,9 +305,9 @@ def _bootstrap_state(
     *,
     login: str,
     display_name: str,
-    object_id: str,
+    object_ids: tuple[str, ...],
     scope: GrantScope,
-) -> tuple[Principal, ObjectGrant] | None:
+) -> tuple[Principal, tuple[ObjectGrant, ...]] | None:
     try:
         principal = principal_by_login(session, login)
     except IdentityError:
@@ -304,23 +315,47 @@ def _bootstrap_state(
     if principal is None:
         return None
     credential = session.get(PasswordCredential, principal.id)
-    grant = session.scalar(
-        select(ObjectGrant).where(
-            ObjectGrant.principal_id == principal.id,
-            ObjectGrant.object_id == object_id,
-            ObjectGrant.role == Role.OWNER,
-            ObjectGrant.scope == scope,
-        )
+    grants = tuple(
+        session.scalars(
+            select(ObjectGrant).where(
+                ObjectGrant.principal_id == principal.id,
+                ObjectGrant.object_id.in_(object_ids),
+                ObjectGrant.role == Role.OWNER,
+                ObjectGrant.scope == scope,
+            )
+        ).all()
     )
     if (
         principal.principal_type == PrincipalType.HUMAN
         and principal.active
         and principal.display_name == " ".join(display_name.split())
         and credential is not None
-        and grant is not None
+        and {grant.object_id for grant in grants} == set(object_ids)
     ):
-        return principal, grant
+        ensure_complete_owner_coverage(session)
+        return principal, grants
     raise IdentityConflict("bootstrap state is incomplete or conflicting")
+
+
+def _bootstrap_result(
+    *,
+    mode: str,
+    principal_id: str,
+    grants: tuple[ObjectGrant, ...],
+) -> str:
+    ordered = tuple(sorted(grants, key=lambda grant: grant.object_id))
+    if len(ordered) == 1:
+        grant = ordered[0]
+        return (
+            f"auth_bootstrap_owner_ok mode={mode} principal_id={principal_id} "
+            f"grant_id={grant.id} object_id={grant.object_id} scope={grant.scope}"
+        )
+    return (
+        f"auth_bootstrap_owner_ok mode={mode} principal_id={principal_id} "
+        f"grant_ids={','.join(str(grant.id) for grant in ordered)} "
+        f"object_ids={','.join(grant.object_id for grant in ordered)} "
+        f"scope={ordered[0].scope}"
+    )
 
 
 def _add_human_fields(parser: argparse.ArgumentParser) -> None:

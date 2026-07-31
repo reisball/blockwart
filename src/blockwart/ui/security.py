@@ -1,11 +1,11 @@
 import hmac
 from typing import Annotated
-from uuid import uuid4
 
 from fastapi import Depends, Form, HTTPException, Request
 from sqlalchemy.orm import Session
 
 from blockwart.api.deps import get_session
+from blockwart.api.errors import request_correlation_id
 from blockwart.db.session import transaction
 from blockwart.services.identity import (
     authenticate_browser_session,
@@ -77,7 +77,7 @@ def require_browser_write_csrf(
             outcome="denied",
             channel="ui",
             principal_id=principal_id,
-            request_id=str(uuid4()),
+            request_id=request_correlation_id(request),
             details={"reason": "invalid_csrf"},
         )
     raise HTTPException(status_code=403, detail="CSRF validation failed")

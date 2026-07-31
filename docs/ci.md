@@ -70,9 +70,9 @@ tools through fifteen read/write and grant-management calls to the installed
 command. It also runs the read-only service-interface normalization and
 placement-state plans from outside the source tree.
 
-The container smoke starts the built image first with an empty volume and then with a database at
-the historical Alembic baseline. Both must reach Docker health and application readiness. The
-second run must migrate to Head without losing its legacy JSON row. Both paths must also pass
+The container smoke proves that an empty catalog fails the Owner invariant, then starts an
+explicitly bootstrapped candidate and a database at the historical Alembic baseline. Ready
+candidates must migrate to Head without losing legacy data. Both ready paths must also pass
 `blockwart-db integrity` plus the read-only `blockwart-db interfaces` and
 `blockwart-db placements` plans.
 
@@ -83,7 +83,7 @@ contract. After an approved API change, update and review it with:
 python scripts/update_openapi_contract.py
 ```
 
-CI uses no live Blockwart instance, production database, admin token, or other secret. A trusted
+CI uses no live Blockwart instance, production database, or production secret. A trusted
 Gitea Actions runner labeled `ubuntu-latest` must provide Python 3.12 setup support, `curl`, and a
 working Docker daemon. Before installing dependencies, the workflow records load average, Linux
 pressure-stall information, root-filesystem usage, and a compact Docker summary so host-level

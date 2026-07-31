@@ -9,7 +9,7 @@ from fastapi.exception_handlers import (
     request_validation_exception_handler,
 )
 from fastapi.exceptions import RequestValidationError
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, PlainTextResponse
 from sqlalchemy.exc import SQLAlchemyError
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
@@ -36,16 +36,19 @@ logger = logging.getLogger(__name__)
 
 def install_api_error_contract(app: FastAPI) -> None:
     @app.middleware("http")
-    async def api_correlation_id_middleware(request: Request, call_next):
+    async def api_error_middleware(request: Request, call_next):
         if not _is_api_request(request):
             return await call_next(request)
 
         correlation_id = _correlation_id(request)
-        request.state.correlation_id = correlation_id
         try:
             response = await call_next(request)
         except SQLAlchemyError:
-            logger.error("API database failure correlation_id=%s", correlation_id)
+            _log_request_failure(
+                code="db_unavailable",
+                channel="api",
+                correlation_id=correlation_id,
+            )
             response = _error_response(
                 status_code=503,
                 code="db_unavailable",
@@ -53,14 +56,17 @@ def install_api_error_contract(app: FastAPI) -> None:
                 correlation_id=correlation_id,
             )
         except Exception:
-            logger.error("Unexpected API failure correlation_id=%s", correlation_id)
+            _log_request_failure(
+                code="internal_error",
+                channel="api",
+                correlation_id=correlation_id,
+            )
             response = _error_response(
                 status_code=500,
                 code="internal_error",
                 message="Request processing failed.",
                 correlation_id=correlation_id,
             )
-        response.headers[CORRELATION_ID_HEADER] = correlation_id
         return response
 
     @app.exception_handler(RequestValidationError)
@@ -85,7 +91,6 @@ def install_api_error_contract(app: FastAPI) -> None:
             correlation_id=_correlation_id(request),
             details=details,
         )
-
     @app.exception_handler(StarletteHTTPException)
     async def api_http_error_handler(
         request: Request,
@@ -123,18 +128,61 @@ def install_api_error_contract(app: FastAPI) -> None:
         _exc: DatabaseTransactionError,
     ) -> JSONResponse:
         if not _is_api_request(request):
+            _log_request_failure(
+                code="db_unavailable",
+                channel="ui",
+                correlation_id=_correlation_id(request),
+            )
             return JSONResponse(
                 status_code=503,
                 content={"detail": "Database transaction failed"},
             )
         correlation_id = _correlation_id(request)
-        logger.error("API database transaction failure correlation_id=%s", correlation_id)
+        _log_request_failure(code="db_unavailable", channel="api", correlation_id=correlation_id)
         return _error_response(
             status_code=503,
             code="db_unavailable",
             message="Database is unavailable.",
             correlation_id=correlation_id,
         )
+
+
+def install_request_context(app: FastAPI) -> None:
+    @app.middleware("http")
+    async def request_context_middleware(request: Request, call_next):
+        correlation_id = _correlation_id(request)
+        request.state.correlation_id = correlation_id
+        try:
+            response = await call_next(request)
+        except SQLAlchemyError:
+            _log_request_failure(
+                code="db_unavailable",
+                channel="api" if _is_api_request(request) else "ui",
+                correlation_id=correlation_id,
+            )
+            response = PlainTextResponse("Request processing failed.", status_code=503)
+        except Exception:
+            _log_request_failure(
+                code="internal_error",
+                channel="api" if _is_api_request(request) else "ui",
+                correlation_id=correlation_id,
+            )
+            response = PlainTextResponse("Request processing failed.", status_code=500)
+        response.headers[CORRELATION_ID_HEADER] = correlation_id
+        return response
+
+
+def request_correlation_id(request: Request) -> str:
+    return _correlation_id(request)
+
+
+def _log_request_failure(*, code: str, channel: str, correlation_id: str) -> None:
+    logger.error(
+        "request_failure operation=http_request code=%s channel=%s correlation_id=%s",
+        code,
+        channel,
+        correlation_id,
+    )
 
 
 def _is_api_request(request: Request) -> bool:

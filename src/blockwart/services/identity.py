@@ -436,6 +436,7 @@ def authenticate_service_token(
     channel: str = "api",
     request_id: str | None = None,
     now: datetime | None = None,
+    record_failure_event: bool = True,
 ) -> PrincipalContext | None:
     timestamp = now or utc_now()
     token_id = _opaque_id(token, SERVICE_TOKEN_PREFIX)
@@ -453,7 +454,7 @@ def authenticate_service_token(
         and (row.expires_at is None or row.expires_at > timestamp)
         and token_matches
     )
-    if not authenticated:
+    if not authenticated and record_failure_event:
         record_security_event(
             session,
             event_type="service_token_authentication",
@@ -464,6 +465,7 @@ def authenticate_service_token(
             details={"reason": "invalid_credentials"},
             now=timestamp,
         )
+    if not authenticated:
         return None
     row.last_used_at = timestamp
     session.flush()
@@ -477,6 +479,7 @@ def authenticate_bearer_header(
     channel: str = "api",
     request_id: str | None = None,
     now: datetime | None = None,
+    record_failure_event: bool = True,
 ) -> PrincipalContext | None:
     if authorization is None:
         token = ""
@@ -489,6 +492,7 @@ def authenticate_bearer_header(
         channel=channel,
         request_id=request_id,
         now=now,
+        record_failure_event=record_failure_event,
     )
 
 

@@ -12,6 +12,7 @@ from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.parse import quote, urlencode, urlsplit
 from urllib.request import HTTPRedirectHandler, Request, build_opener
+from uuid import uuid4
 
 import mcp.server.stdio
 import mcp.types as types
@@ -429,6 +430,7 @@ def call_tool(
     base_url: str | None = None,
     fetcher: Fetcher | None = None,
     requester: Requester | None = None,
+    correlation_id: str | None = None,
 ) -> JSON:
     if name not in TOOL_DEFINITIONS:
         raise UnknownToolError(f"Unknown tool: {name}")
@@ -439,16 +441,33 @@ def call_tool(
     except ValidationError as exc:
         raise ToolInputError("Tool arguments are invalid") from exc
 
-    fetch = fetcher or (lambda path, params: fetch_json(path, params, base_url=base_url))
-    request = requester or (
+    request_id = _safe_correlation_id(correlation_id)
+    fetch = fetcher or (
+        lambda path, params: fetch_json(
+            path,
+            params,
+            base_url=base_url,
+            correlation_id=request_id,
+        )
+    )
+    upstream_request = requester or (
         lambda method, path, body, headers: request_json(
             method,
             path,
             body,
             headers,
             base_url=base_url,
+            correlation_id=request_id,
         )
     )
+
+    def request(method: str, path: str, body: JSON, headers: dict[str, str]) -> JSON:
+        return upstream_request(
+            method,
+            path,
+            body,
+            {**headers, "X-Correlation-ID": request_id},
+        )
 
     if name == "blockwart.search":
         payload = _legacy_page_payload(
@@ -602,13 +621,26 @@ def call_tool(
     }
 
 
-def fetch_json(path: str, params: JSON, *, base_url: str | None = None) -> JSON:
+def fetch_json(
+    path: str,
+    params: JSON,
+    *,
+    base_url: str | None = None,
+    correlation_id: str | None = None,
+) -> JSON:
     root = (base_url or os.environ.get("BLOCKWART_API_BASE_URL") or DEFAULT_BASE_URL).rstrip("/")
     query = urlencode({key: value for key, value in params.items() if value is not None})
     url = f"{root}{path}"
     if query:
         url = f"{url}?{query}"
-    return _http_json("GET", url, body=None, headers={}, base_url=base_url)
+    return _http_json(
+        "GET",
+        url,
+        body=None,
+        headers={},
+        base_url=base_url,
+        correlation_id=correlation_id,
+    )
 
 
 def request_json(
@@ -618,12 +650,20 @@ def request_json(
     headers: dict[str, str],
     *,
     base_url: str | None = None,
+    correlation_id: str | None = None,
 ) -> JSON:
     if method not in {"POST", "PUT", "DELETE"}:
         raise ValueError("unsupported MCP upstream method")
     root = (base_url or os.environ.get("BLOCKWART_API_BASE_URL") or DEFAULT_BASE_URL).rstrip("/")
     url = f"{root}{path}"
-    return _http_json(method, url, body=body, headers=headers, base_url=base_url)
+    return _http_json(
+        method,
+        url,
+        body=body,
+        headers=headers,
+        base_url=base_url,
+        correlation_id=correlation_id,
+    )
 
 
 def _http_json(
@@ -633,9 +673,14 @@ def _http_json(
     body: JSON | None,
     headers: dict[str, str],
     base_url: str | None,
+    correlation_id: str | None = None,
 ) -> JSON:
     del base_url
     request_headers = dict(headers)
+    request_headers["X-Correlation-ID"] = _safe_correlation_id(
+        request_headers.get("X-Correlation-ID") or correlation_id
+    )
+    request_headers["X-Blockwart-Channel"] = "mcp"
     api_token = _api_token()
     if api_token is not None:
         _require_safe_token_transport(url)
@@ -665,7 +710,12 @@ def _http_json(
                     "Blockwart Agent API returned an invalid response.",
                 ) from exc
     except HTTPError as exc:
-        raise _translate_http_error(exc) from exc
+        translated = _translate_http_error(exc)
+        raise UpstreamError(
+            translated.code,
+            translated.public_message,
+            request_headers["X-Correlation-ID"],
+        ) from exc
     except URLError as exc:
         raise UpstreamError(
             "upstream_unavailable",
@@ -743,8 +793,14 @@ async def list_tools() -> list[types.Tool]:
 # call_tool validates the exact published schemas before any upstream request.
 @server.call_tool(validate_input=False)
 async def handle_call_tool(name: str, arguments: JSON) -> types.CallToolResult:
+    correlation_id = _safe_correlation_id(None)
     try:
-        result = await asyncio.to_thread(call_tool, name, arguments)
+        result = await asyncio.to_thread(
+            call_tool,
+            name,
+            arguments,
+            correlation_id=correlation_id,
+        )
         return types.CallToolResult.model_validate(result)
     except UnknownToolError:
         return _tool_error_result("tool_not_found", "Unknown Blockwart tool.")
@@ -757,8 +813,16 @@ async def handle_call_tool(name: str, arguments: JSON) -> types.CallToolResult:
             correlation_id=exc.correlation_id,
         )
     except Exception:
-        logger.exception("Unexpected MCP tool failure for %s", name)
-        return _tool_error_result("internal_error", "Blockwart tool execution failed.")
+        logger.error(
+            "mcp_tool_failure operation=%s code=internal_error channel=mcp correlation_id=%s",
+            name if name in TOOL_DEFINITIONS else "unknown",
+            correlation_id,
+        )
+        return _tool_error_result(
+            "internal_error",
+            "Blockwart tool execution failed.",
+            correlation_id=correlation_id,
+        )
 
 
 async def run_server() -> None:
@@ -895,6 +959,12 @@ def _translate_http_error(exc: HTTPError) -> UpstreamError:
         "upstream_http_error",
         "Blockwart Agent API returned an error.",
     )
+
+
+def _safe_correlation_id(value: str | None) -> str:
+    if value is not None and _CORRELATION_ID_PATTERN.fullmatch(value):
+        return value
+    return str(uuid4())
 
 
 def _tool_error_result(

@@ -43,7 +43,7 @@ expected_revision = sys.argv[1]
 payload = json.loads(os.environ["READY_PAYLOAD"])
 assert payload["ok"] is True
 assert payload["build_revision"] == expected_revision
-assert payload["revision"] == "20260731_0010"
+assert payload["revision"] == "20260731_0011"
 assert all(value == "ok" for value in payload["checks"].values())
 PY
 
@@ -76,10 +76,24 @@ docker run -d \
   --name "$EMPTY_CONTAINER" \
   -e BLOCKWART_ENV=production \
   -e BLOCKWART_DATABASE_URL=sqlite:////data/blockwart.sqlite3 \
-  -e BLOCKWART_ADMIN_TOKEN= \
   -v "$EMPTY_VOLUME:/data" \
   "$IMAGE" >/dev/null
-wait_for_candidate "$EMPTY_CONTAINER"
+for _ in $(seq 1 45); do
+  empty_state=$(docker inspect "$EMPTY_CONTAINER" --format '{{.State.Status}}')
+  [[ "$empty_state" == exited ]] && break
+  sleep 1
+done
+empty_result=$(docker inspect "$EMPTY_CONTAINER" --format '{{.State.Status}} {{.State.ExitCode}}')
+if [[ "$empty_result" != "exited 1" ]]; then
+  docker logs "$EMPTY_CONTAINER" >&2
+  printf 'unexpected empty-catalog state: %s\n' "$empty_result" >&2
+  exit 1
+fi
+empty_log=$(docker logs "$EMPTY_CONTAINER" 2>&1)
+if [[ "$empty_log" != *"startup_error=owner_catalog_empty"* ]]; then
+  printf '%s\n' "$empty_log" >&2
+  exit 1
+fi
 docker rm -f "$EMPTY_CONTAINER" >/dev/null
 
 docker volume create "$MIGRATED_VOLUME" >/dev/null
@@ -116,11 +130,26 @@ engine.dispose()
 print(f"container_fixture=baseline revision={BASELINE_REVISION}")
 PY
 
+docker run --rm \
+  -e BLOCKWART_DATABASE_URL=sqlite:////data/blockwart.sqlite3 \
+  -v "$MIGRATED_VOLUME:/data" \
+  --entrypoint blockwart-db \
+  "$IMAGE" upgrade
+printf '%s\n' 'container-smoke-owner-password' | docker run --rm -i \
+  -e BLOCKWART_DATABASE_URL=sqlite:////data/blockwart.sqlite3 \
+  -v "$MIGRATED_VOLUME:/data" \
+  --entrypoint blockwart-auth \
+  "$IMAGE" bootstrap-owner \
+  --login container.owner \
+  --display-name "Container Owner" \
+  --object-id ci-legacy \
+  --scope self \
+  --password-stdin
+
 docker run -d \
   --name "$MIGRATED_CONTAINER" \
   -e BLOCKWART_ENV=production \
   -e BLOCKWART_DATABASE_URL=sqlite:////data/blockwart.sqlite3 \
-  -e BLOCKWART_ADMIN_TOKEN= \
   -v "$MIGRATED_VOLUME:/data" \
   "$IMAGE" >/dev/null
 wait_for_candidate "$MIGRATED_CONTAINER"
@@ -139,4 +168,4 @@ assert integrity == "ok"
 print("container_migration=preserved integrity=ok")
 PY
 
-echo "container_smoke=passed empty_database=ok migrated_database=ok"
+echo "container_smoke=passed empty_catalog=fail_closed migrated_database=ok"

@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import hmac
 from typing import Annotated
-from uuid import uuid4
 
 from fastapi import APIRouter, Depends, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
@@ -10,6 +9,7 @@ from fastapi.templating import Jinja2Templates
 from sqlalchemy.orm import Session
 
 from blockwart.api.deps import get_session
+from blockwart.api.errors import request_correlation_id
 from blockwart.config import Settings
 from blockwart.db.session import transaction
 from blockwart.services.identity import (
@@ -103,7 +103,7 @@ def login(
     settings = _settings(request)
     protector = _login_protector(request)
     source = _request_source(request)
-    request_id = str(uuid4())
+    request_id = request_correlation_id(request)
     challenge_cookie = request.cookies.get(LOGIN_CHALLENGE_COOKIE_NAME)
     with protector.acquire_password_attempt(source=source, login=login) as attempt:
         if not attempt.allowed:
@@ -182,7 +182,7 @@ def login(
             value=issued_session.value,
             max_age=settings.auth_session_ttl_seconds,
             httponly=True,
-            secure=settings.auth_cookie_secure,
+            secure=True,
             samesite="strict",
             path="/",
         )
@@ -191,7 +191,7 @@ def login(
             value=issued_session.csrf_token,
             max_age=settings.auth_session_ttl_seconds,
             httponly=True,
-            secure=settings.auth_cookie_secure,
+            secure=True,
             samesite="strict",
             path="/",
         )
@@ -199,7 +199,7 @@ def login(
             key=LOGIN_CHALLENGE_COOKIE_NAME,
             path="/auth",
             httponly=True,
-            secure=settings.auth_cookie_secure,
+            secure=True,
             samesite="strict",
         )
         response.headers["Cache-Control"] = "no-store"
@@ -233,7 +233,7 @@ def logout(
     session: Annotated[Session, Depends(get_session)],
 ) -> RedirectResponse:
     settings = _settings(request)
-    request_id = str(uuid4())
+    request_id = request_correlation_id(request)
     session_value = request.cookies.get(AUTH_SESSION_COOKIE_NAME)
     csrf_cookie = request.cookies.get(AUTH_CSRF_COOKIE_NAME)
     csrf_matches_cookie = (
@@ -336,7 +336,7 @@ def _set_login_challenge_cookie(
         value=value,
         max_age=settings.auth_login_challenge_ttl_seconds,
         httponly=True,
-        secure=settings.auth_cookie_secure,
+        secure=True,
         samesite="strict",
         path="/auth",
     )
@@ -352,7 +352,7 @@ def _delete_identity_cookies(
             key=name,
             path="/",
             httponly=True,
-            secure=settings.auth_cookie_secure,
+            secure=True,
             samesite="strict",
         )
 

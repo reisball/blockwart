@@ -21,15 +21,15 @@ from blockwart.domain.ui_schema import (
     ui_schema_payload,
 )
 from blockwart.main import create_app
-from blockwart.models import AuditEvent, Relationship
+from blockwart.models import AuditEvent, CatalogObject, Relationship
 from blockwart.schemas.catalog import PUBLIC_OBJECT_KINDS, CatalogObjectIn
 from blockwart.services.catalog import get_object
 from blockwart.services.catalog import upsert_object as flush_object
+from blockwart.services.commands import revision_etag
 from blockwart.services.seeds import import_seed_file
 from blockwart.ui.i18n import load_catalog, validate_locale_catalogs
 
 SEED_PATH = Path(__file__).resolve().parents[1] / "seeds" / "pilot_objects.yaml"
-TEST_ADMIN_TOKEN = "test-admin-token-with-at-least-32-characters"
 
 
 def integrated_detail_html(document: str) -> str:
@@ -45,6 +45,28 @@ def upsert_object(session: Session, payload: CatalogObjectIn):
         return flush_object(session, payload)
 
 
+class BrowserFormTestClient(TestClient):
+    def __init__(self, app, session_factory) -> None:
+        super().__init__(app)
+        self._session_factory = session_factory
+
+    def post(self, url, *, data=None, **kwargs):
+        submitted = dict(data) if isinstance(data, dict) else data
+        path = str(url).split("?", 1)[0]
+        parts = path.strip("/").split("/")
+        if (
+            isinstance(submitted, dict)
+            and len(parts) >= 2
+            and parts[0] == "objects"
+            and "if_match" not in submitted
+        ):
+            with self._session_factory() as session:
+                catalog_object = session.get(CatalogObject, parts[1])
+                if catalog_object is not None:
+                    submitted["if_match"] = revision_etag(catalog_object.revision)
+        return super().post(url, data=submitted, **kwargs)
+
+
 @pytest.fixture
 def session_factory(alembic_session_factory):
     with alembic_session_factory() as session:
@@ -58,7 +80,7 @@ def client(
     session_factory,
     install_unrestricted_read_access,
 ) -> Generator[TestClient, None, None]:
-    app = create_app(settings=Settings(admin_token=TEST_ADMIN_TOKEN))
+    app = create_app(settings=Settings())
     install_unrestricted_read_access(app)
 
     def override_get_session() -> Generator[Session, None, None]:
@@ -66,13 +88,7 @@ def client(
             yield session
 
     app.dependency_overrides[get_session] = override_get_session
-    with TestClient(app) as test_client:
-        unlock = test_client.post(
-            "/admin/unlock",
-            data={"admin_token": TEST_ADMIN_TOKEN},
-            follow_redirects=False,
-        )
-        assert unlock.status_code == 303
+    with BrowserFormTestClient(app, session_factory) as test_client:
         yield test_client
 
 
@@ -132,7 +148,6 @@ def test_language_cookie_covers_all_ui_surfaces(client: TestClient) -> None:
 
     schema = client.get("/settings/schema?kind=host")
     detail = client.get("/objects/fabrik")
-    admin = client.get("/admin")
 
     assert '<html lang="de">' in schema.text
     assert "Schema-Einstellungen" in schema.text
@@ -141,8 +156,6 @@ def test_language_cookie_covers_all_ui_surfaces(client: TestClient) -> None:
     assert "Zurück zum Katalog" in detail.text
     assert "Netzwerk" in detail.text
     assert "Aktiv" in detail.text
-    assert '<html lang="de">' in admin.text
-    assert "Schreibzugriff aktiv" in admin.text
 
     english = client.get("/?lang=en")
     assert '<html lang="en" data-view="catalog" data-page="catalog">' in english.text
@@ -344,12 +357,9 @@ def test_schema_settings_page_shows_selected_type_schema(client: TestClient) -> 
     assert "data_json.endpoints[].port" in response.text
     assert "<code>overview</code>" in response.text
     assert "<code>network</code>" in response.text
-    assert 'method="post"' in response.text
-    assert "Save" in response.text
-    assert 'name="field_label_primary_name"' in response.text
-    assert 'name="field_placeholder_summary"' in response.text
-    assert 'name="field_order_kind"' in response.text
-    assert 'name="field_required_kind"' in response.text
+    assert 'method="post"' not in response.text
+    assert 'name="field_label_primary_name"' not in response.text
+    assert 'name="field_placeholder_summary"' not in response.text
 
 
 def test_schema_settings_page_falls_back_to_system_for_invalid_kind(
@@ -385,7 +395,7 @@ def test_schema_settings_type_matrix(
     assert f'<option value="{kind}" selected' in response.text
     assert primary_label in response.text
     assert storage in response.text
-    assert ('name="field_label_platform"' in response.text) is platform_label
+    assert ("<code>platform</code>" in response.text) is platform_label
 
 
 def test_ui_schema_payload_matches_public_object_kinds() -> None:
@@ -413,7 +423,7 @@ def test_public_schemas_include_endpoint_fields_but_not_create_form(
         assert response.status_code == 200
         for key in ("endpoint_type", "endpoint_url", "endpoint_port"):
             assert f"<code>{key}</code>" in response.text
-            assert f'name="field_label_{key}"' in response.text
+            assert f'name="field_label_{key}"' not in response.text
         assert "data_json.endpoints[].type" in response.text
         assert "data_json.endpoints[].url" in response.text
         assert "data_json.endpoints[].port" in response.text
@@ -512,43 +522,21 @@ def test_host_and_system_schema_include_hardware_fields(client: TestClient) -> N
         assert not any(str(field["key"]).startswith("hardware_") for field in fields)
 
 
-def test_schema_settings_saves_safe_metadata_overrides(
+def test_schema_settings_http_is_read_only(
     client: TestClient,
     tmp_path,
     monkeypatch,
 ) -> None:
     override_path = tmp_path / "ui_schema_overrides.json"
     monkeypatch.setenv("BLOCKWART_SCHEMA_OVERRIDES_PATH", str(override_path))
-    fields = schema_field_payload(UI_SCHEMAS["system"])
-    data = {"kind": "system"}
-    for index, field in enumerate(fields, start=1):
-        key = str(field["key"])
-        data[f"field_order_{key}"] = str(index)
-        data[f"field_label_{key}"] = load_catalog("en")[str(field["label_key"])]
-        placeholder_key = str(field["placeholder_key"])
-        data[f"field_placeholder_{key}"] = (
-            load_catalog("en")[placeholder_key] if placeholder_key else ""
-        )
-        if field["required"]:
-            data[f"field_required_{key}"] = "1"
-        if field["visible_in_detail"]:
-            data[f"field_visible_in_detail_{key}"] = "1"
-    data["field_label_hardware_storage"] = "Disk"
-    data["field_placeholder_hardware_storage"] = "z.B. 4 TB SSD"
+    response = client.post(
+        "/settings/schema",
+        data={"kind": "system", "field_label_hardware_storage": "Disk"},
+        follow_redirects=False,
+    )
 
-    response = client.post("/settings/schema", data=data, follow_redirects=False)
-
-    assert response.status_code == 303
-    assert response.headers["location"] == "/settings/schema?kind=system&saved=1&lang=en"
-    settings = client.get("/settings/schema?kind=system")
-    detail = client.get("/objects/fabrik")
-    edit = client.get("/objects/fabrik?edit=hardware")
-    assert "Disk" in settings.text
-    assert "z.B. 4 TB SSD" in settings.text
-    assert "Disk" in detail.text
-    assert "z.B. 4 TB SSD" in edit.text
-    assert "data_json.hardware.storage" in settings.text
-    assert "hardware_storage" in settings.text
+    assert response.status_code == 405
+    assert not override_path.exists()
 
 
 def test_service_endpoint_schema_metadata_drives_endpoint_table(
@@ -558,34 +546,13 @@ def test_service_endpoint_schema_metadata_drives_endpoint_table(
 ) -> None:
     override_path = tmp_path / "ui_schema_overrides.json"
     monkeypatch.setenv("BLOCKWART_SCHEMA_OVERRIDES_PATH", str(override_path))
-    fields = schema_field_payload(UI_SCHEMAS["service"])
-    data = {"kind": "service"}
-    for index, field in enumerate(fields, start=1):
-        key = str(field["key"])
-        data[f"field_order_{key}"] = str(index)
-        data[f"field_label_{key}"] = load_catalog("en")[str(field["label_key"])]
-        placeholder_key = str(field["placeholder_key"])
-        data[f"field_placeholder_{key}"] = (
-            load_catalog("en")[placeholder_key] if placeholder_key else ""
-        )
-        if field["required"]:
-            data[f"field_required_{key}"] = "1"
-        if field["visible_in_detail"]:
-            data[f"field_visible_in_detail_{key}"] = "1"
-    data["field_label_endpoint_url"] = "Endpoint URL"
-    data["field_placeholder_endpoint_url"] = "https://service.local/api"
-
-    response = client.post("/settings/schema", data=data, follow_redirects=False)
-
-    assert response.status_code == 303
     settings = client.get("/settings/schema?kind=service")
     edit = client.get("/objects/n8n-web-ui?edit=network")
     detail = client.get("/objects/n8n-web-ui")
-    assert "Endpoint URL" in settings.text
-    assert "https://service.local/api" in settings.text
-    assert "Endpoint URL" in edit.text
-    assert "https://service.local/api" in edit.text
-    assert "Endpoint URL" in detail.text
+    assert "data_json.endpoints[].url" in settings.text
+    assert "URL" in edit.text
+    assert "URL" in detail.text
+    assert not override_path.exists()
 
 
 def test_host_detail_can_edit_host_hardware_fields(
@@ -1296,13 +1263,15 @@ def test_create_object_form_redirects_to_detail(
         "/objects",
         data={
             "object_id": "test-system",
-            "kind": "system",
+            "kind": "service",
             "label": "Test System",
             "status": "active",
             "labels": "infra, docker\nintern",
-            "platform": "LXC",
             "summary": "Created from UI test.",
             "data_json": '{"schema_version": 1}',
+            "relation_target_ref": "system:fabrik",
+            "relation_type": "hosts",
+            "idempotency_key": "ui-test-create-system",
         },
         follow_redirects=False,
     )
@@ -1318,13 +1287,11 @@ def test_create_object_form_redirects_to_detail(
     assert "infra" in index.text
     assert "docker" in index.text
     assert "intern" in index.text
-    assert "LXC" in index.text
     with session_factory() as session:
         catalog_object = get_object(session, "test-system")
     assert catalog_object is not None
     assert catalog_object.data["labels"] == ["infra", "docker", "intern"]
-    assert catalog_object.data["platform"] == "LXC"
-    assert catalog_object.data["network"]["hostnames"][0] == "Test System"
+    assert "platform" not in catalog_object.data
 
 
 @pytest.mark.parametrize(
@@ -1356,10 +1323,18 @@ def test_ui_schema_drives_primary_name_storage_by_kind(
             "platform": "LXC",
             "summary": "Created from schema matrix.",
             "data_json": '{"schema_version": 1}',
+            "relation_target_ref": "system:fabrik",
+            "relation_type": "hosts",
+            "idempotency_key": f"ui-schema-create-{kind}",
         },
         follow_redirects=False,
     )
 
+    if kind != "service":
+        assert response.status_code == 409
+        with session_factory() as session:
+            assert get_object(session, object_id) is None
+        return
     assert response.status_code == 303
     detail = client.get(f"/objects/{object_id}")
     assert primary_label in detail.text
@@ -1394,6 +1369,7 @@ def test_create_service_form_can_set_host_system(
             "platform": "VM",
             "summary": "Created from UI test.",
             "data_json": '{"schema_version": 1}',
+            "idempotency_key": "ui-test-create-service",
         },
         follow_redirects=False,
     )

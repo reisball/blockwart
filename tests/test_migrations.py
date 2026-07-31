@@ -29,7 +29,8 @@ ENGLISH_CONTRACT_REVISION = "20260729_0007"
 IDENTITY_REVISION = "20260730_0008"
 AUTHORIZATION_REVISION = "20260730_0009"
 WRITE_COMMANDS_REVISION = "20260731_0010"
-HEAD_REVISION = WRITE_COMMANDS_REVISION
+TOKEN_FAILURE_BUCKETS_REVISION = "20260731_0011"
+HEAD_REVISION = TOKEN_FAILURE_BUCKETS_REVISION
 PROJECT_ALEMBIC_CONFIG = Path(__file__).resolve().parents[1] / "alembic.ini"
 LEGACY_SNAPSHOT = Path(__file__).resolve().parent / "fixtures" / "legacy_snapshot.sql"
 
@@ -148,6 +149,7 @@ def test_real_alembic_upgrade_creates_fresh_database_and_has_no_drift(
             "relationships",
             "security_events",
             "service_tokens",
+            "service_token_failure_buckets",
         }
     finally:
         engine.dispose()
@@ -163,6 +165,7 @@ def test_real_alembic_upgrade_creates_fresh_database_and_has_no_drift(
         "relationships",
         "security_events",
         "service_tokens",
+        "service_token_failure_buckets",
     }
     assert _revision(database_url) == HEAD_REVISION
 
@@ -1192,15 +1195,16 @@ def downgrade() -> None:
             "audit_events",
             "browser_sessions",
             "catalog_objects",
-                "future_head_only",
-                "idempotency_records",
-                "login_challenges",
+            "future_head_only",
+            "idempotency_records",
+            "login_challenges",
             "object_grants",
             "password_credentials",
             "principals",
             "relationships",
             "security_events",
             "service_tokens",
+            "service_token_failure_buckets",
         }
         with engine.connect() as connection:
             assert connection.execute(
@@ -1209,6 +1213,47 @@ def downgrade() -> None:
         assert _revision(database_url) == future_revision
     finally:
         Base.metadata.remove(future_table)
+        engine.dispose()
+
+
+def test_token_failure_bucket_migration_is_transient_and_downgrade_preserves_catalog(
+    tmp_path: Path,
+) -> None:
+    database_url = _database_url(tmp_path / "failure-bucket-downgrade.sqlite3")
+    config = build_alembic_config(database_url)
+    command.upgrade(config, "head")
+    engine = create_engine(database_url)
+    try:
+        with engine.begin() as connection:
+            connection.execute(
+                text(
+                    "INSERT INTO catalog_objects "
+                    "(id, kind, label, status, lifecycle, health, data_json, "
+                    "provenance_json, revision) VALUES "
+                    "('preserved', 'host', 'Preserved', 'active', 'active', 'unknown', "
+                    "'{}', '{}', 1)"
+                )
+            )
+            connection.execute(
+                text(
+                    "INSERT INTO service_token_failure_buckets "
+                    "(dimension, key_hash, window_start, failure_count, event_emitted, expires_at) "
+                    "VALUES ('global', :key_hash, CURRENT_TIMESTAMP, 1, 0, CURRENT_TIMESTAMP)"
+                ),
+                {"key_hash": "0" * 64},
+            )
+
+        command.downgrade(config, WRITE_COMMANDS_REVISION)
+        assert "service_token_failure_buckets" not in inspect(engine).get_table_names()
+        with engine.connect() as connection:
+            assert connection.scalar(
+                text("SELECT label FROM catalog_objects WHERE id = 'preserved'")
+            ) == "Preserved"
+            assert connection.exec_driver_sql("PRAGMA integrity_check").scalar_one() == "ok"
+
+        command.upgrade(config, "head")
+        assert "service_token_failure_buckets" in inspect(engine).get_table_names()
+    finally:
         engine.dispose()
 
 

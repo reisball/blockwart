@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+import asyncio
+import importlib
 import json
 import os
 from pathlib import Path
 
 import pytest
+from click.testing import CliRunner
 from sqlalchemy import create_engine, text
 
 from blockwart.cli import database as database_cli
@@ -12,20 +15,21 @@ from blockwart.cli import import_markdown as import_markdown_cli
 from blockwart.cli import seed as seed_cli
 from blockwart.cli import start as start_cli
 from blockwart.db.migrations import DatabaseMigrationError
+from blockwart.db.readiness import DatabaseReadinessError
 
 
 def test_database_cli_upgrades_then_checks_database(tmp_path: Path, capsys) -> None:
     database_url = f"sqlite:///{tmp_path / 'cli.sqlite3'}"
 
     assert database_cli.main(["--database-url", database_url, "upgrade"]) == 0
-    assert "database_upgrade_ok revision=20260731_0010" in capsys.readouterr().out
+    assert "database_upgrade_ok revision=20260731_0011" in capsys.readouterr().out
 
     assert database_cli.main(["--database-url", database_url, "check"]) == 0
-    assert "database_check_ok revision=20260731_0010" in capsys.readouterr().out
+    assert "database_check_ok revision=20260731_0011" in capsys.readouterr().out
 
     assert database_cli.main(["--database-url", database_url, "integrity"]) == 0
     assert (
-        "database_integrity_ok revision=20260731_0010 diagnostics=0"
+        "database_integrity_ok revision=20260731_0011 diagnostics=0"
         in capsys.readouterr().out
     )
 
@@ -217,7 +221,7 @@ def test_markdown_create_schema_uses_alembic(
     engine = create_engine(database_url)
     with engine.connect() as connection:
         assert connection.execute(text("SELECT version_num FROM alembic_version")).scalar_one() == (
-            "20260731_0010"
+            "20260731_0011"
         )
     engine.dispose()
 
@@ -294,7 +298,11 @@ def test_startup_upgrades_before_exec(monkeypatch: pytest.MonkeyPatch) -> None:
         calls.append(("exec", (file, args)))
         raise RuntimeError("stop after proof")
 
+    def record_readiness(_settings) -> None:
+        calls.append(("readiness", None))
+
     monkeypatch.setattr(start_cli, "upgrade_database", record_upgrade)
+    monkeypatch.setattr(start_cli, "check_database_readiness", record_readiness)
     monkeypatch.setattr(os, "execv", record_exec)
 
     with pytest.raises(RuntimeError, match="stop after proof"):
@@ -302,8 +310,70 @@ def test_startup_upgrades_before_exec(monkeypatch: pytest.MonkeyPatch) -> None:
 
     assert calls == [
         ("upgrade", None),
+        ("readiness", None),
         ("exec", (start_cli.UVICORN_COMMAND[0], start_cli.UVICORN_COMMAND)),
     ]
+
+
+def test_startup_launcher_preserves_raw_peer_across_uvicorn_boundary(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    uvicorn_main = importlib.import_module("uvicorn.main")
+    configs = []
+    monkeypatch.delenv("FORWARDED_ALLOW_IPS", raising=False)
+
+    def capture_server_config(server) -> None:
+        configs.append(server.config)
+        server.started = True
+
+    monkeypatch.setattr(uvicorn_main.Server, "run", capture_server_config)
+
+    result = CliRunner().invoke(uvicorn_main.main, start_cli.UVICORN_COMMAND[3:])
+
+    assert result.exit_code == 0, result.output
+    assert len(configs) == 1
+    config = configs[0]
+    assert config.proxy_headers is False
+
+    observed_clients: list[tuple[str, int] | None] = []
+
+    async def recorder(scope, receive, send) -> None:
+        observed_clients.append(scope["client"])
+        await send({"type": "http.response.start", "status": 204, "headers": []})
+        await send({"type": "http.response.body", "body": b""})
+
+    async def invoke_loaded_app() -> None:
+        config.app = recorder
+        config.load()
+        scope = {
+            "type": "http",
+            "asgi": {"version": "3.0", "spec_version": "2.3"},
+            "http_version": "1.1",
+            "method": "GET",
+            "scheme": "http",
+            "path": "/api/v1/objects",
+            "raw_path": b"/api/v1/objects",
+            "query_string": b"",
+            "root_path": "",
+            "headers": [
+                (b"x-forwarded-for", b"198.51.100.8"),
+                (b"x-forwarded-for", b"203.0.113.9"),
+            ],
+            "client": ("127.0.0.1", 54321),
+            "server": ("127.0.0.1", 8000),
+            "state": {},
+        }
+
+        async def receive():
+            return {"type": "http.request", "body": b"", "more_body": False}
+
+        async def send(_message) -> None:
+            return None
+
+        await config.loaded_app(scope, receive, send)
+
+    asyncio.run(invoke_loaded_app())
+    assert observed_clients == [("127.0.0.1", 54321)]
 
 
 def test_startup_aborts_before_exec_on_migration_failure(
@@ -323,3 +393,31 @@ def test_startup_aborts_before_exec_on_migration_failure(
     captured = capsys.readouterr()
     assert captured.err.strip() == "startup_error=database_migration_failed"
     assert "sensitive" not in captured.err
+
+
+@pytest.mark.parametrize(
+    "error_code",
+    ["owner_catalog_empty", "owner_coverage_incomplete"],
+)
+def test_startup_aborts_before_exec_on_owner_invariant_failure(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys,
+    error_code: str,
+) -> None:
+    monkeypatch.setattr(start_cli, "upgrade_database", lambda: "20260731_0011")
+
+    def fail_readiness(_settings) -> None:
+        raise DatabaseReadinessError(
+            error_code,
+            checks={"authorization": "error"},
+        )
+
+    monkeypatch.setattr(start_cli, "check_database_readiness", fail_readiness)
+    monkeypatch.setattr(
+        os,
+        "execv",
+        lambda *_args: (_ for _ in ()).throw(AssertionError("uvicorn must not start")),
+    )
+
+    assert start_cli.main() == 1
+    assert capsys.readouterr().err.strip() == f"startup_error={error_code}"
