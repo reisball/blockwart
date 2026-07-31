@@ -45,7 +45,7 @@ Locale resolution uses this precedence:
 
 A valid query selection is persisted for one year. Every HTML surface includes
 the same language switcher: catalog, topology, object details/editing, schema
-settings, and admin access.
+settings, and identity access.
 
 Catalogs live in:
 

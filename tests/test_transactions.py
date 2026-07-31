@@ -23,11 +23,11 @@ from blockwart.services.catalog import (
     get_object,
     upsert_object,
 )
+from blockwart.services.commands import revision_etag
 from blockwart.services.markdown_import import import_tools_markdown
 from blockwart.services.seeds import import_seed_file
 
 SEED_PATH = Path(__file__).resolve().parents[1] / "seeds" / "pilot_objects.yaml"
-TEST_ADMIN_TOKEN = "test-admin-token-with-at-least-32-characters"
 
 
 class CommitCountingSession(Session):
@@ -40,6 +40,28 @@ class CommitCountingSession(Session):
     def commit(self) -> None:
         self.commit_calls += 1
         super().commit()
+
+
+class BrowserFormTestClient(TestClient):
+    def __init__(self, app, session_factory) -> None:
+        super().__init__(app)
+        self._session_factory = session_factory
+
+    def post(self, url, *, data=None, **kwargs):
+        submitted = dict(data) if isinstance(data, dict) else data
+        path = str(url).split("?", 1)[0]
+        parts = path.strip("/").split("/")
+        if (
+            isinstance(submitted, dict)
+            and len(parts) >= 2
+            and parts[0] == "objects"
+            and "if_match" not in submitted
+        ):
+            with self._session_factory() as session:
+                catalog_object = session.get(CatalogObject, parts[1])
+                if catalog_object is not None:
+                    submitted["if_match"] = revision_etag(catalog_object.revision)
+        return super().post(url, data=submitted, **kwargs)
 
 
 @pytest.fixture
@@ -69,11 +91,11 @@ def _add_object(
 
 
 @contextmanager
-def _unlocked_client(
+def _authorized_client(
     session_factory,
     install_unrestricted_read_access,
 ) -> Generator[TestClient, None, None]:
-    app = create_app(settings=Settings(admin_token=TEST_ADMIN_TOKEN))
+    app = create_app(settings=Settings())
     install_unrestricted_read_access(app)
 
     def override_get_session() -> Generator[Session, None, None]:
@@ -81,13 +103,7 @@ def _unlocked_client(
             yield session
 
     app.dependency_overrides[get_session] = override_get_session
-    with TestClient(app) as client:
-        response = client.post(
-            "/admin/unlock",
-            data={"admin_token": TEST_ADMIN_TOKEN},
-            follow_redirects=False,
-        )
-        assert response.status_code == 303
+    with BrowserFormTestClient(app, session_factory) as client:
         yield client
 
 
@@ -210,25 +226,37 @@ def test_ui_object_and_relationship_are_one_transaction(
         "blockwart.services.commands.create_relationship",
         fail_relationship,
     )
+    error_records: list[str] = []
+    monkeypatch.setattr(
+        "blockwart.api.errors.logger.error",
+        lambda message, *args: error_records.append(message % args),
+    )
 
-    with _unlocked_client(
+    with _authorized_client(
         session_factory,
         install_unrestricted_read_access,
     ) as client:
-        with pytest.raises(RuntimeError, match="forced relationship failure"):
-            client.post(
-                "/objects",
-                data={
-                    "object_id": "ui-partial",
-                    "kind": "service",
-                    "primary_name": "UI Partial",
-                    "status": "active",
-                    "data_json": '{"schema_version": 1}',
-                    "relation_target_ref": "host:target",
-                    "relation_type": "hosts",
-                },
-                follow_redirects=False,
-            )
+        response = client.post(
+            "/objects",
+            data={
+                "object_id": "ui-partial",
+                "kind": "service",
+                "primary_name": "UI Partial",
+                "status": "active",
+                "data_json": '{"schema_version": 1}',
+                "relation_target_ref": "host:target",
+                "relation_type": "hosts",
+                "idempotency_key": "ui-transaction-create",
+            },
+            follow_redirects=False,
+        )
+
+    rendered_errors = " ".join(error_records)
+    assert response.status_code == 500
+    assert "forced relationship failure" not in response.text
+    assert "forced relationship failure" not in rendered_errors
+    assert "Traceback" not in rendered_errors
+    assert "code=internal_error channel=ui" in rendered_errors
 
     with session_factory() as session:
         assert session.get(CatalogObject, "ui-partial") is None
@@ -263,7 +291,7 @@ def test_ui_rejects_multi_object_access_update_without_partial_changes(
         )
         session.commit()
 
-    with _unlocked_client(
+    with _authorized_client(
         session_factory,
         install_unrestricted_read_access,
     ) as client:
@@ -506,7 +534,7 @@ def test_ui_database_error_is_redacted_and_rolled_back(
 
     monkeypatch.setattr("blockwart.services.commands.upsert_object", fail_upsert)
 
-    with _unlocked_client(
+    with _authorized_client(
         session_factory,
         install_unrestricted_read_access,
     ) as client:

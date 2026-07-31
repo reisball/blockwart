@@ -19,7 +19,6 @@ from blockwart.domain.auth import Permission, PrincipalContext, PrincipalType
 from blockwart.models import CatalogObject, Principal
 from blockwart.services.policy import PolicySnapshot
 from blockwart.services.read_access import ReadAccess
-from blockwart.ui.admin_auth import can_write
 from blockwart.ui.security import (
     require_browser_read_access,
     require_browser_write_csrf,
@@ -129,8 +128,6 @@ def unrestricted_read_access():
 def install_unrestricted_read_access():
     def install(
         app: FastAPI,
-        *,
-        browser_write_requires_admin: bool = False,
     ) -> None:
         def api_access(
             session: Annotated[Session, Depends(get_session)],
@@ -142,22 +139,6 @@ def install_unrestricted_read_access():
             session: Annotated[Session, Depends(get_session)],
         ) -> ReadAccess:
             access = _unrestricted_read_access(session)
-            if browser_write_requires_admin and not can_write(request):
-                access = ReadAccess(
-                    principal=access.principal,
-                    policy=PolicySnapshot(
-                        principal_id=access.principal.id,
-                        _permissions={
-                            object_id: frozenset(
-                                {Permission.DISCOVER, Permission.READ}
-                            )
-                            for object_id in access.policy.authorized_ids(
-                                Permission.DISCOVER
-                            )
-                        },
-                        _grants={},
-                    ),
-                )
             request.state.read_access = access
             return access
 

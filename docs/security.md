@@ -25,6 +25,7 @@ rows, command-line arguments, or generated documentation. See
 Catalog reads are authenticated and object-authorized across UI, REST, Agent
 API, and MCP. No-discover objects are concealed and discover-only objects use
 a strict safe stub. Catalog and grant commands are also object-authorized.
-Production identity bootstrap, removal of the legacy global-admin
-compatibility path, persistent services, and infrastructure exposure require
-their dedicated rollout and approval.
+Production identity bootstrap, persistent services, and infrastructure exposure
+require their dedicated rollout and approval. Browser identity, challenge, CSRF,
+and clearing cookies are always `Secure`; deploy the browser surface only behind
+an explicitly trusted HTTPS reverse proxy that adds HSTS.

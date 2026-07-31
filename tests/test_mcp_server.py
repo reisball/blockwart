@@ -1,6 +1,7 @@
 import asyncio
 import json
 import os
+import re
 import selectors
 import subprocess
 import sysconfig
@@ -65,6 +66,8 @@ def _agent_api_server():
                     "path": parsed.path,
                     "query": query,
                     "authorization": self.headers.get("Authorization"),
+                    "correlation_id": self.headers.get("X-Correlation-ID"),
+                    "channel": self.headers.get("X-Blockwart-Channel"),
                 }
             )
 
@@ -111,6 +114,7 @@ def _agent_api_server():
                     "channel": self.headers.get("X-Blockwart-Channel"),
                     "if_match": self.headers.get("If-Match"),
                     "idempotency_key": self.headers.get("Idempotency-Key"),
+                    "correlation_id": self.headers.get("X-Correlation-ID"),
                     "body": json.loads(raw_body or b"{}"),
                 }
             )
@@ -385,6 +389,7 @@ def test_mcp_client_completes_handshake_and_calls_every_read_only_tool() -> None
         "error": {
             "code": "upstream_http_error",
             "message": "Blockwart Agent API returned an error.",
+            "correlation_id": requests[-1]["correlation_id"],
         }
     }
     assert "sensitive-upstream-detail" not in upstream_content.text
@@ -420,6 +425,12 @@ def test_mcp_client_completes_handshake_and_calls_every_read_only_tool() -> None
         "/api/v1/objects/host%2Ffabrik/access/preview",
         "/api/v1/objects",
     ]
+    assert all(request["channel"] == "mcp" for request in requests)
+    assert all(
+        isinstance(request["correlation_id"], str)
+        and re.fullmatch(r"[A-Za-z0-9._-]{1,64}", request["correlation_id"])
+        for request in requests
+    )
     assert "Content-Length:" not in stderr
     assert "sensitive-upstream-detail" not in stderr
 
@@ -517,7 +528,24 @@ def test_mcp_write_tools_forward_preconditions_without_credentials_in_arguments(
         requester=requester,
     )
 
-    assert calls == [
+    normalized_calls = [
+        (
+            method,
+            path,
+            body,
+            {
+                key: value
+                for key, value in headers.items()
+                if key != "X-Correlation-ID"
+            },
+        )
+        for method, path, body, headers in calls
+    ]
+    assert all(
+        re.fullmatch(r"[A-Za-z0-9._-]{1,64}", headers["X-Correlation-ID"])
+        for _, _, _, headers in calls
+    )
+    assert normalized_calls == [
         (
             "POST",
             "/api/v1/objects/fabrik/children",
@@ -570,6 +598,32 @@ def test_mcp_write_tools_forward_preconditions_without_credentials_in_arguments(
     )
 
 
+def test_unexpected_mcp_failure_logs_only_allowlisted_context(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    canary = "canary-secret-password-cookie-value"
+    records: list[str] = []
+
+    def fail(*_args, **_kwargs):
+        raise RuntimeError(canary)
+
+    monkeypatch.setattr(mcp_server, "call_tool", fail)
+    monkeypatch.setattr(
+        mcp_server.logger,
+        "error",
+        lambda message, *args: records.append(message % args),
+    )
+    result = asyncio.run(mcp_server.handle_call_tool("blockwart.search", {}))
+
+    content = result.content[0]
+    assert isinstance(content, mcp_types.TextContent)
+    rendered = content.text + " " + " ".join(records)
+    assert canary not in rendered
+    assert "Traceback" not in rendered
+    assert "operation=blockwart.search" in rendered
+    assert "code=internal_error" in rendered
+
+
 def test_mcp_write_transport_uses_runtime_bearer_and_mcp_channel(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -590,6 +644,9 @@ def test_mcp_write_transport_uses_runtime_bearer_and_mcp_channel(
         )
 
     assert result == {"changed": True}
+    correlation_id = requests[0].pop("correlation_id")
+    assert isinstance(correlation_id, str)
+    assert re.fullmatch(r"[A-Za-z0-9._-]{1,64}", correlation_id)
     assert requests == [
         {
             "method": "PUT",

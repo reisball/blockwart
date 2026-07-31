@@ -6,12 +6,14 @@ from pathlib import Path
 from alembic.migration import MigrationContext
 from alembic.script import ScriptDirectory
 from sqlalchemy import make_url, text
+from sqlalchemy.orm import Session
 
 from blockwart.config import Settings
 from blockwart.db.migrations import build_alembic_config
 from blockwart.db.session import build_engine
+from blockwart.services.access import OwnerCoverageError, ensure_complete_owner_coverage
 
-CHECK_NAMES = ("database", "schema", "writable", "sqlite")
+CHECK_NAMES = ("database", "schema", "authorization", "writable", "sqlite")
 
 
 @dataclass(frozen=True)
@@ -66,6 +68,18 @@ def check_database_readiness(settings: Settings) -> DatabaseReadiness:
                     revision=revision,
                 )
             checks["schema"] = "ok"
+
+            try:
+                with Session(bind=connection) as session:
+                    ensure_complete_owner_coverage(session)
+            except OwnerCoverageError as exc:
+                checks["authorization"] = "error"
+                raise DatabaseReadinessError(
+                    exc.code,
+                    checks=checks,
+                    revision=revision,
+                ) from exc
+            checks["authorization"] = "ok"
 
             parsed_url = make_url(settings.database_url)
             if parsed_url.get_backend_name() == "sqlite":

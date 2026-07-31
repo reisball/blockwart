@@ -19,6 +19,14 @@ class LastOwnerError(AccessGrantError):
     """Removing the grant would leave an object without an effective owner."""
 
 
+class OwnerCoverageError(AccessGrantError):
+    """The catalog is empty or lacks active effective Owner coverage."""
+
+    def __init__(self, code: str) -> None:
+        super().__init__("catalog Owner coverage invariant failed")
+        self.code = code
+
+
 def create_object_grant(
     session: Session,
     *,
@@ -211,6 +219,15 @@ def active_owner_covered_object_ids(
         scope_column=True,
     )
     return set(session.scalars(select(reach.c.object_id).distinct()).all())
+
+
+def ensure_complete_owner_coverage(session: Session) -> None:
+    """Require a nonempty catalog with active effective Owner coverage per object."""
+    catalog_ids = set(session.scalars(select(CatalogObject.id)).all())
+    if not catalog_ids:
+        raise OwnerCoverageError("owner_catalog_empty")
+    if catalog_ids != active_owner_covered_object_ids(session):
+        raise OwnerCoverageError("owner_coverage_incomplete")
 
 
 def ensure_owner_coverage_preserved(

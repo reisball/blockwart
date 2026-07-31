@@ -12,20 +12,21 @@ from blockwart.cli import import_markdown as import_markdown_cli
 from blockwart.cli import seed as seed_cli
 from blockwart.cli import start as start_cli
 from blockwart.db.migrations import DatabaseMigrationError
+from blockwart.db.readiness import DatabaseReadinessError
 
 
 def test_database_cli_upgrades_then_checks_database(tmp_path: Path, capsys) -> None:
     database_url = f"sqlite:///{tmp_path / 'cli.sqlite3'}"
 
     assert database_cli.main(["--database-url", database_url, "upgrade"]) == 0
-    assert "database_upgrade_ok revision=20260731_0010" in capsys.readouterr().out
+    assert "database_upgrade_ok revision=20260731_0011" in capsys.readouterr().out
 
     assert database_cli.main(["--database-url", database_url, "check"]) == 0
-    assert "database_check_ok revision=20260731_0010" in capsys.readouterr().out
+    assert "database_check_ok revision=20260731_0011" in capsys.readouterr().out
 
     assert database_cli.main(["--database-url", database_url, "integrity"]) == 0
     assert (
-        "database_integrity_ok revision=20260731_0010 diagnostics=0"
+        "database_integrity_ok revision=20260731_0011 diagnostics=0"
         in capsys.readouterr().out
     )
 
@@ -217,7 +218,7 @@ def test_markdown_create_schema_uses_alembic(
     engine = create_engine(database_url)
     with engine.connect() as connection:
         assert connection.execute(text("SELECT version_num FROM alembic_version")).scalar_one() == (
-            "20260731_0010"
+            "20260731_0011"
         )
     engine.dispose()
 
@@ -294,7 +295,11 @@ def test_startup_upgrades_before_exec(monkeypatch: pytest.MonkeyPatch) -> None:
         calls.append(("exec", (file, args)))
         raise RuntimeError("stop after proof")
 
+    def record_readiness(_settings) -> None:
+        calls.append(("readiness", None))
+
     monkeypatch.setattr(start_cli, "upgrade_database", record_upgrade)
+    monkeypatch.setattr(start_cli, "check_database_readiness", record_readiness)
     monkeypatch.setattr(os, "execv", record_exec)
 
     with pytest.raises(RuntimeError, match="stop after proof"):
@@ -302,6 +307,7 @@ def test_startup_upgrades_before_exec(monkeypatch: pytest.MonkeyPatch) -> None:
 
     assert calls == [
         ("upgrade", None),
+        ("readiness", None),
         ("exec", (start_cli.UVICORN_COMMAND[0], start_cli.UVICORN_COMMAND)),
     ]
 
@@ -323,3 +329,31 @@ def test_startup_aborts_before_exec_on_migration_failure(
     captured = capsys.readouterr()
     assert captured.err.strip() == "startup_error=database_migration_failed"
     assert "sensitive" not in captured.err
+
+
+@pytest.mark.parametrize(
+    "error_code",
+    ["owner_catalog_empty", "owner_coverage_incomplete"],
+)
+def test_startup_aborts_before_exec_on_owner_invariant_failure(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys,
+    error_code: str,
+) -> None:
+    monkeypatch.setattr(start_cli, "upgrade_database", lambda: "20260731_0011")
+
+    def fail_readiness(_settings) -> None:
+        raise DatabaseReadinessError(
+            error_code,
+            checks={"authorization": "error"},
+        )
+
+    monkeypatch.setattr(start_cli, "check_database_readiness", fail_readiness)
+    monkeypatch.setattr(
+        os,
+        "execv",
+        lambda *_args: (_ for _ in ()).throw(AssertionError("uvicorn must not start")),
+    )
+
+    assert start_cli.main() == 1
+    assert capsys.readouterr().err.strip() == f"startup_error={error_code}"

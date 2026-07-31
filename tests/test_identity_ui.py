@@ -44,7 +44,7 @@ def identity_client(identity_session_factory) -> Generator[TestClient, None, Non
             yield session
 
     app.dependency_overrides[get_session] = override_get_session
-    with TestClient(app) as client:
+    with TestClient(app, base_url="https://testserver") as client:
         yield client
 
 
@@ -138,6 +138,7 @@ def test_invalid_login_is_generic_and_security_event_persists(
 
     response = identity_client.post(
         "/auth/login",
+        headers={"X-Correlation-ID": "ui-login-correlation"},
         data={
             "login": "missing.user",
             "password": candidate,
@@ -159,8 +160,10 @@ def test_invalid_login_is_generic_and_security_event_persists(
         )
         assert event is not None
         assert event.outcome == "failure"
+        assert event.request_id == "ui-login-correlation"
         assert candidate not in event.details_json
         assert "missing.user" not in event.details_json
+    assert response.headers["X-Correlation-ID"] == "ui-login-correlation"
 
 
 def test_login_csrf_is_one_time_and_required(
@@ -197,7 +200,7 @@ def test_https_mode_marks_all_identity_cookies_secure(
     identity_session_factory,
 ) -> None:
     session_factory, _ = identity_session_factory
-    app = create_app(settings=Settings(auth_cookie_secure=True))
+    app = create_app(settings=Settings())
 
     def override_get_session() -> Generator[Session, None, None]:
         with session_factory() as session:
@@ -216,11 +219,23 @@ def test_https_mode_marks_all_identity_cookies_secure(
             },
             follow_redirects=False,
         )
+        csrf = client.cookies.get(AUTH_CSRF_COOKIE_NAME)
+        assert csrf is not None
+        logout = client.post(
+            "/auth/logout",
+            data={"csrf_token": csrf},
+            follow_redirects=False,
+        )
 
     assert login.status_code == 303
     assert all(
         "Secure" in header
         for header in login.headers.get_list("set-cookie")
+    )
+    assert logout.status_code == 303
+    assert all(
+        "Secure" in header
+        for header in logout.headers.get_list("set-cookie")
     )
 
 
@@ -241,7 +256,7 @@ def test_login_throttle_is_generic_and_aggregates_denial_events(
             yield session
 
     app.dependency_overrides[get_session] = override_get_session
-    with TestClient(app) as client:
+    with TestClient(app, base_url="https://testserver") as client:
         page = client.get("/auth")
         challenge = _hidden(page, "login_challenge")
         first = client.post(
@@ -312,7 +327,7 @@ def test_login_challenge_issuance_is_bounded_before_database_write(
             yield session
 
     app.dependency_overrides[get_session] = override_get_session
-    with TestClient(app) as client:
+    with TestClient(app, base_url="https://testserver") as client:
         first = client.get("/auth")
         second = client.get("/auth")
 

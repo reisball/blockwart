@@ -245,10 +245,6 @@
   color: var(--explorer-muted);
 }
 
-.explorer-top-actions .admin-control {
-  margin: 0;
-}
-
 .explorer-top-actions .button {
   min-height: 34px;
   white-space: nowrap;
@@ -1457,8 +1453,7 @@ button.map-node {
     gap: 12px;
   }
 
-  .compact-theme-toggle,
-  .explorer-top-actions .admin-control {
+  .compact-theme-toggle {
     display: none;
   }
 

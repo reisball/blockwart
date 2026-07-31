@@ -14,7 +14,6 @@ from pydantic import ValidationError
 from sqlalchemy.orm import Session
 
 from blockwart.api.deps import get_session
-from blockwart.db.session import transaction
 from blockwart.domain.auth import GrantScope, Permission, Role
 from blockwart.domain.placement import PlacementError
 from blockwart.domain.relationships import (
@@ -24,8 +23,6 @@ from blockwart.domain.relationships import (
 from blockwart.domain.security import find_secret_violations
 from blockwart.domain.ui_schema import (
     get_ui_schema,
-    load_editable_schema_settings,
-    save_editable_schema_settings,
     schema_field_payload,
     ui_schema_payload,
 )
@@ -36,7 +33,7 @@ from blockwart.schemas.catalog import (
     CatalogObjectIn,
     CatalogObjectOut,
 )
-from blockwart.services.catalog import get_object, upsert_object
+from blockwart.services.catalog import get_object
 from blockwart.services.commands import (
     CommandAuthorizationDenied,
     authorize_object_command,
@@ -63,7 +60,6 @@ from blockwart.services.queries import (
     query_catalog_browse,
     query_catalog_detail,
 )
-from blockwart.ui.admin_auth import can_write, require_admin_write
 from blockwart.ui.i18n import translation_context
 from blockwart.ui.paths import TEMPLATE_DIR
 from blockwart.ui.security import (
@@ -336,7 +332,6 @@ def _index_template_context(
         ),
         "can_write": can_write_enabled,
         "can_create": bool(create_parents),
-        "admin_write": can_write(request),
         "csrf_token": request.cookies.get(AUTH_CSRF_COOKIE_NAME, ""),
         **i18n,
     }
@@ -419,9 +414,7 @@ def index(
 def schema_settings(
     request: Request,
     kind: str = "system",
-    saved: str = "",
 ):
-    write_enabled = can_write(request)
     selected_kind = kind if kind in OBJECT_KINDS else "system"
     return templates.TemplateResponse(
         request,
@@ -429,58 +422,7 @@ def schema_settings(
         context=_schema_settings_context(
             request,
             selected_kind=selected_kind,
-            saved=saved == "1",
-            error=None,
-            can_write_enabled=write_enabled,
         ),
-    )
-
-
-@router.post(
-    "/settings/schema",
-    response_class=HTMLResponse,
-    dependencies=[Depends(require_admin_write)],
-)
-async def update_schema_settings(
-    request: Request,
-):
-    form = await request.form()
-    selected_kind = str(form.get("kind") or "system")
-    if selected_kind not in OBJECT_KINDS:
-        selected_kind = "system"
-    current = load_editable_schema_settings(selected_kind)
-    field_keys = [str(key) for key in current["field_order"]]
-    i18n = translation_context(request)
-    locale = str(i18n["locale"])
-    try:
-        field_order = _schema_field_order_from_form(form, field_keys)
-        fields = _schema_fields_from_form(
-            form,
-            field_keys,
-            current_fields=list(current["fields"]),
-            locale=locale,
-        )
-        save_editable_schema_settings(
-            selected_kind,
-            field_order=field_order,
-            fields=fields,
-        )
-    except ValueError as exc:
-        return templates.TemplateResponse(
-            request,
-            "schema_settings.html",
-            context=_schema_settings_context(
-                request,
-                selected_kind=selected_kind,
-                saved=False,
-                error=_safe_error_message(exc),
-                can_write_enabled=True,
-            ),
-            status_code=422,
-        )
-    return RedirectResponse(
-        url=f"/settings/schema?kind={selected_kind}&saved=1&lang={locale}",
-        status_code=303,
     )
 
 
@@ -488,9 +430,6 @@ def _schema_settings_context(
     request: Request,
     *,
     selected_kind: str,
-    saved: bool,
-    error: str | None,
-    can_write_enabled: bool,
 ) -> dict[str, Any]:
     i18n = translation_context(request)
     schemas = _localized_ui_schema_payload(str(i18n["locale"]), i18n["t"])
@@ -505,10 +444,6 @@ def _schema_settings_context(
         "schema_fields_by_key": _fields_by_key(schema_fields),
         "create_fields": list(schema["create_field_definitions"]),
         "ui_schemas": schemas,
-        "saved": saved,
-        "error": error,
-        "can_write": can_write_enabled,
-        "admin_write": can_write(request),
         **i18n,
     }
 
@@ -680,7 +615,6 @@ def _detail_template_context(
         "can_delete": Permission.DELETE in catalog_object.capabilities,
         "object_etag": revision_etag(catalog_object.revision),
         "csrf_token": request.cookies.get(AUTH_CSRF_COOKIE_NAME, ""),
-        "admin_write": can_write(request),
         **i18n,
     }
 
@@ -1133,10 +1067,7 @@ def save_object(
 ):
     access = read_access_from_request(request)
     context = ui_write_context(request, access)
-    if (
-        not can_write(request)
-        and not access.policy.authorized_ids(Permission.CREATE_CHILD)
-    ):
+    if not access.policy.authorized_ids(Permission.CREATE_CHILD):
         execute_ui_command(
             session,
             context,
@@ -1195,14 +1126,7 @@ def save_object(
             data=data,
         )
         if not relation_target_ref:
-            if not can_write(request):
-                raise ValueError("An authorized placement parent is required")
-            with transaction(session):
-                upsert_object(session, payload)
-            return RedirectResponse(
-                url=_detail_redirect_url(request, payload.id),
-                status_code=303,
-            )
+            raise ValueError("An authorized placement parent is required")
         if ":" not in relation_target_ref:
             raise ValueError("An authorized placement parent is required")
         if relation_type != "hosts":
@@ -1220,12 +1144,7 @@ def save_object(
                 context,
                 parent_id=parent_id,
                 payload=payload,
-                idempotency_key=(
-                    idempotency_key
-                    or uuid4().hex
-                    if can_write(request)
-                    else idempotency_key
-                ),
+                idempotency_key=idempotency_key,
                 idempotency_ttl_seconds=request.app.state.settings.idempotency_ttl_seconds,
             ),
         )
@@ -2161,14 +2080,12 @@ def _empty_form() -> dict[str, str]:
 
 
 def _ui_expected_revision(
-    request: Request,
+    _request: Request,
     if_match: str,
-    current_revision: int,
+    _current_revision: int,
 ) -> int | str | None:
     if if_match:
         return if_match
-    if can_write(request):
-        return current_revision
     return None
 
 
@@ -2577,50 +2494,6 @@ def _mapping_rows_override(
 
 def _fields_by_key(fields: list[Mapping[str, Any]]) -> dict[str, Mapping[str, Any]]:
     return {str(field["key"]): field for field in fields}
-
-
-def _schema_field_order_from_form(form: Any, field_keys: list[str]) -> list[str]:
-    order_pairs: list[tuple[int, int, str]] = []
-    for fallback_index, key in enumerate(field_keys, start=1):
-        raw_order = str(form.get(f"field_order_{key}") or fallback_index)
-        try:
-            order = int(raw_order)
-        except ValueError as exc:
-            raise ValueError(f"{key}.order must be a number") from exc
-        order_pairs.append((order, fallback_index, key))
-    return [key for _, _, key in sorted(order_pairs)]
-
-
-def _schema_fields_from_form(
-    form: Any,
-    field_keys: list[str],
-    *,
-    current_fields: list[dict[str, object]],
-    locale: str,
-) -> dict[str, dict[str, object]]:
-    current_by_key = {
-        str(field["key"]): field
-        for field in current_fields
-    }
-    fields: dict[str, dict[str, object]] = {}
-    for key in field_keys:
-        label = str(form.get(f"field_label_{key}") or "").strip()
-        if not label:
-            raise ValueError(f"{key}.label must not be empty")
-        current = current_by_key[key]
-        labels = dict(current.get("localized_labels") or {})
-        placeholders = dict(current.get("localized_placeholders") or {})
-        labels[locale] = label
-        placeholders[locale] = str(
-            form.get(f"field_placeholder_{key}") or ""
-        ).strip()
-        fields[key] = {
-            "labels": labels,
-            "placeholders": placeholders,
-            "required": form.get(f"field_required_{key}") == "1",
-            "visible_in_detail": form.get(f"field_visible_in_detail_{key}") == "1",
-        }
-    return fields
 
 
 def _without_credential_references(value: Any) -> Any:
