@@ -198,7 +198,7 @@
           <button class="theme-option" type="button" data-theme-value="light">{{ t("nav.light") }}</button>
         </div>
         <a class="icon-button" href="/settings/schema" aria-label="{{ t('nav.settings') }}">⚙</a>
-        {% if can_write %}
+        {% if can_create %}
           <a class="primary-button" href="/?view={{ view }}&q={{ q|urlencode }}&kind={{ kind }}&create=1" aria-label="{{ t('asset.create') }}">
             ＋ <span class="asset-create-full">{{ t("asset.create") }}</span><span class="asset-create-short">{{ t("asset.create_short") }}</span>
           </a>
@@ -217,6 +217,8 @@
           </div>
           {% if error %}<div class="error">{{ error }}</div>{% endif %}
           <form class="form-grid" method="post" action="/objects">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+            <input type="hidden" name="idempotency_key" value="{{ form.idempotency_key }}" />
             <label data-create-field="kind"><span data-field-label="kind">{{ create_fields_by_key.kind.label }}</span>
               <select name="kind" data-kind-select>
                 {% for object_kind in object_kinds %}
@@ -249,21 +251,14 @@
               </select>
             </label>
             <label data-create-field="relationship"><span data-field-label="relationship">{{ create_fields_by_key.relationship.label }}</span>
-              <select name="relation_target_ref">
-                <option value="">{{ t("asset.none_relationship") }}</option>
+              <select name="relation_target_ref" required>
                 {% for target in relation_targets %}
                   {% set target_ref = target.kind ~ ":" ~ target.id %}
                   <option value="{{ target_ref }}" {% if target_ref == form.relation_target_ref or target.id == form.hosted_on_system_id %}selected{% endif %}>{{ display_names[target.id] }} · {{ target_ref }}</option>
                 {% endfor %}
               </select>
             </label>
-            <label data-create-field="relation_type"><span data-field-label="relation_type">{{ create_fields_by_key.relation_type.label }}</span>
-              <select name="relation_type">
-                {% for relation in relation_types %}
-                  <option value="{{ relation }}" {% if relation == form.relation_type %}selected{% endif %}>{{ relation }}</option>
-                {% endfor %}
-              </select>
-            </label>
+            <input type="hidden" name="relation_type" value="hosts" />
             <label data-create-field="summary"><span data-field-label="summary">{{ create_fields_by_key.summary.label }}</span>
               <textarea class="summary-input" name="summary" data-field-input="summary" placeholder="{{ create_fields_by_key.summary.placeholder }}" {% if create_fields_by_key.summary.required %}required{% endif %}>{{ form.summary }}</textarea>
             </label>

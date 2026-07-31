@@ -28,7 +28,8 @@ RELATIONSHIP_REVISION = "20260724_0004"
 ENGLISH_CONTRACT_REVISION = "20260729_0007"
 IDENTITY_REVISION = "20260730_0008"
 AUTHORIZATION_REVISION = "20260730_0009"
-HEAD_REVISION = AUTHORIZATION_REVISION
+WRITE_COMMANDS_REVISION = "20260731_0010"
+HEAD_REVISION = WRITE_COMMANDS_REVISION
 PROJECT_ALEMBIC_CONFIG = Path(__file__).resolve().parents[1] / "alembic.ini"
 LEGACY_SNAPSHOT = Path(__file__).resolve().parent / "fixtures" / "legacy_snapshot.sql"
 
@@ -139,6 +140,7 @@ def test_real_alembic_upgrade_creates_fresh_database_and_has_no_drift(
             "audit_events",
             "browser_sessions",
             "catalog_objects",
+            "idempotency_records",
             "login_challenges",
             "object_grants",
             "password_credentials",
@@ -153,6 +155,7 @@ def test_real_alembic_upgrade_creates_fresh_database_and_has_no_drift(
         "audit_events",
         "browser_sessions",
         "catalog_objects",
+        "idempotency_records",
         "login_challenges",
         "object_grants",
         "password_credentials",
@@ -553,6 +556,7 @@ def test_identity_and_authorization_migrations_preserve_catalog_data(
     assert _existing_data_snapshot(database_path) == before
 
     command.upgrade(config, AUTHORIZATION_REVISION)
+    command.upgrade(config, HEAD_REVISION)
     command.check(config)
 
     connection = sqlite3.connect(database_path)
@@ -1188,8 +1192,9 @@ def downgrade() -> None:
             "audit_events",
             "browser_sessions",
             "catalog_objects",
-            "future_head_only",
-            "login_challenges",
+                "future_head_only",
+                "idempotency_records",
+                "login_challenges",
             "object_grants",
             "password_credentials",
             "principals",

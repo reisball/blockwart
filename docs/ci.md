@@ -64,9 +64,10 @@ docker build \
 
 The package smoke builds a wheel, installs it into a clean virtual environment, changes to a
 directory outside the repository, starts `blockwart-start`, loads packaged templates and static
-assets, runs the relationship-integrity diagnostic, and calls all three tools through the installed
-`blockwart-mcp` console command. It also runs the read-only service-interface
-normalization and placement-state plans from outside the source tree.
+assets, runs the relationship-integrity diagnostic, and exercises all eight
+tools through nine read/write calls to the installed `blockwart-mcp` console
+command. It also runs the read-only service-interface normalization and
+placement-state plans from outside the source tree.
 
 The container smoke starts the built image first with an empty volume and then with a database at
 the historical Alembic baseline. Both must reach Docker health and application readiness. The

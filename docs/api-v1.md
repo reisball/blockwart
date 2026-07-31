@@ -1,8 +1,8 @@
 # API v1
 
-Blockwart's stable machine-readable read API lives under `/api/v1`. It is
-GET-only. Every request requires a service-account bearer token and is
-object-authorized. Machine writes are intentionally outside this contract.
+Blockwart's stable machine-readable API lives under `/api/v1`. Every request
+requires a service-account bearer token and is object-authorized. Reads and
+writes use the same effective object policy as the browser UI and MCP.
 
 ## Page contract
 
@@ -89,6 +89,54 @@ Credential values are never resolved. A discover-only object returns the same
 strict stub as list/context reads. An object without `discover` returns
 `404 not_found`, indistinguishable from an absent ID.
 
+Full object reads include the monotone `revision` field and a strong
+`ETag: "rev-N"` response header. Stubs expose neither value.
+
+## Commands
+
+### `POST /api/v1/objects/{parent_id}/children`
+
+Requires `create_child` on the parent and an `Idempotency-Key` header containing
+16..128 visible ASCII characters. The validated child, canonical `hosts`
+placement edge, and a direct self-scoped owner grant for the creating principal
+are committed atomically. The response is `201`, includes `Location` and
+`ETag`, and contains the created object.
+
+Keys are SHA-256 hashed at rest and bound globally per principal to the exact
+operation context and canonical request payload. Repeating the same request
+within `BLOCKWART_IDEMPOTENCY_TTL_SECONDS` (default 24 hours) returns the stored
+result without another object or audit event. Reusing a key for another parent,
+operation, or payload returns `409 conflict`. Expired records may be replaced.
+
+### `PUT /api/v1/objects/{object_id}`
+
+Requires `write` on that exact object and `If-Match` with the current strong
+ETag. All mutable business fields use the existing shared schema, secret,
+reference, type, lifecycle, and placement validation. ACLs and delete authority
+are not part of the payload. Missing `If-Match` returns
+`428 precondition_required`; a stale or malformed value returns
+`412 precondition_failed`.
+
+### `DELETE /api/v1/objects/{object_id}`
+
+Requires the separate `delete` permission plus current `If-Match`. Referenced
+objects remain protected by the shared relationship and typed-reference
+integrity checks. Direct grants are removed only in the same successful delete
+transaction.
+
+### `POST|DELETE /api/v1/objects/{object_id}/relationships`
+
+Requires `write` on the path object, discoverability of the peer, and current
+`If-Match`. The JSON body is `from_ref`, `relation_type`, and `to_ref`. Shared
+relationship, canonical-placement, last-owner, and rollback checks apply.
+
+Every successful mutation advances the relevant object revision atomically and
+writes exactly one immutable object audit event in the same transaction. Audit
+details include principal, channel, correlation/request ID, old/new revision,
+structured before/after state, and field changes. Authorization denials create
+only a security event; failed validation, stale writes, and conflicts leave no
+partial business data or object audit event.
+
 ### `GET /api/v1/context`
 
 Returns the same detailed contexts as a cursor page. It accepts the object-list
@@ -115,7 +163,7 @@ defaults to `desc`.
 Returns the canonical host → system → service topology for one object. This is
 a single resource rather than a page.
 
-## Errors and read-only boundary
+## Errors and boundary
 
 All v1 errors use the shared REST envelope and `X-Correlation-ID`. Missing
 objects return `404 not_found`, query validation returns
@@ -126,7 +174,8 @@ Missing or invalid bearer credentials return `401 unauthorized` with
 `WWW-Authenticate: Bearer`. Authorized responses are private and non-cacheable
 across principals.
 
-`POST`, `PUT`, `PATCH`, and `DELETE` are not part of `/api/v1` and return
+Undocumented methods remain unavailable. In particular, collection-level
+`POST /api/v1/objects` and all `PATCH` requests return
 `405 method_not_allowed`.
 
 ## Compatibility

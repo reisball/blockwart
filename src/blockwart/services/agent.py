@@ -28,7 +28,7 @@ from blockwart.domain.provenance import (
     load_provenance,
     provenance_for_read,
 )
-from blockwart.domain.security import FORBIDDEN_SECRET_KEYS, looks_like_secret
+from blockwart.domain.security import redact_secret_values
 from blockwart.domain.timestamps import format_rfc3339_utc
 from blockwart.models import CatalogObject, Relationship
 from blockwart.schemas.agent import (
@@ -47,8 +47,6 @@ from blockwart.schemas.v1 import ObjectSortField, SortDirection
 from blockwart.services.pagination import CursorPage, paginate_items
 from blockwart.services.read_access import ReadAccess
 from blockwart.services.record_integrity import read_catalog_record_data
-
-REDACTED = "[redacted-secret-field]"
 
 
 @dataclass(frozen=True, slots=True)
@@ -520,6 +518,7 @@ class _AgentCatalogResolver:
             kind=obj.kind,
             label=obj.label,
             status=state.status if state is not None else obj.status,
+            revision=obj.revision,
             summary=obj.summary,
             parent=parent,
             ips=self.resolved_ips(obj),
@@ -771,7 +770,7 @@ def _safe_object_data(obj: CatalogObject) -> dict[str, Any]:
 
 def _safe_object_record(obj: CatalogObject) -> CatalogDataRead:
     record = read_catalog_record_data(obj, retain_schema_invalid_data=True)
-    sanitized = _sanitize_for_agent(record.data)
+    sanitized = redact_secret_values(record.data)
     return CatalogDataRead(
         data=sanitized if isinstance(sanitized, dict) else {},
         record_state=record.record_state,
@@ -888,23 +887,6 @@ def _unique_strings(values: Any) -> list[str]:
     return unique
 
 
-
-
-def _sanitize_for_agent(value: Any) -> Any:
-    if isinstance(value, Mapping):
-        safe: dict[str, Any] = {}
-        for key, child in value.items():
-            key_text = str(key)
-            if key_text.lower() in FORBIDDEN_SECRET_KEYS:
-                safe[key_text] = REDACTED
-                continue
-            safe[key_text] = _sanitize_for_agent(child)
-        return safe
-    if isinstance(value, list):
-        return [_sanitize_for_agent(item) for item in value]
-    if isinstance(value, str) and looks_like_secret(value):
-        return REDACTED
-    return value
 
 
 def _collect_credential_references(value: Any) -> set[str]:

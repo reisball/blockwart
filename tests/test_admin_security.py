@@ -57,7 +57,10 @@ def anonymous_client(
     install_unrestricted_read_access,
 ) -> Generator[TestClient, None, None]:
     app = create_app(settings=Settings(admin_token=TEST_ADMIN_TOKEN))
-    install_unrestricted_read_access(app)
+    install_unrestricted_read_access(
+        app,
+        browser_write_requires_admin=True,
+    )
 
     def override_get_session() -> Generator[Session, None, None]:
         with session_factory() as session:
@@ -74,7 +77,10 @@ def configured_client(
     install_unrestricted_read_access,
 ) -> Generator[TestClient, None, None]:
     app = create_app(settings=Settings(admin_token=TEST_ADMIN_TOKEN))
-    install_unrestricted_read_access(app)
+    install_unrestricted_read_access(
+        app,
+        browser_write_requires_admin=True,
+    )
 
     def override_get_session() -> Generator[Session, None, None]:
         with session_factory() as session:
@@ -91,7 +97,10 @@ def read_only_client(
     install_unrestricted_read_access,
 ) -> Generator[TestClient, None, None]:
     app = create_app(settings=Settings())
-    install_unrestricted_read_access(app)
+    install_unrestricted_read_access(
+        app,
+        browser_write_requires_admin=True,
+    )
 
     def override_get_session() -> Generator[Session, None, None]:
         with session_factory() as session:

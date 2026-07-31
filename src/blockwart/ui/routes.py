@@ -5,6 +5,7 @@ from datetime import UTC, datetime
 from ipaddress import ip_address
 from typing import Annotated, Any
 from urllib.parse import urlencode
+from uuid import uuid4
 
 from fastapi import APIRouter, Depends, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
@@ -14,6 +15,7 @@ from sqlalchemy.orm import Session
 
 from blockwart.api.deps import get_session
 from blockwart.db.session import transaction
+from blockwart.domain.auth import Permission
 from blockwart.domain.placement import PlacementError
 from blockwart.domain.relationships import (
     RELATIONSHIP_TYPES,
@@ -34,10 +36,15 @@ from blockwart.schemas.catalog import (
     CatalogObjectIn,
     CatalogObjectOut,
 )
-from blockwart.services.catalog import (
-    create_relationship,
-    get_object,
-    upsert_object,
+from blockwart.services.catalog import get_object, upsert_object
+from blockwart.services.commands import (
+    CommandAuthorizationDenied,
+    authorize_object_command,
+    create_child_object,
+    create_object_relationship,
+    delete_catalog_object,
+    revision_etag,
+    update_catalog_object,
 )
 from blockwart.services.queries import (
     CatalogBrowseReadModel,
@@ -51,9 +58,12 @@ from blockwart.ui.admin_auth import can_write, require_admin_write
 from blockwart.ui.i18n import translation_context
 from blockwart.ui.paths import TEMPLATE_DIR
 from blockwart.ui.security import (
+    AUTH_CSRF_COOKIE_NAME,
     read_access_from_request,
     require_browser_read_access,
+    require_browser_write_csrf,
 )
+from blockwart.ui.write_commands import execute_ui_command, ui_write_context
 
 templates = Jinja2Templates(directory=TEMPLATE_DIR)
 router = APIRouter(
@@ -249,6 +259,11 @@ def _index_template_context(
             next(iter(explorer["assets"]), ""),
         ),
     )
+    create_parents = [
+        target
+        for target in read_model.relation_targets
+        if Permission.CREATE_CHILD in target.capabilities
+    ]
     return {
         "title": "Blockwart",
         "objects": read_model.objects,
@@ -261,11 +276,16 @@ def _index_template_context(
         "platform_types": PLATFORM_TYPES,
         "ui_schemas": localized_schemas,
         "form_ui_schema": localized_schemas[selected_form_kind],
-        "create_fields_by_key": _fields_by_key(
-            localized_schemas[selected_form_kind][
-                "create_field_definitions"
-            ]
-        ),
+        "create_fields_by_key": {
+            **_fields_by_key(
+                localized_schemas["system"]["create_field_definitions"]
+            ),
+            **_fields_by_key(
+                localized_schemas[selected_form_kind][
+                    "create_field_definitions"
+                ]
+            ),
+        },
         "display_names": read_model.display_names,
         "object_counts": read_model.object_counts,
         "health_counts": read_model.health_counts,
@@ -273,7 +293,7 @@ def _index_template_context(
         "error": error,
         "form": form,
         "systems": read_model.systems,
-        "relation_targets": read_model.relation_targets,
+        "relation_targets": create_parents,
         "relation_types": RELATION_TYPES,
         "show_create_form": show_create_form,
         "index_relationships": read_model.index_relationships,
@@ -297,6 +317,9 @@ def _index_template_context(
             )
         ),
         "can_write": can_write_enabled,
+        "can_create": bool(create_parents),
+        "admin_write": can_write(request),
+        "csrf_token": request.cookies.get(AUTH_CSRF_COOKIE_NAME, ""),
         **i18n,
     }
 
@@ -345,7 +368,6 @@ def index(
     create: str = "",
     view: str = "catalog",
 ):
-    write_enabled = can_write(request)
     normalized_kind = kind if kind in OBJECT_KINDS else ""
     selected_view = view if view in {"catalog", "topology"} else "catalog"
     read_model = query_catalog_browse(
@@ -353,6 +375,10 @@ def index(
         read_access_from_request(request),
         query=q,
         kind=normalized_kind or None,
+    )
+    create_enabled = any(
+        Permission.CREATE_CHILD in target.capabilities
+        for target in read_model.relation_targets
     )
     return templates.TemplateResponse(
         request,
@@ -365,8 +391,8 @@ def index(
             view=selected_view,
             form=_empty_form(),
             error=None,
-            show_create_form=write_enabled and create == "1",
-            can_write_enabled=write_enabled,
+            show_create_form=create_enabled and create == "1",
+            can_write_enabled=False,
         ),
     )
 
@@ -464,6 +490,7 @@ def _schema_settings_context(
         "saved": saved,
         "error": error,
         "can_write": can_write_enabled,
+        "admin_write": can_write(request),
         **i18n,
     }
 
@@ -529,10 +556,15 @@ def _detail_template_context(
         submitted_rows.get("network_endpoints"),
         _endpoint_edit_rows(endpoints),
     )
-    access_method_rows = _mapping_rows_override(
+    own_ref = f"{catalog_object.kind}:{catalog_object.id}"
+    access_method_rows = [
+        row
+        for row in _mapping_rows_override(
         submitted_rows.get("access_methods"),
         _access_method_rows(catalog_object, access_methods),
-    )
+        )
+        if str(row.get("source_ref")) == own_ref
+    ]
     own_access_method_count = len(_list_of_mappings(object_data.get("access_methods")))
     audit_events = [
         {
@@ -613,6 +645,10 @@ def _detail_template_context(
         "error": error,
         "edit_section": edit_section,
         "can_write": can_write_enabled,
+        "can_delete": Permission.DELETE in catalog_object.capabilities,
+        "object_etag": revision_etag(catalog_object.revision),
+        "csrf_token": request.cookies.get(AUTH_CSRF_COOKIE_NAME, ""),
+        "admin_write": can_write(request),
         **i18n,
     }
 
@@ -720,6 +756,11 @@ def _render_object_detail(
     if detail_read_model.catalog_object.visibility == "stub":
         can_write_enabled = False
         edit_section = ""
+    else:
+        can_write_enabled = (
+            Permission.WRITE
+            in detail_read_model.catalog_object.capabilities
+        )
     context = _index_template_context(
         request,
         browse_read_model,
@@ -747,12 +788,17 @@ def _render_object_detail(
     )
     context.update(navigation)
     context["detail_mode"] = True
-    return templates.TemplateResponse(
+    response = templates.TemplateResponse(
         request,
         "index.html",
         context=context,
         status_code=status_code,
     )
+    if detail_read_model.catalog_object.visibility == "detail":
+        response.headers["ETag"] = revision_etag(
+            detail_read_model.catalog_object.revision
+        )
+    return response
 
 
 def _detail_redirect_url(request: Request, object_id: str) -> str:
@@ -766,7 +812,6 @@ def object_detail(
     session: Annotated[Session, Depends(get_session)],
     edit: str = "",
 ):
-    write_enabled = can_write(request)
     read_model = query_catalog_detail(
         session,
         object_id,
@@ -774,6 +819,10 @@ def object_detail(
     )
     if read_model is None:
         raise HTTPException(status_code=404, detail="Catalog object not found")
+    write_enabled = (
+        read_model.catalog_object.visibility == "detail"
+        and Permission.WRITE in read_model.catalog_object.capabilities
+    )
     return _render_object_detail(
         request,
         session,
@@ -788,7 +837,7 @@ def object_detail(
 @router.post(
     "/objects",
     response_class=HTMLResponse,
-    dependencies=[Depends(require_admin_write)],
+    dependencies=[Depends(require_browser_write_csrf)],
 )
 def save_object(
     request: Request,
@@ -806,7 +855,22 @@ def save_object(
     hosted_on_system_id: Annotated[str, Form()] = "",
     relation_target_ref: Annotated[str, Form()] = "",
     relation_type: Annotated[str, Form()] = "hosts",
+    idempotency_key: Annotated[str, Form(max_length=128)] = "",
 ):
+    access = read_access_from_request(request)
+    context = ui_write_context(request, access)
+    if (
+        not can_write(request)
+        and not access.policy.authorized_ids(Permission.CREATE_CHILD)
+    ):
+        execute_ui_command(
+            session,
+            context,
+            lambda: _raise_command_denial(
+                object_id="<placement-parent>",
+                permission=Permission.CREATE_CHILD,
+            ),
+        )
     form = {
         "id": object_id,
         "kind": kind,
@@ -821,6 +885,7 @@ def save_object(
         "hosted_on_system_id": hosted_on_system_id,
         "relation_target_ref": relation_target_ref,
         "relation_type": relation_type,
+        "idempotency_key": idempotency_key,
     }
     try:
         data = json.loads(data_json or "{}")
@@ -847,10 +912,6 @@ def save_object(
         if hosted_on_system_id and not relation_target_ref:
             relation_target_ref = f"system:{hosted_on_system_id}"
             relation_type = "hosts"
-        if relation_target_ref:
-            if relation_type not in RELATION_TYPES:
-                raise ValueError("Unsupported relation type")
-            _require_existing_ref(session, relation_target_ref)
         payload = CatalogObjectIn(
             id=object_id,
             kind=kind,
@@ -859,15 +920,41 @@ def save_object(
             summary=summary or None,
             data=data,
         )
-        with transaction(session):
-            upsert_object(session, payload)
-            if relation_target_ref:
-                create_relationship(
-                    session,
-                    from_ref=relation_target_ref,
-                    relation_type=relation_type,
-                    to_ref=f"{payload.kind}:{payload.id}",
-                )
+        if not relation_target_ref:
+            if not can_write(request):
+                raise ValueError("An authorized placement parent is required")
+            with transaction(session):
+                upsert_object(session, payload)
+            return RedirectResponse(
+                url=_detail_redirect_url(request, payload.id),
+                status_code=303,
+            )
+        if ":" not in relation_target_ref:
+            raise ValueError("An authorized placement parent is required")
+        if relation_type != "hosts":
+            raise ValueError("Child creation requires the hosts placement relation")
+        _require_existing_ref(session, relation_target_ref)
+        parent_kind, parent_id = relation_target_ref.split(":", 1)
+        parent = get_object(session, parent_id)
+        if parent is None or parent.kind != parent_kind:
+            raise ValueError("Placement parent does not exist")
+        execute_ui_command(
+            session,
+            context,
+            lambda: create_child_object(
+                session,
+                context,
+                parent_id=parent_id,
+                payload=payload,
+                idempotency_key=(
+                    idempotency_key
+                    or uuid4().hex
+                    if can_write(request)
+                    else idempotency_key
+                ),
+                idempotency_ttl_seconds=request.app.state.settings.idempotency_ttl_seconds,
+            ),
+        )
     except (json.JSONDecodeError, ValidationError, ValueError) as exc:
         form["data_json"] = SAFE_DATA_JSON_FALLBACK
         read_model = query_catalog_browse(
@@ -900,7 +987,7 @@ def save_object(
 @router.post(
     "/objects/{object_id}/relationships",
     response_class=HTMLResponse,
-    dependencies=[Depends(require_admin_write)],
+    dependencies=[Depends(require_browser_write_csrf)],
 )
 def save_relationship(
     request: Request,
@@ -909,7 +996,20 @@ def save_relationship(
     direction: Annotated[str, Form()],
     relation_type: Annotated[str, Form()],
     target_ref: Annotated[str, Form()],
+    if_match: Annotated[str, Form()] = "",
 ):
+    access = read_access_from_request(request)
+    context = ui_write_context(request, access)
+    execute_ui_command(
+        session,
+        context,
+        lambda: authorize_object_command(
+            session,
+            context,
+            object_id=object_id,
+            permission=Permission.WRITE,
+        ),
+    )
     catalog_object = get_object(session, object_id)
     if catalog_object is None:
         raise HTTPException(status_code=404, detail="Catalog object not found")
@@ -924,13 +1024,23 @@ def save_relationship(
             from_ref, to_ref = target_ref, object_ref
         else:
             from_ref, to_ref = object_ref, target_ref
-        with transaction(session):
-            create_relationship(
+        execute_ui_command(
+            session,
+            context,
+            lambda: create_object_relationship(
                 session,
+                context,
+                object_id=object_id,
                 from_ref=from_ref,
                 relation_type=relation_type,
                 to_ref=to_ref,
-            )
+                expected_revision=_ui_expected_revision(
+                    request,
+                    if_match,
+                    catalog_object.revision,
+                ),
+            ),
+        )
     except (
         HTTPException,
         PlacementError,
@@ -956,14 +1066,27 @@ def save_relationship(
 @router.post(
     "/objects/{object_id}/comment",
     response_class=HTMLResponse,
-    dependencies=[Depends(require_admin_write)],
+    dependencies=[Depends(require_browser_write_csrf)],
 )
 def update_comment(
     request: Request,
     object_id: str,
     session: Annotated[Session, Depends(get_session)],
     comment: Annotated[str, Form()] = "",
+    if_match: Annotated[str, Form()] = "",
 ):
+    access = read_access_from_request(request)
+    context = ui_write_context(request, access)
+    execute_ui_command(
+        session,
+        context,
+        lambda: authorize_object_command(
+            session,
+            context,
+            object_id=object_id,
+            permission=Permission.WRITE,
+        ),
+    )
     existing_object = get_object(session, object_id)
     if existing_object is None:
         raise HTTPException(status_code=404, detail="Catalog object not found")
@@ -974,10 +1097,14 @@ def update_comment(
     else:
         data.pop("comment", None)
     _reject_secret_shaped_form_data(data)
-    with transaction(session):
-        upsert_object(
+    execute_ui_command(
+        session,
+        context,
+        lambda: update_catalog_object(
             session,
-            CatalogObjectIn(
+            context,
+            object_id=object_id,
+            payload=CatalogObjectIn(
                 id=existing_object.id,
                 kind=existing_object.kind,
                 label=existing_object.label,
@@ -985,7 +1112,13 @@ def update_comment(
                 summary=existing_object.summary,
                 data=data,
             ),
-        )
+            expected_revision=_ui_expected_revision(
+                request,
+                if_match,
+                existing_object.revision,
+            ),
+        ),
+    )
     return RedirectResponse(
         url=_detail_redirect_url(request, object_id),
         status_code=303,
@@ -995,7 +1128,7 @@ def update_comment(
 @router.post(
     "/objects/{object_id}",
     response_class=HTMLResponse,
-    dependencies=[Depends(require_admin_write)],
+    dependencies=[Depends(require_browser_write_csrf)],
 )
 def update_object(
     request: Request,
@@ -1020,7 +1153,20 @@ def update_object(
     service_sources: Annotated[str | None, Form()] = None,
     service_running_version: Annotated[str | None, Form()] = None,
     data_json: Annotated[str | None, Form()] = None,
+    if_match: Annotated[str, Form()] = "",
 ):
+    access = read_access_from_request(request)
+    context = ui_write_context(request, access)
+    execute_ui_command(
+        session,
+        context,
+        lambda: authorize_object_command(
+            session,
+            context,
+            object_id=object_id,
+            permission=Permission.WRITE,
+        ),
+    )
     submitted_hardware = any(
         value is not None
         for value in (
@@ -1128,8 +1274,21 @@ def update_object(
             summary=existing_object.summary if summary is None else summary or None,
             data=data,
         )
-        with transaction(session):
-            upsert_object(session, payload)
+        execute_ui_command(
+            session,
+            context,
+            lambda: update_catalog_object(
+                session,
+                context,
+                object_id=object_id,
+                payload=payload,
+                expected_revision=_ui_expected_revision(
+                    request,
+                    if_match,
+                    existing_object.revision,
+                ),
+            ),
+        )
     except (json.JSONDecodeError, ValidationError, ValueError) as exc:
         read_model = query_catalog_detail(
             session,
@@ -1162,17 +1321,30 @@ def update_object(
 @router.post(
     "/objects/{object_id}/network",
     response_class=HTMLResponse,
-    dependencies=[Depends(require_admin_write)],
+    dependencies=[Depends(require_browser_write_csrf)],
 )
 async def update_network(
     request: Request,
     object_id: str,
     session: Annotated[Session, Depends(get_session)],
 ):
+    access = read_access_from_request(request)
+    context = ui_write_context(request, access)
+    execute_ui_command(
+        session,
+        context,
+        lambda: authorize_object_command(
+            session,
+            context,
+            object_id=object_id,
+            permission=Permission.WRITE,
+        ),
+    )
     existing_object = get_object(session, object_id)
     if existing_object is None:
         raise HTTPException(status_code=404, detail="Catalog object not found")
     form = await request.form()
+    if_match = str(form.get("if_match") or "")
     submitted_rows = _network_form_rows(form)
     translator = translation_context(request)["t"]
     try:
@@ -1226,8 +1398,21 @@ async def update_network(
             edit_section="network",
             form_rows=submitted_rows,
         )
-    with transaction(session):
-        upsert_object(session, payload)
+    execute_ui_command(
+        session,
+        context,
+        lambda: update_catalog_object(
+            session,
+            context,
+            object_id=object_id,
+            payload=payload,
+            expected_revision=_ui_expected_revision(
+                request,
+                if_match,
+                existing_object.revision,
+            ),
+        ),
+    )
     return RedirectResponse(
         url=_detail_redirect_url(request, object_id),
         status_code=303,
@@ -1237,13 +1422,25 @@ async def update_network(
 @router.post(
     "/objects/{object_id}/access",
     response_class=HTMLResponse,
-    dependencies=[Depends(require_admin_write)],
+    dependencies=[Depends(require_browser_write_csrf)],
 )
 async def update_access(
     request: Request,
     object_id: str,
     session: Annotated[Session, Depends(get_session)],
 ):
+    access = read_access_from_request(request)
+    context = ui_write_context(request, access)
+    execute_ui_command(
+        session,
+        context,
+        lambda: authorize_object_command(
+            session,
+            context,
+            object_id=object_id,
+            permission=Permission.WRITE,
+        ),
+    )
     read_model = query_catalog_detail(
         session,
         object_id,
@@ -1252,22 +1449,12 @@ async def update_access(
     if read_model is None:
         raise HTTPException(status_code=404, detail="Catalog object not found")
     form = await request.form()
+    if_match = str(form.get("if_match") or "")
     submitted_rows = _access_form_rows(form, read_model)
     translator = translation_context(request)["t"]
     allowed_sources = {
-        str(method["source_ref"])
-        for method in _access_method_rows(
-            read_model.catalog_object,
-            _display_access_methods(
-                read_model.catalog_object,
-                read_model.relationship_groups,
-                read_model.object_map,
-            ),
-        )
-    }
-    allowed_sources.add(
         f"{read_model.catalog_object.kind}:{read_model.catalog_object.id}"
-    )
+    }
     changed_objects: dict[str, CatalogObjectOut] = {}
     changed_data: dict[str, dict[str, Any]] = {}
     seen_rows: set[tuple[str, int]] = set()
@@ -1355,13 +1542,57 @@ async def update_access(
             edit_section="access",
             form_rows={"access_methods": submitted_rows},
         )
-    with transaction(session):
-        for payload in payloads:
-            upsert_object(session, payload)
+    if len(payloads) > 1:
+        raise HTTPException(
+            status_code=409,
+            detail="One object may be changed per command",
+        )
+    if payloads:
+        execute_ui_command(
+            session,
+            context,
+            lambda: update_catalog_object(
+                session,
+                context,
+                object_id=object_id,
+                payload=payloads[0],
+                expected_revision=_ui_expected_revision(
+                    request,
+                    if_match,
+                    read_model.catalog_object.revision,
+                ),
+            ),
+        )
     return RedirectResponse(
         url=_detail_redirect_url(request, object_id),
         status_code=303,
     )
+
+
+@router.post(
+    "/objects/{object_id}/delete",
+    response_class=HTMLResponse,
+    dependencies=[Depends(require_browser_write_csrf)],
+)
+def delete_object_from_ui(
+    request: Request,
+    object_id: str,
+    session: Annotated[Session, Depends(get_session)],
+    if_match: Annotated[str, Form()],
+):
+    access = read_access_from_request(request)
+    context = ui_write_context(request, access)
+    execute_ui_command(
+        session,
+        context,
+        lambda: delete_catalog_object(
+            session,
+            context,
+            object_id=object_id,
+            expected_revision=if_match,
+        ),
+    )
+    return RedirectResponse(url="/", status_code=303)
 
 
 def _detail_form_error_response(
@@ -1632,7 +1863,31 @@ def _empty_form() -> dict[str, str]:
         "hosted_on_system_id": "",
         "relation_target_ref": "",
         "relation_type": "hosts",
+        "idempotency_key": uuid4().hex,
     }
+
+
+def _ui_expected_revision(
+    request: Request,
+    if_match: str,
+    current_revision: int,
+) -> int | str | None:
+    if if_match:
+        return if_match
+    if can_write(request):
+        return current_revision
+    return None
+
+
+def _raise_command_denial(
+    *,
+    object_id: str,
+    permission: Permission,
+) -> None:
+    raise CommandAuthorizationDenied(
+        object_id=object_id,
+        permission=permission,
+    )
 
 
 def _split_label_values(raw_labels: str) -> list[str]:

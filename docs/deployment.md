@@ -207,8 +207,9 @@ URLs, or the session cookie. Missing or empty configuration disables every UI wr
 unlock at `/admin` creates a time-limited HMAC-signed cookie with `HttpOnly` and `SameSite=Strict`;
 rotating the token invalidates existing sessions. Logout deletes the cookie.
 
-The catalog and agent APIs remain read-only even while the UI is unlocked. Their OpenAPI contract
-contains no catalog mutation operation.
+The compatibility catalog and agent APIs remain read-only even while the UI is
+unlocked. Authorized mutations use the `/api/v1` command routes, MCP write
+tools, or authenticated UI form routes.
 
 The token and session cookie still traverse the network during browser use. On an untrusted network,
 serve Blockwart through HTTPS and set `BLOCKWART_ADMIN_COOKIE_SECURE=true`.
@@ -223,10 +224,10 @@ authorization, and deployment rollout each require explicit approval. See
 
 ## Agent Access
 
-The stable read-only API lives under `/api/v1`; `/api/agent` remains a
-compatibility namespace. The local MCP wrapper uses v1 through
-`BLOCKWART_API_BASE_URL`. Deployment of the MCP wrapper into OpenClaw/Gateway
-config is a separate approval step.
+The stable object-authorized API lives under `/api/v1`; `/api/agent` remains a
+read-only compatibility namespace. The local MCP wrapper uses v1 through
+`BLOCKWART_API_BASE_URL` for both reads and writes. Deployment of the MCP
+wrapper into OpenClaw/Gateway config is a separate approval step.
 
 For an approved MCP deployment, inject a service-account token through the
 protected `BLOCKWART_API_TOKEN_FILE`. `BLOCKWART_API_TOKEN` is an environment

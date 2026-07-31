@@ -91,6 +91,36 @@ def _agent_api_server():
             self.end_headers()
             self.wfile.write(body)
 
+        def do_POST(self) -> None:
+            self._write_response("POST")
+
+        def do_PUT(self) -> None:
+            self._write_response("PUT")
+
+        def do_DELETE(self) -> None:
+            self._write_response("DELETE")
+
+        def _write_response(self, method: str) -> None:
+            content_length = int(self.headers.get("Content-Length", "0"))
+            raw_body = self.rfile.read(content_length)
+            requests.append(
+                {
+                    "method": method,
+                    "path": urlsplit(self.path).path,
+                    "authorization": self.headers.get("Authorization"),
+                    "channel": self.headers.get("X-Blockwart-Channel"),
+                    "if_match": self.headers.get("If-Match"),
+                    "idempotency_key": self.headers.get("Idempotency-Key"),
+                    "body": json.loads(raw_body or b"{}"),
+                }
+            )
+            body = b'{"changed":true}'
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
         def log_message(self, format: str, *args: object) -> None:
             pass
 
@@ -270,8 +300,30 @@ def test_mcp_client_completes_handshake_and_calls_every_read_only_tool() -> None
         "blockwart.search",
         "blockwart.get_object_context",
         "blockwart.get_context",
+        "blockwart.create_child",
+        "blockwart.update_object",
+        "blockwart.delete_object",
+        "blockwart.create_relationship",
+        "blockwart.delete_relationship",
     }
-    assert all(tool.annotations and tool.annotations.readOnlyHint for tool in tools.values())
+    assert all(
+        tools[name].annotations and tools[name].annotations.readOnlyHint
+        for name in {
+            "blockwart.search",
+            "blockwart.get_object_context",
+            "blockwart.get_context",
+        }
+    )
+    assert all(
+        tools[name].annotations and not tools[name].annotations.readOnlyHint
+        for name in {
+            "blockwart.create_child",
+            "blockwart.update_object",
+            "blockwart.delete_object",
+            "blockwart.create_relationship",
+            "blockwart.delete_relationship",
+        }
+    )
     assert all(not result.isError for result in results.values())
 
     result_payloads = {}
@@ -353,6 +405,109 @@ def test_mcp_forwards_bearer_only_from_runtime_environment(
         "token" not in tool["inputSchema"].get("properties", {})
         for tool in TOOLS
     )
+
+
+def test_mcp_write_tools_forward_preconditions_without_credentials_in_arguments() -> None:
+    calls = []
+
+    def requester(method, path, body, headers):
+        calls.append((method, path, body, headers))
+        return {"changed": True}
+
+    object_payload = {
+        "id": "demo",
+        "kind": "service",
+        "label": "Demo",
+        "lifecycle": "active",
+        "health": "healthy",
+        "data": {"schema_version": 1},
+    }
+    call_tool(
+        "blockwart.create_child",
+        {
+            "parent_id": "fabrik",
+            "idempotency_key": "mcp-create-key-0001",
+            "object": object_payload,
+        },
+        requester=requester,
+    )
+    call_tool(
+        "blockwart.update_object",
+        {
+            "object_id": "demo",
+            "if_match": '"rev-1"',
+            "object": object_payload,
+        },
+        requester=requester,
+    )
+    call_tool(
+        "blockwart.delete_object",
+        {"object_id": "demo", "if_match": '"rev-2"'},
+        requester=requester,
+    )
+
+    assert calls == [
+        (
+            "POST",
+            "/api/v1/objects/fabrik/children",
+            object_payload,
+            {
+                "Idempotency-Key": "mcp-create-key-0001",
+                "X-Blockwart-Channel": "mcp",
+            },
+        ),
+        (
+            "PUT",
+            "/api/v1/objects/demo",
+            object_payload,
+            {"If-Match": '"rev-1"', "X-Blockwart-Channel": "mcp"},
+        ),
+        (
+            "DELETE",
+            "/api/v1/objects/demo",
+            {},
+            {"If-Match": '"rev-2"', "X-Blockwart-Channel": "mcp"},
+        ),
+    ]
+    assert all(
+        not {"token", "authorization", "credential"} & set(
+            tool["inputSchema"].get("properties", {})
+        )
+        for tool in TOOLS
+    )
+
+
+def test_mcp_write_transport_uses_runtime_bearer_and_mcp_channel(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    runtime_token = "bwst_00000000-0000-0000-0000-000000000001.write-secret"
+    monkeypatch.setenv("BLOCKWART_API_TOKEN", runtime_token)
+    monkeypatch.delenv("BLOCKWART_API_TOKEN_FILE", raising=False)
+
+    with _agent_api_server() as (base_url, requests):
+        result = mcp_server.request_json(
+            "PUT",
+            "/api/v1/objects/demo",
+            {"id": "demo"},
+            {
+                "If-Match": '"rev-7"',
+                "X-Blockwart-Channel": "mcp",
+            },
+            base_url=base_url,
+        )
+
+    assert result == {"changed": True}
+    assert requests == [
+        {
+            "method": "PUT",
+            "path": "/api/v1/objects/demo",
+            "authorization": f"Bearer {runtime_token}",
+            "channel": "mcp",
+            "if_match": '"rev-7"',
+            "idempotency_key": None,
+            "body": {"id": "demo"},
+        }
+    ]
 
 
 def test_mcp_rejects_redirect_without_forwarding_bearer_to_second_origin(
@@ -474,16 +629,31 @@ def test_mcp_rejects_schema_invalid_arguments_without_fetching(name, arguments) 
     assert calls == []
 
 
-def test_mcp_tools_are_read_only() -> None:
+def test_mcp_tools_publish_explicit_read_write_and_delete_hints() -> None:
     names = {tool["name"] for tool in TOOLS}
 
     assert names == {
         "blockwart.search",
         "blockwart.get_object_context",
         "blockwart.get_context",
+        "blockwart.create_child",
+        "blockwart.update_object",
+        "blockwart.delete_object",
+        "blockwart.create_relationship",
+        "blockwart.delete_relationship",
     }
-    assert not any("write" in name or "delete" in name or "update" in name for name in names)
-    assert all(tool["annotations"]["readOnlyHint"] for tool in TOOLS)
+    tools = {tool["name"]: tool for tool in TOOLS}
+    assert all(
+        tools[name]["annotations"]["readOnlyHint"]
+        for name in {
+            "blockwart.search",
+            "blockwart.get_object_context",
+            "blockwart.get_context",
+        }
+    )
+    assert tools["blockwart.delete_object"]["annotations"]["destructiveHint"]
+    assert tools["blockwart.delete_relationship"]["annotations"]["destructiveHint"]
+    assert not tools["blockwart.update_object"]["annotations"]["destructiveHint"]
 
 
 def test_mcp_search_and_context_support_host_and_structured_filters() -> None:

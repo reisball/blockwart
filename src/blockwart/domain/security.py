@@ -21,6 +21,7 @@ SECRET_VALUE_PATTERNS = [
     re.compile(r"ghp_[A-Za-z0-9_]{20,}"),
     re.compile(r"eyJ[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{10,}"),
 ]
+REDACTED_SECRET_VALUE = "[redacted-secret-field]"
 
 
 def looks_like_secret(value: str) -> bool:
@@ -49,3 +50,19 @@ def find_secret_violations(data: Any, path: str = "$") -> list[str]:
 
     return violations
 
+
+def redact_secret_values(data: Any) -> Any:
+    if isinstance(data, Mapping):
+        safe: dict[str, Any] = {}
+        for key, value in data.items():
+            key_text = str(key)
+            if key_text.lower() in FORBIDDEN_SECRET_KEYS:
+                safe[key_text] = REDACTED_SECRET_VALUE
+            else:
+                safe[key_text] = redact_secret_values(value)
+        return safe
+    if isinstance(data, list):
+        return [redact_secret_values(value) for value in data]
+    if isinstance(data, str) and looks_like_secret(data):
+        return REDACTED_SECRET_VALUE
+    return data

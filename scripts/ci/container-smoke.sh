@@ -43,7 +43,7 @@ expected_revision = sys.argv[1]
 payload = json.loads(os.environ["READY_PAYLOAD"])
 assert payload["ok"] is True
 assert payload["build_revision"] == expected_revision
-assert payload["revision"] == "20260730_0009"
+assert payload["revision"] == "20260731_0010"
 assert all(value == "ok" for value in payload["checks"].values())
 PY
 
