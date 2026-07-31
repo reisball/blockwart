@@ -16,6 +16,7 @@ UVICORN_COMMAND = [
     "0.0.0.0",
     "--port",
     "8000",
+    "--no-proxy-headers",
 ]
 
 

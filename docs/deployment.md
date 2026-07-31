@@ -75,7 +75,8 @@ backups, monitoring, or service registration.
 
 The image command is `blockwart-start`. It runs the packaged Alembic upgrade against the effective
 `BLOCKWART_DATABASE_URL`, verifies the packaged head and full active effective Owner coverage,
-and only then replaces itself with Uvicorn. Migration errors use the redacted
+and only then replaces itself with Uvicorn with Uvicorn's implicit proxy-header processing
+disabled. Migration errors use the redacted
 `startup_error=database_migration_failed`; authorization-invariant failures use
 `startup_error=owner_catalog_empty` or `startup_error=owner_coverage_incomplete`.
 
@@ -129,7 +130,9 @@ Blockwart does not infer trust from `Forwarded`, `X-Forwarded-Proto`, or arbitra
 direct transport peer belongs to `BLOCKWART_AUTH_TRUSTED_PROXY_CIDRS`, and the header contains
 exactly one valid IP address in exactly one header field. The trusted proxy must overwrite, never
 append, `X-Forwarded-For`. Configure the smallest exact proxy IP/CIDR set; duplicate, malformed, or
-chained values are ignored in favor of the direct peer.
+chained values are ignored in favor of the direct peer. The packaged launcher disables Uvicorn's
+own proxy-header rewriting so this explicit Blockwart allowlist is the sole source-attribution
+policy.
 
 ## Authorization Rollout Checklist
 

@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+import asyncio
+import importlib
 import json
 import os
 from pathlib import Path
 
 import pytest
+from click.testing import CliRunner
 from sqlalchemy import create_engine, text
 
 from blockwart.cli import database as database_cli
@@ -310,6 +313,67 @@ def test_startup_upgrades_before_exec(monkeypatch: pytest.MonkeyPatch) -> None:
         ("readiness", None),
         ("exec", (start_cli.UVICORN_COMMAND[0], start_cli.UVICORN_COMMAND)),
     ]
+
+
+def test_startup_launcher_preserves_raw_peer_across_uvicorn_boundary(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    uvicorn_main = importlib.import_module("uvicorn.main")
+    configs = []
+    monkeypatch.delenv("FORWARDED_ALLOW_IPS", raising=False)
+
+    def capture_server_config(server) -> None:
+        configs.append(server.config)
+        server.started = True
+
+    monkeypatch.setattr(uvicorn_main.Server, "run", capture_server_config)
+
+    result = CliRunner().invoke(uvicorn_main.main, start_cli.UVICORN_COMMAND[3:])
+
+    assert result.exit_code == 0, result.output
+    assert len(configs) == 1
+    config = configs[0]
+    assert config.proxy_headers is False
+
+    observed_clients: list[tuple[str, int] | None] = []
+
+    async def recorder(scope, receive, send) -> None:
+        observed_clients.append(scope["client"])
+        await send({"type": "http.response.start", "status": 204, "headers": []})
+        await send({"type": "http.response.body", "body": b""})
+
+    async def invoke_loaded_app() -> None:
+        config.app = recorder
+        config.load()
+        scope = {
+            "type": "http",
+            "asgi": {"version": "3.0", "spec_version": "2.3"},
+            "http_version": "1.1",
+            "method": "GET",
+            "scheme": "http",
+            "path": "/api/v1/objects",
+            "raw_path": b"/api/v1/objects",
+            "query_string": b"",
+            "root_path": "",
+            "headers": [
+                (b"x-forwarded-for", b"198.51.100.8"),
+                (b"x-forwarded-for", b"203.0.113.9"),
+            ],
+            "client": ("127.0.0.1", 54321),
+            "server": ("127.0.0.1", 8000),
+            "state": {},
+        }
+
+        async def receive():
+            return {"type": "http.request", "body": b"", "more_body": False}
+
+        async def send(_message) -> None:
+            return None
+
+        await config.loaded_app(scope, receive, send)
+
+    asyncio.run(invoke_loaded_app())
+    assert observed_clients == [("127.0.0.1", 54321)]
 
 
 def test_startup_aborts_before_exec_on_migration_failure(
