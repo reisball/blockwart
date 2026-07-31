@@ -647,17 +647,27 @@ class _AgentCatalogResolver:
         return self.placements.parent_path_refs(_object_ref(obj))
 
     def visible_parent_path_refs(self, obj: CatalogObject) -> list[str]:
-        visible: list[str] = []
+        return self._parent_path_refs_with_permission(obj, Permission.DISCOVER)
+
+    def readable_parent_path_refs(self, obj: CatalogObject) -> list[str]:
+        return self._parent_path_refs_with_permission(obj, Permission.READ)
+
+    def _parent_path_refs_with_permission(
+        self,
+        obj: CatalogObject,
+        permission: Permission,
+    ) -> list[str]:
+        authorized: list[str] = []
         for object_ref in reversed(self.parent_path_refs(obj)):
             ancestor = self.object_by_ref.get(object_ref)
             if (
                 ancestor is None
-                or not self.access.policy.can(Permission.DISCOVER, ancestor.id)
+                or not self.access.policy.can(permission, ancestor.id)
             ):
                 break
-            visible.append(object_ref)
-        visible.reverse()
-        return visible
+            authorized.append(object_ref)
+        authorized.reverse()
+        return authorized
 
     def endpoints(self, obj: CatalogObject) -> list[dict[str, Any]]:
         data = _safe_object_data(obj)
@@ -679,13 +689,10 @@ class _AgentCatalogResolver:
         own_ips = _object_ips(_safe_object_data(obj), self.endpoints(obj))
         if own_ips:
             return own_ips
-        for parent_ref in reversed(self.parent_path_refs(obj)):
+        for parent_ref in reversed(self.readable_parent_path_refs(obj)):
             parent = self.object_by_ref.get(parent_ref)
-            if (
-                parent is None
-                or not self.access.policy.can(Permission.READ, parent.id)
-            ):
-                break
+            if parent is None:
+                continue
             parent_ips = _object_ips(_safe_object_data(parent), self.endpoints(parent))
             if parent_ips:
                 return parent_ips
@@ -695,13 +702,10 @@ class _AgentCatalogResolver:
         own_hostnames = _object_hostnames(_safe_object_data(obj), self.endpoints(obj))
         if own_hostnames:
             return own_hostnames
-        for parent_ref in reversed(self.parent_path_refs(obj)):
+        for parent_ref in reversed(self.readable_parent_path_refs(obj)):
             parent = self.object_by_ref.get(parent_ref)
-            if (
-                parent is None
-                or not self.access.policy.can(Permission.READ, parent.id)
-            ):
-                break
+            if parent is None:
+                continue
             parent_hostnames = _object_hostnames(
                 _safe_object_data(parent),
                 self.endpoints(parent),

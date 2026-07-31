@@ -89,9 +89,15 @@ Placement `hosts` edges are visible only when both endpoints are discoverable.
 Other relationship types require `read` on both endpoints. Detail filters such
 as lifecycle, health, IP, endpoint, provenance, or freshness never evaluate
 discover-only stubs; text search on a stub is restricted to ID, kind, and
-label. Counts and pagination are computed after authorization. Opaque cursors
-are bound to both the principal and the exact effective policy, so they cannot
-be reused after a grant change or by another identity.
+label. Counts and pagination are computed after authorization. Kind counts
+include discoverable stubs because kind is part of the released stub
+projection; detail-derived counts such as health include readable objects
+only. Opaque cursors are bound to both the principal and the exact effective
+policy, so they cannot be reused after a grant change or by another identity.
+
+Released placement paths stop at the first ancestor without `discover`.
+Inherited IP addresses and hostnames are stricter: inheritance requires
+`read` on every traversed ancestor and stops at the first unreadable one.
 
 Principal-scoped UI and API responses use `Cache-Control: private, no-store`,
 `Pragma: no-cache`, and `Vary: Authorization, Cookie`. Health/readiness,

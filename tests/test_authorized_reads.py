@@ -4,6 +4,7 @@ import json
 import re
 from collections.abc import Generator
 from dataclasses import dataclass
+from datetime import datetime
 
 import pytest
 from fastapi.testclient import TestClient
@@ -14,6 +15,7 @@ from blockwart.db.session import transaction
 from blockwart.domain.auth import GrantScope, Role
 from blockwart.main import create_app
 from blockwart.mcp.server import call_tool
+from blockwart.models import CatalogObject
 from blockwart.schemas.catalog import CatalogObjectIn
 from blockwart.services.access import create_object_grant
 from blockwart.services.audit import add_audit_event
@@ -582,6 +584,46 @@ def test_filters_counts_relationships_audit_and_cursor_do_not_leak_details(
     )
     assert changed_policy_cursor.status_code == 400
     assert changed_policy_cursor.json()["error"]["code"] == "invalid_request"
+
+
+def test_updated_at_sort_does_not_reveal_stub_timestamp(
+    authorized_client,
+    authorized_read_state,
+) -> None:
+    client, state = authorized_client
+    session_factory, _ = authorized_read_state
+    with session_factory() as session:
+        with transaction(session):
+            session.get(CatalogObject, "fabrik").updated_at = datetime(2021, 1, 1)
+            session.get(CatalogObject, "lxc-137").updated_at = datetime(2022, 1, 1)
+            session.get(CatalogObject, "blockwart").updated_at = datetime(2099, 1, 1)
+
+    headers = _authorization(state.api_token)
+    ascending = client.get(
+        "/api/v1/objects",
+        params={"sort": "updated_at", "direction": "asc"},
+        headers=headers,
+    )
+    descending = client.get(
+        "/api/v1/objects",
+        params={"sort": "updated_at", "direction": "desc"},
+        headers=headers,
+    )
+
+    assert ascending.status_code == 200
+    assert descending.status_code == 200
+    assert [item["id"] for item in ascending.json()["items"]] == [
+        "blockwart",
+        "fabrik",
+        "lxc-137",
+    ]
+    assert [item["id"] for item in descending.json()["items"]] == [
+        "lxc-137",
+        "fabrik",
+        "blockwart",
+    ]
+    assert ascending.json()["items"][0]["visibility"] == "stub"
+    assert descending.json()["items"][-1]["visibility"] == "stub"
 
 
 @pytest.mark.parametrize("language", ["en", "de"])
