@@ -422,6 +422,16 @@ def test_access_manager_cannot_manage_owner_grants_but_owner_can(
             )
         )
         assert denied_owner_count == 1
+        denial = session.scalar(
+            select(SecurityEvent)
+            .where(
+                SecurityEvent.principal_id == principals["manager"],
+                SecurityEvent.event_type == "object_command_authorization",
+            )
+            .order_by(SecurityEvent.id.desc())
+        )
+        assert denial is not None
+        assert json.loads(denial.details_json)["permission"] == "manage_access"
 
 
 def test_only_access_manager_and_owner_may_open_grant_management(

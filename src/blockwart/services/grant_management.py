@@ -556,7 +556,7 @@ def _require_owner_for_owner_grant(
     if Role.OWNER in roles and not is_owner:
         raise CommandAuthorizationDenied(
             object_id=object_id,
-            permission=Permission.DELETE,
+            permission=Permission.MANAGE_ACCESS,
         )
 
 
