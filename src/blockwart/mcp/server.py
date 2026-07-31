@@ -130,6 +130,21 @@ RELATIONSHIP_PROPERTIES: JSON = {
     "relation_type": {"type": "string", "minLength": 1, "maxLength": 96},
     "to_ref": {"type": "string", "minLength": 3, "maxLength": 192},
 }
+GRANT_ROLE_SCHEMA: JSON = {
+    "type": "string",
+    "enum": [
+        "discoverer",
+        "viewer",
+        "editor",
+        "creator",
+        "access_manager",
+        "owner",
+    ],
+}
+GRANT_SCOPE_SCHEMA: JSON = {
+    "type": "string",
+    "enum": ["self", "subtree"],
+}
 
 QUERY_FILTER_PROPERTIES: JSON = {
     "q": {"type": "string", "description": "Search term"},
@@ -300,6 +315,97 @@ TOOLS: list[JSON] = [
         },
         "annotations": DELETE_ANNOTATIONS,
     },
+    {
+        "name": "blockwart.get_object_access",
+        "description": "List direct grants and effective object permissions.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "object_id": {"type": "string", "minLength": 1, "maxLength": 128},
+            },
+            "required": ["object_id"],
+            "additionalProperties": False,
+        },
+        "annotations": READ_ONLY_ANNOTATIONS,
+    },
+    {
+        "name": "blockwart.search_principals",
+        "description": "Search active principals through the minimized access-management view.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "object_id": {"type": "string", "minLength": 1, "maxLength": 128},
+                "query": {"type": "string", "minLength": 2, "maxLength": 100},
+                "limit": {"type": "integer", "minimum": 1, "maximum": 20, "default": 20},
+            },
+            "required": ["object_id", "query"],
+            "additionalProperties": False,
+        },
+        "annotations": READ_ONLY_ANNOTATIONS,
+    },
+    {
+        "name": "blockwart.preview_grant_scope",
+        "description": "Preview the current canonical placement coverage of a grant scope.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "object_id": {"type": "string", "minLength": 1, "maxLength": 128},
+                "scope": GRANT_SCOPE_SCHEMA,
+            },
+            "required": ["object_id", "scope"],
+            "additionalProperties": False,
+        },
+        "annotations": READ_ONLY_ANNOTATIONS,
+    },
+    {
+        "name": "blockwart.create_grant",
+        "description": "Create one authorized direct object grant using the current ETag.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "object_id": {"type": "string", "minLength": 1, "maxLength": 128},
+                "principal_id": {"type": "string", "minLength": 1, "maxLength": 36},
+                "role": GRANT_ROLE_SCHEMA,
+                "scope": GRANT_SCOPE_SCHEMA,
+                "if_match": ETAG_SCHEMA,
+            },
+            "required": ["object_id", "principal_id", "role", "scope", "if_match"],
+            "additionalProperties": False,
+        },
+        "annotations": WRITE_ANNOTATIONS,
+    },
+    {
+        "name": "blockwart.update_grant",
+        "description": "Change one direct grant role and scope using the current ETag.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "object_id": {"type": "string", "minLength": 1, "maxLength": 128},
+                "grant_id": {"type": "integer", "minimum": 1},
+                "role": GRANT_ROLE_SCHEMA,
+                "scope": GRANT_SCOPE_SCHEMA,
+                "if_match": ETAG_SCHEMA,
+            },
+            "required": ["object_id", "grant_id", "role", "scope", "if_match"],
+            "additionalProperties": False,
+        },
+        "annotations": WRITE_ANNOTATIONS,
+    },
+    {
+        "name": "blockwart.revoke_grant",
+        "description": "Revoke one direct grant using the current ETag and owner guards.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "object_id": {"type": "string", "minLength": 1, "maxLength": 128},
+                "grant_id": {"type": "integer", "minimum": 1},
+                "if_match": ETAG_SCHEMA,
+            },
+            "required": ["object_id", "grant_id", "if_match"],
+            "additionalProperties": False,
+        },
+        "annotations": DELETE_ANNOTATIONS,
+    },
 ]
 TOOL_DEFINITIONS: dict[str, JSON] = {tool["name"]: tool for tool in TOOLS}
 
@@ -410,6 +516,73 @@ def call_tool(
                 "relation_type": _required_string(args, "relation_type"),
                 "to_ref": _required_string(args, "to_ref"),
             },
+            {
+                "If-Match": _required_string(args, "if_match"),
+                "X-Blockwart-Channel": "mcp",
+            },
+        )
+    elif name == "blockwart.get_object_access":
+        object_id = _required_string(args, "object_id")
+        payload = fetch(
+            f"/api/v1/objects/{quote(object_id, safe='')}/access",
+            {},
+        )
+    elif name == "blockwart.search_principals":
+        object_id = _required_string(args, "object_id")
+        payload = fetch(
+            f"/api/v1/objects/{quote(object_id, safe='')}/access/principals",
+            {
+                "q": _required_string(args, "query"),
+                "limit": args.get("limit", 20),
+            },
+        )
+    elif name == "blockwart.preview_grant_scope":
+        object_id = _required_string(args, "object_id")
+        payload = fetch(
+            f"/api/v1/objects/{quote(object_id, safe='')}/access/preview",
+            {"scope": _required_string(args, "scope")},
+        )
+    elif name == "blockwart.create_grant":
+        object_id = _required_string(args, "object_id")
+        payload = request(
+            "POST",
+            f"/api/v1/objects/{quote(object_id, safe='')}/access/grants",
+            {
+                "principal_id": _required_string(args, "principal_id"),
+                "role": _required_string(args, "role"),
+                "scope": _required_string(args, "scope"),
+            },
+            {
+                "If-Match": _required_string(args, "if_match"),
+                "X-Blockwart-Channel": "mcp",
+            },
+        )
+    elif name == "blockwart.update_grant":
+        object_id = _required_string(args, "object_id")
+        payload = request(
+            "PUT",
+            (
+                f"/api/v1/objects/{quote(object_id, safe='')}/access/grants/"
+                f"{_required_integer(args, 'grant_id')}"
+            ),
+            {
+                "role": _required_string(args, "role"),
+                "scope": _required_string(args, "scope"),
+            },
+            {
+                "If-Match": _required_string(args, "if_match"),
+                "X-Blockwart-Channel": "mcp",
+            },
+        )
+    elif name == "blockwart.revoke_grant":
+        object_id = _required_string(args, "object_id")
+        payload = request(
+            "DELETE",
+            (
+                f"/api/v1/objects/{quote(object_id, safe='')}/access/grants/"
+                f"{_required_integer(args, 'grant_id')}"
+            ),
+            {},
             {
                 "If-Match": _required_string(args, "if_match"),
                 "X-Blockwart-Channel": "mcp",
@@ -684,6 +857,13 @@ def _required_string(args: JSON, key: str) -> str:
 def _required_object(args: JSON, key: str) -> JSON:
     value = args.get(key)
     if not isinstance(value, dict):
+        raise ToolInputError(f"{key} is required")
+    return value
+
+
+def _required_integer(args: JSON, key: str) -> int:
+    value = args.get(key)
+    if not isinstance(value, int) or isinstance(value, bool) or value < 1:
         raise ToolInputError(f"{key} is required")
     return value
 

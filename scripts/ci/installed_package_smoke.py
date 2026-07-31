@@ -51,7 +51,7 @@ def wait_until_ready() -> dict:
     raise RuntimeError("installed package did not become ready")
 
 
-def prepare_authorized_readers() -> tuple[str, str]:
+def prepare_authorized_readers() -> tuple[str, str, str]:
     engine = build_engine(os.environ["BLOCKWART_DATABASE_URL"])
     try:
         with Session(engine) as session:
@@ -66,6 +66,11 @@ def prepare_authorized_readers() -> tuple[str, str]:
                     login="package-smoke.browser",
                     display_name="Package Smoke Browser",
                     password="package-smoke-browser-password",
+                )
+                grant_candidate = create_service_account(
+                    session,
+                    login="package-smoke.candidate",
+                    display_name="Package Smoke Grant Candidate",
                 )
                 for object_id in session.scalars(
                     select(CatalogObject.id).order_by(CatalogObject.id)
@@ -94,12 +99,17 @@ def prepare_authorized_readers() -> tuple[str, str]:
                     principal_id=browser_principal.id,
                     ttl_seconds=3600,
                 )
-        return service_token.value, browser_session.value
+        return service_token.value, browser_session.value, grant_candidate.id
     finally:
         engine.dispose()
 
 
-async def check_mcp(object_id: str, *, token: str) -> str:
+async def check_mcp(
+    object_id: str,
+    *,
+    token: str,
+    grant_candidate_id: str,
+) -> str:
     scripts_dir = Path(sysconfig.get_path("scripts"))
     entrypoint = scripts_dir / "blockwart-mcp"
     env = os.environ.copy()
@@ -127,6 +137,12 @@ async def check_mcp(object_id: str, *, token: str) -> str:
                 "blockwart.delete_object",
                 "blockwart.create_relationship",
                 "blockwart.delete_relationship",
+                "blockwart.get_object_access",
+                "blockwart.search_principals",
+                "blockwart.preview_grant_scope",
+                "blockwart.create_grant",
+                "blockwart.update_grant",
+                "blockwart.revoke_grant",
             }
             assert all(
                 tool.annotations
@@ -137,6 +153,9 @@ async def check_mcp(object_id: str, *, token: str) -> str:
                         "blockwart.search",
                         "blockwart.get_object_context",
                         "blockwart.get_context",
+                        "blockwart.get_object_access",
+                        "blockwart.search_principals",
+                        "blockwart.preview_grant_scope",
                     }
                     else not tool.annotations.readOnlyHint
                 )
@@ -151,6 +170,63 @@ async def check_mcp(object_id: str, *, token: str) -> str:
                 await session.call_tool("blockwart.get_context", {"limit": 1}),
             ]
             assert all(not result.isError for result in read_results)
+            access = await session.call_tool(
+                "blockwart.get_object_access",
+                {"object_id": object_id},
+            )
+            access_payload = _tool_payload(access)
+            principal_search = await session.call_tool(
+                "blockwart.search_principals",
+                {
+                    "object_id": object_id,
+                    "query": "package-smoke.candidate",
+                    "limit": 3,
+                },
+            )
+            principal_search_payload = _tool_payload(principal_search)
+            assert {
+                principal["id"]
+                for principal in principal_search_payload["items"]
+            } == {grant_candidate_id}
+            preview = await session.call_tool(
+                "blockwart.preview_grant_scope",
+                {"object_id": object_id, "scope": "self"},
+            )
+            preview_payload = _tool_payload(preview)
+            assert [item["id"] for item in preview_payload["affected_objects"]] == [
+                object_id
+            ]
+            grant_created = await session.call_tool(
+                "blockwart.create_grant",
+                {
+                    "object_id": object_id,
+                    "principal_id": grant_candidate_id,
+                    "role": "viewer",
+                    "scope": "self",
+                    "if_match": access_payload["etag"],
+                },
+            )
+            grant_created_payload = _tool_payload(grant_created)
+            grant_updated = await session.call_tool(
+                "blockwart.update_grant",
+                {
+                    "object_id": object_id,
+                    "grant_id": grant_created_payload["grant"]["id"],
+                    "role": "editor",
+                    "scope": "self",
+                    "if_match": grant_created_payload["etag"],
+                },
+            )
+            grant_updated_payload = _tool_payload(grant_updated)
+            grant_revoked = await session.call_tool(
+                "blockwart.revoke_grant",
+                {
+                    "object_id": object_id,
+                    "grant_id": grant_created_payload["grant"]["id"],
+                    "if_match": grant_updated_payload["etag"],
+                },
+            )
+            assert not grant_revoked.isError
             created = await session.call_tool(
                 "blockwart.create_child",
                 {
@@ -230,7 +306,7 @@ def _tool_payload(result) -> dict:
 
 def main() -> None:
     readiness = wait_until_ready()
-    api_token, browser_session = prepare_authorized_readers()
+    api_token, browser_session, grant_candidate_id = prepare_authorized_readers()
     index_request = Request(
         f"{BASE_URL}/",
         headers={
@@ -268,12 +344,13 @@ def main() -> None:
         check_mcp(
             search["results"][0]["id"],
             token=api_token,
+            grant_candidate_id=grant_candidate_id,
         )
     )
     print(
         "installed_package=ok "
         f"cwd={Path.cwd()} revision={readiness['revision']} "
-        f"openapi_paths={len(openapi['paths'])} mcp_protocol={protocol} mcp_calls=9"
+        f"openapi_paths={len(openapi['paths'])} mcp_protocol={protocol} mcp_calls=15"
     )
 
 

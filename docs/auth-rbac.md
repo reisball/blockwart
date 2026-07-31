@@ -1,9 +1,9 @@
 # Authentication and object authorization
 
 Blockwart authenticates every catalog read and authorizes it against current
-object grants. The legacy global UI admin gate still owns catalog mutations;
-writable API/MCP and grant-management surfaces are delivered separately so a
-partially migrated deployment stays fail-closed.
+object grants. Catalog and grant mutations use the same object-scoped command
+and policy layer across the browser UI, API v1, and MCP. The legacy global UI
+admin gate remains only as an isolated compatibility surface.
 
 ## Principals and credentials
 
@@ -70,6 +70,47 @@ Other relationship types do not propagate grants. Effective authorization is
 calculated from the current graph in one recursive database query, so
 reparenting changes access without a stale application cache.
 
+## Grant management
+
+An actor needs effective `manage_access` on the anchor object to list, create,
+update, or revoke its direct grants. Owner grants have an additional invariant:
+only an actor with effective `owner` on that object may create, change, or
+revoke them. Role names are not accepted as proof; both checks resolve the
+actor's current grants from the database inside the command transaction.
+
+The object UI's **Access control** panel, API v1, and MCP expose one shared
+application service:
+
+- direct grants are shown separately from effective permissions;
+- effective entries group all additive direct and inherited grant sources by
+  principal;
+- principal search accepts 2..100 characters, returns at most 20 active
+  identities, and exposes only ID, login, display name, type, and active state;
+- subtree preview follows only canonical placement and returns the safe object
+  ID, kind, label, and whether the anchor is direct;
+- create, update, and revoke require the current strong object `ETag` through
+  `If-Match` (or the equivalent hidden UI field).
+
+Every actual grant change atomically advances the anchor revision and appends
+one immutable object audit event with actor, target principal, channel,
+request ID, old/new revision, and structured before/after grant state. An exact
+duplicate create or unchanged update is a revision-preserving no-op and emits
+no extra audit event.
+
+Owner coverage is evaluated over the affected canonical placement set. A
+revoke, role downgrade, scope shrink, principal deactivation, placement
+change, or delete that would leave any existing affected object without an
+active effective Owner fails closed. A principal also cannot use a grant
+change to remove its own effective `manage_access` on the anchor; another
+authorized Owner can perform a deliberate transfer. Successful revocation is
+visible to the next request because policy decisions are rebuilt from current
+database state and no authorization cache is used.
+
+ACL-shaped keys such as `acl`, `access_grants`, or `permissions` are rejected
+recursively from catalog write and import data. Object grants can be changed
+only through the dedicated grant-management commands and never through
+`data_json`.
+
 ## Authorized read projection
 
 Human UI reads require a valid browser identity session. Machine reads under
@@ -104,10 +145,8 @@ Principal-scoped UI and API responses use `Cache-Control: private, no-store`,
 static assets, OpenAPI documentation, `/auth`, and the separately protected
 legacy `/admin` flow remain outside catalog-read authorization.
 
-Every object has a positive monotone `revision`. Object and relationship
-mutations advance the affected revision. Grant creation and revocation advance
-the anchor object's revision and append an object audit event. A last active
-subtree owner cannot be removed accidentally. The same effective-owner guard
+Every object has a positive monotone `revision`. Object, relationship, and
+grant mutations advance the affected revision. The same effective-owner guard
 applies when a principal is deactivated or a placement edge is removed, so an
 existing object or descendant cannot be orphaned through a lifecycle shortcut.
 
@@ -174,9 +213,9 @@ details.
 
 ## Transition contract
 
-The legacy `BLOCKWART_ADMIN_TOKEN` mechanism remains an additional
-compatibility gate for current UI catalog mutations until the production
-rollout removes it. Identity sessions do not by themselves enable writes:
-UI, REST, and MCP commands also require the matching object grant. Production
-identity bootstrap, token injection, and runtime rollout still require their
-dedicated approval.
+The legacy `BLOCKWART_ADMIN_TOKEN` mechanism remains a compatibility bypass
+for schema settings and unplaced root creation until a dedicated migration
+removes it. It never authorizes grant management. Identity sessions do not by
+themselves enable writes: UI, REST, and MCP commands also require the matching
+object permission. Production identity bootstrap, token injection, and runtime
+rollout still require their dedicated approval.

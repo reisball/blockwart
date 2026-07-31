@@ -14,6 +14,13 @@ FORBIDDEN_SECRET_KEYS = {
     "session",
     "token",
 }
+FORBIDDEN_ACL_DATA_KEYS = {
+    "acl",
+    "access_control",
+    "access_grants",
+    "object_grants",
+    "permissions",
+}
 
 SECRET_VALUE_PATTERNS = [
     re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----"),
@@ -48,6 +55,25 @@ def find_secret_violations(data: Any, path: str = "$") -> list[str]:
     if isinstance(data, str) and looks_like_secret(data):
         violations.append(f"{path}: value looks like a raw secret")
 
+    return violations
+
+
+def find_acl_data_violations(data: Any, path: str = "data") -> list[str]:
+    """Reject ACL-shaped fields from the catalog data security domain."""
+    violations: list[str] = []
+    if isinstance(data, Mapping):
+        for key, value in data.items():
+            key_text = str(key)
+            child_path = f"{path}.{key_text}"
+            if key_text.casefold() in FORBIDDEN_ACL_DATA_KEYS:
+                violations.append(
+                    f"{child_path}: access control belongs to the object grant API"
+                )
+            violations.extend(find_acl_data_violations(value, child_path))
+        return violations
+    if isinstance(data, list):
+        for index, value in enumerate(data):
+            violations.extend(find_acl_data_violations(value, f"{path}[{index}]"))
     return violations
 
 

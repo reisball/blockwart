@@ -15,7 +15,7 @@ from sqlalchemy.orm import Session
 
 from blockwart.api.deps import get_session
 from blockwart.db.session import transaction
-from blockwart.domain.auth import Permission
+from blockwart.domain.auth import GrantScope, Permission, Role
 from blockwart.domain.placement import PlacementError
 from blockwart.domain.relationships import (
     RELATIONSHIP_TYPES,
@@ -45,6 +45,15 @@ from blockwart.services.commands import (
     delete_catalog_object,
     revision_etag,
     update_catalog_object,
+)
+from blockwart.services.grant_management import (
+    actor_can_manage_owner_grants,
+    create_managed_grant,
+    preview_grant_scope,
+    query_object_access,
+    revoke_managed_grant,
+    search_manageable_principals,
+    update_managed_grant,
 )
 from blockwart.services.queries import (
     CatalogBrowseReadModel,
@@ -171,6 +180,9 @@ def _localized_audit_lines(
         "create": "audit.create",
         "delete": "audit.delete",
         "relationship_create": "audit.relationship_create",
+        "grant_create": "audit.grant_create",
+        "grant_update": "audit.grant_update",
+        "grant_revoke": "audit.grant_revoke",
         "placement_assign": "audit.placement_assign",
         "seed_create": "audit.seed_create",
         "seed_update": "audit.seed_update",
@@ -186,6 +198,12 @@ def _localized_audit_lines(
         for key, value in details.items()
         if isinstance(value, str | int | float)
     }
+    if action in {"grant_create", "grant_update", "grant_revoke"}:
+        values["target_principal_id"] = str(
+            details.get("target_principal_id")
+            or details.get("principal_id")
+            or ""
+        )
     return [translator(template_key, **values)]
 
 
@@ -502,6 +520,12 @@ def _detail_template_context(
     error: str | None,
     edit_section: str,
     can_write_enabled: bool,
+    can_manage_access_enabled: bool,
+    can_manage_owner_grants: bool,
+    grant_access: Any | None,
+    grant_scope_preview: Any | None,
+    principal_results: tuple[Any, ...],
+    principal_query: str,
     data_json_override: str | None = None,
     form_rows: Mapping[str, list[Mapping[str, Any]]] | None = None,
 ) -> dict[str, Any]:
@@ -645,6 +669,14 @@ def _detail_template_context(
         "error": error,
         "edit_section": edit_section,
         "can_write": can_write_enabled,
+        "can_manage_access": can_manage_access_enabled,
+        "can_manage_owner_grants": can_manage_owner_grants,
+        "grant_access": grant_access,
+        "grant_scope_preview": grant_scope_preview,
+        "grant_principal_results": principal_results,
+        "grant_principal_query": principal_query,
+        "grant_roles": tuple(Role),
+        "grant_scopes": tuple(GrantScope),
         "can_delete": Permission.DELETE in catalog_object.capabilities,
         "object_etag": revision_etag(catalog_object.revision),
         "csrf_token": request.cookies.get(AUTH_CSRF_COOKIE_NAME, ""),
@@ -692,6 +724,7 @@ def _detail_navigation_context(
         "service-information",
         "network",
         "access",
+        "permissions",
         "relationship-add",
     )
     return {
@@ -709,6 +742,9 @@ def _detail_navigation_context(
             "overview": detail_href,
             "network": f"/objects/{object_id}/network?{detail_query_string}",
             "access": f"/objects/{object_id}/access?{detail_query_string}",
+            "grants": (
+                f"/objects/{object_id}/permissions/grants?{detail_query_string}"
+            ),
             "relationships": (
                 f"/objects/{object_id}/relationships?{detail_query_string}"
             ),
@@ -755,12 +791,55 @@ def _render_object_detail(
     )
     if detail_read_model.catalog_object.visibility == "stub":
         can_write_enabled = False
+        can_manage_access_enabled = False
         edit_section = ""
     else:
         can_write_enabled = (
             Permission.WRITE
             in detail_read_model.catalog_object.capabilities
         )
+        can_manage_access_enabled = (
+            Permission.MANAGE_ACCESS
+            in detail_read_model.catalog_object.capabilities
+        )
+        if (
+            edit_section == "permissions"
+            and not can_manage_access_enabled
+        ) or (
+            edit_section != "permissions"
+            and edit_section
+            and not can_write_enabled
+        ):
+            edit_section = ""
+    principal_query = request.query_params.get("principal_q", "")[:100].strip()
+    grant_access = None
+    grant_scope_preview = None
+    principal_results: tuple[Any, ...] = ()
+    can_manage_owner_grants = False
+    if can_manage_access_enabled:
+        grant_context = ui_write_context(request, access)
+        grant_access = query_object_access(
+            session,
+            grant_context,
+            object_id=object_id,
+        )
+        grant_scope_preview = preview_grant_scope(
+            session,
+            grant_context,
+            object_id=object_id,
+            scope=GrantScope.SUBTREE,
+        )
+        can_manage_owner_grants = actor_can_manage_owner_grants(
+            grant_context,
+            object_id=object_id,
+        )
+        if len(principal_query) >= 2:
+            principal_results = search_manageable_principals(
+                session,
+                grant_context,
+                object_id=object_id,
+                query=principal_query,
+            )
     context = _index_template_context(
         request,
         browse_read_model,
@@ -782,6 +861,12 @@ def _render_object_detail(
             error=error,
             edit_section=edit_section,
             can_write_enabled=can_write_enabled,
+            can_manage_access_enabled=can_manage_access_enabled,
+            can_manage_owner_grants=can_manage_owner_grants,
+            grant_access=grant_access,
+            grant_scope_preview=grant_scope_preview,
+            principal_results=principal_results,
+            principal_query=principal_query,
             data_json_override=data_json_override,
             form_rows=form_rows,
         )
@@ -823,14 +908,203 @@ def object_detail(
         read_model.catalog_object.visibility == "detail"
         and Permission.WRITE in read_model.catalog_object.capabilities
     )
+    manage_access_enabled = (
+        read_model.catalog_object.visibility == "detail"
+        and Permission.MANAGE_ACCESS in read_model.catalog_object.capabilities
+    )
+    edit_allowed = (
+        manage_access_enabled
+        if edit == "permissions"
+        else write_enabled
+    )
     return _render_object_detail(
         request,
         session,
         object_id,
         read_model=read_model,
         error=None,
-        edit_section=edit if write_enabled else "",
+        edit_section=edit if edit_allowed else "",
         can_write_enabled=write_enabled,
+    )
+
+
+@router.post(
+    "/objects/{object_id}/permissions/grants",
+    response_class=HTMLResponse,
+    dependencies=[Depends(require_browser_write_csrf)],
+)
+def create_object_grant_from_ui(
+    request: Request,
+    object_id: str,
+    session: Annotated[Session, Depends(get_session)],
+    principal_id: Annotated[str, Form(max_length=36)],
+    role: Annotated[str, Form(max_length=32)],
+    scope: Annotated[str, Form(max_length=16)],
+    if_match: Annotated[str, Form()],
+):
+    access = read_access_from_request(request)
+    context = ui_write_context(request, access)
+    execute_ui_command(
+        session,
+        context,
+        lambda: authorize_object_command(
+            session,
+            context,
+            object_id=object_id,
+            permission=Permission.MANAGE_ACCESS,
+        ),
+    )
+    try:
+        resolved_role = Role(role)
+        resolved_scope = GrantScope(scope)
+    except ValueError:
+        return _grant_form_error_response(
+            request,
+            session,
+            object_id,
+            error="Unsupported grant role or scope.",
+            status_code=422,
+        )
+    try:
+        execute_ui_command(
+            session,
+            context,
+            lambda: create_managed_grant(
+                session,
+                context,
+                object_id=object_id,
+                principal_id=principal_id,
+                role=resolved_role,
+                scope=resolved_scope,
+                expected_revision=if_match,
+            ),
+        )
+    except HTTPException as exc:
+        return _grant_form_error_response(
+            request,
+            session,
+            object_id,
+            error=str(exc.detail),
+            status_code=exc.status_code,
+        )
+    return RedirectResponse(
+        url=f"{_detail_redirect_url(request, object_id)}&edit=permissions",
+        status_code=303,
+    )
+
+
+@router.post(
+    "/objects/{object_id}/permissions/grants/{grant_id}",
+    response_class=HTMLResponse,
+    dependencies=[Depends(require_browser_write_csrf)],
+)
+def update_object_grant_from_ui(
+    request: Request,
+    object_id: str,
+    grant_id: int,
+    session: Annotated[Session, Depends(get_session)],
+    role: Annotated[str, Form(max_length=32)],
+    scope: Annotated[str, Form(max_length=16)],
+    if_match: Annotated[str, Form()],
+):
+    access = read_access_from_request(request)
+    context = ui_write_context(request, access)
+    execute_ui_command(
+        session,
+        context,
+        lambda: authorize_object_command(
+            session,
+            context,
+            object_id=object_id,
+            permission=Permission.MANAGE_ACCESS,
+        ),
+    )
+    try:
+        resolved_role = Role(role)
+        resolved_scope = GrantScope(scope)
+    except ValueError:
+        return _grant_form_error_response(
+            request,
+            session,
+            object_id,
+            error="Unsupported grant role or scope.",
+            status_code=422,
+        )
+    try:
+        execute_ui_command(
+            session,
+            context,
+            lambda: update_managed_grant(
+                session,
+                context,
+                object_id=object_id,
+                grant_id=grant_id,
+                role=resolved_role,
+                scope=resolved_scope,
+                expected_revision=if_match,
+            ),
+        )
+    except HTTPException as exc:
+        return _grant_form_error_response(
+            request,
+            session,
+            object_id,
+            error=str(exc.detail),
+            status_code=exc.status_code,
+        )
+    return RedirectResponse(
+        url=f"{_detail_redirect_url(request, object_id)}&edit=permissions",
+        status_code=303,
+    )
+
+
+@router.post(
+    "/objects/{object_id}/permissions/grants/{grant_id}/revoke",
+    response_class=HTMLResponse,
+    dependencies=[Depends(require_browser_write_csrf)],
+)
+def revoke_object_grant_from_ui(
+    request: Request,
+    object_id: str,
+    grant_id: int,
+    session: Annotated[Session, Depends(get_session)],
+    if_match: Annotated[str, Form()],
+):
+    access = read_access_from_request(request)
+    context = ui_write_context(request, access)
+    execute_ui_command(
+        session,
+        context,
+        lambda: authorize_object_command(
+            session,
+            context,
+            object_id=object_id,
+            permission=Permission.MANAGE_ACCESS,
+        ),
+    )
+    try:
+        execute_ui_command(
+            session,
+            context,
+            lambda: revoke_managed_grant(
+                session,
+                context,
+                object_id=object_id,
+                grant_id=grant_id,
+                expected_revision=if_match,
+            ),
+        )
+    except HTTPException as exc:
+        return _grant_form_error_response(
+            request,
+            session,
+            object_id,
+            error=str(exc.detail),
+            status_code=exc.status_code,
+        )
+    return RedirectResponse(
+        url=f"{_detail_redirect_url(request, object_id)}&edit=permissions",
+        status_code=303,
     )
 
 
@@ -1621,6 +1895,25 @@ def _detail_form_error_response(
         can_write_enabled=True,
         form_rows=form_rows,
         status_code=422,
+    )
+
+
+def _grant_form_error_response(
+    request: Request,
+    session: Session,
+    object_id: str,
+    *,
+    error: str,
+    status_code: int,
+) -> HTMLResponse:
+    return _render_object_detail(
+        request,
+        session,
+        object_id,
+        error=error,
+        edit_section="permissions",
+        can_write_enabled=False,
+        status_code=status_code,
     )
 
 

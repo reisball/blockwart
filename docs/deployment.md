@@ -202,10 +202,13 @@ document only after the written JSON and its complete structure validate. A malf
 or unreadable existing document fails diagnostically instead of silently falling back to defaults.
 The configured directory must therefore be writable by the application process.
 
-`BLOCKWART_ADMIN_TOKEN` is the one runtime secret. It is not written to the database, logs, HTML,
-URLs, or the session cookie. Missing or empty configuration disables every UI write. A successful
-unlock at `/admin` creates a time-limited HMAC-signed cookie with `HttpOnly` and `SameSite=Strict`;
-rotating the token invalidates existing sessions. Logout deletes the cookie.
+`BLOCKWART_ADMIN_TOKEN` is a legacy runtime secret for schema settings and
+unplaced root creation. It is not written to the database, logs, HTML, URLs,
+or the session cookie. Missing or empty configuration disables those
+compatibility operations; object-authorized UI catalog and grant commands use
+the human identity session instead. A successful unlock at `/admin` creates a
+time-limited HMAC-signed cookie with `HttpOnly` and `SameSite=Strict`; rotating
+the token invalidates existing sessions. Logout deletes the cookie.
 
 The compatibility catalog and agent APIs remain read-only even while the UI is
 unlocked. Authorized mutations use the `/api/v1` command routes, MCP write
@@ -217,10 +220,10 @@ serve Blockwart through HTTPS and set `BLOCKWART_ADMIN_COOKIE_SECURE=true`.
 Catalog access now requires principals and object grants. `/auth` uses the
 `BLOCKWART_AUTH_*` settings for browser sessions; service-account bearer
 tokens authenticate and filter `/api/objects`, `/api/agent`, and `/api/v1`.
-The legacy admin token remains an additional write gate and does not replace
-identity authentication. Production bootstrap, token injection, writable
-authorization, and deployment rollout each require explicit approval. See
-`auth-rbac.md`.
+The legacy admin token does not authorize grant management and does not
+replace identity authentication. Production bootstrap, token injection,
+writable authorization, and deployment rollout each require explicit
+approval. See `auth-rbac.md`.
 
 ## Agent Access
 

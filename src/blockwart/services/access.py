@@ -231,6 +231,30 @@ def ensure_owner_coverage_preserved(
         raise LastOwnerError("placement change would orphan object access")
 
 
+def grant_scope_object_ids(
+    session: Session,
+    *,
+    object_id: str,
+    scope: GrantScope | str,
+) -> set[str]:
+    """Return the exact canonical placement coverage for one prospective grant."""
+    resolved_scope = GrantScope(scope)
+    catalog_object = session.get(CatalogObject, object_id)
+    if catalog_object is None:
+        raise AccessGrantError("catalog object not found")
+    if resolved_scope == GrantScope.SELF:
+        return {catalog_object.id}
+    reach = _subtree_cte(
+        select(
+            CatalogObject.id.label("object_id"),
+            (CatalogObject.kind + literal(":") + CatalogObject.id).label("object_ref"),
+            CatalogObject.kind.label("object_kind"),
+        ).where(CatalogObject.id == catalog_object.id),
+        name="grant_scope_reach",
+    )
+    return set(session.scalars(select(reach.c.object_id).distinct()).all())
+
+
 def _locked_active_owner_grants(
     session: Session,
 ) -> list[ObjectGrant]:
@@ -251,20 +275,14 @@ def _grant_affected_object_ids(
     session: Session,
     grant: ObjectGrant,
 ) -> set[str]:
-    if grant.scope == GrantScope.SELF:
-        return {grant.object_id}
-    catalog_object = session.get(CatalogObject, grant.object_id)
-    if catalog_object is None:
+    try:
+        return grant_scope_object_ids(
+            session,
+            object_id=grant.object_id,
+            scope=grant.scope,
+        )
+    except AccessGrantError:
         return set()
-    reach = _subtree_cte(
-        select(
-            CatalogObject.id.label("object_id"),
-            (CatalogObject.kind + literal(":") + CatalogObject.id).label("object_ref"),
-            CatalogObject.kind.label("object_kind"),
-        ).where(CatalogObject.id == grant.object_id),
-        name="grant_affected_reach",
-    )
-    return set(session.scalars(select(reach.c.object_id).distinct()).all())
 
 
 def _subtree_cte(

@@ -1,4 +1,4 @@
-from typing import Any, Literal
+from typing import Any, ClassVar, Literal
 
 from pydantic import BaseModel, Field, model_validator
 
@@ -12,7 +12,7 @@ from blockwart.domain.provenance import (
     CatalogProvenanceOut,
     manual_provenance,
 )
-from blockwart.domain.security import find_secret_violations
+from blockwart.domain.security import find_acl_data_violations, find_secret_violations
 
 ObjectKind = Literal[
     "host",
@@ -34,6 +34,8 @@ ENDPOINT_TYPES = set(ENDPOINT_TYPE_OPTIONS)
 
 
 class CatalogObjectIn(BaseModel):
+    reject_acl_data: ClassVar[bool] = True
+
     id: str = Field(pattern=r"^[a-z0-9][a-z0-9_-]*[a-z0-9]$|^[a-z0-9]$")
     kind: ObjectKind
     label: str
@@ -49,6 +51,10 @@ class CatalogObjectIn(BaseModel):
         violations = find_secret_violations(self.model_dump())
         if violations:
             raise ValueError("; ".join(violations))
+        if self.reject_acl_data:
+            acl_violations = find_acl_data_violations(self.data)
+            if acl_violations:
+                raise ValueError("; ".join(acl_violations))
         return self
 
     @model_validator(mode="after")
@@ -96,6 +102,10 @@ class CatalogRecordDiagnostic(BaseModel):
 
 
 class CatalogObjectOut(CatalogObjectIn):
+    # Legacy records remain readable while all mutation/import inputs reject
+    # ACL-shaped catalog data.
+    reject_acl_data: ClassVar[bool] = False
+
     visibility: Literal["detail"] = "detail"
     capabilities: list[Permission] = Field(default_factory=list)
     provenance: CatalogProvenanceOut
