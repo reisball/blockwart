@@ -2,9 +2,10 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
+from blockwart.domain.auth import Permission
 from blockwart.schemas.agent import (
-    AgentCatalogObjectContext,
-    AgentCatalogObjectSummary,
+    AgentCatalogContextRead,
+    AgentCatalogObjectRead,
 )
 from blockwart.schemas.catalog import ObjectKind
 
@@ -13,7 +14,7 @@ SortDirection = Literal["asc", "desc"]
 
 
 class V1ObjectPageOut(BaseModel):
-    items: list[AgentCatalogObjectSummary]
+    items: list[AgentCatalogObjectRead]
     next_cursor: str | None = None
     total: int | None = None
     sort: ObjectSortField
@@ -21,7 +22,7 @@ class V1ObjectPageOut(BaseModel):
 
 
 class V1ContextPageOut(BaseModel):
-    items: list[AgentCatalogObjectContext]
+    items: list[AgentCatalogContextRead]
     next_cursor: str | None = None
     total: int | None = None
     sort: ObjectSortField
@@ -65,6 +66,8 @@ class V1TopologyPortOut(BaseModel):
 
 
 class V1TopologyNodeOut(BaseModel):
+    visibility: Literal["detail"] = "detail"
+    capabilities: list[Permission] = Field(default_factory=list)
     ref: str
     id: str
     kind: ObjectKind
@@ -74,10 +77,22 @@ class V1TopologyNodeOut(BaseModel):
     ports: list[V1TopologyPortOut] = Field(default_factory=list)
 
 
+class V1TopologyStubNodeOut(BaseModel):
+    visibility: Literal["stub"] = "stub"
+    capabilities: list[Permission] = Field(default_factory=list)
+    ref: str
+    id: str
+    kind: ObjectKind
+    label: str
+
+
+V1TopologyReadNodeOut = V1TopologyNodeOut | V1TopologyStubNodeOut
+
+
 class V1TopologyChainOut(BaseModel):
-    hosts: list[V1TopologyNodeOut] = Field(default_factory=list)
-    systems: list[V1TopologyNodeOut] = Field(default_factory=list)
-    services: list[V1TopologyNodeOut] = Field(default_factory=list)
+    hosts: list[V1TopologyReadNodeOut] = Field(default_factory=list)
+    systems: list[V1TopologyReadNodeOut] = Field(default_factory=list)
+    services: list[V1TopologyReadNodeOut] = Field(default_factory=list)
 
 
 class V1TopologyOut(BaseModel):

@@ -5,9 +5,10 @@ from sqlalchemy.orm import Session
 
 from blockwart.api.deps import get_session
 from blockwart.api.errors import API_ERROR_RESPONSES
+from blockwart.api.security import require_api_read_access
 from blockwart.domain.asset_state import AssetHealth, AssetLifecycle
 from blockwart.domain.provenance import SourceType
-from blockwart.schemas.agent import AgentCatalogObjectContext
+from blockwart.schemas.agent import AgentCatalogContextRead
 from blockwart.schemas.catalog import ObjectKind, ObjectStatus
 from blockwart.schemas.v1 import (
     ObjectSortField,
@@ -24,6 +25,7 @@ from blockwart.services.agent import (
     query_agent_objects_page,
 )
 from blockwart.services.pagination import InvalidCursor
+from blockwart.services.read_access import ReadAccess
 from blockwart.services.v1 import (
     query_audit_page,
     query_relationship_page,
@@ -73,6 +75,7 @@ PageLimit = Annotated[int, Query(ge=1, le=100)]
 @router.get("/objects", response_model=V1ObjectPageOut)
 def list_v1_objects(
     session: Annotated[Session, Depends(get_session)],
+    access: Annotated[ReadAccess, Depends(require_api_read_access)],
     q: QueryText = None,
     kind: ObjectKind | None = None,
     parent: ParentFilter = None,
@@ -101,6 +104,7 @@ def list_v1_objects(
     try:
         page = query_agent_objects_page(
             session,
+            access,
             query=q,
             kind=kind,
             parent=parent,
@@ -134,6 +138,7 @@ def list_v1_objects(
 @router.get("/context", response_model=V1ContextPageOut)
 def get_v1_context(
     session: Annotated[Session, Depends(get_session)],
+    access: Annotated[ReadAccess, Depends(require_api_read_access)],
     q: QueryText = None,
     kind: ObjectKind | None = None,
     parent: ParentFilter = None,
@@ -162,6 +167,7 @@ def get_v1_context(
     try:
         page = query_agent_context_page(
             session,
+            access,
             query=q,
             kind=kind,
             parent=parent,
@@ -194,13 +200,14 @@ def get_v1_context(
 
 @router.get(
     "/objects/{object_id}",
-    response_model=AgentCatalogObjectContext,
+    response_model=AgentCatalogContextRead,
 )
 def get_v1_object(
     object_id: str,
     session: Annotated[Session, Depends(get_session)],
-) -> AgentCatalogObjectContext:
-    context = get_agent_object_context(session, object_id)
+    access: Annotated[ReadAccess, Depends(require_api_read_access)],
+) -> AgentCatalogContextRead:
+    context = get_agent_object_context(session, object_id, access)
     if context is None:
         raise HTTPException(status_code=404, detail="Catalog object not found")
     return context
@@ -213,6 +220,7 @@ def get_v1_object(
 def get_v1_relationships(
     object_id: str,
     session: Annotated[Session, Depends(get_session)],
+    access: Annotated[ReadAccess, Depends(require_api_read_access)],
     limit: PageLimit = 50,
     cursor: CursorParameter = None,
     direction: SortDirection = "asc",
@@ -225,6 +233,7 @@ def get_v1_relationships(
         page = query_relationship_page(
             session,
             object_id,
+            access,
             limit=limit,
             cursor=cursor,
             direction=direction,
@@ -249,6 +258,7 @@ def get_v1_relationships(
 def get_v1_audit_events(
     object_id: str,
     session: Annotated[Session, Depends(get_session)],
+    access: Annotated[ReadAccess, Depends(require_api_read_access)],
     limit: PageLimit = 50,
     cursor: CursorParameter = None,
     direction: SortDirection = "desc",
@@ -261,6 +271,7 @@ def get_v1_audit_events(
         page = query_audit_page(
             session,
             object_id,
+            access,
             limit=limit,
             cursor=cursor,
             direction=direction,
@@ -285,8 +296,9 @@ def get_v1_audit_events(
 def get_v1_topology(
     object_id: str,
     session: Annotated[Session, Depends(get_session)],
+    access: Annotated[ReadAccess, Depends(require_api_read_access)],
 ) -> V1TopologyOut:
-    resource = query_topology_resource(session, object_id)
+    resource = query_topology_resource(session, object_id, access)
     if resource is None:
         raise HTTPException(status_code=404, detail="Catalog object not found")
     return V1TopologyOut(

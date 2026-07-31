@@ -13,6 +13,7 @@ from blockwart.services.queries import (
     query_catalog_detail,
     query_catalog_topology,
 )
+from blockwart.services.read_access import ReadAccess
 
 
 @dataclass(frozen=True, slots=True)
@@ -38,13 +39,14 @@ class TopologyResource:
 def query_relationship_page(
     session: Session,
     object_id: str,
+    access: ReadAccess,
     *,
     limit: int,
     cursor: str | None,
     direction: SortDirection,
     include_total: bool,
 ) -> RelationshipPage | None:
-    detail = query_catalog_detail(session, object_id)
+    detail = query_catalog_detail(session, object_id, access)
     if detail is None:
         return None
     page = paginate_items(
@@ -57,7 +59,10 @@ def query_relationship_page(
         resource=f"objects/{object_id}/relationships",
         sort="relation_type",
         direction=direction,
-        query={"object_id": object_id},
+        query={
+            "access": access.cursor_scope,
+            "object_id": object_id,
+        },
         cursor=cursor,
         include_total=include_total,
     )
@@ -71,14 +76,15 @@ def query_relationship_page(
 def query_audit_page(
     session: Session,
     object_id: str,
+    access: ReadAccess,
     *,
     limit: int,
     cursor: str | None,
     direction: SortDirection,
     include_total: bool,
 ) -> AuditPage | None:
-    detail = query_catalog_detail(session, object_id)
-    if detail is None:
+    detail = query_catalog_detail(session, object_id, access)
+    if detail is None or detail.catalog_object.visibility != "detail":
         return None
     page = paginate_items(
         detail.audit_events,
@@ -90,7 +96,10 @@ def query_audit_page(
         resource=f"objects/{object_id}/audit-events",
         sort="created_at",
         direction=direction,
-        query={"object_id": object_id},
+        query={
+            "access": access.cursor_scope,
+            "object_id": object_id,
+        },
         cursor=cursor,
         include_total=include_total,
     )
@@ -104,8 +113,9 @@ def query_audit_page(
 def query_topology_resource(
     session: Session,
     object_id: str,
+    access: ReadAccess,
 ) -> TopologyResource | None:
-    result = query_catalog_topology(session, object_id)
+    result = query_catalog_topology(session, object_id, access)
     if result is None:
         return None
     object_ref, topology = result

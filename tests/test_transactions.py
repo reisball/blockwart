@@ -69,8 +69,12 @@ def _add_object(
 
 
 @contextmanager
-def _unlocked_client(session_factory) -> Generator[TestClient, None, None]:
+def _unlocked_client(
+    session_factory,
+    install_unrestricted_read_access,
+) -> Generator[TestClient, None, None]:
     app = create_app(settings=Settings(admin_token=TEST_ADMIN_TOKEN))
+    install_unrestricted_read_access(app)
 
     def override_get_session() -> Generator[Session, None, None]:
         with session_factory() as session:
@@ -192,6 +196,7 @@ def test_fault_after_relationship_rolls_back_object_edge_and_audits(session_fact
 
 def test_ui_object_and_relationship_are_one_transaction(
     session_factory,
+    install_unrestricted_read_access,
     monkeypatch,
 ) -> None:
     with session_factory() as session:
@@ -203,7 +208,10 @@ def test_ui_object_and_relationship_are_one_transaction(
 
     monkeypatch.setattr("blockwart.ui.routes.create_relationship", fail_relationship)
 
-    with _unlocked_client(session_factory) as client:
+    with _unlocked_client(
+        session_factory,
+        install_unrestricted_read_access,
+    ) as client:
         with pytest.raises(RuntimeError, match="forced relationship failure"):
             client.post(
                 "/objects",
@@ -228,6 +236,7 @@ def test_ui_object_and_relationship_are_one_transaction(
 
 def test_multi_object_access_update_rolls_back_first_object(
     session_factory,
+    install_unrestricted_read_access,
     monkeypatch,
 ) -> None:
     old_data = (
@@ -262,7 +271,10 @@ def test_multi_object_access_update_rolls_back_first_object(
 
     monkeypatch.setattr("blockwart.ui.routes.upsert_object", fail_before_second_upsert)
 
-    with _unlocked_client(session_factory) as client:
+    with _unlocked_client(
+        session_factory,
+        install_unrestricted_read_access,
+    ) as client:
         with pytest.raises(RuntimeError, match="forced second access update failure"):
             client.post(
                 "/objects/access-a/access",
@@ -475,6 +487,7 @@ def test_seed_cli_rolls_back_and_redacts_database_error(
 
 def test_ui_database_error_is_redacted_and_rolled_back(
     session_factory,
+    install_unrestricted_read_access,
     monkeypatch,
 ) -> None:
     with session_factory() as session:
@@ -496,7 +509,10 @@ def test_ui_database_error_is_redacted_and_rolled_back(
 
     monkeypatch.setattr("blockwart.ui.routes.upsert_object", fail_upsert)
 
-    with _unlocked_client(session_factory) as client:
+    with _unlocked_client(
+        session_factory,
+        install_unrestricted_read_access,
+    ) as client:
         response = client.post(
             "/objects/db-error-object/comment",
             data={"comment": "trigger"},

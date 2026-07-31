@@ -22,7 +22,8 @@ Plaintext credential material must never enter logs, audit details, database
 rows, command-line arguments, or generated documentation. See
 `auth-rbac.md`.
 
-The foundation does not yet authorize catalog reads or writes. Production
-identity bootstrap, removal of the legacy global admin gate, writable API/MCP
-operations, persistent services, and infrastructure exposure require their
-dedicated rollout and approval.
+Catalog reads are authenticated and object-authorized across UI, REST, Agent
+API, and MCP. No-discover objects are concealed and discover-only objects use
+a strict safe stub. Production identity bootstrap, removal of the legacy
+global admin gate, writable API/MCP operations, persistent services, and
+infrastructure exposure require their dedicated rollout and approval.

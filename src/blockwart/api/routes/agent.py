@@ -5,6 +5,7 @@ from sqlalchemy.orm import Session
 
 from blockwart.api.deps import get_session
 from blockwart.api.errors import API_ERROR_RESPONSES
+from blockwart.api.security import require_api_read_access
 from blockwart.domain.asset_state import AssetHealth, AssetLifecycle
 from blockwart.domain.provenance import SourceType
 from blockwart.schemas.agent import AgentContextOut, AgentSearchOut
@@ -14,6 +15,7 @@ from blockwart.services.agent import (
     get_agent_object_context,
     search_agent_objects,
 )
+from blockwart.services.read_access import ReadAccess
 
 router = APIRouter(
     prefix="/agent",
@@ -25,6 +27,7 @@ router = APIRouter(
 @router.get("/search", response_model=AgentSearchOut)
 def agent_search(
     session: Annotated[Session, Depends(get_session)],
+    access: Annotated[ReadAccess, Depends(require_api_read_access)],
     q: Annotated[
         str | None,
         Query(description="Search term for id, label, summary, or data"),
@@ -61,6 +64,7 @@ def agent_search(
     )
     results = search_agent_objects(
         session,
+        access,
         query=q,
         kind=kind,
         **filters,
@@ -79,8 +83,9 @@ def agent_search(
 def agent_object_context(
     object_id: str,
     session: Annotated[Session, Depends(get_session)],
+    access: Annotated[ReadAccess, Depends(require_api_read_access)],
 ) -> AgentContextOut:
-    context = get_agent_object_context(session, object_id)
+    context = get_agent_object_context(session, object_id, access)
     if context is None:
         raise HTTPException(status_code=404, detail="Catalog object not found")
     return AgentContextOut(query=object_id, count=1, objects=[context])
@@ -89,6 +94,7 @@ def agent_object_context(
 @router.get("/context", response_model=AgentContextOut)
 def agent_context(
     session: Annotated[Session, Depends(get_session)],
+    access: Annotated[ReadAccess, Depends(require_api_read_access)],
     q: Annotated[str | None, Query(description="Search term for context retrieval")] = None,
     kind: ObjectKind | None = None,
     parent: Annotated[str | None, Query(description="Typed parent reference")] = None,
@@ -122,6 +128,7 @@ def agent_context(
     )
     objects = build_agent_context(
         session,
+        access,
         query=q,
         kind=kind,
         **filters,

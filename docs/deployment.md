@@ -213,13 +213,13 @@ contains no catalog mutation operation.
 The token and session cookie still traverse the network during browser use. On an untrusted network,
 serve Blockwart through HTTPS and set `BLOCKWART_ADMIN_COOKIE_SECURE=true`.
 
-The principal and object-grant foundation is intentionally dormant for
-catalog access during this transition. `/auth` uses the `BLOCKWART_AUTH_*`
-settings, and service-account bearer tokens can authenticate
-`/api/v1/auth/me`, but neither mechanism enables current catalog writes or
-filters current catalog reads yet. Do not bootstrap or activate production
-identities until the authorized read/write integration and migration rollout
-have separate approval. See `auth-rbac.md`.
+Catalog access now requires principals and object grants. `/auth` uses the
+`BLOCKWART_AUTH_*` settings for browser sessions; service-account bearer
+tokens authenticate and filter `/api/objects`, `/api/agent`, and `/api/v1`.
+The legacy admin token remains an additional write gate and does not replace
+identity authentication. Production bootstrap, token injection, writable
+authorization, and deployment rollout each require explicit approval. See
+`auth-rbac.md`.
 
 ## Agent Access
 
@@ -228,6 +228,7 @@ compatibility namespace. The local MCP wrapper uses v1 through
 `BLOCKWART_API_BASE_URL`. Deployment of the MCP wrapper into OpenClaw/Gateway
 config is a separate approval step.
 
-For an approved future MCP deployment, inject a service-account token through
-the protected `BLOCKWART_API_TOKEN_FILE`. `BLOCKWART_API_TOKEN` is an
-environment fallback; configuring both sources is an error.
+For an approved MCP deployment, inject a service-account token through the
+protected `BLOCKWART_API_TOKEN_FILE`. `BLOCKWART_API_TOKEN` is an environment
+fallback; configuring both sources is an error. The service account must have
+the exact object grants needed by its tools.

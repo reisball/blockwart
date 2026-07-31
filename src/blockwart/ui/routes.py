@@ -50,9 +50,17 @@ from blockwart.services.queries import (
 from blockwart.ui.admin_auth import can_write, require_admin_write
 from blockwart.ui.i18n import translation_context
 from blockwart.ui.paths import TEMPLATE_DIR
+from blockwart.ui.security import (
+    read_access_from_request,
+    require_browser_read_access,
+)
 
 templates = Jinja2Templates(directory=TEMPLATE_DIR)
-router = APIRouter(tags=["ui"], include_in_schema=False)
+router = APIRouter(
+    tags=["ui"],
+    include_in_schema=False,
+    dependencies=[Depends(require_browser_read_access)],
+)
 
 OBJECT_KINDS = PUBLIC_OBJECT_KINDS
 OBJECT_STATUSES_UI = OBJECT_STATUSES
@@ -342,6 +350,7 @@ def index(
     selected_view = view if view in {"catalog", "topology"} else "catalog"
     read_model = query_catalog_browse(
         session,
+        read_access_from_request(request),
         query=q,
         kind=normalized_kind or None,
     )
@@ -472,6 +481,16 @@ def _detail_template_context(
     i18n = translation_context(request)
     translator = i18n["t"]
     catalog_object = read_model.catalog_object
+    if catalog_object.visibility == "stub":
+        return {
+            "title": f"{catalog_object.label} - Blockwart",
+            "object": catalog_object,
+            "is_stub": True,
+            "can_write": False,
+            "error": None,
+            "edit_section": "",
+            **i18n,
+        }
     object_data = catalog_object.data
     schemas = _localized_ui_schema_payload(str(i18n["locale"]), translator)
     ui_schema = schemas[catalog_object.kind]
@@ -679,12 +698,18 @@ def _render_object_detail(
     form_rows: Mapping[str, list[Mapping[str, Any]]] | None = None,
     status_code: int = 200,
 ) -> HTMLResponse:
-    detail_read_model = read_model or query_catalog_detail(session, object_id)
+    access = read_access_from_request(request)
+    detail_read_model = read_model or query_catalog_detail(
+        session,
+        object_id,
+        access,
+    )
     if detail_read_model is None:
         raise HTTPException(status_code=404, detail="Catalog object not found")
     navigation = _detail_navigation_context(request, object_id)
     browse_read_model = query_catalog_browse(
         session,
+        access,
         query=str(navigation["q"]),
         kind=str(navigation["kind"]) or None,
     )
@@ -692,6 +717,9 @@ def _render_object_detail(
         f"{detail_read_model.catalog_object.kind}:"
         f"{detail_read_model.catalog_object.id}"
     )
+    if detail_read_model.catalog_object.visibility == "stub":
+        can_write_enabled = False
+        edit_section = ""
     context = _index_template_context(
         request,
         browse_read_model,
@@ -739,7 +767,11 @@ def object_detail(
     edit: str = "",
 ):
     write_enabled = can_write(request)
-    read_model = query_catalog_detail(session, object_id)
+    read_model = query_catalog_detail(
+        session,
+        object_id,
+        read_access_from_request(request),
+    )
     if read_model is None:
         raise HTTPException(status_code=404, detail="Catalog object not found")
     return _render_object_detail(
@@ -838,7 +870,10 @@ def save_object(
                 )
     except (json.JSONDecodeError, ValidationError, ValueError) as exc:
         form["data_json"] = SAFE_DATA_JSON_FALLBACK
-        read_model = query_catalog_browse(session)
+        read_model = query_catalog_browse(
+            session,
+            read_access_from_request(request),
+        )
         return templates.TemplateResponse(
             request,
             "index.html",
@@ -1096,7 +1131,11 @@ def update_object(
         with transaction(session):
             upsert_object(session, payload)
     except (json.JSONDecodeError, ValidationError, ValueError) as exc:
-        read_model = query_catalog_detail(session, object_id)
+        read_model = query_catalog_detail(
+            session,
+            object_id,
+            read_access_from_request(request),
+        )
         if read_model is None:
             raise HTTPException(status_code=404, detail="Catalog object not found") from exc
         return _render_object_detail(
@@ -1205,7 +1244,11 @@ async def update_access(
     object_id: str,
     session: Annotated[Session, Depends(get_session)],
 ):
-    read_model = query_catalog_detail(session, object_id)
+    read_model = query_catalog_detail(
+        session,
+        object_id,
+        read_access_from_request(request),
+    )
     if read_model is None:
         raise HTTPException(status_code=404, detail="Catalog object not found")
     form = await request.form()
@@ -1330,7 +1373,11 @@ def _detail_form_error_response(
     edit_section: str,
     form_rows: Mapping[str, list[Mapping[str, Any]]],
 ):
-    read_model = query_catalog_detail(session, object_id)
+    read_model = query_catalog_detail(
+        session,
+        object_id,
+        read_access_from_request(request),
+    )
     if read_model is None:
         raise HTTPException(status_code=404, detail="Catalog object not found")
     return _render_object_detail(

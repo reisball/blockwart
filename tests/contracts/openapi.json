@@ -3,6 +3,13 @@
     "schemas": {
       "AgentAssetNode": {
         "properties": {
+          "capabilities": {
+            "items": {
+              "$ref": "#/components/schemas/Permission"
+            },
+            "title": "Capabilities",
+            "type": "array"
+          },
           "id": {
             "title": "Id",
             "type": "string"
@@ -32,6 +39,12 @@
           "status": {
             "title": "Status",
             "type": "string"
+          },
+          "visibility": {
+            "const": "detail",
+            "default": "detail",
+            "title": "Visibility",
+            "type": "string"
           }
         },
         "required": [
@@ -44,11 +57,76 @@
         "title": "AgentAssetNode",
         "type": "object"
       },
+      "AgentAssetStubNode": {
+        "properties": {
+          "capabilities": {
+            "items": {
+              "$ref": "#/components/schemas/Permission"
+            },
+            "title": "Capabilities",
+            "type": "array"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "host",
+              "system",
+              "network",
+              "service",
+              "credential_reference",
+              "runbook",
+              "decision",
+              "project"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "ref": {
+            "title": "Ref",
+            "type": "string"
+          },
+          "visibility": {
+            "const": "stub",
+            "default": "stub",
+            "title": "Visibility",
+            "type": "string"
+          }
+        },
+        "required": [
+          "ref",
+          "id",
+          "kind",
+          "label"
+        ],
+        "title": "AgentAssetStubNode",
+        "type": "object"
+      },
       "AgentCatalogObjectContext": {
         "properties": {
+          "capabilities": {
+            "items": {
+              "$ref": "#/components/schemas/Permission"
+            },
+            "title": "Capabilities",
+            "type": "array"
+          },
           "children": {
             "items": {
-              "$ref": "#/components/schemas/AgentAssetNode"
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/AgentAssetNode"
+                },
+                {
+                  "$ref": "#/components/schemas/AgentAssetStubNode"
+                }
+              ]
             },
             "title": "Children",
             "type": "array"
@@ -165,13 +243,24 @@
                 "$ref": "#/components/schemas/AgentAssetNode"
               },
               {
+                "$ref": "#/components/schemas/AgentAssetStubNode"
+              },
+              {
                 "type": "null"
               }
-            ]
+            ],
+            "title": "Parent"
           },
           "parent_path": {
             "items": {
-              "$ref": "#/components/schemas/AgentAssetNode"
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/AgentAssetNode"
+                },
+                {
+                  "$ref": "#/components/schemas/AgentAssetStubNode"
+                }
+              ]
             },
             "title": "Parent Path",
             "type": "array"
@@ -259,6 +348,12 @@
               }
             ],
             "title": "Updated At"
+          },
+          "visibility": {
+            "const": "detail",
+            "default": "detail",
+            "title": "Visibility",
+            "type": "string"
           }
         },
         "required": [
@@ -272,8 +367,111 @@
         "title": "AgentCatalogObjectContext",
         "type": "object"
       },
+      "AgentCatalogObjectStub": {
+        "properties": {
+          "capabilities": {
+            "items": {
+              "$ref": "#/components/schemas/Permission"
+            },
+            "title": "Capabilities",
+            "type": "array"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "host",
+              "system",
+              "network",
+              "service",
+              "credential_reference",
+              "runbook",
+              "decision",
+              "project"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "parent": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AgentAssetNode"
+              },
+              {
+                "$ref": "#/components/schemas/AgentAssetStubNode"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Parent"
+          },
+          "parent_path": {
+            "items": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/AgentAssetNode"
+                },
+                {
+                  "$ref": "#/components/schemas/AgentAssetStubNode"
+                }
+              ]
+            },
+            "title": "Parent Path",
+            "type": "array"
+          },
+          "placement_state": {
+            "anyOf": [
+              {
+                "enum": [
+                  "root",
+                  "assigned",
+                  "unassigned",
+                  "unknown"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Placement State"
+          },
+          "ref": {
+            "title": "Ref",
+            "type": "string"
+          },
+          "visibility": {
+            "const": "stub",
+            "default": "stub",
+            "title": "Visibility",
+            "type": "string"
+          }
+        },
+        "required": [
+          "ref",
+          "id",
+          "kind",
+          "label"
+        ],
+        "title": "AgentCatalogObjectStub",
+        "type": "object"
+      },
       "AgentCatalogObjectSummary": {
         "properties": {
+          "capabilities": {
+            "items": {
+              "$ref": "#/components/schemas/Permission"
+            },
+            "title": "Capabilities",
+            "type": "array"
+          },
           "diagnostics": {
             "items": {
               "$ref": "#/components/schemas/CatalogRecordDiagnostic"
@@ -357,9 +555,13 @@
                 "$ref": "#/components/schemas/AgentAssetNode"
               },
               {
+                "$ref": "#/components/schemas/AgentAssetStubNode"
+              },
+              {
                 "type": "null"
               }
-            ]
+            ],
+            "title": "Parent"
           },
           "placement_state": {
             "anyOf": [
@@ -418,6 +620,12 @@
               }
             ],
             "title": "Summary"
+          },
+          "visibility": {
+            "const": "detail",
+            "default": "detail",
+            "title": "Visibility",
+            "type": "string"
           }
         },
         "required": [
@@ -477,7 +685,14 @@
           },
           "objects": {
             "items": {
-              "$ref": "#/components/schemas/AgentCatalogObjectContext"
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/AgentCatalogObjectContext"
+                },
+                {
+                  "$ref": "#/components/schemas/AgentCatalogObjectStub"
+                }
+              ]
             },
             "title": "Objects",
             "type": "array"
@@ -680,7 +895,14 @@
           },
           "results": {
             "items": {
-              "$ref": "#/components/schemas/AgentCatalogObjectSummary"
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/AgentCatalogObjectSummary"
+                },
+                {
+                  "$ref": "#/components/schemas/AgentCatalogObjectStub"
+                }
+              ]
             },
             "title": "Results",
             "type": "array"
@@ -767,6 +989,13 @@
       },
       "CatalogAssetNode": {
         "properties": {
+          "capabilities": {
+            "items": {
+              "$ref": "#/components/schemas/Permission"
+            },
+            "title": "Capabilities",
+            "type": "array"
+          },
           "id": {
             "title": "Id",
             "type": "string"
@@ -796,6 +1025,12 @@
           "status": {
             "title": "Status",
             "type": "string"
+          },
+          "visibility": {
+            "const": "detail",
+            "default": "detail",
+            "title": "Visibility",
+            "type": "string"
           }
         },
         "required": [
@@ -808,8 +1043,66 @@
         "title": "CatalogAssetNode",
         "type": "object"
       },
+      "CatalogAssetStubNode": {
+        "properties": {
+          "capabilities": {
+            "items": {
+              "$ref": "#/components/schemas/Permission"
+            },
+            "title": "Capabilities",
+            "type": "array"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "host",
+              "system",
+              "network",
+              "service",
+              "credential_reference",
+              "runbook",
+              "decision",
+              "project"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "ref": {
+            "title": "Ref",
+            "type": "string"
+          },
+          "visibility": {
+            "const": "stub",
+            "default": "stub",
+            "title": "Visibility",
+            "type": "string"
+          }
+        },
+        "required": [
+          "ref",
+          "id",
+          "kind",
+          "label"
+        ],
+        "title": "CatalogAssetStubNode",
+        "type": "object"
+      },
       "CatalogObjectOut": {
         "properties": {
+          "capabilities": {
+            "items": {
+              "$ref": "#/components/schemas/Permission"
+            },
+            "title": "Capabilities",
+            "type": "array"
+          },
           "created_at": {
             "anyOf": [
               {
@@ -903,7 +1196,14 @@
           },
           "parent_path": {
             "items": {
-              "$ref": "#/components/schemas/CatalogAssetNode"
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/CatalogAssetNode"
+                },
+                {
+                  "$ref": "#/components/schemas/CatalogAssetStubNode"
+                }
+              ]
             },
             "title": "Parent Path",
             "type": "array"
@@ -973,6 +1273,12 @@
               }
             ],
             "title": "Updated At"
+          },
+          "visibility": {
+            "const": "detail",
+            "default": "detail",
+            "title": "Visibility",
+            "type": "string"
           }
         },
         "required": [
@@ -983,6 +1289,83 @@
           "revision"
         ],
         "title": "CatalogObjectOut",
+        "type": "object"
+      },
+      "CatalogObjectStubOut": {
+        "properties": {
+          "capabilities": {
+            "items": {
+              "$ref": "#/components/schemas/Permission"
+            },
+            "title": "Capabilities",
+            "type": "array"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "host",
+              "system",
+              "network",
+              "service",
+              "credential_reference",
+              "runbook",
+              "decision",
+              "project"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "parent_path": {
+            "items": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/CatalogAssetNode"
+                },
+                {
+                  "$ref": "#/components/schemas/CatalogAssetStubNode"
+                }
+              ]
+            },
+            "title": "Parent Path",
+            "type": "array"
+          },
+          "placement_state": {
+            "anyOf": [
+              {
+                "enum": [
+                  "root",
+                  "assigned",
+                  "unassigned",
+                  "unknown"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Placement State"
+          },
+          "visibility": {
+            "const": "stub",
+            "default": "stub",
+            "title": "Visibility",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "kind",
+          "label"
+        ],
+        "title": "CatalogObjectStubOut",
         "type": "object"
       },
       "CatalogProvenanceOut": {
@@ -1126,6 +1509,18 @@
         ],
         "title": "HealthOut",
         "type": "object"
+      },
+      "Permission": {
+        "enum": [
+          "discover",
+          "read",
+          "write",
+          "create_child",
+          "manage_access",
+          "delete"
+        ],
+        "title": "Permission",
+        "type": "string"
       },
       "PrincipalOut": {
         "properties": {
@@ -1338,7 +1733,14 @@
           },
           "items": {
             "items": {
-              "$ref": "#/components/schemas/AgentCatalogObjectContext"
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/AgentCatalogObjectContext"
+                },
+                {
+                  "$ref": "#/components/schemas/AgentCatalogObjectStub"
+                }
+              ]
             },
             "title": "Items",
             "type": "array"
@@ -1396,7 +1798,14 @@
           },
           "items": {
             "items": {
-              "$ref": "#/components/schemas/AgentCatalogObjectSummary"
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/AgentCatalogObjectSummary"
+                },
+                {
+                  "$ref": "#/components/schemas/AgentCatalogObjectStub"
+                }
+              ]
             },
             "title": "Items",
             "type": "array"
@@ -1522,21 +1931,42 @@
         "properties": {
           "hosts": {
             "items": {
-              "$ref": "#/components/schemas/V1TopologyNodeOut"
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/V1TopologyNodeOut"
+                },
+                {
+                  "$ref": "#/components/schemas/V1TopologyStubNodeOut"
+                }
+              ]
             },
             "title": "Hosts",
             "type": "array"
           },
           "services": {
             "items": {
-              "$ref": "#/components/schemas/V1TopologyNodeOut"
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/V1TopologyNodeOut"
+                },
+                {
+                  "$ref": "#/components/schemas/V1TopologyStubNodeOut"
+                }
+              ]
             },
             "title": "Services",
             "type": "array"
           },
           "systems": {
             "items": {
-              "$ref": "#/components/schemas/V1TopologyNodeOut"
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/V1TopologyNodeOut"
+                },
+                {
+                  "$ref": "#/components/schemas/V1TopologyStubNodeOut"
+                }
+              ]
             },
             "title": "Systems",
             "type": "array"
@@ -1547,6 +1977,13 @@
       },
       "V1TopologyNodeOut": {
         "properties": {
+          "capabilities": {
+            "items": {
+              "$ref": "#/components/schemas/Permission"
+            },
+            "title": "Capabilities",
+            "type": "array"
+          },
           "data": {
             "additionalProperties": true,
             "title": "Data",
@@ -1587,6 +2024,12 @@
           },
           "status": {
             "title": "Status",
+            "type": "string"
+          },
+          "visibility": {
+            "const": "detail",
+            "default": "detail",
+            "title": "Visibility",
             "type": "string"
           }
         },
@@ -1636,6 +2079,57 @@
           "value"
         ],
         "title": "V1TopologyPortOut",
+        "type": "object"
+      },
+      "V1TopologyStubNodeOut": {
+        "properties": {
+          "capabilities": {
+            "items": {
+              "$ref": "#/components/schemas/Permission"
+            },
+            "title": "Capabilities",
+            "type": "array"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "host",
+              "system",
+              "network",
+              "service",
+              "credential_reference",
+              "runbook",
+              "decision",
+              "project"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "ref": {
+            "title": "Ref",
+            "type": "string"
+          },
+          "visibility": {
+            "const": "stub",
+            "default": "stub",
+            "title": "Visibility",
+            "type": "string"
+          }
+        },
+        "required": [
+          "ref",
+          "id",
+          "kind",
+          "label"
+        ],
+        "title": "V1TopologyStubNodeOut",
         "type": "object"
       }
     },
@@ -1936,6 +2430,16 @@
             },
             "description": "Invalid request"
           },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Authentication required"
+          },
           "404": {
             "content": {
               "application/json": {
@@ -1987,6 +2491,11 @@
             "description": "Service unavailable"
           }
         },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
         "summary": "Agent Context",
         "tags": [
           "agent-readonly"
@@ -2028,6 +2537,16 @@
             },
             "description": "Invalid request"
           },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Authentication required"
+          },
           "404": {
             "content": {
               "application/json": {
@@ -2079,6 +2598,11 @@
             "description": "Service unavailable"
           }
         },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
         "summary": "Agent Object Context",
         "tags": [
           "agent-readonly"
@@ -2369,6 +2893,16 @@
             },
             "description": "Invalid request"
           },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Authentication required"
+          },
           "404": {
             "content": {
               "application/json": {
@@ -2420,6 +2954,11 @@
             "description": "Service unavailable"
           }
         },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
         "summary": "Agent Search",
         "tags": [
           "agent-readonly"
@@ -2558,7 +3097,14 @@
               "application/json": {
                 "schema": {
                   "items": {
-                    "$ref": "#/components/schemas/CatalogObjectOut"
+                    "anyOf": [
+                      {
+                        "$ref": "#/components/schemas/CatalogObjectOut"
+                      },
+                      {
+                        "$ref": "#/components/schemas/CatalogObjectStubOut"
+                      }
+                    ]
                   },
                   "title": "Response Get Objects Api Objects Get",
                   "type": "array"
@@ -2576,6 +3122,16 @@
               }
             },
             "description": "Invalid request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Authentication required"
           },
           "404": {
             "content": {
@@ -2628,6 +3184,11 @@
             "description": "Service unavailable"
           }
         },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
         "summary": "Get Objects",
         "tags": [
           "catalog"
@@ -2653,7 +3214,15 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/CatalogObjectOut"
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/CatalogObjectOut"
+                    },
+                    {
+                      "$ref": "#/components/schemas/CatalogObjectStubOut"
+                    }
+                  ],
+                  "title": "Response Get Object By Id Api Objects  Object Id  Get"
                 }
               }
             },
@@ -2668,6 +3237,16 @@
               }
             },
             "description": "Invalid request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Authentication required"
           },
           "404": {
             "content": {
@@ -2720,6 +3299,11 @@
             "description": "Service unavailable"
           }
         },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
         "summary": "Get Object By Id",
         "tags": [
           "catalog"
@@ -3184,6 +3768,16 @@
             },
             "description": "Invalid request"
           },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Authentication required"
+          },
           "404": {
             "content": {
               "application/json": {
@@ -3235,6 +3829,11 @@
             "description": "Service unavailable"
           }
         },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
         "summary": "Get V1 Context",
         "tags": [
           "api-v1-readonly"
@@ -3603,6 +4202,16 @@
             },
             "description": "Invalid request"
           },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Authentication required"
+          },
           "404": {
             "content": {
               "application/json": {
@@ -3654,6 +4263,11 @@
             "description": "Service unavailable"
           }
         },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
         "summary": "List V1 Objects",
         "tags": [
           "api-v1-readonly"
@@ -3679,7 +4293,15 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/AgentCatalogObjectContext"
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/AgentCatalogObjectContext"
+                    },
+                    {
+                      "$ref": "#/components/schemas/AgentCatalogObjectStub"
+                    }
+                  ],
+                  "title": "Response Get V1 Object Api V1 Objects  Object Id  Get"
                 }
               }
             },
@@ -3694,6 +4316,16 @@
               }
             },
             "description": "Invalid request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Authentication required"
           },
           "404": {
             "content": {
@@ -3746,6 +4378,11 @@
             "description": "Service unavailable"
           }
         },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
         "summary": "Get V1 Object",
         "tags": [
           "api-v1-readonly"
@@ -3844,6 +4481,16 @@
             },
             "description": "Invalid request"
           },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Authentication required"
+          },
           "404": {
             "content": {
               "application/json": {
@@ -3895,6 +4542,11 @@
             "description": "Service unavailable"
           }
         },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
         "summary": "Get V1 Audit Events",
         "tags": [
           "api-v1-readonly"
@@ -3993,6 +4645,16 @@
             },
             "description": "Invalid request"
           },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Authentication required"
+          },
           "404": {
             "content": {
               "application/json": {
@@ -4044,6 +4706,11 @@
             "description": "Service unavailable"
           }
         },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
         "summary": "Get V1 Relationships",
         "tags": [
           "api-v1-readonly"
@@ -4085,6 +4752,16 @@
             },
             "description": "Invalid request"
           },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Authentication required"
+          },
           "404": {
             "content": {
               "application/json": {
@@ -4136,6 +4813,11 @@
             "description": "Service unavailable"
           }
         },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
         "summary": "Get V1 Topology",
         "tags": [
           "api-v1-readonly"

@@ -76,21 +76,24 @@ def _seed_query_graph(session: Session) -> None:
 
 def test_application_queries_build_catalog_relationship_audit_and_topology_models(
     alembic_session_factory,
+    unrestricted_read_access,
 ) -> None:
     with alembic_session_factory() as session:
         _seed_query_graph(session)
 
     with alembic_session_factory() as session:
-        browse = query_catalog_browse(session)
+        access = unrestricted_read_access(session)
+        browse = query_catalog_browse(session, access)
         filtered = query_catalog_browse(
             session,
+            access,
             query="query-service",
             kind="service",
         )
-        detail = query_catalog_detail(session, "query-service")
-        missing = query_catalog_detail(session, "missing")
-        catalog_objects = list_catalog_objects(session)
-        catalog_object = get_catalog_object(session, "query-service")
+        detail = query_catalog_detail(session, "query-service", access)
+        missing = query_catalog_detail(session, "missing", access)
+        catalog_objects = list_catalog_objects(session, access)
+        catalog_object = get_catalog_object(session, "query-service", access)
 
     assert [catalog_object.id for catalog_object in browse.objects] == [
         "query-host",
@@ -180,9 +183,11 @@ def test_application_queries_build_catalog_relationship_audit_and_topology_model
 
 def test_catalog_browse_query_has_a_bounded_select_count(
     alembic_database,
+    unrestricted_read_access,
 ) -> None:
     with alembic_database.sessions() as session:
         _seed_query_graph(session)
+        access = unrestricted_read_access(session)
 
     select_statements: list[str] = []
 
@@ -204,7 +209,7 @@ def test_catalog_browse_query_has_a_bounded_select_count(
     )
     try:
         with alembic_database.sessions() as session:
-            browse = query_catalog_browse(session)
+            browse = query_catalog_browse(session, access)
     finally:
         event.remove(
             alembic_database.engine,

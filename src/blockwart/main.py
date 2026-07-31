@@ -1,4 +1,4 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.staticfiles import StaticFiles
 
 from blockwart.api.errors import install_api_error_contract
@@ -28,6 +28,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     )
     install_api_error_contract(app)
     app.middleware("http")(persist_locale_cookie)
+    app.middleware("http")(principal_scoped_cache_control)
 
     app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
     app.include_router(health.router, prefix="/api")
@@ -39,6 +40,32 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(auth_router)
     app.include_router(ui_router)
     return app
+
+
+async def principal_scoped_cache_control(request: Request, call_next):
+    response = await call_next(request)
+    if _is_principal_scoped_path(request.url.path):
+        response.headers["Cache-Control"] = "private, no-store"
+        response.headers["Pragma"] = "no-cache"
+        vary = {
+            value.strip()
+            for value in response.headers.get("Vary", "").split(",")
+            if value.strip()
+        }
+        vary.update({"Authorization", "Cookie"})
+        response.headers["Vary"] = ", ".join(sorted(vary))
+    return response
+
+
+def _is_principal_scoped_path(path: str) -> bool:
+    return (
+        path == "/"
+        or path.startswith("/objects")
+        or path.startswith("/settings/")
+        or path.startswith("/api/objects")
+        or path.startswith("/api/agent")
+        or path.startswith("/api/v1")
+    )
 
 
 app = create_app()

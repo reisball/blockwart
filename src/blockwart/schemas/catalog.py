@@ -3,6 +3,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, Field, model_validator
 
 from blockwart.domain.asset_state import AssetHealth, AssetLifecycle, is_asset_kind
+from blockwart.domain.auth import Permission
 from blockwart.domain.interfaces import normalize_interface_data
 from blockwart.domain.object_schema import validate_object_data
 from blockwart.domain.placement import PlacementState, validate_placement_metadata
@@ -67,11 +68,25 @@ class CatalogObjectIn(BaseModel):
 
 
 class CatalogAssetNode(BaseModel):
+    visibility: Literal["detail"] = "detail"
+    capabilities: list[Permission] = Field(default_factory=list)
     ref: str
     id: str
     kind: ObjectKind
     label: str
     status: str
+
+
+class CatalogAssetStubNode(BaseModel):
+    visibility: Literal["stub"] = "stub"
+    capabilities: list[Permission] = Field(default_factory=list)
+    ref: str
+    id: str
+    kind: ObjectKind
+    label: str
+
+
+CatalogAssetReadNode = CatalogAssetNode | CatalogAssetStubNode
 
 
 class CatalogRecordDiagnostic(BaseModel):
@@ -81,15 +96,30 @@ class CatalogRecordDiagnostic(BaseModel):
 
 
 class CatalogObjectOut(CatalogObjectIn):
+    visibility: Literal["detail"] = "detail"
+    capabilities: list[Permission] = Field(default_factory=list)
     provenance: CatalogProvenanceOut
     revision: int = Field(ge=1)
     created_at: str | None = None
     updated_at: str | None = None
     last_changed: str | None = None
-    parent_path: list[CatalogAssetNode] = Field(default_factory=list)
+    parent_path: list[CatalogAssetReadNode] = Field(default_factory=list)
     placement_state: PlacementState | None = None
     record_state: Literal["valid", "corrupt"] = "valid"
     diagnostics: list[CatalogRecordDiagnostic] = Field(default_factory=list)
+
+
+class CatalogObjectStubOut(BaseModel):
+    visibility: Literal["stub"] = "stub"
+    capabilities: list[Permission] = Field(default_factory=list)
+    id: str
+    kind: ObjectKind
+    label: str
+    parent_path: list[CatalogAssetReadNode] = Field(default_factory=list)
+    placement_state: PlacementState | None = None
+
+
+CatalogObjectReadOut = CatalogObjectOut | CatalogObjectStubOut
 
 
 class HealthOut(BaseModel):

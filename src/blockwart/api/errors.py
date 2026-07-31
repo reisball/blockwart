@@ -19,6 +19,7 @@ from blockwart.schemas.errors import ApiErrorResponse
 CORRELATION_ID_HEADER = "X-Correlation-ID"
 API_ERROR_RESPONSES = {
     400: {"model": ApiErrorResponse, "description": "Invalid request"},
+    401: {"model": ApiErrorResponse, "description": "Authentication required"},
     500: {"model": ApiErrorResponse, "description": "Internal server error"},
     404: {"model": ApiErrorResponse, "description": "Resource not found"},
     409: {"model": ApiErrorResponse, "description": "Conflict"},
