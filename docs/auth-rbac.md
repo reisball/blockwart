@@ -174,9 +174,9 @@ details.
 
 ## Transition contract
 
-The legacy `BLOCKWART_ADMIN_TOKEN` mechanism remains the additional gate for
-current UI catalog mutations until writable object authorization is completed.
-Identity sessions do not by themselves enable writes. REST and MCP catalog
-operations remain read-only, but are now authenticated and filtered by object
-grants. Production identity bootstrap, token injection, writable surfaces, and
-runtime rollout still require their dedicated approval.
+The legacy `BLOCKWART_ADMIN_TOKEN` mechanism remains an additional
+compatibility gate for current UI catalog mutations until the production
+rollout removes it. Identity sessions do not by themselves enable writes:
+UI, REST, and MCP commands also require the matching object grant. Production
+identity bootstrap, token injection, and runtime rollout still require their
+dedicated approval.

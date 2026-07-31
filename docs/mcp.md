@@ -3,13 +3,16 @@
 Blockwart ships a local MCP stdio server named `blockwart-mcp`. Transport and protocol lifecycle
 are implemented by the official Python MCP SDK.
 
-It wraps only the read-only v1 API:
+It wraps the object-authorized v1 API:
 
 - blockwart.search -> GET /api/v1/objects
 - blockwart.get_object_context -> GET /api/v1/objects/{object_id}
 - blockwart.get_context -> GET /api/v1/context
-
-There are no writable MCP tools.
+- blockwart.create_child -> POST /api/v1/objects/{parent_id}/children
+- blockwart.update_object -> PUT /api/v1/objects/{object_id}
+- blockwart.delete_object -> DELETE /api/v1/objects/{object_id}
+- blockwart.create_relationship -> POST /api/v1/objects/{object_id}/relationships
+- blockwart.delete_relationship -> DELETE /api/v1/objects/{object_id}/relationships
 
 `blockwart.search` and `blockwart.get_context` accept `host`, `system`, `network`, and `service`
 as kinds. Both tools also forward v1's structured `parent`, `ip`, `port`,
@@ -17,8 +20,14 @@ as kinds. Both tools also forward v1's structured `parent`, `ip`, `port`,
 filters plus canonical `source_type` and computed `stale`, `cursor`, `sort`,
 `direction`, and optional `include_total`.
 Resolved context comes from the same service implementation used by REST.
-All three tools require a service-account token and receive exactly that
+All tools require a service-account token and receive exactly that
 principal's authorized detail/stub projection.
+
+Write tools use the same command, validation, policy, ETag, idempotency, audit,
+and rollback implementation as REST and the browser UI. Update and delete
+arguments carry the last full-read `if_match` ETag. Child creation carries an
+`idempotency_key`; credentials remain runtime configuration and are never tool
+arguments. Delete tools publish MCP's destructive annotation.
 
 For compatibility, MCP output retains the established `results` and `objects`
 fields. It additionally returns v1 `next_cursor`, `total`, `sort`, and
@@ -61,16 +70,17 @@ credential forwarding across an origin or scheme boundary.
 
 ## Secret Handling
 
-The MCP wrapper never resolves credential values. It only returns whatever the read-only v1 API
+The MCP wrapper never resolves credential values. It only returns what the v1 API
 returns: sanitized object context, relationships, and credential-reference IDs.
 Canonical provenance is returned unchanged from v1; secret-shaped stored
 provenance is handled by the same safe record-integrity boundary.
 
-The bearer token authenticates every catalog tool call. Existing catalog tools
-remain read-only and are object-filtered: no-discover objects are concealed,
+The bearer token authenticates every catalog tool call. Read tools are
+object-filtered: no-discover objects are concealed,
 discover-only objects are strict stubs, and readable objects return sanitized
-detail. Writable tools, credential resolution, and Gateway registration
-require their dedicated implementation and approval.
+detail. Write tools reject secret-shaped payloads and require the corresponding
+object permission. Credential resolution and Gateway registration remain out
+of scope.
 
 ## Error Contract
 

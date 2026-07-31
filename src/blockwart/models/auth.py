@@ -194,3 +194,32 @@ class SecurityEvent(Base):
         server_default="{}",
     )
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), index=True)
+
+
+class IdempotencyRecord(Base):
+    __tablename__ = "idempotency_records"
+    __table_args__ = (
+        UniqueConstraint(
+            "principal_id",
+            "key_hash",
+            name="uq_idempotency_records_principal_key",
+        ),
+        Index(
+            "ix_idempotency_records_expiry",
+            "expires_at",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    principal_id: Mapped[str] = mapped_column(
+        String(36),
+        ForeignKey("principals.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    key_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    operation_context: Mapped[str] = mapped_column(String(255), nullable=False)
+    request_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    resource_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    response_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)

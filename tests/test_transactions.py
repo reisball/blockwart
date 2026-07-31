@@ -206,7 +206,10 @@ def test_ui_object_and_relationship_are_one_transaction(
     def fail_relationship(*args, **kwargs):
         raise RuntimeError("forced relationship failure")
 
-    monkeypatch.setattr("blockwart.ui.routes.create_relationship", fail_relationship)
+    monkeypatch.setattr(
+        "blockwart.services.commands.create_relationship",
+        fail_relationship,
+    )
 
     with _unlocked_client(
         session_factory,
@@ -222,7 +225,7 @@ def test_ui_object_and_relationship_are_one_transaction(
                     "status": "active",
                     "data_json": '{"schema_version": 1}',
                     "relation_target_ref": "host:target",
-                    "relation_type": "related_to",
+                    "relation_type": "hosts",
                 },
                 follow_redirects=False,
             )
@@ -234,7 +237,7 @@ def test_ui_object_and_relationship_are_one_transaction(
         ).all() == []
 
 
-def test_multi_object_access_update_rolls_back_first_object(
+def test_ui_rejects_multi_object_access_update_without_partial_changes(
     session_factory,
     install_unrestricted_read_access,
     monkeypatch,
@@ -260,33 +263,23 @@ def test_multi_object_access_update_rolls_back_first_object(
         )
         session.commit()
 
-    calls = 0
-
-    def fail_before_second_upsert(session: Session, payload: CatalogObjectIn):
-        nonlocal calls
-        calls += 1
-        if calls == 2:
-            raise RuntimeError("forced second access update failure")
-        return upsert_object(session, payload)
-
-    monkeypatch.setattr("blockwart.ui.routes.upsert_object", fail_before_second_upsert)
-
     with _unlocked_client(
         session_factory,
         install_unrestricted_read_access,
     ) as client:
-        with pytest.raises(RuntimeError, match="forced second access update failure"):
-            client.post(
-                "/objects/access-a/access",
-                data={
-                    "method_ref": ["system:access-a", "service:access-b"],
-                    "method_index": ["0", "0"],
-                    "method_type": ["ssh", "ssh"],
-                    "method_endpoint": ["ssh://new-a", "ssh://new-b"],
-                    "method_auth_mode": ["key-only", "key-only"],
-                },
-                follow_redirects=False,
-            )
+        response = client.post(
+            "/objects/access-a/access",
+            data={
+                "method_ref": ["system:access-a", "service:access-b"],
+                "method_index": ["0", "0"],
+                "method_type": ["ssh", "ssh"],
+                "method_endpoint": ["ssh://new-a", "ssh://new-b"],
+                "method_auth_mode": ["key-only", "key-only"],
+            },
+            follow_redirects=False,
+        )
+
+    assert response.status_code == 422
 
     with session_factory() as session:
         first = get_object(session, "access-a")
@@ -494,7 +487,11 @@ def test_ui_database_error_is_redacted_and_rolled_back(
         _add_object(session, object_id="db-error-object")
         session.commit()
 
-    def fail_upsert(session: Session, payload: CatalogObjectIn):
+    def fail_upsert(
+        session: Session,
+        payload: CatalogObjectIn,
+        **kwargs,
+    ):
         session.get(CatalogObject, payload.id).label = "must roll back"
         session.add(
             AuditEvent(
@@ -507,7 +504,7 @@ def test_ui_database_error_is_redacted_and_rolled_back(
         session.flush()
         raise OperationalError("UPDATE", {}, RuntimeError("sensitive database detail"))
 
-    monkeypatch.setattr("blockwart.ui.routes.upsert_object", fail_upsert)
+    monkeypatch.setattr("blockwart.services.commands.upsert_object", fail_upsert)
 
     with _unlocked_client(
         session_factory,

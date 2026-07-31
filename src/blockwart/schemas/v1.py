@@ -7,7 +7,7 @@ from blockwart.schemas.agent import (
     AgentCatalogContextRead,
     AgentCatalogObjectRead,
 )
-from blockwart.schemas.catalog import ObjectKind
+from blockwart.schemas.catalog import CatalogObjectOut, ObjectKind
 
 ObjectSortField = Literal["id", "label", "kind", "updated_at"]
 SortDirection = Literal["asc", "desc"]
@@ -33,6 +33,32 @@ class V1RelationshipOut(BaseModel):
     from_ref: str
     relation_type: str
     to_ref: str
+
+
+class V1ObjectCommandOut(BaseModel):
+    catalog_object: CatalogObjectOut
+    etag: str
+    changed: bool
+    replayed: bool = False
+
+
+class V1DeleteCommandOut(BaseModel):
+    object_id: str
+    deleted_revision: int
+    changed: bool = True
+
+
+class V1RelationshipCommandIn(BaseModel):
+    from_ref: str = Field(min_length=3, max_length=192)
+    relation_type: str = Field(min_length=1, max_length=96)
+    to_ref: str = Field(min_length=3, max_length=192)
+
+
+class V1RelationshipCommandOut(V1RelationshipCommandIn):
+    object_id: str
+    revision: int = Field(ge=1)
+    etag: str
+    changed: bool
 
 
 class V1RelationshipPageOut(BaseModel):

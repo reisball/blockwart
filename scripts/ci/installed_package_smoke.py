@@ -70,17 +70,20 @@ def prepare_authorized_readers() -> tuple[str, str]:
                 for object_id in session.scalars(
                     select(CatalogObject.id).order_by(CatalogObject.id)
                 ):
-                    for principal_id in (
-                        service_principal.id,
-                        browser_principal.id,
-                    ):
-                        create_object_grant(
-                            session,
-                            principal_id=principal_id,
-                            object_id=object_id,
-                            role=Role.VIEWER,
-                            scope=GrantScope.SELF,
-                        )
+                    create_object_grant(
+                        session,
+                        principal_id=service_principal.id,
+                        object_id=object_id,
+                        role=Role.OWNER,
+                        scope=GrantScope.SELF,
+                    )
+                    create_object_grant(
+                        session,
+                        principal_id=browser_principal.id,
+                        object_id=object_id,
+                        role=Role.VIEWER,
+                        scope=GrantScope.SELF,
+                    )
                 service_token = issue_service_token(
                     session,
                     principal_id=service_principal.id,
@@ -119,14 +122,27 @@ async def check_mcp(object_id: str, *, token: str) -> str:
                 "blockwart.search",
                 "blockwart.get_object_context",
                 "blockwart.get_context",
+                "blockwart.create_child",
+                "blockwart.update_object",
+                "blockwart.delete_object",
+                "blockwart.create_relationship",
+                "blockwart.delete_relationship",
             }
             assert all(
                 tool.annotations
-                and tool.annotations.readOnlyHint
-                and not tool.annotations.destructiveHint
-                for tool in tools.values()
+                and (
+                    tool.annotations.readOnlyHint
+                    if name
+                    in {
+                        "blockwart.search",
+                        "blockwart.get_object_context",
+                        "blockwart.get_context",
+                    }
+                    else not tool.annotations.readOnlyHint
+                )
+                for name, tool in tools.items()
             )
-            results = [
+            read_results = [
                 await session.call_tool("blockwart.search", {"limit": 1}),
                 await session.call_tool(
                     "blockwart.get_object_context",
@@ -134,8 +150,82 @@ async def check_mcp(object_id: str, *, token: str) -> str:
                 ),
                 await session.call_tool("blockwart.get_context", {"limit": 1}),
             ]
-            assert all(not result.isError for result in results)
+            assert all(not result.isError for result in read_results)
+            created = await session.call_tool(
+                "blockwart.create_child",
+                {
+                    "parent_id": "fabrik",
+                    "idempotency_key": "package-smoke-create-0001",
+                    "object": {
+                        "id": "package-smoke-child",
+                        "kind": "service",
+                        "label": "Package Smoke Child",
+                        "status": "active",
+                        "data": {"schema_version": 1},
+                    },
+                },
+            )
+            created_payload = _tool_payload(created)
+            created_etag = str(created_payload["etag"])
+            relationship_args = {
+                "object_id": "package-smoke-child",
+                "if_match": created_etag,
+                "from_ref": "service:package-smoke-child",
+                "relation_type": "depends_on",
+                "to_ref": "service:n8n-web-ui",
+            }
+            relationship_created = await session.call_tool(
+                "blockwart.create_relationship",
+                relationship_args,
+            )
+            relationship_payload = _tool_payload(relationship_created)
+            relationship_args["if_match"] = str(relationship_payload["etag"])
+            relationship_deleted = await session.call_tool(
+                "blockwart.delete_relationship",
+                relationship_args,
+            )
+            relationship_deleted_payload = _tool_payload(relationship_deleted)
+            updated = await session.call_tool(
+                "blockwart.update_object",
+                {
+                    "object_id": "package-smoke-child",
+                    "if_match": str(relationship_deleted_payload["etag"]),
+                    "object": {
+                        "id": "package-smoke-child",
+                        "kind": "service",
+                        "label": "Package Smoke Child Updated",
+                        "status": "active",
+                        "data": {"schema_version": 1},
+                    },
+                },
+            )
+            updated_payload = _tool_payload(updated)
+            placement_deleted = await session.call_tool(
+                "blockwart.delete_relationship",
+                {
+                    "object_id": "package-smoke-child",
+                    "if_match": str(updated_payload["etag"]),
+                    "from_ref": "system:fabrik",
+                    "relation_type": "hosts",
+                    "to_ref": "service:package-smoke-child",
+                },
+            )
+            placement_deleted_payload = _tool_payload(placement_deleted)
+            deleted = await session.call_tool(
+                "blockwart.delete_object",
+                {
+                    "object_id": "package-smoke-child",
+                    "if_match": str(placement_deleted_payload["etag"]),
+                },
+            )
+            assert not deleted.isError
             return str(initialized.protocolVersion)
+
+
+def _tool_payload(result) -> dict:
+    assert not result.isError
+    content = result.content[0]
+    return json.loads(content.text)
 
 
 def main() -> None:
@@ -158,7 +248,7 @@ def main() -> None:
         token=api_token,
     )["objects"][0]
 
-    assert readiness["revision"] == "20260730_0009"
+    assert readiness["revision"] == "20260731_0010"
     assert "Blockwart" in index
     assert static_content_type == "text/css"
     assert not any(
@@ -183,7 +273,7 @@ def main() -> None:
     print(
         "installed_package=ok "
         f"cwd={Path.cwd()} revision={readiness['revision']} "
-        f"openapi_paths={len(openapi['paths'])} mcp_protocol={protocol} mcp_calls=3"
+        f"openapi_paths={len(openapi['paths'])} mcp_protocol={protocol} mcp_calls=9"
     )
 
 

@@ -7,8 +7,8 @@ The MVP goal is narrow:
 - structured systems, services, credential references, and runbooks
 - DB-backed canonical storage
 - search-first human UI
-- read-only REST API for humans and integrations
-- read-only MCP surface for agents
+- object-authorized REST API for humans and integrations
+- object-authorized MCP surface for agents
 - Markdown/YAML export as generated output
 - no secret values in database records, fixtures, exports, logs, docs, or issues
 
@@ -47,9 +47,11 @@ Catalog reads are object-authorized. Browser routes require an authenticated
 human session; `/api/objects`, `/api/agent`, and `/api/v1` require a
 service-account bearer token. `discover` returns a strict placement stub,
 `read` returns full detail, and objects without `discover` are concealed.
-The legacy admin token remains the separate write gate until writable RBAC
-surfaces are implemented. Roles, bootstrap, token lifecycle, projection,
-revision, and audit contracts are documented in `docs/auth-rbac.md`.
+Catalog mutations use object-scoped `write`, `create_child`, or `delete`
+permissions. The legacy admin token remains an additional compatibility gate
+for browser mutations until the production rollout removes it. Roles,
+bootstrap, token lifecycle, projection, revision, and audit contracts are
+documented in `docs/auth-rbac.md`.
 
 Initialize or refresh a local pilot database:
 
@@ -107,9 +109,11 @@ Endpoint, technical-port, and administrative-access semantics use one backend co
 and MCP expose its normalized view, while live-data normalization remains an explicit dry-run-first
 operation. See `docs/service-interfaces.md`.
 
-The catalog REST API is also read-only. Object changes are available only through authenticated
-UI form routes. Catalog, Agent, and MCP boundaries share RFC3339 UTC timestamps, stable REST error
-codes with correlation IDs, and explicit safe diagnostics for corrupt catalog rows. See
+The compatibility `/api/objects` and `/api/agent` routes remain read-only.
+Authorized object changes are available through authenticated UI form routes,
+the `/api/v1` command routes, and MCP write tools. Catalog, Agent, and MCP
+boundaries share RFC3339 UTC timestamps, stable REST error codes with
+correlation IDs, and explicit safe diagnostics for corrupt catalog rows. See
 `docs/api-boundary-contract.md`.
 
 Catalog JSON routes and UI reads use the same policy-aware, FastAPI-independent
@@ -129,12 +133,13 @@ observation, verification, and staleness times; and protects explicit manual
 overrides from silent import replacement. Read APIs and MCP expose the same
 header and source/freshness filters. See `docs/provenance.md`.
 
-The stable GET-only machine contract lives under `/api/v1` with opaque
-keyset cursors, deterministic sorting, structured domain filters, and
-versioned Relationship, Audit, and Topology resources. Existing `/api/objects`
-and `/api/agent` routes remain compatibility surfaces. See `docs/api-v1.md`.
+The stable machine contract lives under `/api/v1` with object-authorized reads
+and writes, opaque keyset cursors, deterministic sorting, structured domain
+filters, and versioned Relationship, Audit, and Topology resources. Existing
+`/api/objects` and `/api/agent` routes remain read-only compatibility surfaces.
+See `docs/api-v1.md`.
 
-A local MCP-compatible stdio wrapper is available as blockwart-mcp. It reads
+A local MCP-compatible stdio wrapper is available as blockwart-mcp. It uses
 the v1 service layer and can attach a service-account bearer token from a
 protected file when the server requires one. See docs/mcp.md.
 

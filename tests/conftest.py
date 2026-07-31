@@ -16,10 +16,14 @@ from blockwart.api.security import require_api_read_access
 from blockwart.db.migrations import upgrade_database
 from blockwart.db.session import build_engine
 from blockwart.domain.auth import Permission, PrincipalContext, PrincipalType
-from blockwart.models import CatalogObject
+from blockwart.models import CatalogObject, Principal
 from blockwart.services.policy import PolicySnapshot
 from blockwart.services.read_access import ReadAccess
-from blockwart.ui.security import require_browser_read_access
+from blockwart.ui.admin_auth import can_write
+from blockwart.ui.security import (
+    require_browser_read_access,
+    require_browser_write_csrf,
+)
 
 
 @dataclass(frozen=True)
@@ -86,6 +90,17 @@ def alembic_session_factory(
 
 
 def _unrestricted_read_access(session: Session) -> ReadAccess:
+    if session.get(Principal, "test-unrestricted-principal") is None:
+        session.add(
+            Principal(
+                id="test-unrestricted-principal",
+                principal_type=PrincipalType.HUMAN,
+                login="test-unrestricted",
+                display_name="Test Unrestricted",
+                active=True,
+            )
+        )
+        session.flush()
     object_ids = session.scalars(select(CatalogObject.id)).all()
     return ReadAccess(
         principal=PrincipalContext(
@@ -112,7 +127,11 @@ def unrestricted_read_access():
 
 @pytest.fixture
 def install_unrestricted_read_access():
-    def install(app: FastAPI) -> None:
+    def install(
+        app: FastAPI,
+        *,
+        browser_write_requires_admin: bool = False,
+    ) -> None:
         def api_access(
             session: Annotated[Session, Depends(get_session)],
         ) -> ReadAccess:
@@ -123,10 +142,27 @@ def install_unrestricted_read_access():
             session: Annotated[Session, Depends(get_session)],
         ) -> ReadAccess:
             access = _unrestricted_read_access(session)
+            if browser_write_requires_admin and not can_write(request):
+                access = ReadAccess(
+                    principal=access.principal,
+                    policy=PolicySnapshot(
+                        principal_id=access.principal.id,
+                        _permissions={
+                            object_id: frozenset(
+                                {Permission.DISCOVER, Permission.READ}
+                            )
+                            for object_id in access.policy.authorized_ids(
+                                Permission.DISCOVER
+                            )
+                        },
+                        _grants={},
+                    ),
+                )
             request.state.read_access = access
             return access
 
         app.dependency_overrides[require_api_read_access] = api_access
         app.dependency_overrides[require_browser_read_access] = browser_access
+        app.dependency_overrides[require_browser_write_csrf] = lambda: None
 
     return install

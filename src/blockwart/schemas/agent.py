@@ -53,6 +53,7 @@ class AgentCatalogObjectSummary(BaseModel):
     kind: ObjectKind
     label: str
     status: str
+    revision: int = Field(ge=1)
     summary: str | None = None
     parent: AgentAssetReadNode | None = None
     ips: list[str] = Field(default_factory=list)

@@ -1,21 +1,27 @@
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, Response
 from sqlalchemy.orm import Session
 
 from blockwart.api.deps import get_session
 from blockwart.api.errors import API_ERROR_RESPONSES
 from blockwart.api.security import require_api_read_access
+from blockwart.api.write_commands import api_write_context, execute_api_command
+from blockwart.config import Settings
 from blockwart.domain.asset_state import AssetHealth, AssetLifecycle
 from blockwart.domain.provenance import SourceType
 from blockwart.schemas.agent import AgentCatalogContextRead
-from blockwart.schemas.catalog import ObjectKind, ObjectStatus
+from blockwart.schemas.catalog import CatalogObjectIn, ObjectKind, ObjectStatus
 from blockwart.schemas.v1 import (
     ObjectSortField,
     SortDirection,
     V1AuditPageOut,
     V1ContextPageOut,
+    V1DeleteCommandOut,
+    V1ObjectCommandOut,
     V1ObjectPageOut,
+    V1RelationshipCommandIn,
+    V1RelationshipCommandOut,
     V1RelationshipPageOut,
     V1TopologyOut,
 )
@@ -23,6 +29,14 @@ from blockwart.services.agent import (
     get_agent_object_context,
     query_agent_context_page,
     query_agent_objects_page,
+)
+from blockwart.services.commands import (
+    create_child_object,
+    create_object_relationship,
+    delete_catalog_object,
+    delete_object_relationship,
+    revision_etag,
+    update_catalog_object,
 )
 from blockwart.services.pagination import InvalidCursor
 from blockwart.services.read_access import ReadAccess
@@ -204,13 +218,197 @@ def get_v1_context(
 )
 def get_v1_object(
     object_id: str,
+    response: Response,
     session: Annotated[Session, Depends(get_session)],
     access: Annotated[ReadAccess, Depends(require_api_read_access)],
 ) -> AgentCatalogContextRead:
     context = get_agent_object_context(session, object_id, access)
     if context is None:
         raise HTTPException(status_code=404, detail="Catalog object not found")
+    revision = getattr(context, "revision", None)
+    if isinstance(revision, int):
+        response.headers["ETag"] = revision_etag(revision)
     return context
+
+
+@router.post(
+    "/objects/{parent_id}/children",
+    response_model=V1ObjectCommandOut,
+    status_code=201,
+)
+def create_v1_child_object(
+    parent_id: str,
+    payload: CatalogObjectIn,
+    request: Request,
+    response: Response,
+    session: Annotated[Session, Depends(get_session)],
+    access: Annotated[ReadAccess, Depends(require_api_read_access)],
+    idempotency_key: Annotated[str | None, Header(alias="Idempotency-Key")] = None,
+) -> V1ObjectCommandOut:
+    if idempotency_key is None:
+        raise HTTPException(status_code=400, detail="Idempotency-Key is required")
+    context = api_write_context(request, access)
+    settings: Settings = request.app.state.settings
+    result = execute_api_command(
+        session,
+        context,
+        lambda: create_child_object(
+            session,
+            context,
+            parent_id=parent_id,
+            payload=payload,
+            idempotency_key=idempotency_key,
+            idempotency_ttl_seconds=settings.idempotency_ttl_seconds,
+        ),
+    )
+    response.headers["ETag"] = result.etag
+    response.headers["Location"] = f"/api/v1/objects/{result.catalog_object.id}"
+    return V1ObjectCommandOut(
+        catalog_object=result.catalog_object,
+        etag=result.etag,
+        changed=result.changed,
+        replayed=result.replayed,
+    )
+
+
+@router.put(
+    "/objects/{object_id}",
+    response_model=V1ObjectCommandOut,
+)
+def update_v1_object(
+    object_id: str,
+    payload: CatalogObjectIn,
+    request: Request,
+    response: Response,
+    session: Annotated[Session, Depends(get_session)],
+    access: Annotated[ReadAccess, Depends(require_api_read_access)],
+    if_match: Annotated[str | None, Header(alias="If-Match")] = None,
+) -> V1ObjectCommandOut:
+    context = api_write_context(request, access)
+    result = execute_api_command(
+        session,
+        context,
+        lambda: update_catalog_object(
+            session,
+            context,
+            object_id=object_id,
+            payload=payload,
+            expected_revision=if_match,
+        ),
+    )
+    response.headers["ETag"] = result.etag
+    return V1ObjectCommandOut(
+        catalog_object=result.catalog_object,
+        etag=result.etag,
+        changed=result.changed,
+    )
+
+
+@router.delete(
+    "/objects/{object_id}",
+    response_model=V1DeleteCommandOut,
+)
+def delete_v1_object(
+    object_id: str,
+    request: Request,
+    session: Annotated[Session, Depends(get_session)],
+    access: Annotated[ReadAccess, Depends(require_api_read_access)],
+    if_match: Annotated[str | None, Header(alias="If-Match")] = None,
+) -> V1DeleteCommandOut:
+    context = api_write_context(request, access)
+    result = execute_api_command(
+        session,
+        context,
+        lambda: delete_catalog_object(
+            session,
+            context,
+            object_id=object_id,
+            expected_revision=if_match,
+        ),
+    )
+    return V1DeleteCommandOut(
+        object_id=result.object_id,
+        deleted_revision=result.deleted_revision,
+        changed=result.changed,
+    )
+
+
+@router.post(
+    "/objects/{object_id}/relationships",
+    response_model=V1RelationshipCommandOut,
+)
+def create_v1_relationship(
+    object_id: str,
+    payload: V1RelationshipCommandIn,
+    request: Request,
+    response: Response,
+    session: Annotated[Session, Depends(get_session)],
+    access: Annotated[ReadAccess, Depends(require_api_read_access)],
+    if_match: Annotated[str | None, Header(alias="If-Match")] = None,
+) -> V1RelationshipCommandOut:
+    context = api_write_context(request, access)
+    result = execute_api_command(
+        session,
+        context,
+        lambda: create_object_relationship(
+            session,
+            context,
+            object_id=object_id,
+            from_ref=payload.from_ref,
+            relation_type=payload.relation_type,
+            to_ref=payload.to_ref,
+            expected_revision=if_match,
+        ),
+    )
+    response.headers["ETag"] = result.etag
+    return V1RelationshipCommandOut(
+        from_ref=result.from_ref,
+        relation_type=result.relation_type,
+        to_ref=result.to_ref,
+        object_id=result.object_id,
+        revision=result.revision,
+        etag=result.etag,
+        changed=result.changed,
+    )
+
+
+@router.delete(
+    "/objects/{object_id}/relationships",
+    response_model=V1RelationshipCommandOut,
+)
+def delete_v1_relationship(
+    object_id: str,
+    payload: V1RelationshipCommandIn,
+    request: Request,
+    response: Response,
+    session: Annotated[Session, Depends(get_session)],
+    access: Annotated[ReadAccess, Depends(require_api_read_access)],
+    if_match: Annotated[str | None, Header(alias="If-Match")] = None,
+) -> V1RelationshipCommandOut:
+    context = api_write_context(request, access)
+    result = execute_api_command(
+        session,
+        context,
+        lambda: delete_object_relationship(
+            session,
+            context,
+            object_id=object_id,
+            from_ref=payload.from_ref,
+            relation_type=payload.relation_type,
+            to_ref=payload.to_ref,
+            expected_revision=if_match,
+        ),
+    )
+    response.headers["ETag"] = result.etag
+    return V1RelationshipCommandOut(
+        from_ref=result.from_ref,
+        relation_type=result.relation_type,
+        to_ref=result.to_ref,
+        object_id=result.object_id,
+        revision=result.revision,
+        etag=result.etag,
+        changed=result.changed,
+    )
 
 
 @router.get(

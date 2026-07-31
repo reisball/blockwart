@@ -117,6 +117,12 @@ class Settings(BaseSettings):
         default=False,
         description="Require HTTPS when sending identity and CSRF cookies.",
     )
+    idempotency_ttl_seconds: int = Field(
+        default=86400,
+        ge=300,
+        le=604800,
+        description="Retention and replay window for create-command idempotency keys.",
+    )
 
     @field_validator("admin_token", mode="before")
     @classmethod

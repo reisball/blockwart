@@ -27,6 +27,7 @@ SERVER_NAME = "blockwart-mcp"
 SERVER_VERSION = "0.1.0"
 JSON = dict[str, Any]
 Fetcher = Callable[[str, dict[str, Any]], JSON]
+Requester = Callable[[str, str, JSON, dict[str, str]], JSON]
 logger = logging.getLogger(__name__)
 _API_ERROR_CODE_PATTERN = re.compile(r"^[a-z][a-z0-9_]{1,63}$")
 _CORRELATION_ID_PATTERN = re.compile(r"^[A-Za-z0-9._-]{1,64}$")
@@ -63,6 +64,71 @@ READ_ONLY_ANNOTATIONS: JSON = {
     "destructiveHint": False,
     "idempotentHint": True,
     "openWorldHint": True,
+}
+WRITE_ANNOTATIONS: JSON = {
+    "readOnlyHint": False,
+    "destructiveHint": False,
+    "idempotentHint": False,
+    "openWorldHint": True,
+}
+DELETE_ANNOTATIONS: JSON = {
+    "readOnlyHint": False,
+    "destructiveHint": True,
+    "idempotentHint": False,
+    "openWorldHint": True,
+}
+ETAG_SCHEMA: JSON = {
+    "type": "string",
+    "pattern": '^"rev-[1-9][0-9]*"$',
+    "description": "Strong ETag returned by the latest full object read",
+}
+OBJECT_WRITE_SCHEMA: JSON = {
+    "type": "object",
+    "required": ["id", "kind", "label"],
+    "properties": {
+        "id": {
+            "type": "string",
+            "pattern": "^[a-z0-9](?:[a-z0-9_-]*[a-z0-9])?$",
+        },
+        "kind": {
+            "type": "string",
+            "enum": [
+                "host",
+                "system",
+                "network",
+                "service",
+                "credential_reference",
+                "runbook",
+                "decision",
+                "project",
+            ],
+        },
+        "label": {"type": "string", "minLength": 1},
+        "status": {
+            "type": "string",
+            "enum": ["active", "inactive", "deleted"],
+            "default": "active",
+        },
+        "lifecycle": {
+            "type": ["string", "null"],
+            "enum": ["planned", "active", "retired", None],
+        },
+        "health": {
+            "type": ["string", "null"],
+            "enum": ["unknown", "healthy", "degraded", "down", "maintenance", None],
+        },
+        "summary": {"type": ["string", "null"]},
+        "data": {"type": "object", "default": {}},
+        "provenance": {"type": "object"},
+    },
+    "additionalProperties": False,
+}
+RELATIONSHIP_PROPERTIES: JSON = {
+    "object_id": {"type": "string", "minLength": 1, "maxLength": 128},
+    "if_match": ETAG_SCHEMA,
+    "from_ref": {"type": "string", "minLength": 3, "maxLength": 192},
+    "relation_type": {"type": "string", "minLength": 1, "maxLength": 96},
+    "to_ref": {"type": "string", "minLength": 3, "maxLength": 192},
 }
 
 QUERY_FILTER_PROPERTIES: JSON = {
@@ -151,6 +217,89 @@ TOOLS: list[JSON] = [
         },
         "annotations": READ_ONLY_ANNOTATIONS,
     },
+    {
+        "name": "blockwart.create_child",
+        "description": "Create one authorized child object with durable idempotency.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "parent_id": {"type": "string", "minLength": 1, "maxLength": 128},
+                "idempotency_key": {
+                    "type": "string",
+                    "minLength": 16,
+                    "maxLength": 128,
+                    "pattern": "^[!-~]+$",
+                },
+                "object": OBJECT_WRITE_SCHEMA,
+            },
+            "required": ["parent_id", "idempotency_key", "object"],
+            "additionalProperties": False,
+        },
+        "annotations": WRITE_ANNOTATIONS,
+    },
+    {
+        "name": "blockwart.update_object",
+        "description": "Update one authorized object using its current strong ETag.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "object_id": {"type": "string", "minLength": 1, "maxLength": 128},
+                "if_match": ETAG_SCHEMA,
+                "object": OBJECT_WRITE_SCHEMA,
+            },
+            "required": ["object_id", "if_match", "object"],
+            "additionalProperties": False,
+        },
+        "annotations": WRITE_ANNOTATIONS,
+    },
+    {
+        "name": "blockwart.delete_object",
+        "description": "Delete one object when separately authorized and unreferenced.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "object_id": {"type": "string", "minLength": 1, "maxLength": 128},
+                "if_match": ETAG_SCHEMA,
+            },
+            "required": ["object_id", "if_match"],
+            "additionalProperties": False,
+        },
+        "annotations": DELETE_ANNOTATIONS,
+    },
+    {
+        "name": "blockwart.create_relationship",
+        "description": "Create an authorized relationship from the current object revision.",
+        "inputSchema": {
+            "type": "object",
+            "properties": RELATIONSHIP_PROPERTIES,
+            "required": [
+                "object_id",
+                "if_match",
+                "from_ref",
+                "relation_type",
+                "to_ref",
+            ],
+            "additionalProperties": False,
+        },
+        "annotations": WRITE_ANNOTATIONS,
+    },
+    {
+        "name": "blockwart.delete_relationship",
+        "description": "Delete an authorized relationship from the current object revision.",
+        "inputSchema": {
+            "type": "object",
+            "properties": RELATIONSHIP_PROPERTIES,
+            "required": [
+                "object_id",
+                "if_match",
+                "from_ref",
+                "relation_type",
+                "to_ref",
+            ],
+            "additionalProperties": False,
+        },
+        "annotations": DELETE_ANNOTATIONS,
+    },
 ]
 TOOL_DEFINITIONS: dict[str, JSON] = {tool["name"]: tool for tool in TOOLS}
 
@@ -173,6 +322,7 @@ def call_tool(
     *,
     base_url: str | None = None,
     fetcher: Fetcher | None = None,
+    requester: Requester | None = None,
 ) -> JSON:
     if name not in TOOL_DEFINITIONS:
         raise UnknownToolError(f"Unknown tool: {name}")
@@ -184,6 +334,15 @@ def call_tool(
         raise ToolInputError("Tool arguments are invalid") from exc
 
     fetch = fetcher or (lambda path, params: fetch_json(path, params, base_url=base_url))
+    request = requester or (
+        lambda method, path, body, headers: request_json(
+            method,
+            path,
+            body,
+            headers,
+            base_url=base_url,
+        )
+    )
 
     if name == "blockwart.search":
         payload = _legacy_page_payload(
@@ -205,6 +364,57 @@ def call_tool(
             args=args,
             items_field="objects",
         )
+    elif name == "blockwart.create_child":
+        parent_id = _required_string(args, "parent_id")
+        payload = request(
+            "POST",
+            f"/api/v1/objects/{quote(parent_id, safe='')}/children",
+            _required_object(args, "object"),
+            {
+                "Idempotency-Key": _required_string(args, "idempotency_key"),
+                "X-Blockwart-Channel": "mcp",
+            },
+        )
+    elif name == "blockwart.update_object":
+        object_id = _required_string(args, "object_id")
+        payload = request(
+            "PUT",
+            f"/api/v1/objects/{quote(object_id, safe='')}",
+            _required_object(args, "object"),
+            {
+                "If-Match": _required_string(args, "if_match"),
+                "X-Blockwart-Channel": "mcp",
+            },
+        )
+    elif name == "blockwart.delete_object":
+        object_id = _required_string(args, "object_id")
+        payload = request(
+            "DELETE",
+            f"/api/v1/objects/{quote(object_id, safe='')}",
+            {},
+            {
+                "If-Match": _required_string(args, "if_match"),
+                "X-Blockwart-Channel": "mcp",
+            },
+        )
+    elif name in {
+        "blockwart.create_relationship",
+        "blockwart.delete_relationship",
+    }:
+        object_id = _required_string(args, "object_id")
+        payload = request(
+            "POST" if name == "blockwart.create_relationship" else "DELETE",
+            f"/api/v1/objects/{quote(object_id, safe='')}/relationships",
+            {
+                "from_ref": _required_string(args, "from_ref"),
+                "relation_type": _required_string(args, "relation_type"),
+                "to_ref": _required_string(args, "to_ref"),
+            },
+            {
+                "If-Match": _required_string(args, "if_match"),
+                "X-Blockwart-Channel": "mcp",
+            },
+        )
     else:
         raise UnknownToolError(f"Unknown tool: {name}")
 
@@ -225,12 +435,53 @@ def fetch_json(path: str, params: JSON, *, base_url: str | None = None) -> JSON:
     url = f"{root}{path}"
     if query:
         url = f"{url}?{query}"
-    headers = {}
+    return _http_json("GET", url, body=None, headers={}, base_url=base_url)
+
+
+def request_json(
+    method: str,
+    path: str,
+    body: JSON,
+    headers: dict[str, str],
+    *,
+    base_url: str | None = None,
+) -> JSON:
+    if method not in {"POST", "PUT", "DELETE"}:
+        raise ValueError("unsupported MCP upstream method")
+    root = (base_url or os.environ.get("BLOCKWART_API_BASE_URL") or DEFAULT_BASE_URL).rstrip("/")
+    url = f"{root}{path}"
+    return _http_json(method, url, body=body, headers=headers, base_url=base_url)
+
+
+def _http_json(
+    method: str,
+    url: str,
+    *,
+    body: JSON | None,
+    headers: dict[str, str],
+    base_url: str | None,
+) -> JSON:
+    del base_url
+    request_headers = dict(headers)
     api_token = _api_token()
     if api_token is not None:
         _require_safe_token_transport(url)
-        headers["Authorization"] = f"Bearer {api_token}"
-    request = Request(url, headers=headers, method="GET")
+        request_headers["Authorization"] = f"Bearer {api_token}"
+    encoded_body = None
+    if body is not None:
+        encoded_body = json.dumps(
+            body,
+            ensure_ascii=True,
+            separators=(",", ":"),
+            sort_keys=True,
+        ).encode("utf-8")
+        request_headers["Content-Type"] = "application/json"
+    request = Request(
+        url,
+        data=encoded_body,
+        headers=request_headers,
+        method=method,
+    )
     try:
         with build_opener(_RejectRedirectHandler()).open(request, timeout=10) as response:
             try:
@@ -426,6 +677,13 @@ def _legacy_page_payload(
 def _required_string(args: JSON, key: str) -> str:
     value = args.get(key)
     if not isinstance(value, str) or not value:
+        raise ToolInputError(f"{key} is required")
+    return value
+
+
+def _required_object(args: JSON, key: str) -> JSON:
+    value = args.get(key)
+    if not isinstance(value, dict):
         raise ToolInputError(f"{key} is required")
     return value
 

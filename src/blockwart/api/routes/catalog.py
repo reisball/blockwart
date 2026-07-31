@@ -1,6 +1,6 @@
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from sqlalchemy.orm import Session
 
 from blockwart.api.deps import get_session
@@ -8,6 +8,7 @@ from blockwart.api.errors import API_ERROR_RESPONSES
 from blockwart.api.security import require_api_read_access
 from blockwart.domain.asset_state import AssetHealth, AssetLifecycle
 from blockwart.schemas.catalog import CatalogObjectReadOut
+from blockwart.services.commands import revision_etag
 from blockwart.services.queries import (
     get_catalog_object,
     list_catalog_objects,
@@ -45,10 +46,14 @@ def get_objects(
 @router.get("/{object_id}", response_model=CatalogObjectReadOut)
 def get_object_by_id(
     object_id: str,
+    response: Response,
     session: Annotated[Session, Depends(get_session)],
     access: Annotated[ReadAccess, Depends(require_api_read_access)],
 ) -> CatalogObjectReadOut:
     catalog_object = get_catalog_object(session, object_id, access)
     if catalog_object is None:
         raise HTTPException(status_code=404, detail="Catalog object not found")
+    revision = getattr(catalog_object, "revision", None)
+    if isinstance(revision, int):
+        response.headers["ETag"] = revision_etag(revision)
     return catalog_object

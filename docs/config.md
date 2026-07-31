@@ -7,6 +7,8 @@ Current local keys:
 - `BLOCKWART_ENV`
 - `BLOCKWART_DATABASE_URL`
 - `BLOCKWART_SECRET_REFERENCE`
+- `BLOCKWART_IDEMPOTENCY_TTL_SECONDS` (default `86400`, allowed
+  `300..604800`)
 
 `BLOCKWART_SECRET_REFERENCE` is a reference label only. It must never contain a raw secret value.
 

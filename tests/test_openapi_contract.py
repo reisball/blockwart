@@ -18,9 +18,10 @@ EXPECTED_OPERATIONS = {
     "/api/v1/auth/me": {"get"},
     "/api/v1/context": {"get"},
     "/api/v1/objects": {"get"},
-    "/api/v1/objects/{object_id}": {"get"},
+    "/api/v1/objects/{parent_id}/children": {"post"},
+    "/api/v1/objects/{object_id}": {"get", "put", "delete"},
     "/api/v1/objects/{object_id}/audit-events": {"get"},
-    "/api/v1/objects/{object_id}/relationships": {"get"},
+    "/api/v1/objects/{object_id}/relationships": {"get", "post", "delete"},
     "/api/v1/objects/{object_id}/topology": {"get"},
 }
 
@@ -40,7 +41,6 @@ def test_openapi_exposes_only_reviewed_machine_operations() -> None:
     }
 
     assert operations == EXPECTED_OPERATIONS
-    assert all(methods == {"get"} for methods in operations.values())
     assert not any(
         path.startswith(("/admin", "/objects", "/settings")) for path in operations
     )

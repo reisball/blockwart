@@ -459,7 +459,7 @@ def test_v1_can_enumerate_more_than_the_legacy_agent_limit(
     assert len(seen) == len(set(seen))
 
 
-def test_v1_and_compatibility_namespaces_remain_get_only(
+def test_v1_publishes_explicit_command_methods_and_compatibility_reads(
     client: TestClient,
 ) -> None:
     openapi = client.get("/openapi.json").json()
@@ -470,10 +470,18 @@ def test_v1_and_compatibility_namespaces_remain_get_only(
     }
 
     assert v1_paths
-    assert all(set(methods) == {"get"} for methods in v1_paths.values())
+    assert set(v1_paths["/api/v1/objects/{object_id}"]) == {
+        "get",
+        "put",
+        "delete",
+    }
+    assert set(v1_paths["/api/v1/objects/{object_id}/relationships"]) == {
+        "get",
+        "post",
+        "delete",
+    }
+    assert set(v1_paths["/api/v1/objects/{parent_id}/children"]) == {"post"}
     assert client.post("/api/v1/objects", json={}).status_code == 405
-    assert client.put("/api/v1/objects/v1-runtime-api", json={}).status_code == 405
-    assert client.delete("/api/v1/objects/v1-runtime-api").status_code == 405
     assert isinstance(client.get("/api/objects").json(), list)
     assert "results" in client.get("/api/agent/search").json()
 

@@ -2,7 +2,7 @@ import json
 from collections.abc import Mapping
 from datetime import UTC, datetime
 
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.orm import Session
 
 from blockwart.domain.asset_state import (
@@ -303,6 +303,8 @@ def create_relationship(
     to_ref: str,
     audit_action: str = "relationship_create",
     audit_actor: str = "system",
+    write_audit: bool = True,
+    touch_revisions: bool = True,
 ) -> dict[str, str]:
     object_kinds = current_object_kinds(session)
     validate_relationship(
@@ -331,6 +333,7 @@ def create_relationship(
             session,
             child_ref=to_ref,
             changed_at=changed_at,
+            write_audit=write_audit,
         )
     if existing is not None:
         if cleared_unassigned:
@@ -344,18 +347,20 @@ def create_relationship(
             to_ref=to_ref,
         )
     )
-    _write_audit(
-        session,
-        None,
-        audit_action,
-        {
-            "from_ref": from_ref,
-            "relation_type": relation_type,
-            "to_ref": to_ref,
-        },
-        actor=audit_actor,
-    )
-    touch_objects_for_refs(session, [from_ref, to_ref], changed_at)
+    if write_audit:
+        _write_audit(
+            session,
+            None,
+            audit_action,
+            {
+                "from_ref": from_ref,
+                "relation_type": relation_type,
+                "to_ref": to_ref,
+            },
+            actor=audit_actor,
+        )
+    if touch_revisions:
+        touch_objects_for_refs(session, [from_ref, to_ref], changed_at)
     session.flush()
     return {"from_ref": from_ref, "relation_type": relation_type, "to_ref": to_ref}
 
@@ -365,6 +370,7 @@ def _clear_explicit_unassigned_state(
     *,
     child_ref: str,
     changed_at: datetime,
+    write_audit: bool = True,
 ) -> bool:
     _, child_id = child_ref.split(":", 1)
     row = session.get(CatalogObject, child_id)
@@ -376,12 +382,13 @@ def _clear_explicit_unassigned_state(
     data.pop("placement", None)
     row.data_json = json.dumps(data, sort_keys=True)
     row.updated_at = changed_at
-    _write_audit(
-        session,
-        child_id,
-        "placement_assign",
-        {"child_ref": child_ref},
-    )
+    if write_audit:
+        _write_audit(
+            session,
+            child_id,
+            "placement_assign",
+            {"child_ref": child_ref},
+        )
     return True
 
 
@@ -392,6 +399,8 @@ def delete_relationship(
     audit_action: str = "relationship_delete",
     audit_actor: str = "system",
     enforce_owner_coverage: bool = True,
+    write_audit: bool = True,
+    touch_revisions: bool = True,
 ) -> bool:
     row = session.get(Relationship, relationship_id)
     if row is None:
@@ -408,18 +417,20 @@ def delete_relationship(
     relation_type = row.relation_type
     to_ref = row.to_ref
     session.delete(row)
-    touch_objects_for_refs(session, [from_ref, to_ref], _now())
-    _write_audit(
-        session,
-        None,
-        audit_action,
-        {
-            "from_ref": from_ref,
-            "relation_type": relation_type,
-            "to_ref": to_ref,
-        },
-        actor=audit_actor,
-    )
+    if touch_revisions:
+        touch_objects_for_refs(session, [from_ref, to_ref], _now())
+    if write_audit:
+        _write_audit(
+            session,
+            None,
+            audit_action,
+            {
+                "from_ref": from_ref,
+                "relation_type": relation_type,
+                "to_ref": to_ref,
+            },
+            actor=audit_actor,
+        )
     session.flush()
     if previously_covered_ids:
         ensure_owner_coverage_preserved(
@@ -453,6 +464,8 @@ def upsert_object(
     payload: CatalogObjectIn,
     *,
     known_object_kinds: Mapping[str, str] | None = None,
+    expected_revision: int | None = None,
+    write_audit: bool = True,
 ) -> CatalogObjectOut:
     row = session.get(CatalogObject, payload.id)
     object_kinds = current_object_kinds(session)
@@ -486,6 +499,8 @@ def upsert_object(
     target_status = target_state.status if target_state is not None else payload.status
     data_json = json.dumps(payload.data, sort_keys=True)
     provenance_json = dump_provenance(payload.provenance)
+    if row is not None and expected_revision is not None and row.revision != expected_revision:
+        raise RevisionConflict("catalog object revision does not match")
     if row is not None and _object_matches_target(
         row,
         payload,
@@ -525,18 +540,44 @@ def upsert_object(
             target_state=target_state,
             target_status=target_status,
         )
-        row.kind = payload.kind
-        row.label = payload.label
-        row.status = target_status
-        row.lifecycle = target_state.lifecycle if target_state is not None else None
-        row.health = target_state.health if target_state is not None else None
-        row.summary = payload.summary
-        row.data_json = data_json
-        row.provenance_json = provenance_json
-        row.revision += 1
-        row.updated_at = changed_at
+        if expected_revision is None:
+            row.kind = payload.kind
+            row.label = payload.label
+            row.status = target_status
+            row.lifecycle = target_state.lifecycle if target_state is not None else None
+            row.health = target_state.health if target_state is not None else None
+            row.summary = payload.summary
+            row.data_json = data_json
+            row.provenance_json = provenance_json
+            row.revision += 1
+            row.updated_at = changed_at
+        else:
+            result = session.execute(
+                update(CatalogObject)
+                .where(
+                    CatalogObject.id == payload.id,
+                    CatalogObject.revision == expected_revision,
+                )
+                .values(
+                    kind=payload.kind,
+                    label=payload.label,
+                    status=target_status,
+                    lifecycle=target_state.lifecycle if target_state is not None else None,
+                    health=target_state.health if target_state is not None else None,
+                    summary=payload.summary,
+                    data_json=data_json,
+                    provenance_json=provenance_json,
+                    revision=CatalogObject.revision + 1,
+                    updated_at=changed_at,
+                )
+                .execution_options(synchronize_session=False)
+            )
+            if result.rowcount != 1:
+                raise RevisionConflict("catalog object revision does not match")
+            session.expire(row)
 
-    _write_audit(session, payload.id, action, audit_details)
+    if write_audit:
+        _write_audit(session, payload.id, action, audit_details)
     session.flush()
     session.refresh(row)
     return _to_schema(row)
@@ -700,7 +741,12 @@ def _audit_display_value(value: str | None) -> str:
     return text
 
 
-def delete_object(session: Session, object_id: str) -> bool:
+def delete_object(
+    session: Session,
+    object_id: str,
+    *,
+    write_audit: bool = True,
+) -> bool:
     row = session.get(CatalogObject, object_id)
     if row is None:
         return False
@@ -714,7 +760,8 @@ def delete_object(session: Session, object_id: str) -> bool:
             f"cannot delete {object_ref}: {len(blockers)} typed reference(s) still exist",
         )
     session.delete(row)
-    _write_audit(session, object_id, "delete", {"object_ref": object_ref})
+    if write_audit:
+        _write_audit(session, object_id, "delete", {"object_ref": object_ref})
     session.flush()
     return True
 
@@ -730,6 +777,10 @@ def touch_objects_for_refs(session: Session, refs: list[str], changed_at: dateti
         if row is not None:
             row.revision += 1
             row.updated_at = changed_at
+
+
+class RevisionConflict(RuntimeError):
+    """An optimistic catalog-object revision did not match."""
 
 
 def relationship_diagnostics(session: Session) -> list[RelationshipDiagnostic]:

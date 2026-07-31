@@ -1,6 +1,6 @@
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from sqlalchemy.orm import Session
 
 from blockwart.api.deps import get_session
@@ -15,6 +15,7 @@ from blockwart.services.agent import (
     get_agent_object_context,
     search_agent_objects,
 )
+from blockwart.services.commands import revision_etag
 from blockwart.services.read_access import ReadAccess
 
 router = APIRouter(
@@ -82,12 +83,16 @@ def agent_search(
 @router.get("/objects/{object_id}", response_model=AgentContextOut)
 def agent_object_context(
     object_id: str,
+    response: Response,
     session: Annotated[Session, Depends(get_session)],
     access: Annotated[ReadAccess, Depends(require_api_read_access)],
 ) -> AgentContextOut:
     context = get_agent_object_context(session, object_id, access)
     if context is None:
         raise HTTPException(status_code=404, detail="Catalog object not found")
+    revision = getattr(context, "revision", None)
+    if isinstance(revision, int):
+        response.headers["ETag"] = revision_etag(revision)
     return AgentContextOut(query=object_id, count=1, objects=[context])
 
 

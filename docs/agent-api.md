@@ -1,12 +1,12 @@
 # Agent API
 
-Blockwart exposes a read-only agent namespace under /api/agent.
+Blockwart exposes a read-only compatibility agent namespace under /api/agent.
 
-The namespace is intentionally separate from the catalog read API. Both API surfaces are read-only:
-agents and integrations can search and retrieve context, but they cannot create, update, delete, or
-resolve credential values. Every request requires a service-account bearer
+The namespace is intentionally separate from the catalog read API. Authorized
+machine commands live in `/api/v1` and are documented in `api-v1.md`; agents
+and integrations never resolve credential values. Every request requires a service-account bearer
 token and is filtered by its current object grants. Catalog changes are
-restricted to authenticated UI form routes.
+restricted to the authenticated `/api/v1`, MCP, and UI command surfaces.
 
 The catalog model is the faithful stored-object projection: validated data, canonical asset and
 placement state, timestamps, parent path, and safe integrity diagnostics. Agent context is a
@@ -134,4 +134,5 @@ preserving its established `results` and `objects` payload fields:
 - blockwart.get_object_context
 - blockwart.get_context
 
-Writable MCP tools are out of scope until auth, review gates, and audit requirements are defined.
+The MCP server also exposes authorized create, update, relationship, and delete
+commands through the shared `/api/v1` command surface. See `mcp.md`.

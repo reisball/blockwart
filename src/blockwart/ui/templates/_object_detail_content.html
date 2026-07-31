@@ -70,6 +70,8 @@
               <div class="error">{{ error }}</div>
             {% endif %}
             <form class="form-grid" method="post" action="{{ detail_post_urls.overview }}">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+              <input type="hidden" name="if_match" value="{{ object_etag }}" />
               <div class="fact fact-small">
                 <div class="fact-label">{{ t("detail.id") }}</div>
                 <div class="fact-value">{{ object.id }}</div>
@@ -161,6 +163,13 @@
               </div>
             </div>
           {% endif %}
+          {% if can_delete and edit_section != "overview" %}
+            <form class="button-row" method="post" action="/objects/{{ object.id }}/delete">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+              <input type="hidden" name="if_match" value="{{ object_etag }}" />
+              <button class="button button-small button-muted" type="submit">{{ t("permission.delete") }}</button>
+            </form>
+          {% endif %}
         </section>
 
         {% if supports_hardware %}
@@ -180,6 +189,8 @@
                 <div class="error">{{ error }}</div>
               {% endif %}
               <form class="form-grid" method="post" action="{{ detail_post_urls.overview }}">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+                <input type="hidden" name="if_match" value="{{ object_etag }}" />
                 {% for field in hardware_fields %}
                   <label>{{ field.label }}
                     <input name="{{ field.key }}" value="{{ field.value }}" autocomplete="off" placeholder="{{ field.placeholder }}" />
@@ -219,6 +230,8 @@
                 <div class="error">{{ error }}</div>
               {% endif %}
               <form class="form-grid" method="post" action="{{ detail_post_urls.overview }}">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+                <input type="hidden" name="if_match" value="{{ object_etag }}" />
                 {% for field in service_information_fields %}
                   <label>{{ field.label }}
                     {% if field.key == "service_sources" %}
@@ -270,6 +283,8 @@
                 <div class="error" role="alert">{{ error }}</div>
               {% endif %}
               <form class="form-grid" method="post" action="{{ detail_post_urls.network }}">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+                <input type="hidden" name="if_match" value="{{ object_etag }}" />
                 {% if can_edit_network_addresses %}
                   <h3>{{ t("network.addresses") }}</h3>
                   <div class="table-wrap">
@@ -462,6 +477,8 @@
                 <div class="error" role="alert">{{ error }}</div>
               {% endif %}
               <form class="form-grid" method="post" action="{{ detail_post_urls.access }}">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+                <input type="hidden" name="if_match" value="{{ object_etag }}" />
                 <div class="table-wrap">
                   <table class="table edit-table">
                     <thead>
@@ -559,6 +576,8 @@
               <div class="error" role="alert">{{ error }}</div>
             {% endif %}
             <form class="form-grid relation-form" method="post" action="{{ detail_post_urls.relationships }}">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+              <input type="hidden" name="if_match" value="{{ object_etag }}" />
               <h3>{{ t("relationship.create") }}</h3>
               <input type="hidden" name="direction" value="{{ 'inbound' if object.kind == 'service' else 'outbound' }}" />
               <input type="hidden" name="relation_type" value="hosts" />
@@ -581,6 +600,8 @@
           <h2 class="section-title">{{ t("comment.title") }}</h2>
           {% if can_write %}
             <form class="form-grid comment-form" method="post" action="{{ detail_post_urls.comment }}">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+              <input type="hidden" name="if_match" value="{{ object_etag }}" />
               <label>{{ t("comment.label") }}
                 <textarea name="comment" placeholder="{{ t('comment.placeholder') }}">{{ comment }}</textarea>
               </label>
