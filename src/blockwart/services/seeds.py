@@ -27,7 +27,11 @@ from blockwart.domain.relationships import (
 from blockwart.models import CatalogObject, Relationship
 from blockwart.schemas.catalog import CatalogObjectIn
 from blockwart.services.audit import add_audit_event
-from blockwart.services.catalog import create_relationship, ensure_kind_change_allowed
+from blockwart.services.catalog import (
+    create_relationship,
+    ensure_kind_change_allowed,
+    ensure_projected_relationship_endpoints_valid,
+)
 
 
 @dataclass(frozen=True)
@@ -165,6 +169,7 @@ def import_seed_payload(
             row.provenance_json,
         )
         if current_values != target_values:
+            ensure_projected_relationship_endpoints_valid(session, row, obj)
             (
                 row.kind,
                 row.label,

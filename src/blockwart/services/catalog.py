@@ -512,7 +512,7 @@ def upsert_object(
     if row is not None and row.kind != payload.kind:
         ensure_kind_change_allowed(session, row, payload.kind)
     if row is not None:
-        _validate_projected_relationship_endpoints(session, row, payload)
+        ensure_projected_relationship_endpoints_valid(session, row, payload)
     current_state = (
         state_from_record(
             kind=row.kind,
@@ -617,11 +617,18 @@ def upsert_object(
     return _to_schema(row)
 
 
-def _validate_projected_relationship_endpoints(
+def ensure_projected_relationship_endpoints_valid(
     session: Session,
     row: CatalogObject,
     payload: CatalogObjectIn,
 ) -> None:
+    try:
+        current_data = json.loads(row.data_json)
+    except (TypeError, json.JSONDecodeError):
+        current_data = None
+    if row.kind == payload.kind and current_data == payload.data:
+        return
+
     object_refs = tuple(sorted({f"{row.kind}:{row.id}", f"{payload.kind}:{payload.id}"}))
     relationship_rows = list(
         session.scalars(

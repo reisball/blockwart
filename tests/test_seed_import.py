@@ -6,6 +6,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from blockwart.domain.provenance import load_provenance
+from blockwart.domain.relationships import RelationshipIntegrityError
 from blockwart.models import AuditEvent, CatalogObject, Relationship
 from blockwart.schemas.catalog import CatalogObjectIn
 from blockwart.services.catalog import upsert_object
@@ -186,6 +187,100 @@ def test_seed_object_and_relationship_mutations_advance_revisions(
 
     import_seed_payload(session, payload, source_ref="revision-seed")
     assert (host.revision, service.revision) == (3, 2)
+
+
+@pytest.mark.parametrize(
+    ("objects", "relationship", "updated_object_id"),
+    [
+        (
+            [
+                {
+                    "id": "seed-sensor",
+                    "kind": "device",
+                    "label": "Seed sensor",
+                    "data": {"device": {"category": "sensor"}},
+                },
+                {
+                    "id": "seed-switch",
+                    "kind": "network",
+                    "label": "Seed switch",
+                    "data": {"network": {"category": "switch"}},
+                },
+            ],
+            {
+                "from_ref": "device:seed-sensor",
+                "relation_type": "attached_to",
+                "to_ref": "network:seed-switch",
+            },
+            "seed-switch",
+        ),
+        (
+            [
+                {
+                    "id": "seed-switch",
+                    "kind": "network",
+                    "label": "Seed switch",
+                    "data": {"network": {"category": "switch"}},
+                },
+                {
+                    "id": "seed-router",
+                    "kind": "network",
+                    "label": "Seed router",
+                    "data": {"network": {"category": "router"}},
+                },
+            ],
+            {
+                "from_ref": "network:seed-switch",
+                "relation_type": "uplinks_to",
+                "to_ref": "network:seed-router",
+            },
+            "seed-router",
+        ),
+    ],
+)
+def test_partial_seed_update_rejects_projected_invalid_relationship_endpoint(
+    session: Session,
+    objects: list[dict[str, object]],
+    relationship: dict[str, str],
+    updated_object_id: str,
+) -> None:
+    import_seed_payload(
+        session,
+        {
+            "schema_version": 1,
+            "objects": objects,
+            "relationships": [relationship],
+        },
+        source_ref="endpoint-seed",
+    )
+    row = session.get(CatalogObject, updated_object_id)
+    assert row is not None
+    initial_revision = row.revision
+    initial_data_json = row.data_json
+    initial_audit_count = session.scalar(select(func.count()).select_from(AuditEvent))
+
+    with pytest.raises(RelationshipIntegrityError) as error:
+        import_seed_payload(
+            session,
+            {
+                "schema_version": 1,
+                "objects": [
+                    {
+                        "id": updated_object_id,
+                        "kind": "network",
+                        "label": row.label,
+                        "data": {"network": {"category": "segment"}},
+                    }
+                ],
+                "relationships": [],
+            },
+            source_ref="endpoint-seed",
+        )
+
+    assert error.value.code == "invalid_relationship_endpoint"
+    assert row.revision == initial_revision
+    assert row.data_json == initial_data_json
+    assert session.scalar(select(func.count()).select_from(AuditEvent)) == initial_audit_count
 
 
 def test_seed_import_validates_and_canonicalizes_relationship_metadata(session: Session) -> None:
