@@ -35,6 +35,38 @@ server-stored pre-authentication challenge. Authenticated browser sessions are
 opaque, revocable, time-limited, `Secure`, `HttpOnly`, and `SameSite=Strict`; state
 changes require the session-bound CSRF value.
 
+## Platform administration
+
+Identity administration is a separate authorization axis. A principal may
+have the optional platform role `admin`, which permits user, service-account,
+credential-metadata, and lifecycle administration. It never grants catalog
+`discover`, `read`, `write`, `manage_access`, or `delete`; those permissions
+still come only from explicit object grants.
+
+The admin-only browser UI lives at `/admin/principals`. It provides principal
+search, lifecycle changes, direct and effective assignment views, password
+reset, and service-token lifecycle. Reverse assignment rows are limited to
+objects on which the acting admin currently has `manage_access`; hidden object
+IDs, labels, and counts are not released. Owner-grant changes still require an
+effective Owner grant and use the shared object ETag, last-owner, and
+self-lockout checks.
+
+Principal search uses opaque, filter-bound keyset cursors and exposes no total
+count. The browser keeps the active filters while following the exhaustive
+next-page link; REST and the read-only MCP wrapper forward the same cursor.
+
+Principal changes use their own positive revision and strong ETag. A service
+guard plus SQLite triggers prevents demotion, deactivation, or deletion of the
+last active platform admin, including concurrent writers. Credential-creating
+browser actions require the current human admin password. REST may use an
+explicit admin service-account bearer credential as the equivalent protected
+machine authorization. New tokens are returned once with `no-store`; MCP has
+no password or token-value operation.
+
+Protected CLI password, token, and lifecycle mutations advance the same
+principal revision as UI and REST mutations, so previously issued principal
+ETags become stale across channels.
+
 Password work is bounded before Argon2 verification by configurable global,
 per-source, and per-account-fingerprint limits plus a per-process concurrency
 cap. Challenge issuance has separate global and per-source limits so anonymous
@@ -158,7 +190,7 @@ Run the schema upgrade before any auth command:
 blockwart-db upgrade
 ```
 
-Create the first human and its Owner grant atomically:
+Create the first human platform admin and its explicit Owner grant atomically:
 
 ```bash
 blockwart-auth bootstrap-owner \
@@ -177,6 +209,16 @@ Repeat `--object-id` for each disconnected canonical component. Creation of the
 principal, password credential, and all requested Owner grants is one transaction;
 the command rolls everything back unless the complete catalog satisfies the same
 Owner-coverage invariant used by startup and readiness.
+
+An existing installation is never promoted implicitly by a migration. Promote
+the exact existing human explicitly through the protected CLI before enabling
+the admin UI:
+
+```bash
+blockwart-auth promote-admin --login kai
+```
+
+The operation is idempotent and writes a redacted security event.
 
 Service-account tokens use a protected output file:
 

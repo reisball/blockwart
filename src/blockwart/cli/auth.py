@@ -13,7 +13,7 @@ from sqlalchemy.orm import Session
 
 from blockwart.db.migrations import build_alembic_config, check_database_revision
 from blockwart.db.session import build_engine, transaction
-from blockwart.domain.auth import GrantScope, PrincipalType, Role
+from blockwart.domain.auth import GrantScope, PlatformRole, PrincipalType, Role
 from blockwart.models import (
     CatalogObject,
     ObjectGrant,
@@ -29,6 +29,7 @@ from blockwart.services.identity import (
     deactivate_principal,
     issue_service_token,
     principal_by_login,
+    record_security_event,
     revoke_service_token,
     rotate_service_token,
     set_human_password,
@@ -115,6 +116,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="Deactivate a principal and revoke all of its active credentials.",
     )
     deactivate.add_argument("--login", required=True)
+
+    promote = subparsers.add_parser(
+        "promote-admin",
+        help="Explicitly promote one existing active human principal to platform admin.",
+    )
+    promote.add_argument("--login", required=True)
     return parser
 
 
@@ -178,6 +185,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                             expires_at=expires_at,
                         )
                     )
+                    _advance_principal_revision(principal)
                     _write_secret_file(output_path, issued.value)
                     output_created = True
                 result = (
@@ -198,6 +206,8 @@ def main(argv: Sequence[str] | None = None) -> int:
                         principal_id=principal.id,
                         name=args.name,
                     )
+                    if changed:
+                        _advance_principal_revision(principal)
                 result = (
                     "auth_revoke_token_ok "
                     f"principal_id={principal.id} changed={int(changed)}"
@@ -216,6 +226,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                         principal_id=principal.id,
                         password=password,
                     )
+                    _advance_principal_revision(principal)
                 result = (
                     "auth_set_password_ok "
                     f"principal_id={principal.id} sessions_revoked=all"
@@ -229,8 +240,36 @@ def main(argv: Sequence[str] | None = None) -> int:
                         session,
                         principal_id=principal.id,
                     )
+                    if changed:
+                        _advance_principal_revision(principal)
                 result = (
                     "auth_deactivate_principal_ok "
+                    f"principal_id={principal.id} changed={int(changed)}"
+                )
+            elif args.action == "promote-admin":
+                with transaction(session):
+                    principal = principal_by_login(session, args.login)
+                    if (
+                        principal is None
+                        or principal.principal_type != PrincipalType.HUMAN
+                        or not principal.active
+                    ):
+                        raise IdentityError("active human principal not found")
+                    changed = principal.platform_role != PlatformRole.ADMIN
+                    if changed:
+                        principal.platform_role = PlatformRole.ADMIN
+                        principal.revision += 1
+                        principal.updated_at = utc_now()
+                        record_security_event(
+                            session,
+                            event_type="platform_admin_promoted",
+                            outcome="success",
+                            channel="cli",
+                            principal_id=principal.id,
+                            details={"actor": "protected_cli"},
+                        )
+                result = (
+                    "auth_promote_admin_ok "
                     f"principal_id={principal.id} changed={int(changed)}"
                 )
             else:
@@ -279,6 +318,7 @@ def _bootstrap_owner(session: Session, args: argparse.Namespace) -> str:
             login=args.login,
             display_name=args.display_name,
             password=password,
+            platform_role=PlatformRole.ADMIN,
         )
         grants = tuple(
             create_object_grant(
@@ -328,6 +368,7 @@ def _bootstrap_state(
     if (
         principal.principal_type == PrincipalType.HUMAN
         and principal.active
+        and principal.platform_role == PlatformRole.ADMIN
         and principal.display_name == " ".join(display_name.split())
         and credential is not None
         and {grant.object_id for grant in grants} == set(object_ids)
@@ -385,6 +426,11 @@ def _expiry(seconds: int | None):
     if seconds < 300 or seconds > 31536000:
         raise IdentityError("token expiry must be between 300 and 31536000 seconds")
     return utc_now() + timedelta(seconds=seconds)
+
+
+def _advance_principal_revision(principal: Principal) -> None:
+    principal.revision += 1
+    principal.updated_at = utc_now()
 
 
 def _write_secret_file(path: Path | None, value: str) -> None:

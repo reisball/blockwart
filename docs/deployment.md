@@ -44,6 +44,12 @@ BLOCKWART_DATABASE_URL=sqlite:////tmp/blockwart.sqlite3 \
   --object-id COMPONENT_ROOT_ID --scope subtree
 ```
 
+`bootstrap-owner` makes that protected first human a platform admin while
+catalog access still comes only from the listed Owner anchors. For an existing
+database upgraded from an earlier release, explicitly run
+`blockwart-auth promote-admin --login kai`; migration `0012` never guesses an
+admin identity.
+
 Then run the migration/readiness-gated launcher:
 
 ```bash

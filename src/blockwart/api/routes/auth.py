@@ -29,4 +29,6 @@ def authenticated_principal(
         principal_type=principal.principal_type,
         login=principal.login,
         display_name=principal.display_name,
+        platform_role=principal.platform_role,
+        revision=principal.revision,
     )

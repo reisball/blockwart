@@ -6,6 +6,7 @@ from sqlalchemy import (
     DateTime,
     ForeignKey,
     Index,
+    Integer,
     String,
     Text,
     UniqueConstraint,
@@ -28,6 +29,14 @@ class Principal(Base):
             "active IN (0,1)",
             name="ck_principals_active_boolean",
         ),
+        CheckConstraint(
+            "platform_role IS NULL OR platform_role = 'admin'",
+            name="ck_principals_platform_role",
+        ),
+        CheckConstraint(
+            "revision >= 1",
+            name="ck_principals_revision_positive",
+        ),
         UniqueConstraint(
             "login",
             name="uq_principals_login",
@@ -45,6 +54,16 @@ class Principal(Base):
         default=True,
         server_default=text("1"),
         index=True,
+    )
+    platform_role: Mapped[str | None] = mapped_column(
+        String(32),
+        nullable=True,
+        index=True,
+    )
+    revision: Mapped[int] = mapped_column(
+        Integer,
+        default=1,
+        server_default=text("1"),
     )
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(

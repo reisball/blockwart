@@ -30,7 +30,8 @@ IDENTITY_REVISION = "20260730_0008"
 AUTHORIZATION_REVISION = "20260730_0009"
 WRITE_COMMANDS_REVISION = "20260731_0010"
 TOKEN_FAILURE_BUCKETS_REVISION = "20260731_0011"
-HEAD_REVISION = TOKEN_FAILURE_BUCKETS_REVISION
+PLATFORM_ADMIN_REVISION = "20260731_0012"
+HEAD_REVISION = PLATFORM_ADMIN_REVISION
 PROJECT_ALEMBIC_CONFIG = Path(__file__).resolve().parents[1] / "alembic.ini"
 LEGACY_SNAPSHOT = Path(__file__).resolve().parent / "fixtures" / "legacy_snapshot.sql"
 
@@ -598,6 +599,75 @@ def test_identity_and_authorization_migrations_preserve_catalog_data(
     }
     assert _existing_data_snapshot(database_path) == before
     assert _revision(database_url) == HEAD_REVISION
+
+
+def test_platform_admin_migration_is_lossless_and_guards_last_active_admin(
+    tmp_path: Path,
+) -> None:
+    database_path = tmp_path / "platform-admin.sqlite3"
+    database_url = _database_url(database_path)
+    config = build_alembic_config(database_url)
+    command.upgrade(config, TOKEN_FAILURE_BUCKETS_REVISION)
+    connection = sqlite3.connect(database_path)
+    try:
+        connection.execute(
+            "INSERT INTO principals "
+            "(id, principal_type, login, display_name, active) "
+            "VALUES ('admin-a', 'human', 'admin.a', 'Admin A', 1)"
+        )
+        connection.commit()
+    finally:
+        connection.close()
+
+    command.upgrade(config, PLATFORM_ADMIN_REVISION)
+    connection = sqlite3.connect(database_path)
+    try:
+        assert connection.execute(
+            "SELECT platform_role, revision FROM principals WHERE id = 'admin-a'"
+        ).fetchone() == (None, 1)
+        connection.execute(
+            "UPDATE principals SET platform_role = 'admin' WHERE id = 'admin-a'"
+        )
+        connection.commit()
+        with pytest.raises(sqlite3.IntegrityError, match="last active platform admin"):
+            connection.execute(
+                "UPDATE principals SET active = 0 WHERE id = 'admin-a'"
+            )
+        connection.rollback()
+        connection.execute(
+            "INSERT INTO principals "
+            "(id, principal_type, login, display_name, active, platform_role, revision) "
+            "VALUES ('admin-b', 'human', 'admin.b', 'Admin B', 1, 'admin', 1)"
+        )
+        connection.execute(
+            "UPDATE principals SET active = 0 WHERE id = 'admin-a'"
+        )
+        connection.commit()
+        with pytest.raises(sqlite3.IntegrityError, match="last active platform admin"):
+            connection.execute("DELETE FROM principals WHERE id = 'admin-b'")
+        connection.rollback()
+    finally:
+        connection.close()
+
+    command.downgrade(config, TOKEN_FAILURE_BUCKETS_REVISION)
+    connection = sqlite3.connect(database_path)
+    try:
+        columns = {
+            str(row[1]) for row in connection.execute("PRAGMA table_info(principals)")
+        }
+        triggers = {
+            str(row[0])
+            for row in connection.execute(
+                "SELECT name FROM sqlite_master WHERE type = 'trigger'"
+            )
+        }
+        assert "platform_role" not in columns
+        assert "revision" not in columns
+        assert "ck_principals_last_active_admin_update" not in triggers
+        assert "ck_principals_last_active_admin_delete" not in triggers
+        assert connection.execute("SELECT COUNT(*) FROM principals").fetchone() == (2,)
+    finally:
+        connection.close()
 
 
 def test_english_contract_migration_rejects_invalid_data_before_first_write(

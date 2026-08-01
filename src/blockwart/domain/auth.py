@@ -8,6 +8,10 @@ class PrincipalType(StrEnum):
     SERVICE_ACCOUNT = "service_account"
 
 
+class PlatformRole(StrEnum):
+    ADMIN = "admin"
+
+
 class Permission(StrEnum):
     DISCOVER = "discover"
     READ = "read"
@@ -73,6 +77,12 @@ class PrincipalContext:
     principal_type: PrincipalType
     login: str
     display_name: str
+    platform_role: PlatformRole | None = None
+    revision: int = 1
+
+    @property
+    def is_admin(self) -> bool:
+        return self.platform_role == PlatformRole.ADMIN
 
 
 def permissions_for_role(role: Role | str) -> frozenset[Permission]:

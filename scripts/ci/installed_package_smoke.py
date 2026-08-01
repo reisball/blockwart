@@ -16,7 +16,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from blockwart.db.session import build_engine, transaction
-from blockwart.domain.auth import GrantScope, Role
+from blockwart.domain.auth import GrantScope, PlatformRole, Role
 from blockwart.models import CatalogObject
 from blockwart.services.access import create_object_grant
 from blockwart.services.identity import (
@@ -60,6 +60,7 @@ def prepare_authorized_readers() -> tuple[str, str, str]:
                     session,
                     login="package-smoke.service",
                     display_name="Package Smoke Service",
+                    platform_role=PlatformRole.ADMIN,
                 )
                 browser_principal = create_human_principal(
                     session,
@@ -139,6 +140,8 @@ async def check_mcp(
                 "blockwart.delete_relationship",
                 "blockwart.get_object_access",
                 "blockwart.search_principals",
+                "blockwart.list_admin_principals",
+                "blockwart.get_admin_principal",
                 "blockwart.preview_grant_scope",
                 "blockwart.create_grant",
                 "blockwart.update_grant",
@@ -155,12 +158,33 @@ async def check_mcp(
                         "blockwart.get_context",
                         "blockwart.get_object_access",
                         "blockwart.search_principals",
+                        "blockwart.list_admin_principals",
+                        "blockwart.get_admin_principal",
                         "blockwart.preview_grant_scope",
                     }
                     else not tool.annotations.readOnlyHint
                 )
                 for name, tool in tools.items()
             )
+            admin_first_page = await session.call_tool(
+                "blockwart.list_admin_principals",
+                {"query": "package-smoke", "limit": 1},
+            )
+            admin_first_payload = _tool_payload(admin_first_page)
+            admin_cursor = admin_first_payload["next_cursor"]
+            assert isinstance(admin_cursor, str) and admin_cursor
+            admin_second_page = await session.call_tool(
+                "blockwart.list_admin_principals",
+                {
+                    "query": "package-smoke",
+                    "limit": 1,
+                    "cursor": admin_cursor,
+                },
+            )
+            admin_second_payload = _tool_payload(admin_second_page)
+            assert {
+                item["id"] for item in admin_first_payload["items"]
+            }.isdisjoint(item["id"] for item in admin_second_payload["items"])
             read_results = [
                 await session.call_tool("blockwart.search", {"limit": 1}),
                 await session.call_tool(
@@ -168,6 +192,12 @@ async def check_mcp(
                     {"object_id": object_id},
                 ),
                 await session.call_tool("blockwart.get_context", {"limit": 1}),
+                admin_first_page,
+                admin_second_page,
+                await session.call_tool(
+                    "blockwart.get_admin_principal",
+                    {"principal_id": grant_candidate_id},
+                ),
             ]
             assert all(not result.isError for result in read_results)
             access = await session.call_tool(
@@ -324,7 +354,7 @@ def main() -> None:
         token=api_token,
     )["objects"][0]
 
-    assert readiness["revision"] == "20260731_0011"
+    assert readiness["revision"] == "20260731_0012"
     assert "Blockwart" in index
     assert static_content_type == "text/css"
     assert not any(
@@ -350,7 +380,7 @@ def main() -> None:
     print(
         "installed_package=ok "
         f"cwd={Path.cwd()} revision={readiness['revision']} "
-        f"openapi_paths={len(openapi['paths'])} mcp_protocol={protocol} mcp_calls=15"
+        f"openapi_paths={len(openapi['paths'])} mcp_protocol={protocol} mcp_calls=18"
     )
 
 
