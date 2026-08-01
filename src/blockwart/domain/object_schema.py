@@ -430,6 +430,15 @@ NETWORK_FIELDS = (
     _field("network.addresses", "array"),
     _field("network.addresses[]", "object"),
     _field("network.addresses[].ip", "ip"),
+)
+
+NETWORK_OBJECT_FIELDS = (
+    _field(
+        "network.category",
+        "enum",
+        required=True,
+        enum_values=NETWORK_CATEGORIES,
+    ),
     _field(
         "network.manufacturer",
         "string",
@@ -448,15 +457,6 @@ NETWORK_FIELDS = (
         "network.location",
         "string",
         max_length=255,
-    ),
-)
-
-NETWORK_OBJECT_FIELDS = (
-    _field(
-        "network.category",
-        "enum",
-        required=True,
-        enum_values=NETWORK_CATEGORIES,
     ),
 )
 

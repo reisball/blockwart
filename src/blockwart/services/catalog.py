@@ -511,6 +511,8 @@ def upsert_object(
     )
     if row is not None and row.kind != payload.kind:
         ensure_kind_change_allowed(session, row, payload.kind)
+    if row is not None:
+        _validate_projected_relationship_endpoints(session, row, payload)
     current_state = (
         state_from_record(
             kind=row.kind,
@@ -613,6 +615,58 @@ def upsert_object(
     session.flush()
     session.refresh(row)
     return _to_schema(row)
+
+
+def _validate_projected_relationship_endpoints(
+    session: Session,
+    row: CatalogObject,
+    payload: CatalogObjectIn,
+) -> None:
+    object_refs = tuple(sorted({f"{row.kind}:{row.id}", f"{payload.kind}:{payload.id}"}))
+    relationship_rows = list(
+        session.scalars(
+            select(Relationship)
+            .where(
+                Relationship.from_ref.in_(object_refs)
+                | Relationship.to_ref.in_(object_refs)
+            )
+            .order_by(
+                Relationship.id,
+                Relationship.from_ref,
+                Relationship.relation_type,
+                Relationship.to_ref,
+            )
+        ).all()
+    )
+    if not relationship_rows:
+        return
+
+    endpoint_ids = {
+        reference.split(":", 1)[1]
+        for relationship in relationship_rows
+        for reference in (relationship.from_ref, relationship.to_ref)
+    }
+    endpoint_rows = list(
+        session.scalars(
+            select(CatalogObject)
+            .where(CatalogObject.id.in_(sorted(endpoint_ids)))
+            .order_by(CatalogObject.id)
+        ).all()
+    )
+    projected_rows: list[CatalogObject | dict[str, object]] = [
+        (
+            {
+                "id": payload.id,
+                "kind": payload.kind,
+                "data": payload.data,
+            }
+            if endpoint_row.id == payload.id
+            else endpoint_row
+        )
+        for endpoint_row in endpoint_rows
+    ]
+    endpoints = endpoint_descriptor_map(projected_rows)
+    validate_relationship_collection(relationship_rows, endpoints)
 
 
 def _object_matches_target(

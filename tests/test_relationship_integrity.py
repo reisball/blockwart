@@ -123,6 +123,75 @@ def test_attachment_and_uplink_endpoint_contract_is_fail_closed(session: Session
     assert error.value.code == "invalid_relationship_endpoint"
 
 
+@pytest.mark.parametrize(
+    ("source_ref", "relation_type", "target_ref", "updated_object_id"),
+    [
+        ("device:sensor", "attached_to", "network:switch", "switch"),
+        ("network:switch", "uplinks_to", "network:core", "core"),
+    ],
+)
+def test_object_update_rejects_projected_invalid_relationship_endpoints(
+    session: Session,
+    source_ref: str,
+    relation_type: str,
+    target_ref: str,
+    updated_object_id: str,
+) -> None:
+    _add_object(session, "sensor", "device", {"device": {"category": "sensor"}})
+    _add_object(session, "switch", "network", {"network": {"category": "switch"}})
+    _add_object(session, "core", "network", {"network": {"category": "router"}})
+    session.flush()
+    create_relationship(
+        session,
+        from_ref=source_ref,
+        relation_type=relation_type,
+        to_ref=target_ref,
+    )
+
+    with pytest.raises(RelationshipIntegrityError) as error:
+        upsert_object(
+            session,
+            CatalogObjectIn(
+                id=updated_object_id,
+                kind="network",
+                label=updated_object_id,
+                data={"schema_version": 1, "network": {"category": "segment"}},
+            ),
+        )
+
+    assert error.value.code == "invalid_relationship_endpoint"
+    stored_data = json.loads(session.get(CatalogObject, updated_object_id).data_json)
+    assert stored_data["network"]["category"] in {"switch", "router"}
+
+
+def test_object_update_allows_non_endpoint_network_changes(session: Session) -> None:
+    _add_object(session, "sensor", "device", {"device": {"category": "sensor"}})
+    _add_object(session, "switch", "network", {"network": {"category": "switch"}})
+    session.flush()
+    create_relationship(
+        session,
+        from_ref="device:sensor",
+        relation_type="attached_to",
+        to_ref="network:switch",
+    )
+
+    updated = upsert_object(
+        session,
+        CatalogObjectIn(
+            id="switch",
+            kind="network",
+            label="Switch updated",
+            data={
+                "schema_version": 1,
+                "network": {"category": "switch", "model": "Model 2"},
+            },
+        ),
+    )
+
+    assert updated.label == "Switch updated"
+    assert updated.data["network"]["model"] == "Model 2"
+
+
 def test_relationship_metadata_is_typed_canonical_and_secret_safe() -> None:
     assert validate_relationship_metadata(
         "attached_to",

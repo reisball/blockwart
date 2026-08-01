@@ -279,6 +279,86 @@ def test_update_requires_current_etag_and_denied_delete_is_security_only(
         assert '"permission":"delete"' in denial.details_json
 
 
+def test_authorized_update_rejects_projected_invalid_relationship_endpoint(
+    authorized_write_client: TestClient,
+    authorized_write_state,
+) -> None:
+    session_factory, principal_id, token = authorized_write_state
+    with session_factory() as session:
+        with transaction(session):
+            upsert_object(
+                session,
+                CatalogObjectIn(
+                    id="protected-sensor",
+                    kind="device",
+                    label="Protected sensor",
+                    lifecycle="active",
+                    health="healthy",
+                    data={"schema_version": 1, "device": {"category": "sensor"}},
+                ),
+            )
+            network = upsert_object(
+                session,
+                CatalogObjectIn(
+                    id="protected-switch",
+                    kind="network",
+                    label="Protected switch",
+                    lifecycle="active",
+                    health="healthy",
+                    data={"schema_version": 1, "network": {"category": "switch"}},
+                ),
+            )
+            create_object_grant(
+                session,
+                principal_id=principal_id,
+                object_id=network.id,
+                role=Role.EDITOR,
+                scope=GrantScope.SELF,
+            )
+            create_relationship(
+                session,
+                from_ref="device:protected-sensor",
+                relation_type="attached_to",
+                to_ref="network:protected-switch",
+            )
+
+    auth = _authorization(token)
+    current = authorized_write_client.get(
+        "/api/v1/objects/protected-switch",
+        headers=auth,
+    )
+    assert current.status_code == 200
+    current_revision = current.json()["revision"]
+    rejected = authorized_write_client.put(
+        "/api/v1/objects/protected-switch",
+        headers={**auth, "If-Match": current.headers["etag"]},
+        json=CatalogObjectIn(
+            id="protected-switch",
+            kind="network",
+            label="Protected switch",
+            lifecycle="active",
+            health="healthy",
+            data={"schema_version": 1, "network": {"category": "segment"}},
+        ).model_dump(mode="json"),
+    )
+
+    assert rejected.status_code == 409
+    assert rejected.json()["error"]["code"] == "conflict"
+    with session_factory() as session:
+        row = session.get(CatalogObject, "protected-switch")
+        assert row is not None
+        assert row.revision == current_revision
+        assert json.loads(row.data_json)["network"]["category"] == "switch"
+        assert session.scalar(
+            select(func.count())
+            .select_from(AuditEvent)
+            .where(
+                AuditEvent.object_id == "protected-switch",
+                AuditEvent.action == "update",
+            )
+        ) == 0
+
+
 def test_relationship_mutations_use_target_etag_and_one_audit_each(
     authorized_write_client: TestClient,
     authorized_write_state,
