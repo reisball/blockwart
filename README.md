@@ -4,7 +4,8 @@ Blockwart is a small infrastructure knowledge and credential-reference platform 
 
 The MVP goal is narrow:
 
-- structured systems, services, credential references, and runbooks
+- structured hosts, systems, network assets, devices, services, credential
+  references, and runbooks
 - DB-backed canonical storage
 - search-first human UI
 - object-authorized REST API for humans and integrations
@@ -92,10 +93,11 @@ It returns sanitized object context, resolved parent paths, children, network/en
 and credential-reference IDs only. Structured read filters are available for placement, IP, port,
 status, lifecycle, and health. It never resolves credential values. See docs/agent-api.md.
 
-The canonical asset hierarchy is `host → system → service`, with direct
+The canonical placement hierarchy is `host → system → service`, with direct
 `host → service` placement also supported. Placement is stored only as a
-parent-to-child `hosts` relationship; object IDs are globally unique. See
-`docs/domain-model.md`.
+parent-to-child `hosts` relationship. `device` is a separate public asset kind;
+its attachment graph does not extend placement or RBAC inheritance. Object IDs
+are globally unique. See `docs/domain-model.md`.
 
 All relationship types, directions, typed-reference checks, dependency storage, kind-change and
 delete behavior, database constraints, and the read-only integrity diagnostic are documented in

@@ -5,7 +5,7 @@ from pydantic import BaseModel, Field, model_validator
 from blockwart.domain.asset_state import AssetHealth, AssetLifecycle, is_asset_kind
 from blockwart.domain.auth import Permission
 from blockwart.domain.interfaces import normalize_interface_data
-from blockwart.domain.object_schema import validate_object_data
+from blockwart.domain.object_schema import normalize_object_data, validate_object_data
 from blockwart.domain.placement import PlacementState, validate_placement_metadata
 from blockwart.domain.provenance import (
     CatalogProvenance,
@@ -18,15 +18,22 @@ ObjectKind = Literal[
     "host",
     "system",
     "network",
+    "device",
     "service",
     "credential_reference",
     "runbook",
     "decision",
     "project",
 ]
-PublicObjectKind = Literal["host", "system", "network", "service"]
+PublicObjectKind = Literal["host", "system", "network", "device", "service"]
 ObjectStatus = Literal["active", "inactive", "deleted"]
-PUBLIC_OBJECT_KINDS: tuple[PublicObjectKind, ...] = ("host", "system", "network", "service")
+PUBLIC_OBJECT_KINDS: tuple[PublicObjectKind, ...] = (
+    "host",
+    "system",
+    "network",
+    "device",
+    "service",
+)
 OBJECT_STATUSES: tuple[ObjectStatus, ...] = ("active", "inactive", "deleted")
 
 ENDPOINT_TYPE_OPTIONS = ("Web", "REST API", "MCP", "HEC", "SSH")
@@ -35,6 +42,7 @@ ENDPOINT_TYPES = set(ENDPOINT_TYPE_OPTIONS)
 
 class CatalogObjectIn(BaseModel):
     reject_acl_data: ClassVar[bool] = True
+    allow_legacy_network_without_category: ClassVar[bool] = False
 
     id: str = Field(pattern=r"^[a-z0-9][a-z0-9_-]*[a-z0-9]$|^[a-z0-9]$")
     kind: ObjectKind
@@ -63,7 +71,15 @@ class CatalogObjectIn(BaseModel):
             self.lifecycle is not None or self.health is not None
         ):
             raise ValueError("lifecycle and health are only valid for asset kinds")
-        validate_object_data(self.kind, self.data)
+        if not self.allow_legacy_network_without_category:
+            self.data = normalize_object_data(self.kind, self.data)
+        validate_object_data(
+            self.kind,
+            self.data,
+            allow_legacy_network_without_category=(
+                self.allow_legacy_network_without_category
+            ),
+        )
         normalize_interface_data(
             self.data,
             kind=self.kind,
@@ -105,6 +121,7 @@ class CatalogObjectOut(CatalogObjectIn):
     # Legacy records remain readable while all mutation/import inputs reject
     # ACL-shaped catalog data.
     reject_acl_data: ClassVar[bool] = False
+    allow_legacy_network_without_category: ClassVar[bool] = True
 
     visibility: Literal["detail"] = "detail"
     capabilities: list[Permission] = Field(default_factory=list)

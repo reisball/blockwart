@@ -194,6 +194,11 @@ For an authentication-denial incident:
 
 Treat application code and its database revision as one release. Before updating the live image:
 
+Revision `0013` deliberately keeps legacy Network rows without `data.network.category` readable
+while rejecting every write to them. It does not classify or mutate those rows. Do not deploy that
+transitional revision to production until the separately reviewed Network classification dry run,
+mapping/apply plan, backup, and production acceptance are complete.
+
 1. Record the current application commit and image ID.
 2. Create a SQLite online backup outside `/opt/blockwart-data`.
 3. Run `PRAGMA integrity_check` against the backup and record the catalog, relationship, and audit
@@ -225,8 +230,10 @@ the current image without mutating the live database.
 For rollback, stop Blockwart first, preserve the failed database for diagnosis, restore the
 verified pre-upgrade backup, select the matching previous image, and start the service again. Do
 not run an automatic Alembic downgrade on live data. The `0011` downgrade drops only the transient
-service-token failure-bucket table, but primary recovery remains the matching verified pre-upgrade
-database plus pinned old image. Never supply a retired global-bypass credential to an old image.
+service-token failure-bucket table; the `0013` device/relationship foundation explicitly refuses a
+downgrade because its two SQLite rebuilds require the matching pre-migration backup. Primary
+recovery remains the matching verified pre-upgrade database plus pinned old image. Never supply a
+retired global-bypass credential to an old image.
 
 An existing unversioned Blockwart database is adopted only if Alembic finds no model/schema
 differences. The adopter stamps the known initial revision and then applies later revisions

@@ -6,11 +6,16 @@ Blockwart version 1 models concrete infrastructure assets:
   single-board computer.
 - `system` is one concrete runtime environment on hardware, for example an
   LXC container, VM, or WSL instance.
+- `network` is either a segment or a network device, distinguished by the
+  required closed `data.network.category` vocabulary on new writes.
+- `device` is a non-compute equipment asset such as an antenna, sensor,
+  adapter, controller, or UPS. Its required `data.device.category` is
+  `antenna`, `sensor`, `adapter`, `controller`, `ups`, or `other`.
 - `service` is one concrete running deployment instance. A distributed service
   is represented by multiple service objects until an explicit grouping model
   is introduced.
 
-`network` and the non-public catalog kinds are not placement levels.
+`network`, `device`, and the non-public catalog kinds are not placement levels.
 
 English identifiers are the canonical backend contract. Alembic revision
 `20260729_0007` migrates the former `netzwerk` identifier and every valid typed
@@ -24,8 +29,8 @@ Infrastructure assets use two independent, closed dimensions:
 - `lifecycle`: `planned`, `active`, or `retired`
 - `health`: `unknown`, `healthy`, `degraded`, `down`, or `maintenance`
 
-The values are stored in dedicated `catalog_objects` columns for `host`, `system`, `network`, and
-`service`. They are absent for knowledge objects such as runbooks and decisions. Free-form
+The values are stored in dedicated `catalog_objects` columns for `host`, `system`, `network`,
+`device`, and `service`. They are absent for knowledge objects such as runbooks and decisions. Free-form
 `data.lifecycle` and `data.health` fields are rejected.
 
 The legacy `status` column remains a derived compatibility field while UI work is out of scope:
@@ -83,6 +88,26 @@ sources. Alembic revision `20260724_0003` reconciles them with any existing
 `hosts` edge, rejects conflicts, creates a missing canonical edge, converts
 `provides`, and removes only `system_id` from the JSON document. New payloads
 containing `system_id` and new `provides` writes are rejected.
+
+## Device and network links
+
+Attachment and uplink edges are separate from placement. Their canonical directions are
+child/endpoint to immediate parent/upstream:
+
+```text
+host|system attached_to network-device
+device attached_to host|system|network-device|device
+network-device uplinks_to network-device
+```
+
+A `network` object is a network device only when `data.network.category` is one of `switch`,
+`router`, `access_point`, `mesh`, `firewall`, `gateway`, or `other_device`; `segment` is explicitly
+not a device. Services and segments cannot be attachment endpoints. These links do not propagate
+RBAC and do not change the existing `hosts` placement hierarchy.
+
+Existing Network rows without a category remain readable during the migration transition. Every
+new or updated Network payload through the canonical schema service is fail-closed until it has an
+explicit category. No migration guesses or mutates that classification.
 
 ## Object identity
 

@@ -6,16 +6,17 @@ from the database, UI settings, seed files, or Markdown.
 
 ## Boundary
 
-`CatalogObjectIn` is the single validation entry point used by catalog service
-calls, seed import, Markdown import, and stored-record integrity checks.
-Consequently, every write/import path receives the same object-kind rules
-before persistence.
+`CatalogObjectIn` is the canonical validation entry point used by catalog service
+calls, seed import, and Markdown import. Consequently, every write/import path receives the same
+object-kind rules before persistence. Stored-record reads use the same rules with one explicit
+migration exception: existing Network rows without a category remain readable.
 
 The registry covers the existing object kinds:
 
 - `host`
 - `system`
 - `network`
+- `device`
 - `service`
 - `credential_reference`
 - `runbook`
@@ -36,9 +37,21 @@ segments use `[]`, for example:
 - `applies_to.systems[]`
 
 Supported types are string/text, strict integer, strict boolean, enum, URL, IP,
-port, object, array, string-or-object, and typed reference. Required fields and
-fixed literal values are also supported. Validation errors contain the resolved
-record path, such as `data.network.addresses[1].ip`.
+port, object, array, string-or-object, and typed reference. Required fields,
+fixed literal values, closed enums, whitespace normalization, and string length bounds are also
+supported. Validation errors contain the resolved record path, such as
+`data.network.addresses[1].ip`.
+
+Device writes require `data.device.category` from
+`antenna|sensor|adapter|controller|ups|other`. Optional manufacturer and model values are trimmed,
+must remain non-empty, and are limited to 128 characters. Network writes require
+`data.network.category` from
+`segment|switch|router|access_point|mesh|firewall|gateway|other_device`; optional manufacturer and
+model use the same 128-character rule and location is limited to 255 characters.
+
+The Network exception is read-only and transitional. Any write through `CatalogObjectIn`,
+including an otherwise unrelated update to a legacy row, fails until the caller provides an
+explicit valid category. Blockwart does not infer or backfill one.
 
 Unknown additional data remains allowed to preserve the current flexible
 catalog contract. Tightening unknown-field handling requires a separate
@@ -75,5 +88,4 @@ This keeps one field-rule registry without duplicating richer domain logic.
 - no schema database tables or migrations
 - no editable storage paths or field types
 - no schema-driven UI generation
-- no new public catalog fields
-- no change to REST/OpenAPI or the persisted `data_json` format
+- no API v1 relationship-metadata commands or device-graph endpoints in this slice

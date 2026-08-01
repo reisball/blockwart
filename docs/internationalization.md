@@ -14,6 +14,7 @@ The public object kinds are:
 | `system` | LXC, VM, WSL, or another runtime environment | Host | Host |
 | `service` | one deployed service instance | Service | Dienst |
 | `network` | a network or segment | Network | Netzwerk |
+| `device` | a separately managed physical or virtual device | Device | Gerät |
 
 Database values, typed references, JSON keys, Pydantic/OpenAPI schemas, Agent
 API, MCP, seeds, diagnostics, logs, and audit event codes use the canonical

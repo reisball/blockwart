@@ -222,6 +222,7 @@ def test_topology_keeps_network_assets_visible(
                 data={
                     "schema_version": 1,
                     "network": {
+                        "category": "segment",
                         "addresses": [
                             {
                                 "ip": "192.168.99.1",
@@ -315,7 +316,7 @@ def test_create_form_schema_gates_fields_by_type(client: TestClient) -> None:
     assert 'data-create-field="kind"' in response.text
     assert 'data-create-field="platform"' in response.text
     assert 'data-create-field="relationship"' in response.text
-    assert set(UI_SCHEMAS) == {"host", "system", "network", "service"}
+    assert set(UI_SCHEMAS) == {"host", "system", "network", "device", "service"}
     assert "platform" in UI_SCHEMAS["system"].create_fields
     assert "platform" not in UI_SCHEMAS["service"].create_fields
     assert "platform" not in UI_SCHEMAS["host"].create_fields
@@ -716,12 +717,17 @@ def test_system_detail_can_edit_resource_hardware_fields(
     }
 
 
-@pytest.mark.parametrize("kind", ["host", "system", "service", "network"])
+@pytest.mark.parametrize("kind", ["host", "system", "service", "network", "device"])
 def test_object_data_updates_write_object_audit_for_public_kinds(
     session_factory,
     kind: str,
 ) -> None:
     object_id = f"audit-{kind}"
+    base_data: dict[str, object] = {"schema_version": 1}
+    if kind == "network":
+        base_data["network"] = {"category": "segment"}
+    elif kind == "device":
+        base_data["device"] = {"category": "other"}
     with session_factory() as session:
         upsert_object(
             session,
@@ -730,7 +736,7 @@ def test_object_data_updates_write_object_audit_for_public_kinds(
                 kind=kind,
                 label=f"Audit {kind}",
                 status="active",
-                data={"schema_version": 1},
+                data=base_data,
             ),
         )
         upsert_object(
@@ -740,7 +746,7 @@ def test_object_data_updates_write_object_audit_for_public_kinds(
                 kind=kind,
                 label=f"Audit {kind}",
                 status="active",
-                data={"schema_version": 1, "comment": f"{kind} changed"},
+                data={**base_data, "comment": f"{kind} changed"},
             ),
         )
         event = session.scalars(
@@ -813,6 +819,9 @@ def test_network_and_service_detail_do_not_show_hardware_panel(
     kind: str,
 ) -> None:
     object_id = f"no-hardware-{kind}"
+    data: dict[str, object] = {"schema_version": 1}
+    if kind == "network":
+        data["network"] = {"category": "segment"}
     with session_factory() as session:
         upsert_object(
             session,
@@ -821,7 +830,7 @@ def test_network_and_service_detail_do_not_show_hardware_panel(
                 kind=kind,
                 label=f"No Hardware {kind}",
                 status="active",
-                data={"schema_version": 1},
+                data=data,
             ),
         )
 
@@ -1322,7 +1331,11 @@ def test_ui_schema_drives_primary_name_storage_by_kind(
             "labels": "infra, docker\ninfra",
             "platform": "LXC",
             "summary": "Created from schema matrix.",
-            "data_json": '{"schema_version": 1}',
+            "data_json": (
+                '{"network":{"category":"segment"},"schema_version":1}'
+                if kind == "network"
+                else '{"schema_version":1}'
+            ),
             "relation_target_ref": "system:fabrik",
             "relation_type": "hosts",
             "idempotency_key": f"ui-schema-create-{kind}",
@@ -2327,6 +2340,8 @@ def test_public_network_edit_exposes_and_updates_endpoints(
         "network": {"addresses": [{"ip": "192.168.50.20", "scope": "lan"}]},
         "endpoints": [{"type": "Web", "url": "https://192.168.50.20", "port": 443}],
     }
+    if kind == "network":
+        data["network"]["category"] = "segment"
     if kind in {"host", "system"}:
         data["ports"] = [{"port": 443, "protocol": "tcp", "purpose": "Legacy HTTPS"}]
     with session_factory() as session:
