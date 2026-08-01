@@ -1,3 +1,5 @@
+from typing import ClassVar
+
 from pydantic import ValidationError
 
 from blockwart.domain.catalog_data import (
@@ -8,6 +10,12 @@ from blockwart.domain.catalog_data import (
 from blockwart.domain.provenance import load_provenance
 from blockwart.models import CatalogObject
 from blockwart.schemas.catalog import CatalogObjectIn
+
+
+class _StoredCatalogObjectIn(CatalogObjectIn):
+    """Validate legacy-readable rows without weakening the canonical write model."""
+
+    allow_legacy_network_without_category: ClassVar[bool] = True
 
 
 def read_catalog_record_data(
@@ -32,7 +40,7 @@ def read_catalog_record_data(
             )
         return corrupt
     try:
-        CatalogObjectIn.model_validate(
+        _StoredCatalogObjectIn.model_validate(
             {
                 "id": row.id,
                 "kind": row.kind,

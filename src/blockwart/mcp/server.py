@@ -97,6 +97,7 @@ OBJECT_WRITE_SCHEMA: JSON = {
                 "host",
                 "system",
                 "network",
+                "device",
                 "service",
                 "credential_reference",
                 "runbook",
@@ -151,7 +152,7 @@ QUERY_FILTER_PROPERTIES: JSON = {
     "q": {"type": "string", "description": "Search term"},
     "kind": {
         "type": "string",
-        "enum": ["host", "system", "network", "service"],
+        "enum": ["host", "system", "network", "device", "service"],
     },
     "parent": {"type": "string", "description": "Typed parent reference"},
     "ip": {"type": "string", "description": "Resolved exact IP address"},

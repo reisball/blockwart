@@ -33,9 +33,9 @@ class CatalogObject(Base):
             name="ck_catalog_objects_health",
         ),
         CheckConstraint(
-            "(kind IN ('host','system','network','service') "
+            "(kind IN ('host','system','network','device','service') "
             "AND lifecycle IS NOT NULL AND health IS NOT NULL) OR "
-            "(kind NOT IN ('host','system','network','service') "
+            "(kind NOT IN ('host','system','network','device','service') "
             "AND lifecycle IS NULL AND health IS NULL)",
             name="ck_catalog_objects_asset_state",
         ),
@@ -92,7 +92,8 @@ class Relationship(Base):
         ),
         CheckConstraint(
             "relation_type IN "
-            "('hosts','depends_on','supports','feeds','exposes','documents','uses','related_to')",
+            "('hosts','depends_on','supports','feeds','exposes','documents','uses','related_to',"
+            "'attached_to','uplinks_to')",
             name="ck_relationships_known_type",
         ),
         Index(
@@ -107,6 +108,11 @@ class Relationship(Base):
     from_ref: Mapped[str] = mapped_column(String(192), index=True)
     relation_type: Mapped[str] = mapped_column(String(96), index=True)
     to_ref: Mapped[str] = mapped_column(String(192), index=True)
+    metadata_json: Mapped[str] = mapped_column(
+        Text,
+        default="{}",
+        server_default=text("'{}'"),
+    )
 
 
 class AuditEvent(Base):

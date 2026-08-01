@@ -9,13 +9,13 @@ from blockwart.domain.auth import (
     permissions_for_role,
 )
 from blockwart.models import CatalogObject, Principal, Relationship
-from blockwart.services.access import create_object_grant
+from blockwart.services.access import active_owner_covered_object_ids, create_object_grant
 from blockwart.services.identity import create_service_account
 from blockwart.services.policy import policy_for_principal
 
 
 def _object(object_id: str, kind: str) -> CatalogObject:
-    is_asset = kind in {"host", "system", "network", "service"}
+    is_asset = kind in {"host", "system", "network", "device", "service"}
     return CatalogObject(
         id=object_id,
         kind=kind,
@@ -24,7 +24,11 @@ def _object(object_id: str, kind: str) -> CatalogObject:
         lifecycle="active" if is_asset else None,
         health="healthy" if is_asset else None,
         summary=None,
-        data_json="{}",
+        data_json=(
+            '{"device":{"category":"other"},"schema_version":1}'
+            if kind == "device"
+            else "{}"
+        ),
         provenance_json='{"manual_override":false,"source_type":"unknown"}',
     )
 
@@ -243,6 +247,41 @@ def test_inactive_principal_has_no_effective_permissions(
             )
             == set()
         )
+
+
+def test_attachment_links_do_not_propagate_subtree_rbac_or_owner_coverage(
+    alembic_session_factory,
+) -> None:
+    with alembic_session_factory() as session:
+        with transaction(session):
+            session.add_all([_object("root", "host"), _object("sensor", "device")])
+            session.flush()
+            session.add(
+                Relationship(
+                    from_ref="device:sensor",
+                    relation_type="attached_to",
+                    to_ref="host:root",
+                )
+            )
+            principal = create_service_account(
+                session,
+                login="attachment.owner",
+                display_name="Attachment Owner",
+            )
+            create_object_grant(
+                session,
+                principal_id=principal.id,
+                object_id="root",
+                role=Role.OWNER,
+                scope=GrantScope.SUBTREE,
+            )
+
+        policy = policy_for_principal(session, principal.id)
+        covered_ids = active_owner_covered_object_ids(session)
+
+    assert policy.visibility_for("root") == ObjectVisibility.DETAIL
+    assert policy.visibility_for("sensor") == ObjectVisibility.NONE
+    assert covered_ids == {"root"}
 
 
 def test_policy_snapshot_uses_constant_select_count(

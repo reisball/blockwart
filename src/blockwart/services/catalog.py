@@ -25,12 +25,16 @@ from blockwart.domain.provenance import (
     provenance_for_read,
 )
 from blockwart.domain.relationships import (
+    EndpointDescriptor,
     RelationshipDiagnostic,
     RelationshipIntegrityError,
+    canonical_relationship_metadata_json,
     diagnose_relationship_integrity,
+    endpoint_descriptor_map,
     iter_typed_reference_strings,
     validate_data_references,
     validate_relationship,
+    validate_relationship_collection,
 )
 from blockwart.domain.timestamps import format_rfc3339_utc
 from blockwart.models import AuditEvent, CatalogObject, Relationship
@@ -301,17 +305,19 @@ def create_relationship(
     from_ref: str,
     relation_type: str,
     to_ref: str,
+    metadata: Mapping[str, object] | None = None,
     audit_action: str = "relationship_create",
     audit_actor: str = "system",
     write_audit: bool = True,
     touch_revisions: bool = True,
 ) -> dict[str, str]:
-    object_kinds = current_object_kinds(session)
+    endpoints = current_endpoint_descriptors(session)
+    metadata_json = canonical_relationship_metadata_json(relation_type, metadata)
     validate_relationship(
         from_ref=from_ref,
         relation_type=relation_type,
         to_ref=to_ref,
-        object_kinds=object_kinds,
+        endpoints=endpoints,
     )
     existing = session.scalar(
         select(Relationship).where(
@@ -320,12 +326,37 @@ def create_relationship(
             Relationship.to_ref == to_ref,
         )
     )
+    if existing is not None and existing.metadata_json != metadata_json:
+        raise RelationshipIntegrityError(
+            "relationship_metadata_conflict",
+            "relationship already exists with different metadata",
+        )
     if relation_type == CANONICAL_PLACEMENT_RELATION_TYPE:
         _validate_placement_relationship(
             session,
             parent_ref=from_ref,
             child_ref=to_ref,
         )
+    relationship_rows = list(
+        session.scalars(
+            select(Relationship).order_by(
+                Relationship.id,
+                Relationship.from_ref,
+                Relationship.relation_type,
+                Relationship.to_ref,
+            )
+        ).all()
+    )
+    if existing is None:
+        relationship_rows.append(
+            {
+                "from_ref": from_ref,
+                "relation_type": relation_type,
+                "to_ref": to_ref,
+                "metadata_json": metadata_json,
+            }
+        )
+    validate_relationship_collection(relationship_rows, endpoints)
     changed_at = _now()
     cleared_unassigned = False
     if relation_type == CANONICAL_PLACEMENT_RELATION_TYPE:
@@ -345,6 +376,7 @@ def create_relationship(
             from_ref=from_ref,
             relation_type=relation_type,
             to_ref=to_ref,
+            metadata_json=metadata_json,
         )
     )
     if write_audit:
@@ -479,6 +511,8 @@ def upsert_object(
     )
     if row is not None and row.kind != payload.kind:
         ensure_kind_change_allowed(session, row, payload.kind)
+    if row is not None:
+        ensure_projected_relationship_endpoints_valid(session, row, payload)
     current_state = (
         state_from_record(
             kind=row.kind,
@@ -581,6 +615,65 @@ def upsert_object(
     session.flush()
     session.refresh(row)
     return _to_schema(row)
+
+
+def ensure_projected_relationship_endpoints_valid(
+    session: Session,
+    row: CatalogObject,
+    payload: CatalogObjectIn,
+) -> None:
+    try:
+        current_data = json.loads(row.data_json)
+    except (TypeError, json.JSONDecodeError):
+        current_data = None
+    if row.kind == payload.kind and current_data == payload.data:
+        return
+
+    object_refs = tuple(sorted({f"{row.kind}:{row.id}", f"{payload.kind}:{payload.id}"}))
+    relationship_rows = list(
+        session.scalars(
+            select(Relationship)
+            .where(
+                Relationship.from_ref.in_(object_refs)
+                | Relationship.to_ref.in_(object_refs)
+            )
+            .order_by(
+                Relationship.id,
+                Relationship.from_ref,
+                Relationship.relation_type,
+                Relationship.to_ref,
+            )
+        ).all()
+    )
+    if not relationship_rows:
+        return
+
+    endpoint_ids = {
+        reference.split(":", 1)[1]
+        for relationship in relationship_rows
+        for reference in (relationship.from_ref, relationship.to_ref)
+    }
+    endpoint_rows = list(
+        session.scalars(
+            select(CatalogObject)
+            .where(CatalogObject.id.in_(sorted(endpoint_ids)))
+            .order_by(CatalogObject.id)
+        ).all()
+    )
+    projected_rows: list[CatalogObject | dict[str, object]] = [
+        (
+            {
+                "id": payload.id,
+                "kind": payload.kind,
+                "data": payload.data,
+            }
+            if endpoint_row.id == payload.id
+            else endpoint_row
+        )
+        for endpoint_row in endpoint_rows
+    ]
+    endpoints = endpoint_descriptor_map(projected_rows)
+    validate_relationship_collection(relationship_rows, endpoints)
 
 
 def _object_matches_target(
@@ -801,6 +894,11 @@ def relationship_diagnostics(session: Session) -> list[RelationshipDiagnostic]:
 def current_object_kinds(session: Session) -> dict[str, str]:
     rows = session.execute(select(CatalogObject.id, CatalogObject.kind)).all()
     return {str(object_id): str(kind) for object_id, kind in rows}
+
+
+def current_endpoint_descriptors(session: Session) -> dict[str, EndpointDescriptor]:
+    rows = session.scalars(select(CatalogObject).order_by(CatalogObject.id)).all()
+    return endpoint_descriptor_map(rows)
 
 
 def ensure_kind_change_allowed(

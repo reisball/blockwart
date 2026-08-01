@@ -4,6 +4,7 @@ VALID_REFERENCE_KINDS = {
     "host",
     "system",
     "network",
+    "device",
     "service",
     "credential_reference",
     "runbook",

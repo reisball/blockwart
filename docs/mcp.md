@@ -22,8 +22,8 @@ It wraps the object-authorized v1 API:
 - blockwart.update_grant -> PUT /api/v1/objects/{object_id}/access/grants/{grant_id}
 - blockwart.revoke_grant -> DELETE /api/v1/objects/{object_id}/access/grants/{grant_id}
 
-`blockwart.search` and `blockwart.get_context` accept `host`, `system`, `network`, and `service`
-as kinds. Both tools also forward v1's structured `parent`, `ip`, `port`,
+`blockwart.search` and `blockwart.get_context` accept `host`, `system`, `network`, `device`, and
+`service` as kinds. Both tools also forward v1's structured `parent`, `ip`, `port`,
 `endpoint_type`, `protocol`, `exposure`, `status`, `lifecycle`, and `health`
 filters plus canonical `source_type` and computed `stale`, `cursor`, `sort`,
 `direction`, and optional `include_total`.

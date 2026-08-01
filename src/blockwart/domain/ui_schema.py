@@ -243,6 +243,30 @@ FIELD_DEFINITIONS: dict[str, UiField] = {
         "data_json.hardware.storage",
         placeholder_key="field.hardware_storage.placeholder",
     ),
+    "device_category": UiField(
+        "device_category",
+        "field.device_category.label",
+        "select",
+        "data_json.device.category",
+        required=True,
+        visible_in_create=True,
+    ),
+    "device_manufacturer": UiField(
+        "device_manufacturer",
+        "field.device_manufacturer.label",
+        "text",
+        "data_json.device.manufacturer",
+        placeholder_key="field.device_manufacturer.placeholder",
+        visible_in_create=True,
+    ),
+    "device_model": UiField(
+        "device_model",
+        "field.device_model.label",
+        "text",
+        "data_json.device.model",
+        placeholder_key="field.device_model.placeholder",
+        visible_in_create=True,
+    ),
     "endpoint_type": UiField(
         "endpoint_type",
         "field.endpoint_type.label",
@@ -331,6 +355,13 @@ SERVICE_INFORMATION_SCHEMA_FIELDS = (
     "service_running_version",
 )
 
+DEVICE_SCHEMA_FIELDS = (
+    "device_category",
+    "device_manufacturer",
+    "device_model",
+)
+DEVICE_CREATE_FIELDS = COMMON_CREATE_FIELDS + DEVICE_SCHEMA_FIELDS
+
 
 UI_SCHEMAS: dict[str, UiTypeSchema] = {
     "host": UiTypeSchema(
@@ -358,6 +389,15 @@ UI_SCHEMAS: dict[str, UiTypeSchema] = {
         supports_platform=False,
         fields=COMMON_SCHEMA_FIELDS + ENDPOINT_SCHEMA_FIELDS,
         create_fields=COMMON_CREATE_FIELDS,
+        panels=BASE_UI_PANELS,
+    ),
+    "device": UiTypeSchema(
+        kind="device",
+        primary_name_label_key="field.primary_name.device.label",
+        primary_name_storage="label",
+        supports_platform=False,
+        fields=COMMON_SCHEMA_FIELDS + DEVICE_SCHEMA_FIELDS + ENDPOINT_SCHEMA_FIELDS,
+        create_fields=DEVICE_CREATE_FIELDS,
         panels=BASE_UI_PANELS,
     ),
     "service": UiTypeSchema(
