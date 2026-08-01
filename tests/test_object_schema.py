@@ -1,3 +1,4 @@
+import json
 from copy import deepcopy
 
 import pytest
@@ -11,7 +12,9 @@ from blockwart.domain.object_schema import (
     TypeSchema,
     validate_fields,
 )
+from blockwart.models import CatalogObject
 from blockwart.schemas.catalog import CatalogObjectIn
+from blockwart.services.catalog import get_object
 from blockwart.services.markdown_import import build_tools_import_plan
 from blockwart.services.seeds import import_seed_payload
 
@@ -21,6 +24,7 @@ def test_builtin_schema_registry_is_fixed_and_complete() -> None:
         "host",
         "system",
         "network",
+        "device",
         "service",
         "credential_reference",
         "runbook",
@@ -228,6 +232,10 @@ def test_catalog_input_uses_schema_paths(
 
 def test_builtin_schemas_preserve_unknown_fields_and_current_minimal_records() -> None:
     for kind in BUILTIN_SCHEMAS:
+        kind_data = {
+            "network": {"network": {"category": "segment"}},
+            "device": {"device": {"category": "sensor"}},
+        }.get(kind, {})
         record = CatalogObjectIn.model_validate(
             {
                 "id": f"minimal-{kind.replace('_', '-')}",
@@ -236,10 +244,119 @@ def test_builtin_schemas_preserve_unknown_fields_and_current_minimal_records() -
                 "data": {
                     "schema_version": 1,
                     "future_extension": {"preserved": True},
+                    **kind_data,
                 },
             }
         )
         assert record.data["future_extension"] == {"preserved": True}
+
+
+def test_device_schema_requires_closed_category_and_canonical_equipment_text() -> None:
+    record = CatalogObjectIn.model_validate(
+        {
+            "id": "zigbee-antenna",
+            "kind": "device",
+            "label": "Zigbee antenna",
+            "data": {
+                "device": {
+                    "category": "antenna",
+                    "manufacturer": "  Sonoff  ",
+                    "model": "  ZBDongle-E  ",
+                }
+            },
+        }
+    )
+    assert record.data["device"] == {
+        "category": "antenna",
+        "manufacturer": "Sonoff",
+        "model": "ZBDongle-E",
+    }
+
+    for device in ({}, {"category": "camera"}, {"category": "sensor", "model": "   "}):
+        with pytest.raises(ValidationError):
+            CatalogObjectIn.model_validate(
+                {
+                    "id": "invalid-device",
+                    "kind": "device",
+                    "label": "Invalid device",
+                    "data": {"device": device},
+                }
+            )
+
+    with pytest.raises(ValidationError, match="at most 128"):
+        CatalogObjectIn.model_validate(
+            {
+                "id": "long-device",
+                "kind": "device",
+                "label": "Long device",
+                "data": {"device": {"category": "other", "manufacturer": "x" * 129}},
+            }
+        )
+
+
+def test_network_schema_requires_category_for_writes_and_bounds_equipment_fields() -> None:
+    record = CatalogObjectIn.model_validate(
+        {
+            "id": "core-switch",
+            "kind": "network",
+            "label": "Core switch",
+            "data": {
+                "network": {
+                    "category": "switch",
+                    "manufacturer": "  MikroTik ",
+                    "model": " CRS326 ",
+                    "location": " Rack 1 ",
+                }
+            },
+        }
+    )
+    assert record.data["network"] == {
+        "category": "switch",
+        "manufacturer": "MikroTik",
+        "model": "CRS326",
+        "location": " Rack 1 ",
+    }
+
+    with pytest.raises(ValidationError, match=r"data\.network\.category.*required"):
+        CatalogObjectIn.model_validate(
+            {
+                "id": "legacy-network-write",
+                "kind": "network",
+                "label": "Legacy network write",
+                "data": {"network": {}},
+            }
+        )
+    with pytest.raises(ValidationError, match="at most 255"):
+        CatalogObjectIn.model_validate(
+            {
+                "id": "long-location",
+                "kind": "network",
+                "label": "Long location",
+                "data": {"network": {"category": "segment", "location": "x" * 256}},
+            }
+        )
+
+
+def test_legacy_network_without_category_remains_readable(alembic_session_factory) -> None:
+    with alembic_session_factory() as session:
+        session.add(
+            CatalogObject(
+                id="legacy-network-row",
+                kind="network",
+                label="Legacy network row",
+                status="active",
+                lifecycle="active",
+                health="unknown",
+                data_json=json.dumps({"network": {"location": "Legacy rack"}}),
+            )
+        )
+        session.flush()
+
+        record = get_object(session, "legacy-network-row")
+
+    assert record is not None
+    assert record.record_state == "valid"
+    assert record.data == {"network": {"location": "Legacy rack"}}
 
 
 def test_global_secret_guard_runs_independently_of_builtin_schema() -> None:

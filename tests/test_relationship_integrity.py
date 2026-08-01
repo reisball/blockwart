@@ -12,6 +12,7 @@ from blockwart.domain.relationships import (
     RELATIONSHIP_TYPES,
     RelationshipIntegrityError,
     diagnose_relationship_integrity,
+    validate_relationship_metadata,
 )
 from blockwart.models import AuditEvent, CatalogObject, Relationship
 from blockwart.schemas.catalog import CatalogObjectIn
@@ -30,6 +31,8 @@ def session(alembic_session_factory) -> Session:
 
 
 def _add_object(session: Session, object_id: str, kind: str, data: dict | None = None) -> None:
+    if data is None and kind == "device":
+        data = {"schema_version": 1, "device": {"category": "other"}}
     session.add(
         CatalogObject(
             id=object_id,
@@ -54,7 +57,229 @@ def test_relationship_registry_is_explicit_and_stable() -> None:
         "documents",
         "uses",
         "related_to",
+        "attached_to",
+        "uplinks_to",
     )
+
+
+def test_attachment_and_uplink_endpoint_contract_is_fail_closed(session: Session) -> None:
+    _add_object(session, "hardware", "host")
+    _add_object(session, "runtime", "system")
+    _add_object(session, "api", "service")
+    _add_object(session, "sensor", "device", {"device": {"category": "sensor"}})
+    _add_object(
+        session,
+        "switch",
+        "network",
+        {"network": {"category": "switch"}},
+    )
+    _add_object(
+        session,
+        "segment",
+        "network",
+        {"network": {"category": "segment"}},
+    )
+    _add_object(session, "legacy-network", "network", {"network": {}})
+    session.flush()
+
+    create_relationship(
+        session,
+        from_ref="host:hardware",
+        relation_type="attached_to",
+        to_ref="network:switch",
+    )
+    create_relationship(
+        session,
+        from_ref="device:sensor",
+        relation_type="attached_to",
+        to_ref="system:runtime",
+    )
+
+    for from_ref, to_ref in (
+        ("service:api", "network:switch"),
+        ("host:hardware", "network:segment"),
+        ("device:sensor", "network:segment"),
+        ("host:hardware", "network:legacy-network"),
+    ):
+        with pytest.raises(RelationshipIntegrityError) as error:
+            create_relationship(
+                session,
+                from_ref=from_ref,
+                relation_type="attached_to",
+                to_ref=to_ref,
+            )
+        assert error.value.code in {
+            "invalid_relationship_direction",
+            "invalid_relationship_endpoint",
+        }
+
+    with pytest.raises(RelationshipIntegrityError) as error:
+        create_relationship(
+            session,
+            from_ref="network:switch",
+            relation_type="uplinks_to",
+            to_ref="network:segment",
+        )
+    assert error.value.code == "invalid_relationship_endpoint"
+
+
+def test_relationship_metadata_is_typed_canonical_and_secret_safe() -> None:
+    assert validate_relationship_metadata(
+        "attached_to",
+        {
+            "source_interface": "  ttyUSB0 ",
+            "target_interface_or_port": " USB 3 ",
+            "link_kind": "usb",
+            "primary": True,
+            "note": "  Coordinator ",
+        },
+    ) == {
+        "source_interface": "ttyUSB0",
+        "target_interface_or_port": "USB 3",
+        "link_kind": "usb",
+        "primary": True,
+        "note": "Coordinator",
+    }
+    assert validate_relationship_metadata("attached_to", {}) == {}
+    assert validate_relationship_metadata("attached_to", {"primary": False}) == {
+        "primary": False
+    }
+    assert validate_relationship_metadata("uplinks_to", {"mode": "trunk"}) == {
+        "mode": "trunk"
+    }
+
+    invalid = (
+        ("hosts", {"note": "not allowed"}, "invalid_relationship_metadata"),
+        ("attached_to", {"mode": "access"}, "invalid_relationship_metadata"),
+        ("attached_to", {"note": "   "}, "invalid_relationship_metadata"),
+        ("attached_to", {"note": "x" * 513}, "invalid_relationship_metadata"),
+        (
+            "attached_to",
+            {"source_interface": "x" * 129},
+            "invalid_relationship_metadata",
+        ),
+        (
+            "attached_to",
+            {"target_interface_or_port": "x" * 129},
+            "invalid_relationship_metadata",
+        ),
+        ("attached_to", {"link_kind": "coax"}, "invalid_relationship_metadata"),
+        ("attached_to", {"primary": 1}, "invalid_relationship_metadata"),
+        ("uplinks_to", {"mode": "invalid"}, "invalid_relationship_metadata"),
+        (
+            "attached_to",
+            {"note": "Bearer abcdefghijklmnopqrstuvwxyz123456"},
+            "secret_relationship_metadata",
+        ),
+        ("attached_to", {"token": "not-even-a-secret"}, "secret_relationship_metadata"),
+    )
+    for relation_type, metadata, code in invalid:
+        with pytest.raises(RelationshipIntegrityError) as error:
+            validate_relationship_metadata(relation_type, metadata)
+        assert error.value.code == code
+    with pytest.raises(RelationshipIntegrityError, match="must be an object"):
+        validate_relationship_metadata("attached_to", [])  # type: ignore[arg-type]
+
+
+def test_device_attachment_graph_rejects_cycles_and_multiple_primary_edges(
+    session: Session,
+) -> None:
+    for object_id in ("sensor", "antenna", "controller"):
+        _add_object(session, object_id, "device")
+    session.flush()
+
+    create_relationship(
+        session,
+        from_ref="device:sensor",
+        relation_type="attached_to",
+        to_ref="device:antenna",
+        metadata={"primary": True, "link_kind": "zigbee"},
+    )
+    create_relationship(
+        session,
+        from_ref="device:antenna",
+        relation_type="attached_to",
+        to_ref="device:controller",
+    )
+
+    with pytest.raises(RelationshipIntegrityError) as cycle:
+        create_relationship(
+            session,
+            from_ref="device:controller",
+            relation_type="attached_to",
+            to_ref="device:sensor",
+        )
+    assert cycle.value.code == "relationship_cycle"
+
+    with pytest.raises(RelationshipIntegrityError) as primary:
+        create_relationship(
+            session,
+            from_ref="device:sensor",
+            relation_type="attached_to",
+            to_ref="device:controller",
+            metadata={"primary": True},
+        )
+    assert primary.value.code == "multiple_primary_relationships"
+
+    with pytest.raises(RelationshipIntegrityError) as delete_error:
+        delete_object(session, "antenna")
+    assert delete_error.value.code == "delete_referenced_object"
+
+
+def test_network_uplink_graph_and_primary_use_collection_validation(
+    session: Session,
+) -> None:
+    for object_id in ("edge", "core", "backup"):
+        _add_object(
+            session,
+            object_id,
+            "network",
+            {"network": {"category": "switch"}},
+        )
+    session.flush()
+    first = create_relationship(
+        session,
+        from_ref="network:edge",
+        relation_type="uplinks_to",
+        to_ref="network:core",
+        metadata={"primary": True, "mode": "trunk"},
+    )
+    assert first["relation_type"] == "uplinks_to"
+    edge = session.scalar(
+        select(Relationship).where(
+            Relationship.from_ref == "network:edge",
+            Relationship.to_ref == "network:core",
+        )
+    )
+    assert edge is not None
+    assert json.loads(edge.metadata_json) == {"mode": "trunk", "primary": True}
+
+    with pytest.raises(RelationshipIntegrityError) as primary:
+        create_relationship(
+            session,
+            from_ref="network:edge",
+            relation_type="uplinks_to",
+            to_ref="network:backup",
+            metadata={"primary": True},
+        )
+    assert primary.value.code == "multiple_primary_relationships"
+
+    second = create_relationship(
+        session,
+        from_ref="network:edge",
+        relation_type="uplinks_to",
+        to_ref="network:backup",
+    )
+    assert second["to_ref"] == "network:backup"
+
+    with pytest.raises(RelationshipIntegrityError) as cycle:
+        create_relationship(
+            session,
+            from_ref="network:core",
+            relation_type="uplinks_to",
+            to_ref="network:edge",
+        )
+    assert cycle.value.code == "relationship_cycle"
 
 
 @pytest.mark.parametrize(
@@ -336,3 +561,44 @@ def test_pure_diagnostics_find_duplicate_and_multiple_placement_parents() -> Non
     }
 
     assert codes == {"duplicate_relationship", "multiple_placement_parents"}
+
+
+def test_pure_diagnostics_find_metadata_violations_and_device_cycles() -> None:
+    objects = [
+        {
+            "id": object_id,
+            "kind": "device",
+            "data_json": '{"device":{"category":"other"},"schema_version":1}',
+        }
+        for object_id in ("sensor", "antenna", "controller")
+    ]
+    relationships = [
+        {
+            "id": 1,
+            "from_ref": "device:sensor",
+            "relation_type": "attached_to",
+            "to_ref": "device:antenna",
+            "metadata_json": "{}",
+        },
+        {
+            "id": 2,
+            "from_ref": "device:antenna",
+            "relation_type": "attached_to",
+            "to_ref": "device:sensor",
+            "metadata_json": "{}",
+        },
+        {
+            "id": 3,
+            "from_ref": "device:controller",
+            "relation_type": "attached_to",
+            "to_ref": "device:antenna",
+            "metadata_json": '{"note":"Bearer abcdefghijklmnopqrstuvwxyz123456"}',
+        },
+    ]
+
+    codes = {
+        diagnostic.code
+        for diagnostic in diagnose_relationship_integrity(objects, relationships)
+    }
+
+    assert codes == {"relationship_cycle", "secret_relationship_metadata"}

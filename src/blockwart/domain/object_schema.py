@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping
-from dataclasses import dataclass
+from copy import deepcopy
+from dataclasses import dataclass, replace
 from ipaddress import ip_address
 from types import MappingProxyType
 from typing import Any, Literal
@@ -50,6 +51,21 @@ CREDENTIAL_ACCESS_TYPES = frozenset(
 RUNBOOK_RISK_LEVELS = frozenset(
     {"read-only", "safe-change", "disruptive", "destructive"}
 )
+DEVICE_CATEGORIES = frozenset(
+    {"antenna", "sensor", "adapter", "controller", "ups", "other"}
+)
+NETWORK_CATEGORIES = frozenset(
+    {
+        "segment",
+        "switch",
+        "router",
+        "access_point",
+        "mesh",
+        "firewall",
+        "gateway",
+        "other_device",
+    }
+)
 
 REFERENCE_TARGETS: Mapping[str, frozenset[str]] = MappingProxyType(
     {
@@ -81,6 +97,9 @@ class FieldSpec:
     enum_values: frozenset[Any] = frozenset()
     reference_kinds: frozenset[str] = frozenset()
     literal: Any = _UNSET
+    strip_whitespace: bool = False
+    min_length: int | None = None
+    max_length: int | None = None
     message: str | None = None
     forbidden_message: str | None = None
 
@@ -96,6 +115,23 @@ class FieldSpec:
             raise ValueError(f"enum field {self.path} requires enum_values")
         if self.field_type == "reference" and not self.reference_kinds:
             raise ValueError(f"reference field {self.path} requires reference_kinds")
+        if self.strip_whitespace and self.field_type not in {"string", "text"}:
+            raise ValueError(f"only string fields may strip whitespace: {self.path}")
+        if (self.min_length is not None or self.max_length is not None) and self.field_type not in {
+            "string",
+            "text",
+        }:
+            raise ValueError(f"only string fields may declare length limits: {self.path}")
+        if self.min_length is not None and self.min_length < 0:
+            raise ValueError(f"minimum length must be non-negative: {self.path}")
+        if self.max_length is not None and self.max_length < 0:
+            raise ValueError(f"maximum length must be non-negative: {self.path}")
+        if (
+            self.min_length is not None
+            and self.max_length is not None
+            and self.min_length > self.max_length
+        ):
+            raise ValueError(f"minimum length exceeds maximum length: {self.path}")
         if self.forbidden_message is not None and (
             self.required
             or self.enum_values
@@ -123,11 +159,54 @@ class TypeSchema:
             raise ValueError(f"schema {self.kind} contains duplicate field paths")
 
 
-def validate_object_data(kind: str, data: Mapping[str, Any]) -> None:
+def normalize_object_data(kind: str, data: Mapping[str, Any]) -> dict[str, Any]:
+    normalized = deepcopy(dict(data))
+    for field in BUILTIN_SCHEMAS[kind].fields:
+        if field.strip_whitespace:
+            _normalize_string_field(normalized, field.path.split("."))
+    return normalized
+
+
+def validate_object_data(
+    kind: str,
+    data: Mapping[str, Any],
+    *,
+    allow_legacy_network_without_category: bool = False,
+) -> None:
     schema = BUILTIN_SCHEMAS[kind]
-    validate_fields(data, schema.fields)
+    fields = schema.fields
+    if allow_legacy_network_without_category and kind == "network":
+        fields = tuple(
+            replace(field, required=False)
+            if field.path == "network.category"
+            else field
+            for field in fields
+        )
+    validate_fields(data, fields)
     for rule in schema.rules:
         rule(data)
+
+
+def _normalize_string_field(value: Any, path: list[str]) -> None:
+    if not path or not isinstance(value, dict):
+        return
+    raw_part = path[0]
+    is_array = raw_part.endswith("[]")
+    key = raw_part.removesuffix("[]")
+    if key not in value:
+        return
+    child = value[key]
+    if len(path) == 1:
+        if is_array and isinstance(child, list):
+            value[key] = [item.strip() if isinstance(item, str) else item for item in child]
+        elif not is_array and isinstance(child, str):
+            value[key] = child.strip()
+        return
+    if is_array and isinstance(child, list):
+        for item in child:
+            _normalize_string_field(item, path[1:])
+    else:
+        _normalize_string_field(child, path[1:])
 
 
 def validate_fields(
@@ -219,6 +298,14 @@ def _validate_value(field: FieldSpec, path: str, value: Any) -> None:
 
     if not valid:
         raise ObjectSchemaError(path, field.message or default_message)
+    if isinstance(value, str):
+        if field.min_length is not None and len(value) < field.min_length:
+            raise ObjectSchemaError(path, field.message or "must not be empty")
+        if field.max_length is not None and len(value) > field.max_length:
+            raise ObjectSchemaError(
+                path,
+                field.message or f"must contain at most {field.max_length} characters",
+            )
     if field.literal is not _UNSET and value != field.literal:
         raise ObjectSchemaError(path, field.message or f"must be {field.literal!r}")
 
@@ -343,6 +430,58 @@ NETWORK_FIELDS = (
     _field("network.addresses", "array"),
     _field("network.addresses[]", "object"),
     _field("network.addresses[].ip", "ip"),
+    _field(
+        "network.manufacturer",
+        "string",
+        strip_whitespace=True,
+        min_length=1,
+        max_length=128,
+    ),
+    _field(
+        "network.model",
+        "string",
+        strip_whitespace=True,
+        min_length=1,
+        max_length=128,
+    ),
+    _field(
+        "network.location",
+        "string",
+        max_length=255,
+    ),
+)
+
+NETWORK_OBJECT_FIELDS = (
+    _field(
+        "network.category",
+        "enum",
+        required=True,
+        enum_values=NETWORK_CATEGORIES,
+    ),
+)
+
+DEVICE_FIELDS = (
+    _field("device", "object", required=True),
+    _field(
+        "device.category",
+        "enum",
+        required=True,
+        enum_values=DEVICE_CATEGORIES,
+    ),
+    _field(
+        "device.manufacturer",
+        "string",
+        strip_whitespace=True,
+        min_length=1,
+        max_length=128,
+    ),
+    _field(
+        "device.model",
+        "string",
+        strip_whitespace=True,
+        min_length=1,
+        max_length=128,
+    ),
 )
 
 REFERENCE_FIELDS = tuple(
@@ -498,6 +637,13 @@ BUILTIN_SCHEMAS: Mapping[str, TypeSchema] = MappingProxyType(
             "network",
             *INTERFACE_FIELDS,
             *NETWORK_FIELDS,
+            *NETWORK_OBJECT_FIELDS,
+        ),
+        "device": _schema(
+            "device",
+            *INTERFACE_FIELDS,
+            *DEVICE_FIELDS,
+            *REFERENCE_FIELDS,
         ),
         "service": _schema(
             "service",

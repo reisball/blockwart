@@ -17,7 +17,9 @@ from blockwart.domain.provenance import (
     seed_timestamp,
 )
 from blockwart.domain.relationships import (
+    canonical_relationship_metadata_json,
     dependency_relationships_from_data,
+    endpoint_descriptor_map,
     validate_data_references,
     validate_relationship,
     validate_relationship_collection,
@@ -69,16 +71,17 @@ def import_seed_payload(
     if len(object_ids) != len(set(object_ids)):
         raise ValueError("Seed object ids must be globally unique across kinds")
     object_kinds = {obj.id: obj.kind for obj in objects}
+    endpoints = endpoint_descriptor_map(objects)
     _validate_typed_references(objects, object_kinds)
 
     raw_relationships = payload.get("relationships", [])
     if not isinstance(raw_relationships, list):
         raise ValueError("Seed relationships must be a list")
     relationships = [
-        _validate_relationship(item, object_kinds)
+        _validate_relationship(item, endpoints)
         for item in [*raw_relationships, *_deduplicate_relationships(dependency_relationships)]
     ]
-    validate_relationship_collection(relationships, object_kinds)
+    validate_relationship_collection(relationships, endpoints)
 
     imported_objects = 0
     for obj in objects:
@@ -198,6 +201,7 @@ def import_seed_payload(
                 from_ref=relationship["from_ref"],
                 relation_type=relationship["relation_type"],
                 to_ref=relationship["to_ref"],
+                metadata=relationship["metadata"],
                 audit_action="seed_relationship_create",
                 audit_actor="seed-import",
             )
@@ -264,8 +268,8 @@ def _seed_provenance(
 
 def _validate_relationship(
     raw_relationship: Any,
-    object_kinds: dict[str, str],
-) -> dict[str, str]:
+    endpoints,
+) -> dict[str, Any]:
     if not isinstance(raw_relationship, dict):
         raise ValueError("Seed relationship must be a mapping")
 
@@ -279,10 +283,17 @@ def _validate_relationship(
         from_ref=from_ref,
         relation_type=relation_type,
         to_ref=to_ref,
-        object_kinds=object_kinds,
+        endpoints=endpoints,
     )
-
-    return {"from_ref": from_ref, "relation_type": relation_type, "to_ref": to_ref}
+    raw_metadata = raw_relationship.get("metadata", {})
+    metadata_json = canonical_relationship_metadata_json(relation_type, raw_metadata)
+    return {
+        "from_ref": from_ref,
+        "relation_type": relation_type,
+        "to_ref": to_ref,
+        "metadata": json.loads(metadata_json),
+        "metadata_json": metadata_json,
+    }
 
 
 def _validate_typed_references(
