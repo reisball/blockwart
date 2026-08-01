@@ -335,6 +335,7 @@ def update_managed_grant(
     role: Role | str,
     scope: GrantScope | str,
     expected_revision: int | str | None,
+    expected_principal_id: str | None = None,
 ) -> GrantCommandResult:
     row = _require_manage_access(
         session,
@@ -343,6 +344,11 @@ def update_managed_grant(
         refresh_policy=True,
     )
     grant = _direct_grant(session, object_id=object_id, grant_id=grant_id)
+    if (
+        expected_principal_id is not None
+        and grant.principal_id != expected_principal_id
+    ):
+        raise CommandNotFound("direct grant not found")
     resolved_role = Role(role)
     resolved_scope = GrantScope(scope)
     _require_owner_for_owner_grant(
@@ -437,6 +443,7 @@ def revoke_managed_grant(
     object_id: str,
     grant_id: int,
     expected_revision: int | str | None,
+    expected_principal_id: str | None = None,
 ) -> GrantCommandResult:
     row = _require_manage_access(
         session,
@@ -445,6 +452,11 @@ def revoke_managed_grant(
         refresh_policy=True,
     )
     grant = _direct_grant(session, object_id=object_id, grant_id=grant_id)
+    if (
+        expected_principal_id is not None
+        and grant.principal_id != expected_principal_id
+    ):
+        raise CommandNotFound("direct grant not found")
     _require_owner_for_owner_grant(
         session,
         context,

@@ -1,6 +1,6 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
-from blockwart.domain.auth import PrincipalType
+from blockwart.domain.auth import PlatformRole, PrincipalType
 
 
 class PrincipalOut(BaseModel):
@@ -8,3 +8,5 @@ class PrincipalOut(BaseModel):
     principal_type: PrincipalType
     login: str
     display_name: str
+    platform_role: PlatformRole | None = None
+    revision: int = Field(ge=1)

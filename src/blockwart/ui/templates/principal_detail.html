@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="{{ locale }}">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="referrer" content="no-referrer" />
+    <link rel="icon" href="data:," />
+    <title>{{ title }}</title>
+    <script>if (localStorage.getItem("blockwart-theme") === "light") document.documentElement.dataset.theme = "light";</script>
+    <link rel="stylesheet" href="/static/app.css?v=063" />
+    <script src="/static/theme.js?v=054" defer></script>
+  </head>
+  <body>
+    <header class="topbar"><div class="topbar-inner">
+      <a class="breadcrumb" href="/admin/principals">{{ t("admin.principals.back") }}</a>
+      <div class="title-row">
+        <div><h1>{{ detail.principal.display_name }}</h1><div class="subtle"><code>{{ detail.principal.login }}</code> · {{ t("admin.type." ~ detail.principal.principal_type.value) }}</div></div>
+        <div class="top-actions">{% include "_language_switcher.html" %}<div class="theme-toggle" role="group" aria-label="{{ t('nav.theme') }}"><button class="theme-option" type="button" data-theme-value="dark">{{ t("nav.dark") }}</button><button class="theme-option" type="button" data-theme-value="light">{{ t("nav.light") }}</button></div></div>
+      </div>
+    </div></header>
+    <main class="page">
+      {% if error %}<div class="error" role="alert">{{ error }}</div>{% endif %}
+      {% if one_time_token %}<section class="panel" role="status" aria-live="polite"><h2 class="section-title">{{ t("admin.token.one_time_title") }}</h2><p class="error">{{ t("admin.token.one_time_hint") }}</p><pre><code>{{ one_time_token }}</code></pre></section>{% endif %}
+
+      <section class="panel">
+        <h2 class="section-title">{{ t("admin.principal.account_title") }}</h2>
+        <form class="form-grid" method="post" action="/admin/principals/{{ detail.principal.id }}">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}" /><input type="hidden" name="if_match" value="{{ detail.principal.etag }}" />
+          <label>{{ t("admin.principals.name") }}<input name="display_name" value="{{ detail.principal.display_name }}" maxlength="255" required /></label>
+          <label>{{ t("admin.principals.status") }}<select name="active"><option value="active" {% if detail.principal.active %}selected{% endif %}>{{ t("admin.status.active") }}</option><option value="inactive" {% if not detail.principal.active %}selected{% endif %}>{{ t("admin.status.inactive") }}</option></select></label>
+          <label>{{ t("admin.principals.role") }}<select name="platform_role"><option value="" {% if not detail.principal.platform_role %}selected{% endif %}>{{ t("admin.role.none") }}</option><option value="admin" {% if detail.principal.platform_role %}selected{% endif %}>{{ t("admin.role.admin") }}</option></select></label>
+          <div class="button-row"><button type="submit">{{ t("asset.save") }}</button></div>
+        </form>
+        <dl class="detail-list"><div><dt>ID</dt><dd><code>{{ detail.principal.id }}</code></dd></div><div><dt>{{ t("admin.principal.revision") }}</dt><dd>{{ detail.principal.revision }}</dd></div><div><dt>{{ t("asset.updated") }}</dt><dd>{{ detail.principal.updated_at }}</dd></div></dl>
+      </section>
+
+      <section class="panel">
+        <h2 class="section-title">{{ t("admin.assignments.direct_title") }}</h2>
+        <div class="table-wrap"><table><thead><tr><th>{{ t("admin.assignments.object") }}</th><th>{{ t("admin.assignments.role") }}</th><th>{{ t("admin.assignments.scope") }}</th><th>{{ t("admin.assignments.actions") }}</th></tr></thead><tbody>
+          {% for grant in detail.direct_grants %}<tr><td><a href="/objects/{{ grant.object_id }}">{{ grant.object_label }}</a><br /><code>{{ grant.object_kind }}:{{ grant.object_id }}</code></td><td colspan="3"><form class="form-grid" method="post" action="/admin/principals/{{ detail.principal.id }}/grants/{{ grant.grant_id }}"><input type="hidden" name="csrf_token" value="{{ csrf_token }}" /><input type="hidden" name="object_id" value="{{ grant.object_id }}" /><input type="hidden" name="if_match" value="{{ grant.object_etag }}" /><label><span class="visually-hidden">{{ t("admin.assignments.role") }}</span><select name="role">{% for item in roles %}<option value="{{ item.value }}" {% if item == grant.role %}selected{% endif %}>{{ item.value }}</option>{% endfor %}</select></label><label><span class="visually-hidden">{{ t("admin.assignments.scope") }}</span><select name="scope">{% for item in scopes %}<option value="{{ item.value }}" {% if item == grant.scope %}selected{% endif %}>{{ item.value }}</option>{% endfor %}</select></label><button type="submit">{{ t("asset.save") }}</button></form><form method="post" action="/admin/principals/{{ detail.principal.id }}/grants/{{ grant.grant_id }}/revoke"><input type="hidden" name="csrf_token" value="{{ csrf_token }}" /><input type="hidden" name="object_id" value="{{ grant.object_id }}" /><input type="hidden" name="if_match" value="{{ grant.object_etag }}" /><button class="button-muted" type="submit">{{ t("admin.assignments.revoke") }}</button></form></td></tr>{% else %}<tr><td colspan="4" class="muted">{{ t("admin.assignments.empty") }}</td></tr>{% endfor %}
+        </tbody></table></div>
+        <h3>{{ t("admin.assignments.add_title") }}</h3>
+        <form class="form-grid" method="post" action="/admin/principals/{{ detail.principal.id }}/grants" data-grant-create><input type="hidden" name="csrf_token" value="{{ csrf_token }}" /><input type="hidden" name="if_match" value="{% if manageable_objects %}&quot;rev-{{ manageable_objects[0].revision }}&quot;{% endif %}" data-grant-etag /><label>{{ t("admin.assignments.object") }}<select name="object_id" required data-grant-object>{% for object in manageable_objects %}<option value="{{ object.id }}" data-etag='"rev-{{ object.revision }}"'>{{ object.kind }}:{{ object.id }} · {{ object.label }}</option>{% endfor %}</select></label><label>{{ t("admin.assignments.role") }}<select name="role">{% for item in roles %}<option value="{{ item.value }}">{{ item.value }}</option>{% endfor %}</select></label><label>{{ t("admin.assignments.scope") }}<select name="scope">{% for item in scopes %}<option value="{{ item.value }}">{{ item.value }}</option>{% endfor %}</select></label><div class="button-row"><button type="submit">{{ t("admin.assignments.add") }}</button></div></form>
+      </section>
+
+      <section class="panel"><h2 class="section-title">{{ t("admin.assignments.effective_title") }}</h2><div class="table-wrap"><table><thead><tr><th>{{ t("admin.assignments.object") }}</th><th>{{ t("admin.assignments.permissions") }}</th><th>{{ t("admin.assignments.source") }}</th></tr></thead><tbody>{% for item in detail.effective_access %}<tr><td>{{ item.object_label }}<br /><code>{{ item.object_kind }}:{{ item.object_id }}</code></td><td>{{ item.permissions | map(attribute='value') | join(', ') }}</td><td>{% for source in item.sources %}<code>{{ source.anchor_object_kind }}:{{ source.anchor_object_id }}</code> · {{ source.role.value }}/{{ source.scope.value }}{% if not loop.last %}<br />{% endif %}{% else %}<span class="muted">{{ t("admin.assignments.source_restricted") }}</span>{% endfor %}</td></tr>{% else %}<tr><td colspan="3" class="muted">{{ t("admin.assignments.empty") }}</td></tr>{% endfor %}</tbody></table></div></section>
+
+      {% if detail.principal.principal_type.value == "human" %}<section class="panel"><h2 class="section-title">{{ t("admin.password.title") }}</h2><form class="form-grid" method="post" action="/admin/principals/{{ detail.principal.id }}/password" autocomplete="off"><input type="hidden" name="csrf_token" value="{{ csrf_token }}" /><input type="hidden" name="if_match" value="{{ detail.principal.etag }}" /><label>{{ t("admin.password.new") }}<input name="new_password" type="password" minlength="12" maxlength="1024" autocomplete="new-password" required /></label><label>{{ t("admin.reauthenticate") }}<input name="current_admin_password" type="password" maxlength="1024" autocomplete="current-password" required /></label><div class="button-row"><button type="submit">{{ t("admin.password.reset") }}</button></div></form></section>{% endif %}
+
+      {% if detail.principal.principal_type.value == "service_account" %}<section class="panel"><h2 class="section-title">{{ t("admin.token.title") }}</h2><div class="table-wrap"><table><thead><tr><th>{{ t("admin.token.name") }}</th><th>{{ t("admin.principals.status") }}</th><th>{{ t("admin.principals.last_used") }}</th><th>{{ t("admin.assignments.actions") }}</th></tr></thead><tbody>{% for token in detail.service_tokens %}<tr><td>{{ token.name }}<br /><code>{{ token.token_prefix }}…</code></td><td>{{ t("admin.status.active" if token.active else "admin.status.inactive") }}</td><td>{{ token.last_used_at or t("asset.no_value") }}</td><td><form method="post" action="/admin/principals/{{ detail.principal.id }}/tokens/revoke"><input type="hidden" name="csrf_token" value="{{ csrf_token }}" /><input type="hidden" name="if_match" value="{{ detail.principal.etag }}" /><input type="hidden" name="name" value="{{ token.name }}" /><button class="button-muted" type="submit">{{ t("admin.token.revoke") }}</button></form></td></tr>{% else %}<tr><td colspan="4" class="muted">{{ t("admin.token.empty") }}</td></tr>{% endfor %}</tbody></table></div><form class="form-grid" method="post" action="/admin/principals/{{ detail.principal.id }}/tokens" autocomplete="off"><input type="hidden" name="csrf_token" value="{{ csrf_token }}" /><input type="hidden" name="if_match" value="{{ detail.principal.etag }}" /><input type="hidden" name="idempotency_key" value="{{ idempotency_key }}" /><label>{{ t("admin.token.name") }}<input name="name" maxlength="128" required /></label><label>{{ t("admin.token.expires") }}<input name="expires_in_seconds" type="number" min="300" max="31536000" /></label><label>{{ t("admin.reauthenticate") }}<input name="current_admin_password" type="password" maxlength="1024" autocomplete="current-password" required /></label><label>{{ t("admin.token.operation") }}<select name="rotate"><option value="0">{{ t("admin.token.issue") }}</option><option value="1">{{ t("admin.token.rotate") }}</option></select></label><div class="button-row"><button type="submit">{{ t("admin.token.submit") }}</button></div></form></section>{% endif %}
+    </main>
+    <script>document.querySelectorAll("[data-grant-create]").forEach((form) => { const object = form.querySelector("[data-grant-object]"); const etag = form.querySelector("[data-grant-etag]"); const sync = () => { etag.value = object.selectedOptions[0]?.dataset.etag || ""; }; object.addEventListener("change", sync); sync(); });</script>
+  </body>
+</html>

@@ -1,0 +1,100 @@
+<!doctype html>
+<html lang="{{ locale }}">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="referrer" content="no-referrer" />
+    <link rel="icon" href="data:," />
+    <title>{{ title }}</title>
+    <script>if (localStorage.getItem("blockwart-theme") === "light") document.documentElement.dataset.theme = "light";</script>
+    <link rel="stylesheet" href="/static/app.css?v=063" />
+    <script src="/static/theme.js?v=054" defer></script>
+  </head>
+  <body>
+    <header class="topbar">
+      <div class="topbar-inner">
+        <a class="breadcrumb" href="/">{{ t("detail.back") }}</a>
+        <div class="title-row">
+          <div>
+            <h1>{{ t("admin.principals.title") }}</h1>
+            <div class="subtle">{{ t("admin.principals.subtitle") }}</div>
+          </div>
+          <div class="top-actions">
+            {% include "_language_switcher.html" %}
+            <div class="theme-toggle" role="group" aria-label="{{ t('nav.theme') }}">
+              <button class="theme-option" type="button" data-theme-value="dark">{{ t("nav.dark") }}</button>
+              <button class="theme-option" type="button" data-theme-value="light">{{ t("nav.light") }}</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </header>
+
+    <main class="page">
+      {% if error %}<div class="error" role="alert">{{ error }}</div>{% endif %}
+      <section class="panel">
+        <h2 class="section-title">{{ t("admin.principals.search_title") }}</h2>
+        <form class="form-grid" method="get" action="/admin/principals">
+          <label>{{ t("admin.principals.search") }}
+            <input name="q" type="search" value="{{ q }}" maxlength="100" />
+          </label>
+          <label>{{ t("admin.principals.type") }}
+            <select name="principal_type">
+              <option value="">{{ t("admin.filter.all") }}</option>
+              {% for item in principal_types %}<option value="{{ item.value }}" {% if principal_type_filter == item.value %}selected{% endif %}>{{ t("admin.type." ~ item.value) }}</option>{% endfor %}
+            </select>
+          </label>
+          <label>{{ t("admin.principals.status") }}
+            <select name="active">
+              <option value="">{{ t("admin.filter.all") }}</option>
+              <option value="active" {% if active_filter == "active" %}selected{% endif %}>{{ t("admin.status.active") }}</option>
+              <option value="inactive" {% if active_filter == "inactive" %}selected{% endif %}>{{ t("admin.status.inactive") }}</option>
+            </select>
+          </label>
+          <div class="button-row"><button type="submit">{{ t("search.submit") }}</button></div>
+        </form>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>{{ t("admin.principals.login") }}</th><th>{{ t("admin.principals.name") }}</th><th>{{ t("admin.principals.type") }}</th><th>{{ t("admin.principals.status") }}</th><th>{{ t("admin.principals.role") }}</th><th>{{ t("admin.principals.last_used") }}</th></tr></thead>
+            <tbody>
+              {% for item in items %}
+                <tr>
+                  <td><a href="/admin/principals/{{ item.id }}"><code>{{ item.login }}</code></a></td>
+                  <td>{{ item.display_name }}</td>
+                  <td>{{ t("admin.type." ~ item.principal_type.value) }}</td>
+                  <td>{{ t("admin.status.active" if item.active else "admin.status.inactive") }}</td>
+                  <td>{{ t("admin.role.admin") if item.platform_role else t("admin.role.none") }}</td>
+                  <td>{{ item.last_used_at or t("asset.no_value") }}</td>
+                </tr>
+              {% else %}
+                <tr><td colspan="6" class="muted">{{ t("admin.principals.empty") }}</td></tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+        {% if next_url %}<nav aria-label="{{ t('admin.pagination.label') }}"><a href="{{ next_url }}" rel="next">{{ t("admin.pagination.next") }}</a></nav>{% endif %}
+      </section>
+
+      <section class="panel">
+        <h2 class="section-title">{{ t("admin.principals.create_title") }}</h2>
+        <p class="meta">{{ t("admin.principals.create_hint") }}</p>
+        <form class="form-grid" method="post" action="/admin/principals" autocomplete="off">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+          <label>{{ t("admin.principals.type") }}
+            <select name="principal_type" required>
+              {% for item in principal_types %}<option value="{{ item.value }}">{{ t("admin.type." ~ item.value) }}</option>{% endfor %}
+            </select>
+          </label>
+          <label>{{ t("admin.principals.login") }}<input name="login" minlength="3" maxlength="128" required /></label>
+          <label>{{ t("admin.principals.name") }}<input name="display_name" maxlength="255" required /></label>
+          <label>{{ t("admin.principals.initial_password") }}<input name="initial_password" type="password" minlength="12" maxlength="1024" autocomplete="new-password" /></label>
+          <label>{{ t("admin.principals.role") }}
+            <select name="platform_role"><option value="">{{ t("admin.role.none") }}</option><option value="admin">{{ t("admin.role.admin") }}</option></select>
+          </label>
+          <label>{{ t("admin.reauthenticate") }}<input name="current_admin_password" type="password" maxlength="1024" autocomplete="current-password" required /></label>
+          <div class="button-row"><button type="submit">{{ t("admin.principals.create") }}</button></div>
+        </form>
+      </section>
+    </main>
+  </body>
+</html>

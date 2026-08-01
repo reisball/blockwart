@@ -130,7 +130,46 @@ Requires `write` on the path object, discoverability of the peer, and current
 `If-Match`. The JSON body is `from_ref`, `relation_type`, and `to_ref`. Shared
 relationship, canonical-placement, last-owner, and rollback checks apply.
 
-## Access-control resources
+## Platform-admin resources
+
+The `/api/v1/admin/principals` resources require an explicitly assigned
+platform `admin` service account. They list and create principals, return one
+principal's lifecycle and credential metadata, and update a principal using
+its current `If-Match` ETag. Platform administration does not bypass the
+caller's object policy: direct and effective assignment rows contain only
+objects on which the caller currently has `manage_access`.
+
+The principal list accepts `q`, `principal_type`, `active`, `limit` (1..200),
+and the opaque, filter-bound `cursor` returned as `next_cursor`. It deliberately
+does not return a total count.
+
+```text
+GET|POST /api/v1/admin/principals
+GET|PUT  /api/v1/admin/principals/{principal_id}
+POST     /api/v1/admin/principals/{principal_id}/grants
+PUT      /api/v1/admin/principals/{principal_id}/grants/{grant_id}
+DELETE   /api/v1/admin/principals/{principal_id}/grants/{grant_id}?object_id=...
+POST     /api/v1/admin/principals/{principal_id}/password
+POST     /api/v1/admin/principals/{principal_id}/tokens
+POST     /api/v1/admin/principals/{principal_id}/tokens/rotate
+DELETE   /api/v1/admin/principals/{principal_id}/tokens/{token_name}
+```
+
+Lifecycle and credential mutations advance the principal revision. Token
+issue and rotation require `Idempotency-Key`; a successful response discloses
+the new token exactly once and uses `Cache-Control: private, no-store`.
+Replaying the completed request proves completion but does not redisclose the
+secret. Existing password, token, session, and hash values are never readable.
+The last-active-admin and independent last-effective-owner invariants fail
+atomically.
+
+The principal-targeted grant routes are administrative aliases for the shared
+object grant command layer. They require both the platform `admin` role and the
+normal object `manage_access`/Owner policy, use the object's `If-Match` ETag,
+and retain the same Owner, idempotency, audit, and rollback rules. Update and
+delete also bind the grant to the principal and object named by the request.
+
+## Object access-control resources
 
 ### `GET /api/v1/objects/{object_id}/access`
 

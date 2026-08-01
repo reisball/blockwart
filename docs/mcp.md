@@ -15,6 +15,8 @@ It wraps the object-authorized v1 API:
 - blockwart.delete_relationship -> DELETE /api/v1/objects/{object_id}/relationships
 - blockwart.get_object_access -> GET /api/v1/objects/{object_id}/access
 - blockwart.search_principals -> GET /api/v1/objects/{object_id}/access/principals
+- blockwart.list_admin_principals -> GET /api/v1/admin/principals
+- blockwart.get_admin_principal -> GET /api/v1/admin/principals/{principal_id}
 - blockwart.preview_grant_scope -> GET /api/v1/objects/{object_id}/access/preview
 - blockwart.create_grant -> POST /api/v1/objects/{object_id}/access/grants
 - blockwart.update_grant -> PUT /api/v1/objects/{object_id}/access/grants/{grant_id}
@@ -47,6 +49,14 @@ tools use the same `manage_access`, Owner-only, last-owner, self-lockout,
 revision, and audit rules as REST and UI. Their `if_match` argument carries the
 last access-resource ETag. The service token remains runtime transport
 configuration and is never accepted as a tool argument.
+
+The two platform-admin MCP tools are read-only. They require the calling
+service account to have the explicit `admin` platform role, and assignment
+rows remain filtered by that same principal's object `manage_access` policy.
+`blockwart.list_admin_principals` forwards `query`, `principal_type`, `active`,
+`limit`, and the opaque `cursor`, returning `next_cursor` without a total count.
+MCP intentionally provides no password, session-secret, or service-token-value
+operation; existing object grant tools remain the only MCP assignment writes.
 
 For compatibility, MCP output retains the established `results` and `objects`
 fields. It additionally returns v1 `next_cursor`, `total`, `sort`, and

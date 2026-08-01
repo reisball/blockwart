@@ -256,6 +256,19 @@ def test_mcp_client_completes_handshake_and_calls_every_read_only_tool() -> None
                                 "limit": 3,
                             },
                         ),
+                        "blockwart.list_admin_principals": await session.call_tool(
+                            "blockwart.list_admin_principals",
+                            {
+                                "query": "kai",
+                                "principal_type": "human",
+                                "limit": 3,
+                                "cursor": "opaque-admin-cursor",
+                            },
+                        ),
+                        "blockwart.get_admin_principal": await session.call_tool(
+                            "blockwart.get_admin_principal",
+                            {"principal_id": "principal/admin"},
+                        ),
                         "blockwart.preview_grant_scope": await session.call_tool(
                             "blockwart.preview_grant_scope",
                             {"object_id": "host/fabrik", "scope": "subtree"},
@@ -327,6 +340,8 @@ def test_mcp_client_completes_handshake_and_calls_every_read_only_tool() -> None
         "blockwart.delete_relationship",
         "blockwart.get_object_access",
         "blockwart.search_principals",
+        "blockwart.list_admin_principals",
+        "blockwart.get_admin_principal",
         "blockwart.preview_grant_scope",
         "blockwart.create_grant",
         "blockwart.update_grant",
@@ -340,6 +355,8 @@ def test_mcp_client_completes_handshake_and_calls_every_read_only_tool() -> None
             "blockwart.get_context",
             "blockwart.get_object_access",
             "blockwart.search_principals",
+            "blockwart.list_admin_principals",
+            "blockwart.get_admin_principal",
             "blockwart.preview_grant_scope",
         }
     )
@@ -378,6 +395,15 @@ def test_mcp_client_completes_handshake_and_calls_every_read_only_tool() -> None
     assert result_payloads["blockwart.search_principals"]["path"] == (
         "/api/v1/objects/host%2Ffabrik/access/principals"
     )
+    assert result_payloads["blockwart.list_admin_principals"]["path"] == (
+        "/api/v1/admin/principals"
+    )
+    assert result_payloads["blockwart.list_admin_principals"]["query"]["cursor"] == [
+        "opaque-admin-cursor"
+    ]
+    assert result_payloads["blockwart.get_admin_principal"]["path"] == (
+        "/api/v1/admin/principals/principal%2Fadmin"
+    )
     assert result_payloads["blockwart.preview_grant_scope"]["path"] == (
         "/api/v1/objects/host%2Ffabrik/access/preview"
     )
@@ -415,13 +441,15 @@ def test_mcp_client_completes_handshake_and_calls_every_read_only_tool() -> None
     assert unknown_tool.isError is True
     assert json.loads(unknown_content.text)["error"]["code"] == "tool_not_found"
 
-    assert [request["method"] for request in requests] == ["GET"] * 7
+    assert [request["method"] for request in requests] == ["GET"] * 9
     assert [request["path"] for request in requests] == [
         "/api/v1/objects",
         "/api/v1/objects/host%2Ffabrik",
         "/api/v1/context",
         "/api/v1/objects/host%2Ffabrik/access",
         "/api/v1/objects/host%2Ffabrik/access/principals",
+        "/api/v1/admin/principals",
+        "/api/v1/admin/principals/principal%2Fadmin",
         "/api/v1/objects/host%2Ffabrik/access/preview",
         "/api/v1/objects",
     ]
@@ -804,6 +832,8 @@ def test_mcp_tools_publish_explicit_read_write_and_delete_hints() -> None:
         "blockwart.delete_relationship",
         "blockwart.get_object_access",
         "blockwart.search_principals",
+        "blockwart.list_admin_principals",
+        "blockwart.get_admin_principal",
         "blockwart.preview_grant_scope",
         "blockwart.create_grant",
         "blockwart.update_grant",
@@ -818,6 +848,8 @@ def test_mcp_tools_publish_explicit_read_write_and_delete_hints() -> None:
             "blockwart.get_context",
             "blockwart.get_object_access",
             "blockwart.search_principals",
+            "blockwart.list_admin_principals",
+            "blockwart.get_admin_principal",
             "blockwart.preview_grant_scope",
         }
     )
@@ -988,6 +1020,49 @@ def test_mcp_grant_read_tools_use_minimized_access_endpoints() -> None:
             {"scope": "subtree"},
         ),
     ]
+
+
+def test_mcp_admin_tools_are_read_only_and_never_expose_credential_operations() -> None:
+    calls = []
+
+    def fake_fetch(path, params):
+        calls.append((path, params))
+        return {"path": path, "params": params}
+
+    call_tool(
+        "blockwart.list_admin_principals",
+        {
+            "query": "kai",
+            "principal_type": "human",
+            "active": True,
+            "limit": 7,
+            "cursor": "opaque-next-page",
+        },
+        fetcher=fake_fetch,
+    )
+    call_tool(
+        "blockwart.get_admin_principal",
+        {"principal_id": "principal/root"},
+        fetcher=fake_fetch,
+    )
+
+    assert calls == [
+        (
+            "/api/v1/admin/principals",
+            {
+                "q": "kai",
+                "principal_type": "human",
+                "active": True,
+                "limit": 7,
+                "cursor": "opaque-next-page",
+            },
+        ),
+        ("/api/v1/admin/principals/principal%2Froot", {}),
+    ]
+    assert not any(
+        "password" in tool["name"] or "token" in tool["name"]
+        for tool in TOOLS
+    )
 
 
 def test_mcp_forwards_structured_filters_to_the_read_only_agent_api() -> None:

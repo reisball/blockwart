@@ -198,6 +198,7 @@
           <button class="theme-option" type="button" data-theme-value="light">{{ t("nav.light") }}</button>
         </div>
         <a class="icon-button" href="/settings/schema" aria-label="{{ t('nav.settings') }}">⚙</a>
+        {% if is_platform_admin %}<a class="icon-button" href="/admin/principals" aria-label="{{ t('nav.principals') }}">♙</a>{% endif %}
         {% if can_create %}
           <a class="primary-button" href="/?view={{ view }}&q={{ q|urlencode }}&kind={{ kind }}&create=1" aria-label="{{ t('asset.create') }}">
             ＋ <span class="asset-create-full">{{ t("asset.create") }}</span><span class="asset-create-short">{{ t("asset.create_short") }}</span>

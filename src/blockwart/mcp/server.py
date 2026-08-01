@@ -345,6 +345,44 @@ TOOLS: list[JSON] = [
         "annotations": READ_ONLY_ANNOTATIONS,
     },
     {
+        "name": "blockwart.list_admin_principals",
+        "description": (
+            "List users and agents for an explicit platform-admin principal; "
+            "never returns credential values."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "query": {"type": "string", "maxLength": 100},
+                "principal_type": {
+                    "type": "string",
+                    "enum": ["human", "service_account"],
+                },
+                "active": {"type": "boolean"},
+                "limit": {"type": "integer", "minimum": 1, "maximum": 200, "default": 100},
+                "cursor": {"type": "string", "maxLength": 2048},
+            },
+            "additionalProperties": False,
+        },
+        "annotations": READ_ONLY_ANNOTATIONS,
+    },
+    {
+        "name": "blockwart.get_admin_principal",
+        "description": (
+            "Get one admin-authorized principal and only its actor-manageable "
+            "object assignments; never returns secrets."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "principal_id": {"type": "string", "minLength": 1, "maxLength": 36},
+            },
+            "required": ["principal_id"],
+            "additionalProperties": False,
+        },
+        "annotations": READ_ONLY_ANNOTATIONS,
+    },
+    {
         "name": "blockwart.preview_grant_scope",
         "description": "Preview the current canonical placement coverage of a grant scope.",
         "inputSchema": {
@@ -554,6 +592,23 @@ def call_tool(
                 "q": _required_string(args, "query"),
                 "limit": args.get("limit", 20),
             },
+        )
+    elif name == "blockwart.list_admin_principals":
+        payload = fetch(
+            "/api/v1/admin/principals",
+            {
+                "q": args.get("query"),
+                "principal_type": args.get("principal_type"),
+                "active": args.get("active"),
+                "limit": args.get("limit", 100),
+                "cursor": args.get("cursor"),
+            },
+        )
+    elif name == "blockwart.get_admin_principal":
+        principal_id = _required_string(args, "principal_id")
+        payload = fetch(
+            f"/api/v1/admin/principals/{quote(principal_id, safe='')}",
+            {},
         )
     elif name == "blockwart.preview_grant_scope":
         object_id = _required_string(args, "object_id")

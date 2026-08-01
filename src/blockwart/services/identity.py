@@ -15,7 +15,7 @@ from argon2.low_level import Type
 from sqlalchemy import delete, func, or_, select
 from sqlalchemy.orm import Session
 
-from blockwart.domain.auth import PrincipalContext, PrincipalType
+from blockwart.domain.auth import PlatformRole, PrincipalContext, PrincipalType
 from blockwart.domain.security import find_secret_violations
 from blockwart.models import (
     BrowserSession,
@@ -144,6 +144,7 @@ def create_human_principal(
     login: str,
     display_name: str,
     password: str,
+    platform_role: PlatformRole | str | None = None,
     now: datetime | None = None,
 ) -> PrincipalContext:
     normalized_login = normalize_login(login)
@@ -157,6 +158,8 @@ def create_human_principal(
         login=normalized_login,
         display_name=normalized_name,
         active=True,
+        platform_role=(PlatformRole(platform_role) if platform_role is not None else None),
+        revision=1,
         created_at=timestamp,
         updated_at=timestamp,
     )
@@ -179,6 +182,7 @@ def create_service_account(
     *,
     login: str,
     display_name: str,
+    platform_role: PlatformRole | str | None = None,
     now: datetime | None = None,
 ) -> PrincipalContext:
     normalized_login = normalize_login(login)
@@ -192,6 +196,8 @@ def create_service_account(
         login=normalized_login,
         display_name=normalized_name,
         active=True,
+        platform_role=(PlatformRole(platform_role) if platform_role is not None else None),
+        revision=1,
         created_at=timestamp,
         updated_at=timestamp,
     )
@@ -205,6 +211,9 @@ def set_human_password(
     *,
     principal_id: str,
     password: str,
+    channel: str = "cli",
+    request_id: str | None = None,
+    actor_principal_id: str | None = None,
     now: datetime | None = None,
 ) -> None:
     principal = session.get(Principal, principal_id)
@@ -232,9 +241,14 @@ def set_human_password(
         session,
         event_type="password_credential_rotated",
         outcome="success",
-        channel="cli",
+        channel=channel,
         principal_id=principal_id,
-        details={},
+        request_id=request_id,
+        details=(
+            {"actor_principal_id": actor_principal_id}
+            if actor_principal_id is not None
+            else {}
+        ),
         now=timestamp,
     )
     principal.updated_at = timestamp
@@ -305,6 +319,9 @@ def issue_service_token(
     principal_id: str,
     name: str,
     expires_at: datetime | None = None,
+    channel: str = "cli",
+    request_id: str | None = None,
+    actor_principal_id: str | None = None,
     now: datetime | None = None,
 ) -> IssuedServiceToken:
     principal = _active_service_account(session, principal_id)
@@ -335,9 +352,18 @@ def issue_service_token(
         session,
         event_type="service_token_issued",
         outcome="success",
-        channel="cli",
+        channel=channel,
         principal_id=principal.id,
-        details={"credential_id": token_id, "credential_name": normalized_name},
+        request_id=request_id,
+        details={
+            "credential_id": token_id,
+            "credential_name": normalized_name,
+            **(
+                {"actor_principal_id": actor_principal_id}
+                if actor_principal_id is not None
+                else {}
+            ),
+        },
         now=timestamp,
     )
     session.flush()
@@ -356,6 +382,9 @@ def rotate_service_token(
     principal_id: str,
     name: str,
     expires_at: datetime | None = None,
+    channel: str = "cli",
+    request_id: str | None = None,
+    actor_principal_id: str | None = None,
     now: datetime | None = None,
 ) -> IssuedServiceToken:
     principal = _active_service_account(session, principal_id)
@@ -381,9 +410,18 @@ def rotate_service_token(
         session,
         event_type="service_token_rotated",
         outcome="success",
-        channel="cli",
+        channel=channel,
         principal_id=principal.id,
-        details={"credential_id": row.id, "credential_name": row.name},
+        request_id=request_id,
+        details={
+            "credential_id": row.id,
+            "credential_name": row.name,
+            **(
+                {"actor_principal_id": actor_principal_id}
+                if actor_principal_id is not None
+                else {}
+            ),
+        },
         now=timestamp,
     )
     session.flush()
@@ -401,6 +439,9 @@ def revoke_service_token(
     *,
     principal_id: str,
     name: str,
+    channel: str = "cli",
+    request_id: str | None = None,
+    actor_principal_id: str | None = None,
     now: datetime | None = None,
 ) -> bool:
     normalized_name = normalize_token_name(name)
@@ -420,9 +461,18 @@ def revoke_service_token(
         session,
         event_type="service_token_revoked",
         outcome="success",
-        channel="cli",
+        channel=channel,
         principal_id=principal_id,
-        details={"credential_id": row.id, "credential_name": row.name},
+        request_id=request_id,
+        details={
+            "credential_id": row.id,
+            "credential_name": row.name,
+            **(
+                {"actor_principal_id": actor_principal_id}
+                if actor_principal_id is not None
+                else {}
+            ),
+        },
         now=timestamp,
     )
     session.flush()
@@ -675,6 +725,9 @@ def deactivate_principal(
     session: Session,
     *,
     principal_id: str,
+    channel: str = "cli",
+    request_id: str | None = None,
+    actor_principal_id: str | None = None,
     now: datetime | None = None,
 ) -> bool:
     principal = session.get(Principal, principal_id)
@@ -708,9 +761,14 @@ def deactivate_principal(
         session,
         event_type="principal_deactivated",
         outcome="success",
-        channel="cli",
+        channel=channel,
         principal_id=principal_id,
-        details={},
+        request_id=request_id,
+        details=(
+            {"actor_principal_id": actor_principal_id}
+            if actor_principal_id is not None
+            else {}
+        ),
         now=timestamp,
     )
     session.flush()
@@ -793,6 +851,12 @@ def principal_context(principal: Principal) -> PrincipalContext:
         principal_type=PrincipalType(principal.principal_type),
         login=principal.login,
         display_name=principal.display_name,
+        platform_role=(
+            PlatformRole(principal.platform_role)
+            if principal.platform_role is not None
+            else None
+        ),
+        revision=principal.revision,
     )
 
 

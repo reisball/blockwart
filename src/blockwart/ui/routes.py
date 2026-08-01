@@ -239,6 +239,7 @@ def _index_template_context(
     detail_mode: bool = False,
     detail_query_string: str = "",
 ) -> dict[str, Any]:
+    current_access = read_access_from_request(request)
     i18n = translation_context(request)
     translator = i18n["t"]
     localized_schemas = _localized_ui_schema_payload(
@@ -332,6 +333,7 @@ def _index_template_context(
         ),
         "can_write": can_write_enabled,
         "can_create": bool(create_parents),
+        "is_platform_admin": current_access.principal.is_admin,
         "csrf_token": request.cookies.get(AUTH_CSRF_COOKIE_NAME, ""),
         **i18n,
     }

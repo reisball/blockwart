@@ -83,6 +83,8 @@ def test_bootstrap_owner_is_atomic_idempotent_and_secret_free(
         assert grant.object_id == "fabrik"
         assert grant.role == "owner"
         assert grant.scope == "subtree"
+        assert principal.platform_role == "admin"
+        assert principal.revision == 1
         assert PASSWORD not in credential.password_hash
 
     monkeypatch.setattr("sys.stdin", io.StringIO(""))
@@ -108,6 +110,45 @@ def test_bootstrap_owner_is_atomic_idempotent_and_secret_free(
     with Session(engine) as session:
         assert len(session.scalars(select(Principal)).all()) == 1
         assert len(session.scalars(select(ObjectGrant)).all()) == 1
+    engine.dispose()
+
+
+def test_existing_human_can_be_explicitly_promoted_to_platform_admin(
+    tmp_path: Path,
+    monkeypatch,
+    capsys,
+) -> None:
+    database_url, engine = _database(tmp_path)
+    monkeypatch.setattr("sys.stdin", io.StringIO(f"{PASSWORD}\n"))
+    assert auth_cli.main(
+        [
+            "--database-url",
+            database_url,
+            "create-human",
+            "--login",
+            "kai",
+            "--display-name",
+            "Kai",
+            "--password-stdin",
+        ]
+    ) == 0
+    capsys.readouterr()
+
+    assert auth_cli.main(
+        ["--database-url", database_url, "promote-admin", "--login", "kai"]
+    ) == 0
+    output = capsys.readouterr()
+    assert "changed=1" in output.out
+    with Session(engine) as session:
+        principal = session.scalar(select(Principal).where(Principal.login == "kai"))
+        assert principal is not None
+        assert principal.platform_role == "admin"
+        assert principal.revision == 2
+
+    assert auth_cli.main(
+        ["--database-url", database_url, "promote-admin", "--login", "kai"]
+    ) == 0
+    assert "changed=0" in capsys.readouterr().out
     engine.dispose()
 
 
@@ -268,6 +309,7 @@ def test_service_token_is_written_once_to_new_mode_0600_file(
         principal = session.scalar(select(Principal).where(Principal.login == "mcp.reader"))
         assert stored is not None
         assert principal is not None
+        assert principal.revision == 2
         assert token not in stored.token_hash
         assert authenticate_service_token(session, token=token) is not None
 
@@ -288,4 +330,58 @@ def test_service_token_is_written_once_to_new_mode_0600_file(
     assert duplicate == 1
     assert duplicate_output.err == "auth_rotate_token_error=failed\n"
     assert token_path.read_text(encoding="utf-8").strip() == token
+
+    rotated_path = tmp_path / "mcp-reader-rotated.token"
+    assert auth_cli.main(
+        [
+            "--database-url",
+            database_url,
+            "rotate-token",
+            "--login",
+            "mcp.reader",
+            "--name",
+            "runtime",
+            "--output-file",
+            str(rotated_path),
+        ]
+    ) == 0
+    capsys.readouterr()
+    with Session(engine) as session:
+        principal = session.scalar(select(Principal).where(Principal.login == "mcp.reader"))
+        assert principal is not None
+        assert principal.revision == 3
+
+    assert auth_cli.main(
+        [
+            "--database-url",
+            database_url,
+            "revoke-token",
+            "--login",
+            "mcp.reader",
+            "--name",
+            "runtime",
+        ]
+    ) == 0
+    assert "changed=1" in capsys.readouterr().out
+    with Session(engine) as session:
+        principal = session.scalar(select(Principal).where(Principal.login == "mcp.reader"))
+        assert principal is not None
+        assert principal.revision == 4
+
+    assert auth_cli.main(
+        [
+            "--database-url",
+            database_url,
+            "revoke-token",
+            "--login",
+            "mcp.reader",
+            "--name",
+            "runtime",
+        ]
+    ) == 0
+    assert "changed=0" in capsys.readouterr().out
+    with Session(engine) as session:
+        principal = session.scalar(select(Principal).where(Principal.login == "mcp.reader"))
+        assert principal is not None
+        assert principal.revision == 4
     engine.dispose()

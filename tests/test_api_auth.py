@@ -62,6 +62,8 @@ def test_bearer_auth_returns_same_stable_principal(
         "principal_type": "service_account",
         "login": "api.reader",
         "display_name": "API Reader",
+        "platform_role": None,
+        "revision": 1,
     }
     assert response.headers["x-correlation-id"]
     session_factory, _, _ = api_auth_state
