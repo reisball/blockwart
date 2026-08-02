@@ -51,7 +51,11 @@ that count differs from the baseline. Then run:
 The tool creates one `exports/github-migration/<UTC>-<main-shortsha>` directory atomically. It
 refuses an existing final destination, uses directory mode 0700 and file mode 0600, records the
 full API and Git inventory in `manifest.json`, and protects that manifest with
-`manifest.sha256`. Runtime snapshots remain ignored and must never be committed.
+`manifest.sha256`. Before sealing, it repeats the indexes, every issue/PR subresource, diff/patch
+availability check, and asset download; any count, endpoint-availability, payload, or asset-byte
+change fails closed. Offline validation reconstructs asset bindings from the captured API objects,
+requires the complete PR evidence schema, and rejects every unmanifested filesystem object.
+Runtime snapshots remain ignored and must never be committed.
 
 Validate again without network access, still passing the exact original token through stdin:
 

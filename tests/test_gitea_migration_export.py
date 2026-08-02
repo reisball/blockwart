@@ -35,8 +35,11 @@ class FakeGiteaState:
         self.total_overrides: dict[str, int] = {}
         self.duplicate_issue_id = False
         self.mutate_confirmation = False
+        self.mutate_pull_subresources = False
+        self.unavailable_pull_evidence = False
         self.redirect_asset = False
         self.issue_index_cycles = 0
+        self.pull_commit_cycles = 0
         self.labels = [
             {"id": number, "name": f"label-{number}", "color": "abcdef"}
             for number in range(1, 52)
@@ -254,21 +257,42 @@ class _FakeGiteaHandler(BaseHTTPRequestHandler):
             self._send_json(state.pull())
             return
         if path == f"{root}/pulls/87/commits":
-            self._send_list([{"sha": "d" * 40}])
+            if state.unavailable_pull_evidence:
+                self.send_error(404)
+                return
+            state.pull_commit_cycles += 1
+            commit_sha = (
+                "e" * 40
+                if state.mutate_pull_subresources and state.pull_commit_cycles >= 2
+                else "d" * 40
+            )
+            self._send_list([{"sha": commit_sha}])
             return
         if path == f"{root}/pulls/87/files":
+            if state.unavailable_pull_evidence:
+                self.send_error(404)
+                return
             self._send_list([{"filename": "README.md", "status": "modified"}])
             return
         if path == f"{root}/pulls/87/reviews":
+            if state.unavailable_pull_evidence:
+                self.send_error(404)
+                return
             self._send_list([{"id": 501, "state": "APPROVED"}])
             return
         if path == f"{root}/pulls/87/reviews/501/comments":
             self._send_list([{"id": 601, "body": "review note"}])
             return
         if path == f"{root}/commits/{'c' * 40}/status":
+            if state.unavailable_pull_evidence:
+                self.send_error(404)
+                return
             self._send_json({"state": "success", "sha": "c" * 40})
             return
         if path in {f"{root}/pulls/87.diff", f"{root}/pulls/87.patch"}:
+            if state.unavailable_pull_evidence:
+                self.send_error(404)
+                return
             payload = b"diff --git a/README.md b/README.md\n"
             self.send_response(200)
             self.send_header("Content-Length", str(len(payload)))
@@ -373,8 +397,10 @@ def exported_snapshot(
 
 
 def _copy_snapshot(source: Path, destination: Path) -> Path:
-    shutil.copytree(source, destination, copy_function=shutil.copy2)
-    return destination
+    destination.mkdir()
+    snapshot = destination / source.name
+    shutil.copytree(source, snapshot, copy_function=shutil.copy2)
+    return snapshot
 
 
 def _reseal(snapshot: Path, relative: str) -> None:
@@ -394,6 +420,22 @@ def _reseal(snapshot: Path, relative: str) -> None:
     )
     os.chmod(manifest_path, 0o600)
     os.chmod(snapshot / "manifest.sha256", 0o600)
+
+
+def _write_manifest(snapshot: Path, manifest: dict[str, object]) -> None:
+    manifest_path = snapshot / "manifest.json"
+    manifest_path.write_bytes(export_gitea._canonical_json(manifest))
+    (snapshot / "manifest.sha256").write_text(
+        f"{hashlib.sha256(manifest_path.read_bytes()).hexdigest()}  manifest.json\n"
+    )
+    os.chmod(manifest_path, 0o600)
+    os.chmod(snapshot / "manifest.sha256", 0o600)
+
+
+def _reseal_inventory(snapshot: Path) -> None:
+    manifest = json.loads((snapshot / "manifest.json").read_text())
+    manifest["file_inventory"] = export_gitea._inventory(snapshot)
+    _write_manifest(snapshot, manifest)
 
 
 def test_export_multipage_number_plan_pr_assets_and_bundle(exported_snapshot: Path) -> None:
@@ -418,6 +460,32 @@ def test_export_multipage_number_plan_pr_assets_and_bundle(exported_snapshot: Pa
     assert TOKEN not in b"".join(
         path.read_bytes() for path in exported_snapshot.rglob("*") if path.is_file()
     )
+
+
+def test_export_records_and_validates_unavailable_pr_evidence(
+    tmp_path: Path,
+    git_repository: Path,
+) -> None:
+    state = FakeGiteaState()
+    state.unavailable_pull_evidence = True
+    with fake_gitea(state) as (state, origin):
+        snapshot = _export(tmp_path, git_repository, state, origin)
+    manifest = export_gitea.validate_snapshot(snapshot, TOKEN)
+    item_dir = snapshot / "items" / "87"
+    assert json.loads((item_dir / "status.json").read_text()) == export_gitea.UNAVAILABLE_MARKER
+    assert json.loads((item_dir / "diff.unavailable.json").read_text()) == (
+        export_gitea.UNAVAILABLE_MARKER
+    )
+    assert json.loads((item_dir / "patch.unavailable.json").read_text()) == (
+        export_gitea.UNAVAILABLE_MARKER
+    )
+    assert manifest["api_scope"]["page_counts"]["initial.pull.87.commits"]["pages"] == 0
+    assert manifest["api_scope"]["endpoint_evidence"]["initial.pull.87.diff"] == {
+        "path": f"repos/{REPOSITORY}/pulls/87.diff",
+        "kind": "bytes",
+        "available": False,
+        "reason": "endpoint-unavailable",
+    }
 
 
 def test_pagination_count_mismatch_fails_closed(
@@ -468,6 +536,17 @@ def test_mid_export_mutation_fails_closed(tmp_path: Path, git_repository: Path) 
             _export(tmp_path, git_repository, state, origin)
 
 
+def test_mid_export_pull_subresource_mutation_fails_closed(
+    tmp_path: Path,
+    git_repository: Path,
+) -> None:
+    state = FakeGiteaState()
+    state.mutate_pull_subresources = True
+    with fake_gitea(state) as (state, origin):
+        with pytest.raises(export_gitea.ExportError, match="item data changed"):
+            _export(tmp_path, git_repository, state, origin)
+
+
 def test_asset_redirect_fails_closed(tmp_path: Path, git_repository: Path) -> None:
     state = FakeGiteaState()
     state.redirect_asset = True
@@ -485,6 +564,36 @@ def test_asset_tampering_is_detected(exported_snapshot: Path, tmp_path: Path) ->
         export_gitea.validate_snapshot(snapshot, TOKEN)
 
 
+def test_resealed_asset_misbinding_is_detected(
+    exported_snapshot: Path,
+    tmp_path: Path,
+) -> None:
+    snapshot = _copy_snapshot(exported_snapshot, tmp_path / "asset-misbinding")
+    manifest = json.loads((snapshot / "manifest.json").read_text())
+    first, second = manifest["asset_rewrite_mapping"]
+    for field in ("id", "name", "source_url", "path", "size", "sha256"):
+        first[field], second[field] = second[field], first[field]
+    _write_manifest(snapshot, manifest)
+    with pytest.raises(export_gitea.ExportError, match="asset mapping"):
+        export_gitea.validate_snapshot(snapshot, TOKEN)
+
+
+def test_resealed_malformed_asset_endpoint_object_is_detected(
+    exported_snapshot: Path,
+    tmp_path: Path,
+) -> None:
+    snapshot = _copy_snapshot(exported_snapshot, tmp_path / "malformed-asset-object")
+    relative = "items/1/assets.json"
+    path = snapshot / relative
+    assets = json.loads(path.read_text())
+    del assets[0]["browser_download_url"]
+    path.write_bytes(export_gitea._canonical_json(assets))
+    os.chmod(path, 0o600)
+    _reseal(snapshot, relative)
+    with pytest.raises(export_gitea.ExportError, match="asset download URL"):
+        export_gitea.validate_snapshot(snapshot, TOKEN)
+
+
 def test_manifest_hash_tampering_is_detected(exported_snapshot: Path, tmp_path: Path) -> None:
     snapshot = _copy_snapshot(exported_snapshot, tmp_path / "manifest-tamper")
     manifest = json.loads((snapshot / "manifest.json").read_text())
@@ -492,6 +601,32 @@ def test_manifest_hash_tampering_is_detected(exported_snapshot: Path, tmp_path: 
     (snapshot / "manifest.json").write_text(json.dumps(manifest))
     os.chmod(snapshot / "manifest.json", 0o600)
     with pytest.raises(export_gitea.ExportError, match="manifest checksum"):
+        export_gitea.validate_snapshot(snapshot, TOKEN)
+
+
+def test_resealed_false_main_sha_is_detected(
+    exported_snapshot: Path,
+    tmp_path: Path,
+) -> None:
+    snapshot = _copy_snapshot(exported_snapshot, tmp_path / "false-main")
+    manifest = json.loads((snapshot / "manifest.json").read_text())
+    manifest["refs"]["main"]["sha"] = "0" * 40
+    _write_manifest(snapshot, manifest)
+    with pytest.raises(export_gitea.ExportError, match="main SHA does not match"):
+        export_gitea.validate_snapshot(snapshot, TOKEN)
+
+
+@pytest.mark.parametrize("false_sha", ["A" * 40, "a" * 39])
+def test_resealed_invalid_git_sha_syntax_is_detected(
+    false_sha: str,
+    exported_snapshot: Path,
+    tmp_path: Path,
+) -> None:
+    snapshot = _copy_snapshot(exported_snapshot, tmp_path / f"invalid-sha-{len(false_sha)}")
+    manifest = json.loads((snapshot / "manifest.json").read_text())
+    manifest["refs"]["archive"]["sha"] = false_sha
+    _write_manifest(snapshot, manifest)
+    with pytest.raises(export_gitea.ExportError, match="full lowercase Git SHA"):
         export_gitea.validate_snapshot(snapshot, TOKEN)
 
 
@@ -517,6 +652,154 @@ def test_extra_missing_and_symlink_files_are_rejected(
     else:
         (snapshot / "link").symlink_to("api/issues.json")
     with pytest.raises(export_gitea.ExportError):
+        export_gitea.validate_snapshot(snapshot, TOKEN)
+
+
+@pytest.mark.parametrize("kind", ["diff", "patch"])
+@pytest.mark.parametrize("mutation", ["absent", "duplicate", "malformed-marker"])
+def test_resealed_pr_diff_patch_representation_tampering_is_rejected(
+    kind: str,
+    mutation: str,
+    exported_snapshot: Path,
+    tmp_path: Path,
+) -> None:
+    snapshot = _copy_snapshot(
+        exported_snapshot, tmp_path / f"{kind}-representation-{mutation}"
+    )
+    item_dir = snapshot / "items" / "87"
+    payload = item_dir / f"pull.{kind}"
+    marker = item_dir / f"{kind}.unavailable.json"
+    if mutation == "absent":
+        payload.unlink()
+    elif mutation == "duplicate":
+        marker.write_bytes(export_gitea._canonical_json(export_gitea.UNAVAILABLE_MARKER))
+        os.chmod(marker, 0o600)
+    else:
+        payload.unlink()
+        marker.write_bytes(export_gitea._canonical_json({"available": False}))
+        os.chmod(marker, 0o600)
+    _reseal_inventory(snapshot)
+    with pytest.raises(export_gitea.ExportError, match="representation|marker"):
+        export_gitea.validate_snapshot(snapshot, TOKEN)
+
+
+@pytest.mark.parametrize(
+    "relative",
+    [
+        "items/87/pull.json",
+        "items/87/pull-metadata.json",
+        "items/87/commits.json",
+        "items/87/files.json",
+        "items/87/reviews.json",
+        "items/87/review-comments.json",
+        "items/87/status.json",
+    ],
+)
+def test_resealed_required_pr_evidence_deletion_is_rejected(
+    relative: str,
+    exported_snapshot: Path,
+    tmp_path: Path,
+) -> None:
+    snapshot = _copy_snapshot(
+        exported_snapshot, tmp_path / f"deleted-{Path(relative).name}"
+    )
+    (snapshot / relative).unlink()
+    _reseal_inventory(snapshot)
+    with pytest.raises(export_gitea.ExportError):
+        export_gitea.validate_snapshot(snapshot, TOKEN)
+
+
+@pytest.mark.parametrize("resource", ["commits", "files", "reviews", "review-comments"])
+def test_resealed_duplicate_pr_resource_identities_are_rejected(
+    resource: str,
+    exported_snapshot: Path,
+    tmp_path: Path,
+) -> None:
+    snapshot = _copy_snapshot(exported_snapshot, tmp_path / f"duplicate-{resource}")
+    relative = f"items/87/{resource}.json"
+    path = snapshot / relative
+    payload = json.loads(path.read_text())
+    if resource == "review-comments":
+        payload["501"].append(dict(payload["501"][0]))
+    else:
+        payload.append(dict(payload[0]))
+    path.write_bytes(export_gitea._canonical_json(payload))
+    os.chmod(path, 0o600)
+    _reseal(snapshot, relative)
+    with pytest.raises(export_gitea.ExportError, match="duplicate"):
+        export_gitea.validate_snapshot(snapshot, TOKEN)
+
+
+def test_resealed_pr_status_semantic_tampering_is_rejected(
+    exported_snapshot: Path,
+    tmp_path: Path,
+) -> None:
+    snapshot = _copy_snapshot(exported_snapshot, tmp_path / "status-semantic-tamper")
+    relative = "items/87/status.json"
+    path = snapshot / relative
+    status = json.loads(path.read_text())
+    status["sha"] = "f" * 40
+    path.write_bytes(export_gitea._canonical_json(status))
+    os.chmod(path, 0o600)
+    _reseal(snapshot, relative)
+    with pytest.raises(export_gitea.ExportError, match="status payload"):
+        export_gitea.validate_snapshot(snapshot, TOKEN)
+
+
+def test_resealed_pr_endpoint_count_evidence_tampering_is_rejected(
+    exported_snapshot: Path,
+    tmp_path: Path,
+) -> None:
+    snapshot = _copy_snapshot(exported_snapshot, tmp_path / "endpoint-evidence-tamper")
+    manifest = json.loads((snapshot / "manifest.json").read_text())
+    del manifest["api_scope"]["page_counts"]["confirmation.pull.87.files"]
+    _write_manifest(snapshot, manifest)
+    with pytest.raises(export_gitea.ExportError, match="page count|key set"):
+        export_gitea.validate_snapshot(snapshot, TOKEN)
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [("state", "open"), ("reason", ""), ("reason", "Different reservation")],
+)
+def test_resealed_modified_tombstone_is_rejected(
+    field: str,
+    value: str,
+    exported_snapshot: Path,
+    tmp_path: Path,
+) -> None:
+    snapshot = _copy_snapshot(exported_snapshot, tmp_path / f"tombstone-{field}-{len(value)}")
+    plan_path = snapshot / "number-plan.json"
+    plan = json.loads(plan_path.read_text())
+    plan[85][field] = value
+    plan_path.write_bytes(export_gitea._canonical_json(plan))
+    os.chmod(plan_path, 0o600)
+    _reseal(snapshot, "number-plan.json")
+    with pytest.raises(export_gitea.ExportError, match="tombstone"):
+        export_gitea.validate_snapshot(snapshot, TOKEN)
+
+
+def test_extra_empty_directory_is_rejected(
+    exported_snapshot: Path,
+    tmp_path: Path,
+) -> None:
+    snapshot = _copy_snapshot(exported_snapshot, tmp_path / "empty-directory")
+    extra = snapshot / "unmanifested-empty-directory"
+    extra.mkdir(mode=0o700)
+    with pytest.raises(export_gitea.ExportError, match="directory set mismatch"):
+        export_gitea.validate_snapshot(snapshot, TOKEN)
+
+
+@pytest.mark.skipif(not hasattr(os, "mkfifo"), reason="mkfifo is unavailable")
+def test_mode_0600_fifo_is_rejected(
+    exported_snapshot: Path,
+    tmp_path: Path,
+) -> None:
+    snapshot = _copy_snapshot(exported_snapshot, tmp_path / "fifo")
+    fifo = snapshot / "unexpected.fifo"
+    os.mkfifo(fifo, mode=0o600)
+    os.chmod(fifo, 0o600)
+    with pytest.raises(export_gitea.ExportError, match="special filesystem object"):
         export_gitea.validate_snapshot(snapshot, TOKEN)
 
 
