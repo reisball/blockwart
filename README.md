@@ -71,7 +71,7 @@ python -m compileall -q src tests scripts
 ```
 
 The dependency update process, reviewed OpenAPI snapshot, installed-wheel smoke, container smoke,
-and Gitea Actions contract are documented in `docs/ci.md`.
+and host-neutral Gitea/GitHub Actions contract are documented in `docs/ci.md`.
 
 The backend uses one canonical English vocabulary. The UI defaults to English
 and ships complete English/German catalogs with a persistent language switcher.
