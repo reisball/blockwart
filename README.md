@@ -19,13 +19,20 @@ The MVP goal is narrow:
 
 ## Current Status
 
-This repository is scaffolded from the planning artifacts in:
+Blockwart is an implemented, database-backed catalog with an authenticated
+human UI, object-authorized REST and MCP APIs, Alembic-managed schema
+lifecycle, and generated Markdown/YAML exports. Its operational, API,
+security, and architecture contracts are collected in the [documentation
+index](docs/README.md).
 
-- `/home/zoe/shared/infra-knowledge-platform/specs/repo-skeleton-plan.md`
-- `/home/zoe/shared/infra-knowledge-platform/specs/core-object-schema.md`
-- `/home/zoe/shared/infra-knowledge-platform/specs/pilot-import-mapping.md`
+GitHub `reisball/blockwart` is canonical. Gitea `services/blockwart` is an
+archived read-only rollback source; the preserved migration evidence is in
+[docs/github-migration.md](docs/github-migration.md).
 
 ## Local Development
+
+Start here, then use the [documentation index](docs/README.md) for the
+contract or operating procedure you need.
 
 Create a virtual environment and install development dependencies:
 

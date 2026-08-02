@@ -4,8 +4,8 @@
 > canonical repository. The validated source snapshot used Gitea `main`
 > `8d0bd2fcb097c09f1be8863539ef6527f3745d82` and preserved 114 numbered
 > items, 320 comments, 48 target labels, seven attachments, the complete
-> `main` history, and the historical `task-070` branch. Gitea remains
-> unchanged as a pre-cutover rollback source.
+> `main` history, and the historical `task-070` branch. Gitea remains an
+> archived read-only rollback source.
 
 The procedure below is the preserved pre-cutover runbook. Its authorization
 boundaries and statements about Gitea being canonical describe the state before
