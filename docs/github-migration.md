@@ -11,7 +11,8 @@ Before any cutover window, require all of the following:
 - Gitea `main` is the approved final commit, its matching push workflow is green, and no pull
   request is open.
 - A fresh export from `scripts/migration/export_gitea.py` validates offline with the original token
-  supplied only through stdin. Never commit or copy the export outside protected storage.
+  supplied only through stdin and the externally pinned manifest SHA-256. Never commit or copy the
+  export outside protected storage.
 - The export count reconciliation explains every legitimate difference from the discovery baseline
   of 72 issues, 37 pull requests, 292 comments, 47 labels, and seven assets.
 - The bundle resolves the current remote `main` and
@@ -24,10 +25,11 @@ Before any cutover window, require all of the following:
   and billing/Actions availability are verified using read-only checks before a separately
   authorized write. The destination must be empty.
 
-Stop immediately on a failed validator, count or hash mismatch, changed Gitea ref/index, open PR,
-number mismatch, missing asset, unexpected redirect, authentication/authorization error, scan
-finding, non-empty GitHub target, insufficient permissions, or GitHub workflow failure. Do not
-repair numbering by creating filler items outside the exported plan.
+Stop immediately on a missing/lost external manifest pin, failed validator, count or hash mismatch,
+changed Gitea ref/index, open PR, number mismatch, missing asset, unexpected redirect,
+authentication/authorization error, scan finding, non-empty GitHub target, insufficient
+permissions, or GitHub workflow failure. Do not repair numbering by creating filler items outside
+the exported plan.
 
 ## Prepare A Protected Snapshot
 
@@ -57,10 +59,20 @@ change fails closed. Offline validation reconstructs asset bindings from the cap
 requires the complete PR evidence schema, and rejects every unmanifested filesystem object.
 Runtime snapshots remain ignored and must never be committed.
 
-Validate again without network access, still passing the exact original token through stdin:
+After the atomic rename, export prints both `export=<path>` and
+`manifest_sha256=<64 lowercase hex characters>`. Immediately record that digest in independent,
+access-controlled controller custody outside the snapshot directory. The digest is not secret, but
+it is the external trust root: do not regenerate or replace the pin from a snapshot presented for
+later validation. `manifest.sha256` remains useful for internal corruption detection only and is
+not a substitute for the independently held pin. Losing the pin, observing a mismatch, or finding
+that the pin was stored only inside the snapshot is a hard stop requiring a new authorized export.
+
+Validate again without network access, still passing the exact original token through stdin and
+the independently held original digest:
 
 ```text
 <secret-provider-to-stdin> | python scripts/migration/export_gitea.py validate \
+  --expected-manifest-sha256 <independently-pinned-manifest-sha256> \
   exports/github-migration/<UTC>-<main-shortsha>
 ```
 
@@ -149,7 +161,8 @@ cutover; otherwise reconcile those writes under an approved data-recovery plan f
 
 ## Evidence To Retain
 
-Retain the accepted commit SHAs, Gitea and GitHub exact-SHA CI run links, export manifest hash,
+Retain the accepted commit SHAs, Gitea and GitHub exact-SHA CI run links, externally pinned export
+manifest hash in independent custody,
 offline-validator output, count reconciliation, bundle ref/hash/merge-base proof, number-by-number
 import log, asset rewrite/hash proof, tree/history secret scans, privacy adjudication, identity and
 permission checks, independent review, stop/rollback decisions, and canonical-source decision.

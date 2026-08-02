@@ -25,6 +25,7 @@ import urllib.parse
 import urllib.request
 import uuid
 from collections.abc import Iterable, Mapping, Sequence
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path, PurePosixPath
 from typing import Any
@@ -57,6 +58,14 @@ class NotFoundError(ExportError):
     """An optional Gitea endpoint is unavailable."""
 
 
+@dataclass(frozen=True)
+class ExportResult:
+    """Final snapshot path and its non-secret external trust-root digest."""
+
+    path: Path
+    manifest_sha256: str
+
+
 class _RejectRedirects(urllib.request.HTTPRedirectHandler):
     def redirect_request(
         self,
@@ -72,13 +81,36 @@ class _RejectRedirects(urllib.request.HTTPRedirectHandler):
 
 
 def _origin(url: str) -> tuple[str, str, int]:
-    parsed = urllib.parse.urlsplit(url)
+    try:
+        parsed = urllib.parse.urlsplit(url)
+        explicit_port = parsed.port
+    except ValueError as exc:
+        raise ExportError("source URL contains an invalid host or port") from exc
     if parsed.scheme not in {"http", "https"} or not parsed.hostname:
         raise ExportError("source URL must use http or https and include a host")
     if parsed.username is not None or parsed.password is not None:
         raise ExportError("source URL must not contain credentials")
-    port = parsed.port or (443 if parsed.scheme == "https" else 80)
+    port = (
+        explicit_port
+        if explicit_port is not None
+        else (443 if parsed.scheme == "https" else 80)
+    )
+    if port < 1:
+        raise ExportError("source URL contains an invalid host or port")
     return parsed.scheme.lower(), parsed.hostname.lower(), port
+
+
+def _canonical_gitea_base_url(url: str) -> str:
+    scheme, hostname, port = _origin(url)
+    parsed = urllib.parse.urlsplit(url)
+    if parsed.path not in {"", "/"} or parsed.query or parsed.fragment:
+        raise ExportError(
+            "Gitea base URL must be an origin root without a path, query, or fragment"
+        )
+    host = f"[{hostname}]" if ":" in hostname else hostname
+    default_port = 443 if scheme == "https" else 80
+    netloc = host if port == default_port else f"{host}:{port}"
+    return urllib.parse.urlunsplit((scheme, netloc, "", "", ""))
 
 
 def _canonical_json(value: Any) -> bytes:
@@ -101,6 +133,12 @@ def _sha256(path: Path) -> str:
 def _require_git_sha(value: Any, *, label: str) -> str:
     if not isinstance(value, str) or GIT_SHA_RE.fullmatch(value) is None:
         raise ExportError(f"{label} must be a full lowercase Git SHA")
+    return value
+
+
+def _require_sha256(value: Any, *, label: str) -> str:
+    if not isinstance(value, str) or re.fullmatch(r"[0-9a-f]{64}", value) is None:
+        raise ExportError(f"{label} must be a 64-character lowercase SHA-256")
     return value
 
 
@@ -206,12 +244,7 @@ def _resolve_refs(
 
 class GiteaClient:
     def __init__(self, base_url: str, token: bytes) -> None:
-        parsed = urllib.parse.urlsplit(base_url)
-        if parsed.query or parsed.fragment:
-            raise ExportError("source base URL must not contain a query or fragment")
-        if parsed.path not in {"", "/"}:
-            raise ExportError("source base URL must be the Gitea origin root")
-        self.base_url = base_url.rstrip("/")
+        self.base_url = _canonical_gitea_base_url(base_url)
         self.api_url = f"{self.base_url}/api/v1"
         self.origin = _origin(self.base_url)
         try:
@@ -1136,7 +1169,7 @@ def _optional_representation(
     return None
 
 
-def _validate_data(snapshot: Path, manifest: Mapping[str, Any]) -> None:
+def _validate_data(snapshot: Path, manifest: Mapping[str, Any]) -> set[str]:
     source = manifest.get("source")
     if not isinstance(source, dict) or set(source) != {"base_url", "repository"}:
         raise ExportError("manifest source is invalid")
@@ -1146,8 +1179,21 @@ def _validate_data(snapshot: Path, manifest: Mapping[str, Any]) -> None:
         raise ExportError("manifest source is invalid")
     if not re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", repository):
         raise ExportError("manifest repository is invalid")
-    source_origin = _origin(base_url)
+    canonical_base_url = _canonical_gitea_base_url(base_url)
+    if base_url != canonical_base_url:
+        raise ExportError("manifest Gitea base URL is not canonical")
+    source_origin = _origin(canonical_base_url)
     root = f"repos/{repository}"
+    semantic_files = {
+        "manifest.json",
+        "manifest.sha256",
+        "repository.bundle",
+        "number-plan.json",
+        "api/labels.json",
+        "api/issues.json",
+        "api/pull-requests.json",
+        "api/comments.json",
+    }
 
     api_scope = manifest.get("api_scope")
     if not isinstance(api_scope, dict) or set(api_scope) != {
@@ -1274,6 +1320,14 @@ def _validate_data(snapshot: Path, manifest: Mapping[str, Any]) -> None:
     pull_index = {item["number"]: item for item in pulls}
     for number in sorted(issue_numbers | pull_numbers):
         item_dir = snapshot / "items" / str(number)
+        item_prefix = f"items/{number}"
+        semantic_files.update(
+            {
+                f"{item_prefix}/issue.json",
+                f"{item_prefix}/comments.json",
+                f"{item_prefix}/assets.json",
+            }
+        )
         detail = _json_from_path(item_dir / "issue.json")
         item_comments = _require_object_list(
             _json_from_path(item_dir / "comments.json"),
@@ -1330,6 +1384,17 @@ def _validate_data(snapshot: Path, manifest: Mapping[str, Any]) -> None:
                 "comment_ids": sorted(comment_ids),
             }
         else:
+            semantic_files.update(
+                {
+                    f"{item_prefix}/pull.json",
+                    f"{item_prefix}/pull-metadata.json",
+                    f"{item_prefix}/commits.json",
+                    f"{item_prefix}/files.json",
+                    f"{item_prefix}/reviews.json",
+                    f"{item_prefix}/review-comments.json",
+                    f"{item_prefix}/status.json",
+                }
+            )
             pull = _json_from_path(item_dir / "pull.json")
             metadata = _json_from_path(item_dir / "pull-metadata.json")
             commits = _require_object_list(
@@ -1436,6 +1501,16 @@ def _validate_data(snapshot: Path, manifest: Mapping[str, Any]) -> None:
                 marker_name="patch.unavailable.json",
                 label=f"{number} patch",
             )
+            semantic_files.add(
+                f"{item_prefix}/pull.diff"
+                if diff is not None
+                else f"{item_prefix}/diff.unavailable.json"
+            )
+            semantic_files.add(
+                f"{item_prefix}/pull.patch"
+                if patch is not None
+                else f"{item_prefix}/patch.unavailable.json"
+            )
 
             pull_path = f"{root}/pulls/{number}"
             for prefix in ("initial", "confirmation"):
@@ -1521,6 +1596,7 @@ def _validate_data(snapshot: Path, manifest: Mapping[str, Any]) -> None:
                 "sha256": _sha256(asset_path),
             }
         )
+        semantic_files.add(identity["path"])
     mappings = manifest.get("asset_rewrite_mapping")
     if mappings != expected_mappings:
         raise ExportError("manifest asset mapping does not match captured API objects")
@@ -1584,21 +1660,35 @@ def _validate_data(snapshot: Path, manifest: Mapping[str, Any]) -> None:
             raise ExportError(f"manifest reconciliation delta for {key} is invalid")
         if entry["delta"] and not str(entry.get("explanation", "")).strip():
             raise ExportError(f"manifest reconciliation for {key} is unexplained")
+    return semantic_files
 
 
-def validate_snapshot(
+def _validate_snapshot(
     snapshot: Path,
     token: bytes,
     *,
-    allow_staging_name: bool = False,
+    expected_manifest_sha256: str,
+    allow_staging_name: bool,
 ) -> dict[str, Any]:
+    pinned_manifest_sha256 = _require_sha256(
+        expected_manifest_sha256, label="expected manifest SHA-256"
+    )
     if snapshot.is_symlink():
         raise ExportError("snapshot directory must not be a symlink")
     snapshot = snapshot.resolve()
     if not snapshot.is_dir():
         raise ExportError("snapshot directory does not exist")
-    _check_permissions(snapshot)
     manifest_path = snapshot / "manifest.json"
+    try:
+        manifest_metadata = manifest_path.lstat()
+    except OSError as exc:
+        raise ExportError("manifest file does not exist") from exc
+    if not stat.S_ISREG(manifest_metadata.st_mode):
+        raise ExportError("manifest file is not a regular file")
+    actual_manifest_sha256 = _sha256(manifest_path)
+    if actual_manifest_sha256 != pinned_manifest_sha256:
+        raise ExportError("manifest does not match the externally pinned SHA-256")
+    _check_permissions(snapshot)
     sidecar_path = snapshot / "manifest.sha256"
     manifest = _json_from_path(manifest_path)
     if (
@@ -1625,7 +1715,7 @@ def validate_snapshot(
         sidecar = sidecar_path.read_text(encoding="ascii")
     except (OSError, UnicodeDecodeError) as exc:
         raise ExportError("manifest checksum sidecar is invalid") from exc
-    expected_sidecar = f"{_sha256(manifest_path)}  manifest.json\n"
+    expected_sidecar = f"{actual_manifest_sha256}  manifest.json\n"
     if sidecar != expected_sidecar:
         raise ExportError("manifest checksum does not match")
     exported_at = manifest.get("exported_at")
@@ -1656,8 +1746,7 @@ def validate_snapshot(
     inventory = manifest.get("file_inventory")
     if not isinstance(inventory, list):
         raise ExportError("manifest file inventory is invalid")
-    expected_files = {"manifest.json", "manifest.sha256"}
-    seen_inventory: set[str] = set()
+    inventory_paths: set[str] = set()
     for entry in inventory:
         if not isinstance(entry, dict) or set(entry) != {"path", "size", "sha256"}:
             raise ExportError("manifest inventory entry is invalid")
@@ -1673,7 +1762,7 @@ def validate_snapshot(
             or pure_path.as_posix() != relative
             or not pure_path.parts
             or any(part in {"", ".", ".."} for part in pure_path.parts)
-            or relative in seen_inventory
+            or relative in inventory_paths
             or isinstance(size, bool)
             or not isinstance(size, int)
             or size < 0
@@ -1681,8 +1770,7 @@ def validate_snapshot(
             or re.fullmatch(r"[0-9a-f]{64}", digest) is None
         ):
             raise ExportError("manifest inventory path is invalid or duplicated")
-        seen_inventory.add(relative)
-        expected_files.add(relative)
+        inventory_paths.add(relative)
         path = snapshot / relative
         if not path.is_file() or path.is_symlink():
             raise ExportError(f"inventoried file is missing: {relative}")
@@ -1691,12 +1779,25 @@ def validate_snapshot(
     actual_files = {
         path.relative_to(snapshot).as_posix() for path in snapshot.rglob("*") if path.is_file()
     }
-    if actual_files != expected_files:
-        missing = sorted(expected_files - actual_files)
-        extra = sorted(actual_files - expected_files)
+    if token:
+        for relative in sorted(actual_files):
+            if token in (snapshot / relative).read_bytes():
+                raise ExportError(f"exact token found in snapshot file: {relative}")
+    semantic_files = _validate_data(snapshot, manifest)
+    semantic_inventory = semantic_files - {"manifest.json", "manifest.sha256"}
+    if inventory_paths != semantic_inventory:
+        missing = sorted(semantic_inventory - inventory_paths)
+        extra = sorted(inventory_paths - semantic_inventory)
+        raise ExportError(
+            f"manifest inventory semantic set mismatch: missing={missing[:3]} "
+            f"extra={extra[:3]}"
+        )
+    if actual_files != semantic_files:
+        missing = sorted(semantic_files - actual_files)
+        extra = sorted(actual_files - semantic_files)
         raise ExportError(f"snapshot file set mismatch: missing={missing[:3]} extra={extra[:3]}")
     expected_dirs = {"."}
-    for relative in expected_files:
+    for relative in semantic_files:
         parent = PurePosixPath(relative).parent
         while parent.as_posix() != ".":
             expected_dirs.add(parent.as_posix())
@@ -1713,13 +1814,24 @@ def validate_snapshot(
         raise ExportError(
             f"snapshot directory set mismatch: missing={missing[:3]} extra={extra[:3]}"
         )
-    if token:
-        for relative in sorted(actual_files):
-            if token in (snapshot / relative).read_bytes():
-                raise ExportError(f"exact token found in snapshot file: {relative}")
-    _validate_data(snapshot, manifest)
     _validate_bundle(snapshot, manifest)
     return manifest
+
+
+def validate_snapshot(
+    snapshot: Path,
+    token: bytes,
+    *,
+    expected_manifest_sha256: str,
+) -> dict[str, Any]:
+    """Validate a finalized snapshot against an externally held manifest digest."""
+
+    return _validate_snapshot(
+        snapshot,
+        token,
+        expected_manifest_sha256=expected_manifest_sha256,
+        allow_staging_name=False,
+    )
 
 
 def export_snapshot(
@@ -1733,7 +1845,7 @@ def export_snapshot(
     reconciliation_path: Path,
     token: bytes,
     now: datetime | None = None,
-) -> Path:
+) -> ExportResult:
     if not re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", repository):
         raise ExportError("repository must use owner/name form")
     if not token:
@@ -1812,7 +1924,7 @@ def export_snapshot(
 
         manifest: dict[str, Any] = {
             "format_version": FORMAT_VERSION,
-            "source": {"base_url": base_url.rstrip("/"), "repository": repository},
+            "source": {"base_url": client.base_url, "repository": repository},
             "exported_at": timestamp.isoformat().replace("+00:00", "Z"),
             "snapshot_name": final_name,
             "api_scope": {
@@ -1870,10 +1982,15 @@ def export_snapshot(
             staging / "manifest.sha256",
             f"{manifest_hash}  manifest.json\n".encode("ascii"),
         )
-        validate_snapshot(staging, token, allow_staging_name=True)
+        _validate_snapshot(
+            staging,
+            token,
+            expected_manifest_sha256=manifest_hash,
+            allow_staging_name=True,
+        )
         _rename_noreplace(staging, final_path)
         staging = None
-        return final_path
+        return ExportResult(path=final_path, manifest_sha256=manifest_hash)
     finally:
         os.umask(previous_umask)
         if staging is not None and staging.exists():
@@ -1902,6 +2019,11 @@ def _parser() -> argparse.ArgumentParser:
     export.add_argument("--archive-ref", default=DEFAULT_ARCHIVE_REF)
     export.add_argument("--reconciliation", type=Path, required=True)
     validate = subparsers.add_parser("validate", help="validate a snapshot without network access")
+    validate.add_argument(
+        "--expected-manifest-sha256",
+        required=True,
+        help="externally pinned SHA-256 of manifest.json",
+    )
     validate.add_argument("snapshot", type=Path)
     return parser
 
@@ -1911,7 +2033,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     try:
         token = _read_token()
         if args.command == "export":
-            path = export_snapshot(
+            result = export_snapshot(
                 base_url=args.base_url,
                 repository=args.repository,
                 destination_root=args.destination_root,
@@ -1921,9 +2043,14 @@ def main(argv: Sequence[str] | None = None) -> int:
                 reconciliation_path=args.reconciliation,
                 token=token,
             )
-            print(f"export={path}")
+            print(f"export={result.path}")
+            print(f"manifest_sha256={result.manifest_sha256}")
         else:
-            manifest = validate_snapshot(args.snapshot, token)
+            manifest = validate_snapshot(
+                args.snapshot,
+                token,
+                expected_manifest_sha256=args.expected_manifest_sha256,
+            )
             print(f"validation=passed main_sha={manifest['main_sha']}")
         return 0
     except ExportError as exc:
