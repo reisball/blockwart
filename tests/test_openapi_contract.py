@@ -34,8 +34,10 @@ EXPECTED_OPERATIONS = {
     "/api/v1/objects/{object_id}/access/preview": {"get"},
     "/api/v1/objects/{object_id}/access/principals": {"get"},
     "/api/v1/objects/{object_id}/audit-events": {"get"},
+    "/api/v1/objects/{object_id}/device-graph": {"get"},
     "/api/v1/objects/{object_id}/relationships": {"get", "post", "delete"},
     "/api/v1/objects/{object_id}/topology": {"get"},
+    "/api/v1/objects/{parent_id}/attached-devices": {"post"},
 }
 
 
@@ -49,11 +51,8 @@ def test_openapi_matches_reviewed_contract() -> None:
 def test_openapi_exposes_only_reviewed_machine_operations() -> None:
     contract = json.loads(CONTRACT_PATH.read_text())
     operations = {
-        path: set(path_item) & HTTP_METHODS
-        for path, path_item in contract["paths"].items()
+        path: set(path_item) & HTTP_METHODS for path, path_item in contract["paths"].items()
     }
 
     assert operations == EXPECTED_OPERATIONS
-    assert not any(
-        path.startswith(("/admin", "/objects", "/settings")) for path in operations
-    )
+    assert not any(path.startswith(("/admin", "/objects", "/settings")) for path in operations)

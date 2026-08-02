@@ -552,6 +552,7 @@ def test_filters_counts_relationships_audit_and_cursor_do_not_leak_details(
             "from_ref": "system:lxc-137",
             "relation_type": "hosts",
             "to_ref": "service:blockwart",
+            "metadata": {},
         }
     ]
     assert relationships.json()["total"] == 1

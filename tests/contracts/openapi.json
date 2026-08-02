@@ -2495,6 +2495,21 @@
         "title": "ServiceTokenIssueIn",
         "type": "object"
       },
+      "V1AttachedDeviceCreateIn": {
+        "properties": {
+          "device": {
+            "$ref": "#/components/schemas/CatalogObjectIn"
+          },
+          "metadata": {
+            "$ref": "#/components/schemas/V1RelationshipMetadata-Input"
+          }
+        },
+        "required": [
+          "device"
+        ],
+        "title": "V1AttachedDeviceCreateIn",
+        "type": "object"
+      },
       "V1AuditEventOut": {
         "properties": {
           "action": {
@@ -2672,6 +2687,235 @@
           "deleted_revision"
         ],
         "title": "V1DeleteCommandOut",
+        "type": "object"
+      },
+      "V1DeviceGraphDetailNodeOut": {
+        "properties": {
+          "capabilities": {
+            "items": {
+              "$ref": "#/components/schemas/Permission"
+            },
+            "title": "Capabilities",
+            "type": "array"
+          },
+          "category": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Category"
+          },
+          "data": {
+            "additionalProperties": true,
+            "title": "Data",
+            "type": "object"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "host",
+              "system",
+              "network",
+              "device",
+              "service",
+              "credential_reference",
+              "runbook",
+              "decision",
+              "project"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "manufacturer": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Manufacturer"
+          },
+          "model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model"
+          },
+          "ref": {
+            "title": "Ref",
+            "type": "string"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "visibility": {
+            "const": "detail",
+            "default": "detail",
+            "title": "Visibility",
+            "type": "string"
+          }
+        },
+        "required": [
+          "ref",
+          "id",
+          "kind",
+          "label",
+          "status"
+        ],
+        "title": "V1DeviceGraphDetailNodeOut",
+        "type": "object"
+      },
+      "V1DeviceGraphEdgeOut": {
+        "properties": {
+          "from_ref": {
+            "title": "From Ref",
+            "type": "string"
+          },
+          "metadata": {
+            "$ref": "#/components/schemas/V1RelationshipMetadata-Output"
+          },
+          "relation_type": {
+            "const": "attached_to",
+            "title": "Relation Type",
+            "type": "string"
+          },
+          "to_ref": {
+            "title": "To Ref",
+            "type": "string"
+          }
+        },
+        "required": [
+          "from_ref",
+          "relation_type",
+          "to_ref"
+        ],
+        "title": "V1DeviceGraphEdgeOut",
+        "type": "object"
+      },
+      "V1DeviceGraphOut": {
+        "properties": {
+          "downstream_refs": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Downstream Refs",
+            "type": "array"
+          },
+          "edges": {
+            "items": {
+              "$ref": "#/components/schemas/V1DeviceGraphEdgeOut"
+            },
+            "title": "Edges",
+            "type": "array"
+          },
+          "nodes": {
+            "items": {
+              "discriminator": {
+                "mapping": {
+                  "detail": "#/components/schemas/V1DeviceGraphDetailNodeOut",
+                  "stub": "#/components/schemas/V1DeviceGraphStubNodeOut"
+                },
+                "propertyName": "visibility"
+              },
+              "oneOf": [
+                {
+                  "$ref": "#/components/schemas/V1DeviceGraphDetailNodeOut"
+                },
+                {
+                  "$ref": "#/components/schemas/V1DeviceGraphStubNodeOut"
+                }
+              ]
+            },
+            "title": "Nodes",
+            "type": "array"
+          },
+          "object_ref": {
+            "title": "Object Ref",
+            "type": "string"
+          },
+          "upstream_path": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Upstream Path",
+            "type": "array"
+          }
+        },
+        "required": [
+          "object_ref"
+        ],
+        "title": "V1DeviceGraphOut",
+        "type": "object"
+      },
+      "V1DeviceGraphStubNodeOut": {
+        "properties": {
+          "capabilities": {
+            "items": {
+              "$ref": "#/components/schemas/Permission"
+            },
+            "title": "Capabilities",
+            "type": "array"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "host",
+              "system",
+              "network",
+              "device",
+              "service",
+              "credential_reference",
+              "runbook",
+              "decision",
+              "project"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "ref": {
+            "title": "Ref",
+            "type": "string"
+          },
+          "visibility": {
+            "const": "stub",
+            "default": "stub",
+            "title": "Visibility",
+            "type": "string"
+          }
+        },
+        "required": [
+          "ref",
+          "id",
+          "kind",
+          "label"
+        ],
+        "title": "V1DeviceGraphStubNodeOut",
         "type": "object"
       },
       "V1DirectGrantOut": {
@@ -3085,6 +3329,9 @@
             "title": "From Ref",
             "type": "string"
           },
+          "metadata": {
+            "$ref": "#/components/schemas/V1RelationshipMetadata-Input"
+          },
           "relation_type": {
             "maxLength": 96,
             "minLength": 1,
@@ -3117,18 +3364,17 @@
             "type": "string"
           },
           "from_ref": {
-            "maxLength": 192,
-            "minLength": 3,
             "title": "From Ref",
             "type": "string"
+          },
+          "metadata": {
+            "$ref": "#/components/schemas/V1RelationshipMetadata-Output"
           },
           "object_id": {
             "title": "Object Id",
             "type": "string"
           },
           "relation_type": {
-            "maxLength": 96,
-            "minLength": 1,
             "title": "Relation Type",
             "type": "string"
           },
@@ -3138,8 +3384,6 @@
             "type": "integer"
           },
           "to_ref": {
-            "maxLength": 192,
-            "minLength": 3,
             "title": "To Ref",
             "type": "string"
           }
@@ -3156,11 +3400,119 @@
         "title": "V1RelationshipCommandOut",
         "type": "object"
       },
+      "V1RelationshipMetadata-Input": {
+        "additionalProperties": false,
+        "description": "Canonical optional metadata for link-shaped relationships.\n\nUnset fields are omitted so empty metadata serializes as ``{}``.",
+        "properties": {
+          "link_kind": {
+            "anyOf": [
+              {
+                "enum": [
+                  "ethernet",
+                  "wifi",
+                  "mesh",
+                  "zigbee",
+                  "bluetooth",
+                  "usb",
+                  "serial",
+                  "gpio",
+                  "power",
+                  "virtual",
+                  "other"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Link Kind"
+          },
+          "mode": {
+            "anyOf": [
+              {
+                "enum": [
+                  "access",
+                  "trunk",
+                  "routed",
+                  "bridged",
+                  "mesh",
+                  "other"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mode"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "maxLength": 512,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          },
+          "primary": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Primary"
+          },
+          "source_interface": {
+            "anyOf": [
+              {
+                "maxLength": 128,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Interface"
+          },
+          "target_interface_or_port": {
+            "anyOf": [
+              {
+                "maxLength": 128,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Target Interface Or Port"
+          }
+        },
+        "title": "V1RelationshipMetadata",
+        "type": "object"
+      },
+      "V1RelationshipMetadata-Output": {
+        "additionalProperties": true,
+        "type": "object"
+      },
       "V1RelationshipOut": {
         "properties": {
           "from_ref": {
             "title": "From Ref",
             "type": "string"
+          },
+          "metadata": {
+            "$ref": "#/components/schemas/V1RelationshipMetadata-Output"
           },
           "relation_type": {
             "title": "Relation Type",
@@ -9271,6 +9623,143 @@
         ]
       }
     },
+    "/api/v1/objects/{object_id}/device-graph": {
+      "get": {
+        "operationId": "get_v1_device_graph_api_v1_objects__object_id__device_graph_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "object_id",
+            "required": true,
+            "schema": {
+              "title": "Object Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1DeviceGraphOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Authentication required"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Permission denied"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Resource not found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "412": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Precondition failed"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Request validation failed"
+          },
+          "428": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Precondition required"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Internal server error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Service unavailable"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get V1 Device Graph",
+        "tags": [
+          "api-v1-readonly"
+        ]
+      }
+    },
     "/api/v1/objects/{object_id}/relationships": {
       "delete": {
         "operationId": "delete_v1_relationship_api_v1_objects__object_id__relationships_delete",
@@ -9919,6 +10408,169 @@
           }
         ],
         "summary": "Get V1 Topology",
+        "tags": [
+          "api-v1-readonly"
+        ]
+      }
+    },
+    "/api/v1/objects/{parent_id}/attached-devices": {
+      "post": {
+        "operationId": "create_v1_attached_device_api_v1_objects__parent_id__attached_devices_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "parent_id",
+            "required": true,
+            "schema": {
+              "title": "Parent Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Idempotency-Key"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/V1AttachedDeviceCreateIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ObjectCommandOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Authentication required"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Permission denied"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Resource not found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "412": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Precondition failed"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Request validation failed"
+          },
+          "428": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Precondition required"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Internal server error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Service unavailable"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Create V1 Attached Device",
         "tags": [
           "api-v1-readonly"
         ]

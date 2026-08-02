@@ -138,6 +138,8 @@ async def check_mcp(
                 "blockwart.delete_object",
                 "blockwart.create_relationship",
                 "blockwart.delete_relationship",
+                "blockwart.create_attached_device",
+                "blockwart.get_device_graph",
                 "blockwart.get_object_access",
                 "blockwart.search_principals",
                 "blockwart.list_admin_principals",
@@ -161,6 +163,7 @@ async def check_mcp(
                         "blockwart.list_admin_principals",
                         "blockwart.get_admin_principal",
                         "blockwart.preview_grant_scope",
+                        "blockwart.get_device_graph",
                     }
                     else not tool.annotations.readOnlyHint
                 )
@@ -325,6 +328,58 @@ async def check_mcp(
                 },
             )
             assert not deleted.isError
+            attached_device = await session.call_tool(
+                "blockwart.create_attached_device",
+                {
+                    "parent_id": "fabrik",
+                    "idempotency_key": "package-smoke-device-0001",
+                    "device": {
+                        "id": "package-smoke-device",
+                        "kind": "device",
+                        "label": "Package Smoke Device",
+                        "status": "active",
+                        "data": {
+                            "schema_version": 1,
+                            "device": {"category": "sensor"},
+                        },
+                    },
+                    "metadata": {"link_kind": "zigbee", "primary": True},
+                },
+            )
+            attached_device_payload = _tool_payload(attached_device)
+            device_graph = await session.call_tool(
+                "blockwart.get_device_graph",
+                {"object_id": "package-smoke-device"},
+            )
+            device_graph_payload = _tool_payload(device_graph)
+            assert device_graph_payload["object_ref"] == "device:package-smoke-device"
+            assert device_graph_payload["edges"] == [
+                {
+                    "from_ref": "device:package-smoke-device",
+                    "relation_type": "attached_to",
+                    "to_ref": "host:fabrik",
+                    "metadata": {"link_kind": "zigbee", "primary": True},
+                }
+            ]
+            device_detached = await session.call_tool(
+                "blockwart.delete_relationship",
+                {
+                    "object_id": "package-smoke-device",
+                    "if_match": str(attached_device_payload["etag"]),
+                    "from_ref": "device:package-smoke-device",
+                    "relation_type": "attached_to",
+                    "to_ref": "host:fabrik",
+                },
+            )
+            device_detached_payload = _tool_payload(device_detached)
+            device_deleted = await session.call_tool(
+                "blockwart.delete_object",
+                {
+                    "object_id": "package-smoke-device",
+                    "if_match": str(device_detached_payload["etag"]),
+                },
+            )
+            assert not device_deleted.isError
             return str(initialized.protocolVersion)
 
 
@@ -380,7 +435,7 @@ def main() -> None:
     print(
         "installed_package=ok "
         f"cwd={Path.cwd()} revision={readiness['revision']} "
-        f"openapi_paths={len(openapi['paths'])} mcp_protocol={protocol} mcp_calls=18"
+        f"openapi_paths={len(openapi['paths'])} mcp_protocol={protocol} mcp_calls=22"
     )
 
 

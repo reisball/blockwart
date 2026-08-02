@@ -66,8 +66,8 @@ docker build \
 
 The package smoke builds a wheel, installs it into a clean virtual environment, changes to a
 directory outside the repository, starts `blockwart-start`, loads packaged templates and static
-assets, runs the relationship-integrity diagnostic, and exercises all sixteen
-tools through eighteen read/write and grant-management calls to the installed
+assets, runs the relationship-integrity diagnostic, and exercises all eighteen
+tools through 22 read/write and grant-management calls to the installed
 `blockwart-mcp` console command. It also runs the read-only service-interface
 normalization and
 placement-state plans from outside the source tree.

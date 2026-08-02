@@ -8,12 +8,20 @@ from blockwart.schemas.v1 import SortDirection
 from blockwart.services.pagination import paginate_items
 from blockwart.services.queries import (
     AuditEventReadModel,
+    DeviceGraphReadModel,
     RelationshipReadModel,
     TopologyReadModel,
     query_catalog_detail,
     query_catalog_topology,
+    query_device_graph,
 )
 from blockwart.services.read_access import ReadAccess
+
+
+@dataclass(frozen=True, slots=True)
+class DeviceGraphResource:
+    object_ref: str
+    graph: DeviceGraphReadModel
 
 
 @dataclass(frozen=True, slots=True)
@@ -120,3 +128,14 @@ def query_topology_resource(
         return None
     object_ref, topology = result
     return TopologyResource(object_ref=object_ref, topology=topology)
+
+
+def query_device_graph_resource(
+    session: Session,
+    object_id: str,
+    access: ReadAccess,
+) -> DeviceGraphResource | None:
+    graph = query_device_graph(session, object_id, access)
+    if graph is None:
+        return None
+    return DeviceGraphResource(object_ref=graph["object_ref"], graph=graph)

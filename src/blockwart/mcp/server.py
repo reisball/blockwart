@@ -125,12 +125,60 @@ OBJECT_WRITE_SCHEMA: JSON = {
     },
     "additionalProperties": False,
 }
+DEVICE_WRITE_SCHEMA: JSON = {
+    **OBJECT_WRITE_SCHEMA,
+    "properties": {
+        **OBJECT_WRITE_SCHEMA["properties"],
+        "kind": {"type": "string", "const": "device"},
+    },
+}
 RELATIONSHIP_PROPERTIES: JSON = {
     "object_id": {"type": "string", "minLength": 1, "maxLength": 128},
     "if_match": ETAG_SCHEMA,
     "from_ref": {"type": "string", "minLength": 3, "maxLength": 192},
     "relation_type": {"type": "string", "minLength": 1, "maxLength": 96},
     "to_ref": {"type": "string", "minLength": 3, "maxLength": 192},
+    "metadata": {
+        "type": "object",
+        "default": {},
+        "additionalProperties": False,
+        "properties": {
+            "source_interface": {"type": "string", "minLength": 1, "maxLength": 128},
+            "target_interface_or_port": {"type": "string", "minLength": 1, "maxLength": 128},
+            "link_kind": {
+                "type": "string",
+                "enum": [
+                    "ethernet",
+                    "wifi",
+                    "mesh",
+                    "zigbee",
+                    "bluetooth",
+                    "usb",
+                    "serial",
+                    "gpio",
+                    "power",
+                    "virtual",
+                    "other",
+                ],
+            },
+            "primary": {"type": "boolean"},
+            "note": {"type": "string", "minLength": 1, "maxLength": 512},
+            "mode": {
+                "type": "string",
+                "enum": [
+                    "access",
+                    "trunk",
+                    "routed",
+                    "bridged",
+                    "mesh",
+                    "other",
+                ],
+            },
+        },
+    },
+}
+DEVICE_GRAPH_PROPERTIES: JSON = {
+    "object_id": {"type": "string", "minLength": 1, "maxLength": 128},
 }
 GRANT_ROLE_SCHEMA: JSON = {
     "type": "string",
@@ -285,7 +333,7 @@ TOOLS: list[JSON] = [
     },
     {
         "name": "blockwart.create_relationship",
-        "description": "Create an authorized relationship from the current object revision.",
+        "description": "Create or idempotently replace metadata for an authorized relationship.",
         "inputSchema": {
             "type": "object",
             "properties": RELATIONSHIP_PROPERTIES,
@@ -316,6 +364,38 @@ TOOLS: list[JSON] = [
             "additionalProperties": False,
         },
         "annotations": DELETE_ANNOTATIONS,
+    },
+    {
+        "name": "blockwart.create_attached_device",
+        "description": "Atomically create a device and attach it to a parent endpoint.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "parent_id": {"type": "string", "minLength": 1, "maxLength": 128},
+                "idempotency_key": {
+                    "type": "string",
+                    "minLength": 16,
+                    "maxLength": 128,
+                    "pattern": "^[!-~]+$",
+                },
+                "device": DEVICE_WRITE_SCHEMA,
+                "metadata": RELATIONSHIP_PROPERTIES["metadata"],
+            },
+            "required": ["parent_id", "idempotency_key", "device"],
+            "additionalProperties": False,
+        },
+        "annotations": WRITE_ANNOTATIONS,
+    },
+    {
+        "name": "blockwart.get_device_graph",
+        "description": "Return the authorized attached_to graph for an object.",
+        "inputSchema": {
+            "type": "object",
+            "properties": DEVICE_GRAPH_PROPERTIES,
+            "required": ["object_id"],
+            "additionalProperties": False,
+        },
+        "annotations": READ_ONLY_ANNOTATIONS,
     },
     {
         "name": "blockwart.get_object_access",
@@ -457,8 +537,7 @@ def _compile_input_validator(schema: JSON) -> Validator:
 
 
 TOOL_INPUT_VALIDATORS: dict[str, Validator] = {
-    name: _compile_input_validator(tool["inputSchema"])
-    for name, tool in TOOL_DEFINITIONS.items()
+    name: _compile_input_validator(tool["inputSchema"]) for name, tool in TOOL_DEFINITIONS.items()
 }
 
 
@@ -566,18 +645,45 @@ def call_tool(
         "blockwart.delete_relationship",
     }:
         object_id = _required_string(args, "object_id")
+        body: JSON = {
+            "from_ref": _required_string(args, "from_ref"),
+            "relation_type": _required_string(args, "relation_type"),
+            "to_ref": _required_string(args, "to_ref"),
+        }
+        metadata = args.get("metadata")
+        if metadata:
+            body["metadata"] = metadata
         payload = request(
             "POST" if name == "blockwart.create_relationship" else "DELETE",
             f"/api/v1/objects/{quote(object_id, safe='')}/relationships",
-            {
-                "from_ref": _required_string(args, "from_ref"),
-                "relation_type": _required_string(args, "relation_type"),
-                "to_ref": _required_string(args, "to_ref"),
-            },
+            body,
             {
                 "If-Match": _required_string(args, "if_match"),
                 "X-Blockwart-Channel": "mcp",
             },
+        )
+    elif name == "blockwart.create_attached_device":
+        parent_id = _required_string(args, "parent_id")
+        body = {
+            "device": _required_object(args, "device"),
+        }
+        metadata = args.get("metadata")
+        if metadata:
+            body["metadata"] = metadata
+        payload = request(
+            "POST",
+            f"/api/v1/objects/{quote(parent_id, safe='')}/attached-devices",
+            body,
+            {
+                "Idempotency-Key": _required_string(args, "idempotency_key"),
+                "X-Blockwart-Channel": "mcp",
+            },
+        )
+    elif name == "blockwart.get_device_graph":
+        object_id = _required_string(args, "object_id")
+        payload = fetch(
+            f"/api/v1/objects/{quote(object_id, safe='')}/device-graph",
+            {},
         )
     elif name == "blockwart.get_object_access":
         object_id = _required_string(args, "object_id")
