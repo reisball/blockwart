@@ -30,7 +30,8 @@ from datetime import UTC, datetime
 from pathlib import Path, PurePosixPath
 from typing import Any
 
-FORMAT_VERSION = 1
+FORMAT_VERSION = 2
+SEMANTIC_PROJECTION_VERSION = 1
 PER_PAGE = 50
 TOMBSTONE_NUMBER = 86
 TOMBSTONE_REASON = "Deleted Gitea item; reserve the historical number."
@@ -165,7 +166,8 @@ def _payload_evidence(
 
 
 def _json_evidence(path: str, payload: Any) -> dict[str, Any]:
-    return _payload_evidence(path, kind="json", payload=_canonical_json(payload))
+    del payload
+    return {"path": path, "kind": "json", "available": True}
 
 
 def _write_bytes(path: Path, payload: bytes) -> None:
@@ -428,6 +430,775 @@ def _sort_index(items: list[dict[str, Any]], field: str) -> list[dict[str, Any]]
     return sorted(items, key=lambda item: _as_int(item.get(field), label=field))
 
 
+def _project_known_object(
+    value: Any,
+    *,
+    label: str,
+    semantic_fields: set[str],
+    ignored_fields: set[str],
+) -> dict[str, Any]:
+    if not isinstance(value, Mapping):
+        raise ExportError(f"{label} must be an object")
+    unknown = set(value) - semantic_fields - ignored_fields
+    if unknown:
+        raise ExportError(f"{label} contains unclassified fields: {', '.join(sorted(unknown))}")
+    return {field: value[field] for field in sorted(semantic_fields) if field in value}
+
+
+def _project_optional_object(value: Any, projector: Any, *, label: str) -> Any:
+    if value is None:
+        return None
+    if not isinstance(value, Mapping):
+        raise ExportError(f"{label} must be an object or null")
+    return projector(value)
+
+
+def _project_collection(
+    values: Any,
+    projector: Any,
+    key: Any,
+    *,
+    label: str,
+    preserve_order: bool = False,
+) -> list[dict[str, Any]]:
+    if values is None:
+        values = []
+    if not isinstance(values, list):
+        raise ExportError(f"{label} must be a list")
+    projected = [projector(value) for value in values]
+    identities = [key(value) for value in projected]
+    if len(set(identities)) != len(identities):
+        raise ExportError(f"{label} contains duplicate semantic identities")
+    if preserve_order:
+        return projected
+    pairs = sorted(zip(identities, projected, strict=True), key=lambda pair: pair[0])
+    return [value for _identity, value in pairs]
+
+
+def _project_user(value: Mapping[str, Any]) -> dict[str, Any]:
+    return _project_known_object(
+        value,
+        label="user",
+        semantic_fields={"id", "login", "login_name", "username", "full_name", "email"},
+        ignored_fields={
+            "active",
+            "avatar_url",
+            "created",
+            "description",
+            "followers_count",
+            "following_count",
+            "html_url",
+            "is_admin",
+            "language",
+            "last_login",
+            "location",
+            "prohibit_login",
+            "restricted",
+            "source_id",
+            "starred_repos_count",
+            "visibility",
+            "website",
+        },
+    )
+
+
+def _user_key(value: Mapping[str, Any]) -> tuple[Any, Any]:
+    identifier = value.get("id")
+    login = value.get("login") or value.get("username")
+    if identifier is None and not login:
+        raise ExportError("user lacks a stable identity")
+    return identifier is None, identifier if identifier is not None else login
+
+
+def _project_label(value: Mapping[str, Any]) -> dict[str, Any]:
+    return _project_known_object(
+        value,
+        label="label",
+        semantic_fields={"id", "name", "color", "description", "exclusive", "is_archived"},
+        ignored_fields={"url"},
+    )
+
+
+def _project_asset(value: Mapping[str, Any]) -> dict[str, Any]:
+    projected = _project_known_object(
+        value,
+        label="asset",
+        semantic_fields={
+            "id",
+            "uuid",
+            "name",
+            "browser_download_url",
+            "size",
+            "created_at",
+            "uploader",
+        },
+        ignored_fields={"download_count"},
+    )
+    if "uploader" in projected:
+        projected["uploader"] = _project_optional_object(
+            projected["uploader"], _project_user, label="asset uploader"
+        )
+    return projected
+
+
+def _asset_projection_key(value: Mapping[str, Any]) -> tuple[Any, ...]:
+    asset_uuid = value.get("uuid")
+    asset_id = value.get("id")
+    if not asset_uuid and asset_id is None:
+        raise ExportError("asset lacks a stable identity")
+    return (asset_uuid is None, asset_uuid if asset_uuid is not None else asset_id)
+
+
+def _project_milestone(value: Mapping[str, Any]) -> dict[str, Any]:
+    projected = _project_known_object(
+        value,
+        label="milestone",
+        semantic_fields={
+            "id",
+            "title",
+            "description",
+            "state",
+            "created_at",
+            "updated_at",
+            "closed_at",
+            "due_on",
+            "due_date",
+            "creator",
+        },
+        ignored_fields={"open_issues", "closed_issues", "url", "html_url"},
+    )
+    if "creator" in projected:
+        projected["creator"] = _project_optional_object(
+            projected["creator"], _project_user, label="milestone creator"
+        )
+    return projected
+
+
+_REPOSITORY_FIELDS = {
+    "allow_fast_forward_only_merge",
+    "allow_manual_merge",
+    "allow_merge_commits",
+    "allow_rebase",
+    "allow_rebase_explicit",
+    "allow_rebase_update",
+    "allow_squash_merge",
+    "archived",
+    "archived_at",
+    "autodetect_manual_merge",
+    "avatar_url",
+    "clone_url",
+    "created_at",
+    "default_allow_maintainer_edit",
+    "default_branch",
+    "default_delete_branch_after_merge",
+    "default_merge_style",
+    "description",
+    "empty",
+    "fork",
+    "forks_count",
+    "full_name",
+    "has_actions",
+    "has_code",
+    "has_issues",
+    "has_packages",
+    "has_projects",
+    "has_pull_requests",
+    "has_releases",
+    "has_wiki",
+    "html_url",
+    "id",
+    "ignore_whitespace_conflicts",
+    "internal",
+    "internal_tracker",
+    "language",
+    "languages_url",
+    "licenses",
+    "link",
+    "mirror",
+    "mirror_interval",
+    "mirror_updated",
+    "name",
+    "object_format_name",
+    "open_issues_count",
+    "open_pr_counter",
+    "original_url",
+    "owner",
+    "permissions",
+    "private",
+    "projects_mode",
+    "release_counter",
+    "size",
+    "ssh_url",
+    "stars_count",
+    "template",
+    "topics",
+    "updated_at",
+    "url",
+    "watchers_count",
+    "website",
+}
+
+
+def _project_repository(value: Mapping[str, Any]) -> dict[str, Any]:
+    projected = _project_known_object(
+        value,
+        label="repository",
+        semantic_fields={"id", "name", "full_name", "owner"},
+        ignored_fields=_REPOSITORY_FIELDS - {"id", "name", "full_name", "owner"},
+    )
+    if "owner" in projected:
+        owner = projected["owner"]
+        if isinstance(owner, Mapping):
+            projected["owner"] = _project_user(owner)
+        elif owner is not None and not isinstance(owner, str):
+            raise ExportError("repository owner must be an object, text, or null")
+    return projected
+
+
+def _project_pull_reference(value: Mapping[str, Any]) -> dict[str, Any]:
+    projected = _project_known_object(
+        value,
+        label="pull reference",
+        semantic_fields={"ref", "sha", "repo_id", "repo"},
+        ignored_fields={"label"},
+    )
+    if "repo" in projected:
+        projected["repo"] = _project_optional_object(
+            projected["repo"], _project_repository, label="pull reference repository"
+        )
+    return projected
+
+
+def _project_team(value: Mapping[str, Any]) -> dict[str, Any]:
+    return _project_known_object(
+        value,
+        label="review team",
+        semantic_fields={"id", "name", "description"},
+        ignored_fields={
+            "can_create_org_repo",
+            "includes_all_repositories",
+            "permission",
+            "units",
+            "units_map",
+            "organization",
+        },
+    )
+
+
+def _project_pull_request_marker(value: Mapping[str, Any]) -> dict[str, Any]:
+    return _project_known_object(
+        value,
+        label="issue pull-request marker",
+        semantic_fields={"merged", "merged_at", "draft"},
+        ignored_fields={"html_url", "diff_url", "patch_url"},
+    )
+
+
+def _project_issue(value: Mapping[str, Any]) -> dict[str, Any]:
+    projected = _project_known_object(
+        value,
+        label="issue",
+        semantic_fields={
+            "id",
+            "number",
+            "title",
+            "body",
+            "state",
+            "is_locked",
+            "created_at",
+            "updated_at",
+            "closed_at",
+            "due_date",
+            "original_author",
+            "original_author_id",
+            "pin_order",
+            "ref",
+            "time_estimate",
+            "user",
+            "labels",
+            "assignee",
+            "assignees",
+            "milestone",
+            "assets",
+            "repository",
+            "pull_request",
+        },
+        ignored_fields={"comments", "html_url", "url"},
+    )
+    if "user" in projected:
+        projected["user"] = _project_optional_object(
+            projected["user"], _project_user, label="issue user"
+        )
+    if "assignee" in projected:
+        projected["assignee"] = _project_optional_object(
+            projected["assignee"], _project_user, label="issue assignee"
+        )
+    if "assignees" in projected:
+        projected["assignees"] = _project_collection(
+            projected["assignees"], _project_user, _user_key, label="issue assignees"
+        )
+    if "labels" in projected:
+        projected["labels"] = _project_collection(
+            projected["labels"],
+            _project_label,
+            lambda item: _as_int(item.get("id"), label="label id"),
+            label="issue labels",
+        )
+    if "milestone" in projected:
+        projected["milestone"] = _project_optional_object(
+            projected["milestone"], _project_milestone, label="issue milestone"
+        )
+    if "assets" in projected:
+        projected["assets"] = _project_collection(
+            projected["assets"], _project_asset, _asset_projection_key, label="issue assets"
+        )
+    if "repository" in projected:
+        projected["repository"] = _project_optional_object(
+            projected["repository"], _project_repository, label="issue repository"
+        )
+    if "pull_request" in projected:
+        projected["pull_request"] = _project_optional_object(
+            projected["pull_request"],
+            _project_pull_request_marker,
+            label="issue pull-request marker",
+        )
+    return projected
+
+
+def _project_pull(value: Mapping[str, Any]) -> dict[str, Any]:
+    projected = _project_known_object(
+        value,
+        label="pull request",
+        semantic_fields={
+            "id",
+            "number",
+            "title",
+            "body",
+            "state",
+            "is_locked",
+            "draft",
+            "allow_maintainer_edit",
+            "created_at",
+            "updated_at",
+            "closed_at",
+            "due_date",
+            "merged",
+            "merged_at",
+            "merge_commit_sha",
+            "merge_base",
+            "pin_order",
+            "user",
+            "merged_by",
+            "labels",
+            "assignee",
+            "assignees",
+            "milestone",
+            "requested_reviewers",
+            "requested_reviewers_teams",
+            "base",
+            "head",
+        },
+        ignored_fields={
+            "additions",
+            "changed_files",
+            "comments",
+            "deletions",
+            "diff_url",
+            "html_url",
+            "mergeable",
+            "patch_url",
+            "url",
+        },
+    )
+    for field in ("user", "merged_by", "assignee"):
+        if field in projected:
+            projected[field] = _project_optional_object(
+                projected[field], _project_user, label=f"pull request {field}"
+            )
+    for field in ("assignees", "requested_reviewers"):
+        if field in projected:
+            projected[field] = _project_collection(
+                projected[field], _project_user, _user_key, label=f"pull request {field}"
+            )
+    if "requested_reviewers_teams" in projected:
+        projected["requested_reviewers_teams"] = _project_collection(
+            projected["requested_reviewers_teams"],
+            _project_team,
+            lambda item: (_as_int(item.get("id"), label="review team id"), item.get("name")),
+            label="pull request review teams",
+        )
+    if "labels" in projected:
+        projected["labels"] = _project_collection(
+            projected["labels"],
+            _project_label,
+            lambda item: _as_int(item.get("id"), label="label id"),
+            label="pull request labels",
+        )
+    if "milestone" in projected:
+        projected["milestone"] = _project_optional_object(
+            projected["milestone"], _project_milestone, label="pull request milestone"
+        )
+    for field in ("base", "head"):
+        if field in projected:
+            projected[field] = _project_optional_object(
+                projected[field], _project_pull_reference, label=f"pull request {field}"
+            )
+    return projected
+
+
+def _comment_parent_association(
+    value: Mapping[str, Any], *, required: bool
+) -> dict[str, Any] | None:
+    present = [
+        (field, value.get(field))
+        for field in ("issue_url", "pull_request_url")
+        if value.get(field) is not None and value.get(field) != ""
+    ]
+    if len(present) > 1:
+        raise ExportError("comment has conflicting issue and pull-request parents")
+    if not present:
+        if required:
+            raise ExportError("comment lacks a parent association")
+        return None
+
+    field, url = present[0]
+    if not isinstance(url, str):
+        raise ExportError(f"comment {field} must be text or null")
+    parsed = urllib.parse.urlsplit(url)
+    if parsed.username is not None or parsed.password is not None:
+        raise ExportError(f"comment {field} must not contain credentials")
+    if parsed.query or parsed.fragment:
+        raise ExportError(f"comment {field} must not contain a query or fragment")
+    scheme, hostname, port = _origin(url)
+    parts = [urllib.parse.unquote(part) for part in parsed.path.split("/") if part]
+    if len(parts) < 4:
+        raise ExportError(f"comment {field} is not a canonical repository item URL")
+    owner, repository, path_kind, number_text = parts[-4:]
+    expected_path_kind = "issues" if field == "issue_url" else "pulls"
+    if path_kind != expected_path_kind or not number_text.isdigit():
+        raise ExportError(f"comment {field} has an invalid parent kind or number")
+    if not re.fullmatch(r"[A-Za-z0-9_.-]+", owner) or not re.fullmatch(
+        r"[A-Za-z0-9_.-]+", repository
+    ):
+        raise ExportError(f"comment {field} has an invalid repository identity")
+    host = f"[{hostname}]" if ":" in hostname else hostname
+    default_port = 443 if scheme == "https" else 80
+    origin = f"{scheme}://{host}" if port == default_port else f"{scheme}://{host}:{port}"
+    return {
+        "kind": "issue" if field == "issue_url" else "pull_request",
+        "origin": origin,
+        "repository": f"{owner}/{repository}",
+        "number": int(number_text),
+    }
+
+
+def _project_comment(
+    value: Mapping[str, Any], *, require_parent: bool = False
+) -> dict[str, Any]:
+    parent = _comment_parent_association(value, required=require_parent)
+    projected = _project_known_object(
+        value,
+        label="comment",
+        semantic_fields={
+            "id",
+            "body",
+            "created_at",
+            "updated_at",
+            "original_author",
+            "original_author_id",
+            "user",
+            "assets",
+        },
+        ignored_fields={"html_url", "issue_url", "pull_request_url"},
+    )
+    if parent is not None:
+        projected["parent"] = parent
+    if "user" in projected:
+        projected["user"] = _project_optional_object(
+            projected["user"], _project_user, label="comment user"
+        )
+    if "assets" in projected:
+        projected["assets"] = _project_collection(
+            projected["assets"], _project_asset, _asset_projection_key, label="comment assets"
+        )
+    return projected
+
+
+def _reconcile_comment_parents(
+    global_comments: Sequence[Mapping[str, Any]],
+    per_item_comments: Mapping[int, Mapping[str, Any]],
+    expected_parents: Mapping[int, Mapping[str, Any]],
+) -> None:
+    global_comment_ids = _unique(global_comments, "id", "global comment")
+    expected_comment_ids = set(expected_parents)
+    per_item_comment_ids = set(per_item_comments)
+    if expected_comment_ids != global_comment_ids or (
+        expected_comment_ids != per_item_comment_ids
+    ):
+        missing = sorted(global_comment_ids - expected_comment_ids)
+        extra = sorted(expected_comment_ids - global_comment_ids)
+        detail = f"missing={missing[:3]} extra={extra[:3]}"
+        raise ExportError(f"global/per-item comment reconciliation failed ({detail})")
+
+    global_comments_by_id = {
+        _as_int(comment.get("id"), label="global comment id"): comment
+        for comment in global_comments
+    }
+    for comment_id in sorted(global_comments_by_id):
+        global_comment = global_comments_by_id[comment_id]
+        per_item_comment = per_item_comments[comment_id]
+        expected_parent = expected_parents[comment_id]
+        global_parent = _comment_parent_association(global_comment, required=True)
+        per_item_parent = _comment_parent_association(per_item_comment, required=True)
+        if global_parent != expected_parent or per_item_parent != expected_parent:
+            raise ExportError(
+                f"comment {comment_id} parent association does not match captured item"
+            )
+        if _project_comment(global_comment, require_parent=True) != _project_comment(
+            per_item_comment, require_parent=True
+        ):
+            raise ExportError(
+                f"comment {comment_id} global/per-item semantic content differs"
+            )
+
+
+def _chronological_key(value: Mapping[str, Any]) -> tuple[str, int]:
+    timestamp = value.get("submitted_at") or value.get("created_at") or ""
+    if not isinstance(timestamp, str):
+        raise ExportError("chronological item timestamp must be text")
+    return timestamp, _as_int(value.get("id"), label="chronological item id")
+
+
+def _project_commit_signature(value: Mapping[str, Any], *, label: str) -> dict[str, Any]:
+    return _project_known_object(
+        value,
+        label=label,
+        semantic_fields={"name", "email", "date"},
+        ignored_fields=set(),
+    )
+
+
+def _project_commit_payload(value: Mapping[str, Any]) -> dict[str, Any]:
+    projected = _project_known_object(
+        value,
+        label="commit payload",
+        semantic_fields={"author", "committer", "message", "tree"},
+        ignored_fields={"url", "verification"},
+    )
+    for field in ("author", "committer"):
+        if field in projected:
+            projected[field] = _project_optional_object(
+                projected[field],
+                lambda item, field=field: _project_commit_signature(
+                    item, label=f"commit {field}"
+                ),
+                label=f"commit {field}",
+            )
+    if "tree" in projected:
+        projected["tree"] = _project_known_object(
+            projected["tree"],
+            label="commit tree",
+            semantic_fields={"sha"},
+            ignored_fields={"url", "created"},
+        )
+    return projected
+
+
+def _project_commit(value: Mapping[str, Any]) -> dict[str, Any]:
+    projected = _project_known_object(
+        value,
+        label="pull request commit",
+        semantic_fields={"sha", "created", "author", "committer", "commit", "parents"},
+        ignored_fields={"files", "html_url", "stats", "url"},
+    )
+    for field in ("author", "committer"):
+        if field in projected:
+            projected[field] = _project_optional_object(
+                projected[field], _project_user, label=f"commit API {field}"
+            )
+    if "commit" in projected:
+        projected["commit"] = _project_optional_object(
+            projected["commit"], _project_commit_payload, label="commit payload"
+        )
+    if "parents" in projected:
+        projected["parents"] = _project_collection(
+            projected["parents"],
+            lambda item: _project_known_object(
+                item,
+                label="commit parent",
+                semantic_fields={"sha"},
+                ignored_fields={"created", "url"},
+            ),
+            lambda item: item.get("sha"),
+            label="commit parents",
+            preserve_order=True,
+        )
+    return projected
+
+
+def _project_file(value: Mapping[str, Any]) -> dict[str, Any]:
+    return _project_known_object(
+        value,
+        label="pull request file",
+        semantic_fields={
+            "filename",
+            "previous_filename",
+            "status",
+            "additions",
+            "deletions",
+            "changes",
+        },
+        ignored_fields={"contents_url", "html_url", "raw_url", "blob_url", "patch", "sha"},
+    )
+
+
+def _project_review(value: Mapping[str, Any]) -> dict[str, Any]:
+    projected = _project_known_object(
+        value,
+        label="pull request review",
+        semantic_fields={
+            "id",
+            "body",
+            "state",
+            "commit_id",
+            "submitted_at",
+            "created_at",
+            "updated_at",
+            "user",
+            "team",
+            "official",
+            "dismissed",
+            "dismissal_message",
+        },
+        ignored_fields={"comments_count", "html_url", "pull_request_url", "stale"},
+    )
+    if "user" in projected:
+        projected["user"] = _project_optional_object(
+            projected["user"], _project_user, label="review user"
+        )
+    if "team" in projected:
+        projected["team"] = _project_optional_object(
+            projected["team"], _project_team, label="review team"
+        )
+    return projected
+
+
+def _project_review_comment(value: Mapping[str, Any]) -> dict[str, Any]:
+    projected = _project_known_object(
+        value,
+        label="pull request review comment",
+        semantic_fields={
+            "id",
+            "body",
+            "path",
+            "position",
+            "original_position",
+            "commit_id",
+            "original_commit_id",
+            "diff_hunk",
+            "pull_request_review_id",
+            "created_at",
+            "updated_at",
+            "resolvable",
+            "resolved",
+            "user",
+            "resolver",
+        },
+        ignored_fields={"html_url", "pull_request_url", "links"},
+    )
+    for field in ("user", "resolver"):
+        if field in projected:
+            projected[field] = _project_optional_object(
+                projected[field], _project_user, label=f"review comment {field}"
+            )
+    return projected
+
+
+def _project_commit_status(value: Mapping[str, Any]) -> dict[str, Any]:
+    projected = _project_known_object(
+        value,
+        label="commit status",
+        semantic_fields={
+            "id",
+            "status",
+            "state",
+            "context",
+            "description",
+            "target_url",
+            "created_at",
+            "updated_at",
+            "creator",
+        },
+        ignored_fields={"url"},
+    )
+    if "creator" in projected:
+        projected["creator"] = _project_optional_object(
+            projected["creator"], _project_user, label="commit status creator"
+        )
+    return projected
+
+
+def _project_status(value: Any) -> Any:
+    if value == UNAVAILABLE_MARKER:
+        return dict(UNAVAILABLE_MARKER)
+    projected = _project_known_object(
+        value,
+        label="combined commit status",
+        semantic_fields={"sha", "state", "statuses"},
+        ignored_fields={"commit_url", "repository", "total_count", "url"},
+    )
+    if "statuses" in projected:
+        projected["statuses"] = _project_collection(
+            projected["statuses"],
+            _project_commit_status,
+            lambda item: (item.get("context"), item.get("id")),
+            label="commit statuses",
+        )
+    return projected
+
+
+def _project_indexes(
+    indexes: Mapping[str, list[dict[str, Any]]],
+) -> dict[str, Any]:
+    if set(indexes) != {"labels", "issues", "pull_requests", "comments"}:
+        raise ExportError("index projection input is incomplete")
+    labels = _project_collection(
+        indexes["labels"],
+        _project_label,
+        lambda item: _as_int(item.get("id"), label="label id"),
+        label="label index",
+    )
+    issues = _project_collection(
+        indexes["issues"],
+        _project_issue,
+        lambda item: _as_int(item.get("number"), label="issue number"),
+        label="issue index",
+    )
+    pulls = _project_collection(
+        indexes["pull_requests"],
+        _project_pull,
+        lambda item: _as_int(item.get("number"), label="pull request number"),
+        label="pull request index",
+    )
+    comments = _project_collection(
+        indexes["comments"],
+        lambda item: _project_comment(item, require_parent=True),
+        lambda item: _as_int(item.get("id"), label="comment id"),
+        label="global comment index",
+    )
+    return {
+        "version": SEMANTIC_PROJECTION_VERSION,
+        "labels": labels,
+        "issues": issues,
+        "pull_requests": pulls,
+        "comments": comments,
+    }
+
+
+def _semantic_digest(value: Any) -> str:
+    return hashlib.sha256(_canonical_json(value)).hexdigest()
+
+
 def _capture_indexes(
     client: GiteaClient,
     repository: str,
@@ -633,7 +1404,6 @@ def _pull_metadata(pull: Mapping[str, Any]) -> dict[str, Any]:
         "state": pull.get("state"),
         "merged": pull.get("merged"),
         "merged_at": pull.get("merged_at"),
-        "mergeable": pull.get("mergeable"),
         "merge_commit_sha": pull.get("merge_commit_sha"),
         "base_ref": base.get("ref"),
         "base_sha": base.get("sha"),
@@ -681,7 +1451,8 @@ def _capture_items(
     root = f"repos/{repository}"
     assets: dict[str, dict[str, Any]] = {}
     plan: list[dict[str, Any]] = []
-    per_item_comment_ids: set[int] = set()
+    per_item_comments: dict[int, dict[str, Any]] = {}
+    per_item_comment_parents: dict[int, dict[str, Any]] = {}
 
     combined: list[tuple[str, dict[str, Any]]] = [
         *(("issue", issue) for issue in indexes["issues"]),
@@ -708,10 +1479,18 @@ def _capture_items(
             require_total=False,
         )
         comment_ids = _unique(comments, "id", f"item {number} comment")
-        overlap = per_item_comment_ids & comment_ids
+        overlap = set(per_item_comments) & comment_ids
         if overlap:
             raise ExportError(f"comment appears under multiple items: {min(overlap)}")
-        per_item_comment_ids.update(comment_ids)
+        for comment in comments:
+            comment_id = _as_int(comment.get("id"), label=f"item {number} comment id")
+            per_item_comments[comment_id] = comment
+            per_item_comment_parents[comment_id] = {
+                "kind": item_type,
+                "origin": client.base_url,
+                "repository": repository,
+                "number": number,
+            }
         item_assets = client.paginate(
             f"{root}/issues/{number}/assets",
             params=None,
@@ -840,12 +1619,9 @@ def _capture_items(
             }
         )
 
-    global_comment_ids = _unique(indexes["comments"], "id", "global comment")
-    if per_item_comment_ids != global_comment_ids:
-        missing = sorted(global_comment_ids - per_item_comment_ids)
-        extra = sorted(per_item_comment_ids - global_comment_ids)
-        detail = f"missing={missing[:3]} extra={extra[:3]}"
-        raise ExportError(f"global/per-item comment reconciliation failed ({detail})")
+    _reconcile_comment_parents(
+        indexes["comments"], per_item_comments, per_item_comment_parents
+    )
 
     numbers = {entry["number"] for entry in plan}
     if TOMBSTONE_NUMBER in numbers:
@@ -900,6 +1676,156 @@ def _captured_payload_proof(snapshot: Path) -> dict[str, Any]:
         "algorithm": "sha256",
         "file_count": len(inventory),
         "sha256": hashlib.sha256(_canonical_json(inventory)).hexdigest(),
+    }
+
+
+def _project_optional_binary(
+    item_dir: Path,
+    *,
+    payload_name: str,
+    marker_name: str,
+    label: str,
+) -> dict[str, Any]:
+    payload = _optional_representation(
+        item_dir,
+        payload_name=payload_name,
+        marker_name=marker_name,
+        label=label,
+    )
+    if payload is None:
+        return dict(UNAVAILABLE_MARKER)
+    return {
+        "available": True,
+        "size": len(payload),
+        "sha256": hashlib.sha256(payload).hexdigest(),
+    }
+
+
+def _project_captured_items(
+    snapshot: Path,
+    indexes: Mapping[str, list[dict[str, Any]]],
+    number_plan: list[dict[str, Any]],
+    asset_mapping: list[dict[str, Any]],
+) -> dict[str, Any]:
+    issue_numbers = {
+        _as_int(item.get("number"), label="issue number") for item in indexes["issues"]
+    }
+    pull_numbers = {
+        _as_int(item.get("number"), label="pull request number")
+        for item in indexes["pull_requests"]
+    }
+    if issue_numbers & pull_numbers:
+        raise ExportError("item projection contains overlapping issue and pull numbers")
+
+    items: list[dict[str, Any]] = []
+    for number in sorted(issue_numbers | pull_numbers):
+        item_dir = snapshot / "items" / str(number)
+        detail = _json_from_path(item_dir / "issue.json")
+        comments = _require_object_list(
+            _json_from_path(item_dir / "comments.json"),
+            label=f"item {number} comments",
+        )
+        assets = _require_object_list(
+            _json_from_path(item_dir / "assets.json"),
+            label=f"item {number} assets",
+        )
+        entry: dict[str, Any] = {
+            "number": number,
+            "issue": _project_issue(detail),
+            "comments": _project_collection(
+                comments,
+                _project_comment,
+                _chronological_key,
+                label=f"item {number} comments",
+            ),
+            "assets": _project_collection(
+                assets,
+                _project_asset,
+                _asset_projection_key,
+                label=f"item {number} assets",
+            ),
+        }
+        if number in pull_numbers:
+            pull = _json_from_path(item_dir / "pull.json")
+            metadata = _json_from_path(item_dir / "pull-metadata.json")
+            commits = _require_object_list(
+                _json_from_path(item_dir / "commits.json"),
+                label=f"pull request {number} commits",
+            )
+            files = _require_object_list(
+                _json_from_path(item_dir / "files.json"),
+                label=f"pull request {number} files",
+            )
+            reviews = _require_object_list(
+                _json_from_path(item_dir / "reviews.json"),
+                label=f"pull request {number} reviews",
+            )
+            review_comments = _json_from_path(item_dir / "review-comments.json")
+            if not isinstance(review_comments, dict):
+                raise ExportError(f"pull request {number} review comments must be an object")
+            projected_review_comments: dict[str, Any] = {}
+            for review_id, values in sorted(review_comments.items()):
+                if not isinstance(review_id, str) or not review_id.isdigit():
+                    raise ExportError("review-comment map key must be a numeric review ID")
+                projected_review_comments[review_id] = _project_collection(
+                    values,
+                    _project_review_comment,
+                    _chronological_key,
+                    label=f"pull request {number} review {review_id} comments",
+                )
+            status_payload = _json_from_path(item_dir / "status.json")
+            entry.update(
+                {
+                    "pull": _project_pull(pull),
+                    "pull_metadata": metadata,
+                    "commits": _project_collection(
+                        commits,
+                        _project_commit,
+                        lambda item: item.get("sha"),
+                        label=f"pull request {number} commits",
+                        preserve_order=True,
+                    ),
+                    "files": _project_collection(
+                        files,
+                        _project_file,
+                        lambda item: item.get("filename"),
+                        label=f"pull request {number} files",
+                    ),
+                    "reviews": _project_collection(
+                        reviews,
+                        _project_review,
+                        _chronological_key,
+                        label=f"pull request {number} reviews",
+                    ),
+                    "review_comments": projected_review_comments,
+                    "status": _project_status(status_payload),
+                    "diff": _project_optional_binary(
+                        item_dir,
+                        payload_name="pull.diff",
+                        marker_name="diff.unavailable.json",
+                        label=f"{number} diff",
+                    ),
+                    "patch": _project_optional_binary(
+                        item_dir,
+                        payload_name="pull.patch",
+                        marker_name="patch.unavailable.json",
+                        label=f"{number} patch",
+                    ),
+                }
+            )
+        items.append(entry)
+
+    asset_files = [
+        item
+        for item in _captured_payload_inventory(snapshot)
+        if item["path"].startswith("assets/")
+    ]
+    return {
+        "version": SEMANTIC_PROJECTION_VERSION,
+        "items": items,
+        "number_plan": number_plan,
+        "asset_mapping": asset_mapping,
+        "asset_files": asset_files,
     }
 
 
@@ -1141,7 +2067,11 @@ def _check_endpoint_evidence(
     payload: bytes | None,
 ) -> None:
     expected_keys.add(key)
-    expected = _payload_evidence(path, kind=kind, payload=payload)
+    expected = (
+        _json_evidence(path, payload)
+        if kind == "json" and payload is not None
+        else _payload_evidence(path, kind=kind, payload=payload)
+    )
     if endpoint_evidence.get(key) != expected:
         raise ExportError(f"manifest endpoint evidence does not match: {key}")
 
@@ -1231,7 +2161,7 @@ def _validate_data(snapshot: Path, manifest: Mapping[str, Any]) -> set[str]:
     _unique(labels, "id", "label")
     _unique(issues, "id", "issue")
     _unique(pulls, "id", "pull request")
-    global_comment_ids = _unique(comments, "id", "comment")
+    _unique(comments, "id", "comment")
     issue_numbers = _unique(issues, "number", "issue")
     pull_numbers = _unique(pulls, "number", "pull request")
     if issue_numbers & pull_numbers:
@@ -1314,7 +2244,8 @@ def _validate_data(snapshot: Path, manifest: Mapping[str, Any]) -> set[str]:
             required_endpoint=True,
         )
 
-    per_item_comments: set[int] = set()
+    per_item_comments: dict[int, dict[str, Any]] = {}
+    per_item_comment_parents: dict[int, dict[str, Any]] = {}
     canonical_assets: dict[str, dict[str, Any]] = {}
     issue_index = {item["number"]: item for item in issues}
     pull_index = {item["number"]: item for item in pulls}
@@ -1352,9 +2283,18 @@ def _validate_data(snapshot: Path, manifest: Mapping[str, Any]) -> set[str]:
                 payload=_canonical_json(detail),
             )
         comment_ids = _unique(item_comments, "id", f"item {number} comment")
-        if per_item_comments & comment_ids:
+        if set(per_item_comments) & comment_ids:
             raise ExportError("a comment is stored under more than one item")
-        per_item_comments.update(comment_ids)
+        parent_kind = "issue" if number in issue_index else "pull_request"
+        for comment in item_comments:
+            comment_id = _as_int(comment.get("id"), label=f"item {number} comment id")
+            per_item_comments[comment_id] = comment
+            per_item_comment_parents[comment_id] = {
+                "kind": parent_kind,
+                "origin": base_url,
+                "repository": repository,
+                "number": number,
+            }
         _unique(item_assets, "id", f"item {number} asset")
         for item_asset in item_assets:
             _asset_identity(item_asset, source_origin)
@@ -1424,7 +2364,6 @@ def _validate_data(snapshot: Path, manifest: Mapping[str, Any]) -> set[str]:
                 "state",
                 "merged",
                 "merged_at",
-                "mergeable",
                 "merge_commit_sha",
                 "base_ref",
                 "base_sha",
@@ -1432,10 +2371,7 @@ def _validate_data(snapshot: Path, manifest: Mapping[str, Any]) -> set[str]:
                 "head_sha",
             }:
                 raise ExportError(f"pull request {number} metadata does not match")
-            if not isinstance(metadata.get("merged"), bool) or not (
-                isinstance(metadata.get("mergeable"), bool)
-                or metadata.get("mergeable") is None
-            ):
+            if not isinstance(metadata.get("merged"), bool):
                 raise ExportError(f"pull request {number} merge metadata is invalid")
             for field in ("base_ref", "head_ref"):
                 if not isinstance(metadata.get(field), str) or not metadata[field]:
@@ -1580,8 +2516,7 @@ def _validate_data(snapshot: Path, manifest: Mapping[str, Any]) -> set[str]:
         if plan_by_number[number] != expected_entry:
             raise ExportError(f"item {number} number plan does not match captured data")
 
-    if per_item_comments != global_comment_ids:
-        raise ExportError("snapshot global/per-item comments do not reconcile")
+    _reconcile_comment_parents(comments, per_item_comments, per_item_comment_parents)
 
     expected_mappings: list[dict[str, Any]] = []
     for identity in sorted(canonical_assets.values(), key=lambda item: item["uuid"]):
@@ -1614,17 +2549,22 @@ def _validate_data(snapshot: Path, manifest: Mapping[str, Any]) -> set[str]:
         "pull_requests": pulls,
         "comments": comments,
     }
-    index_digest = hashlib.sha256(_canonical_json(index_payload)).hexdigest()
+    index_digest = _semantic_digest(_project_indexes(index_payload))
+    item_digest = _semantic_digest(
+        _project_captured_items(snapshot, index_payload, plan, expected_mappings)
+    )
     payload_proof = _captured_payload_proof(snapshot)
     expected_consistency = {
+        "projection_version": SEMANTIC_PROJECTION_VERSION,
         "indexes": {
             "initial_sha256": index_digest,
             "confirmation_sha256": index_digest,
         },
-        "payload": {
-            "initial": payload_proof,
-            "confirmation": payload_proof,
+        "items": {
+            "initial_sha256": item_digest,
+            "confirmation_sha256": item_digest,
         },
+        "initial_raw_payload": payload_proof,
     }
     if manifest.get("capture_consistency") != expected_consistency:
         raise ExportError("manifest capture consistency proof is invalid")
@@ -1885,6 +2825,15 @@ def export_snapshot(
         )
         initial_payload_proof = _captured_payload_proof(staging)
         _write_json(staging / "number-plan.json", number_plan)
+        initial_index_projection = _project_indexes(initial_indexes)
+        initial_item_projection = _project_captured_items(
+            staging,
+            initial_indexes,
+            number_plan,
+            asset_mapping,
+        )
+        initial_index_digest = _semantic_digest(initial_index_projection)
+        initial_item_digest = _semantic_digest(initial_item_projection)
         current_counts = {
             "issues": len(initial_indexes["issues"]),
             "pull_requests": len(initial_indexes["pull_requests"]),
@@ -1895,7 +2844,9 @@ def export_snapshot(
         reconciliation = _load_reconciliation(reconciliation_path, current_counts)
 
         confirmed_indexes = _capture_indexes(client, repository, prefix="confirmation")
-        if _canonical_json(initial_indexes) != _canonical_json(confirmed_indexes):
+        confirmed_index_projection = _project_indexes(confirmed_indexes)
+        confirmed_index_digest = _semantic_digest(confirmed_index_projection)
+        if initial_index_digest != confirmed_index_digest:
             raise ExportError("Gitea index changed during export")
         confirmation = staging / ".confirmation"
         confirmation.mkdir(mode=0o700)
@@ -1906,12 +2857,14 @@ def export_snapshot(
             confirmation,
             prefix="confirmation",
         )
-        confirmation_payload_proof = _captured_payload_proof(confirmation)
-        if (
-            _canonical_json(number_plan) != _canonical_json(confirmed_plan)
-            or _canonical_json(asset_mapping) != _canonical_json(confirmed_asset_mapping)
-            or initial_payload_proof != confirmation_payload_proof
-        ):
+        confirmed_item_projection = _project_captured_items(
+            confirmation,
+            confirmed_indexes,
+            confirmed_plan,
+            confirmed_asset_mapping,
+        )
+        confirmed_item_digest = _semantic_digest(confirmed_item_projection)
+        if initial_item_digest != confirmed_item_digest:
             raise ExportError("Gitea captured item data changed during export")
         shutil.rmtree(confirmation)
         confirmed_refs = _resolve_refs(git_repository, main_ref, archive_ref)
@@ -1961,18 +2914,16 @@ def export_snapshot(
                 "strategy": "strictly ascending; stop on first destination number mismatch",
             },
             "capture_consistency": {
+                "projection_version": SEMANTIC_PROJECTION_VERSION,
                 "indexes": {
-                    "initial_sha256": hashlib.sha256(
-                        _canonical_json(initial_indexes)
-                    ).hexdigest(),
-                    "confirmation_sha256": hashlib.sha256(
-                        _canonical_json(confirmed_indexes)
-                    ).hexdigest(),
+                    "initial_sha256": initial_index_digest,
+                    "confirmation_sha256": confirmed_index_digest,
                 },
-                "payload": {
-                    "initial": initial_payload_proof,
-                    "confirmation": confirmation_payload_proof,
+                "items": {
+                    "initial_sha256": initial_item_digest,
+                    "confirmation_sha256": confirmed_item_digest,
                 },
+                "initial_raw_payload": initial_payload_proof,
             },
         }
         manifest["file_inventory"] = _inventory(staging)

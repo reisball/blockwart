@@ -37,7 +37,32 @@ class FakeGiteaState:
         self.mutate_confirmation = False
         self.mutate_pull_subresources = False
         self.unavailable_pull_evidence = False
+        self.unavailable_confirmation_evidence = False
         self.redirect_asset = False
+        self.irrelevant_confirmation_drift = False
+        self.reorder_confirmation_sets = False
+        self.mergeable_confirmation_drift = False
+        self.semantic_comment_drift = False
+        self.diff_confirmation_drift = False
+        self.asset_confirmation_drift = False
+        self.commit_order_confirmation_drift = False
+        self.rename_file = False
+        self.rename_file_confirmation_drift = False
+        self.merge_base_confirmation_drift = False
+        self.comment_parent_kind_drift = False
+        self.comment_parent_repository_drift = False
+        self.comment_parent_origin_drift = False
+        self.comment_parent_number_drift = False
+        self.comment_parent_kind_mismatch = False
+        self.comment_parent_repository_mismatch = False
+        self.comment_parent_origin_mismatch = False
+        self.comment_parent_number_mismatch = False
+        self.per_item_comment_parent_kind_mismatch = False
+        self.per_item_comment_parent_repository_mismatch = False
+        self.per_item_comment_parent_origin_mismatch = False
+        self.per_item_comment_parent_number_mismatch = False
+        self.per_item_comment_body_mismatch = False
+        self.unclassified_issue_field = False
         self.issue_index_cycles = 0
         self.pull_commit_cycles = 0
         self.labels = [
@@ -65,6 +90,10 @@ class FakeGiteaState:
 
     def issue(self, number: int) -> dict[str, object]:
         labels = [self.labels[0]] if number == 1 else []
+        if number == 1 and self.reorder_confirmation_sets:
+            labels = [self.labels[0], self.labels[1]]
+            if self.issue_index_cycles >= 2:
+                labels.reverse()
         issue: dict[str, object] = {
             "id": 1000 + number,
             "number": number,
@@ -73,6 +102,19 @@ class FakeGiteaState:
             "labels": labels,
             "updated_at": "2026-08-02T00:00:00Z",
         }
+        if self.irrelevant_confirmation_drift:
+            issue["user"] = {
+                "id": 42,
+                "login": "migration-user",
+                "last_login": (
+                    "2026-08-02T01:00:00Z"
+                    if self.issue_index_cycles >= 2
+                    else "2026-08-02T00:00:00Z"
+                ),
+                "avatar_url": "https://example.invalid/avatar.png",
+            }
+        if self.unclassified_issue_field:
+            issue["future_migration_field"] = "unclassified"
         if number == 1:
             issue["assets"] = [self.first_asset]
         return issue
@@ -95,8 +137,17 @@ class FakeGiteaState:
             "state": "closed",
             "merged": True,
             "merged_at": "2026-08-01T00:00:00Z",
-            "mergeable": True,
+            "mergeable": (
+                None
+                if self.mergeable_confirmation_drift and self.issue_index_cycles >= 2
+                else True
+            ),
             "merge_commit_sha": "b" * 40,
+            "merge_base": (
+                "0" * 40
+                if self.merge_base_confirmation_drift and self.issue_index_cycles >= 2
+                else "f" * 40
+            ),
             "base": {"ref": "main", "sha": "a" * 40},
             "head": {"ref": "feature", "sha": "c" * 40},
             "labels": [],
@@ -114,28 +165,146 @@ class FakeGiteaState:
             }
         return self.issue(number)
 
-    def comments(self, number: int) -> list[dict[str, object]]:
+    def comments(
+        self, number: int, *, global_copy: bool = False
+    ) -> list[dict[str, object]]:
         if number == 1:
-            return [{"id": 9001, "body": "issue comment", "assets": []}]
-        if number == 2:
-            return [
-                {
-                    "id": 9002,
-                    "body": "comment attachment",
-                    "assets": [self.second_asset],
-                }
+            body = (
+                "issue comment changed"
+                if self.semantic_comment_drift and self.issue_index_cycles >= 2
+                else "issue comment"
+            )
+            comments = [{"id": 9001, "body": body, "assets": []}]
+        elif number == 2:
+            comments = [
+                {"id": 9002, "body": "comment attachment", "assets": [self.second_asset]}
             ]
-        return []
+        elif number == 87:
+            comments = [{"id": 9087, "body": "pull request comment", "assets": []}]
+        else:
+            return []
+
+        parent_number = (
+            3
+            if not global_copy
+            and number == 1
+            and self.per_item_comment_parent_number_mismatch
+            else number
+        )
+        repository = (
+            "services/other"
+            if not global_copy
+            and number == 1
+            and self.per_item_comment_parent_repository_mismatch
+            else REPOSITORY
+        )
+        origin = (
+            "http://other.invalid"
+            if not global_copy
+            and number == 1
+            and self.per_item_comment_parent_origin_mismatch
+            else self.origin
+        )
+        is_pull = number == 87 or (
+            not global_copy
+            and number == 1
+            and self.per_item_comment_parent_kind_mismatch
+        )
+        for comment in comments:
+            if not global_copy and number == 1 and self.per_item_comment_body_mismatch:
+                comment["body"] = "stable per-item mismatch"
+            comment["issue_url"] = (
+                ""
+                if is_pull
+                else f"{origin}/api/v1/repos/{repository}/issues/{parent_number}"
+            )
+            comment["pull_request_url"] = (
+                f"{origin}/api/v1/repos/{repository}/pulls/{parent_number}"
+                if is_pull
+                else ""
+            )
+        return comments
 
     def global_comments(self) -> list[dict[str, object]]:
-        return [
-            {
-                **comment,
-                "issue_url": f"{self.origin}/api/v1/repos/{REPOSITORY}/issues/{number}",
-            }
-            for number in (1, 2)
-            for comment in self.comments(number)
-        ]
+        result: list[dict[str, object]] = []
+        for number in (1, 2, 87):
+            for comment in self.comments(number, global_copy=True):
+                parent_number = (
+                    3
+                    if number == 1
+                    and (
+                        self.comment_parent_number_mismatch
+                        or (
+                            self.comment_parent_number_drift
+                            and self.issue_index_cycles >= 2
+                        )
+                    )
+                    else number
+                )
+                repository = (
+                    "services/other"
+                    if number == 1
+                    and (
+                        self.comment_parent_repository_mismatch
+                        or (
+                            self.comment_parent_repository_drift
+                            and self.issue_index_cycles >= 2
+                        )
+                    )
+                    else REPOSITORY
+                )
+                origin = (
+                    "http://other.invalid"
+                    if number == 1
+                    and (
+                        self.comment_parent_origin_mismatch
+                        or (
+                            self.comment_parent_origin_drift
+                            and self.issue_index_cycles >= 2
+                        )
+                    )
+                    else self.origin
+                )
+                if (
+                    number == 1
+                    and (
+                        self.comment_parent_kind_mismatch
+                        or (
+                            self.comment_parent_kind_drift
+                            and self.issue_index_cycles >= 2
+                        )
+                    )
+                ):
+                    result.append(
+                        {
+                            **comment,
+                            "issue_url": "",
+                            "pull_request_url": (
+                                f"{origin}/api/v1/repos/{repository}/pulls/{parent_number}"
+                            ),
+                        }
+                    )
+                elif number == 87:
+                    result.append(
+                        {
+                            **comment,
+                            "issue_url": "",
+                            "pull_request_url": (
+                                f"{origin}/api/v1/repos/{repository}/pulls/{parent_number}"
+                            ),
+                        }
+                    )
+                else:
+                    result.append(
+                        {
+                            **comment,
+                            "issue_url": (
+                                f"{origin}/api/v1/repos/{repository}/issues/{parent_number}"
+                            ),
+                            "pull_request_url": "",
+                        }
+                    )
+        return result
 
     def assets(self, number: int) -> list[dict[str, object]]:
         if number == 1:
@@ -202,7 +371,11 @@ class _FakeGiteaHandler(BaseHTTPRequestHandler):
                 self.end_headers()
                 return
             payloads = {
-                "/assets/asset-issue-1": b"issue-asset-bytes",
+                "/assets/asset-issue-1": (
+                    b"issue-asset-bytes-confirmation"
+                    if state.asset_confirmation_drift and state.issue_index_cycles >= 2
+                    else b"issue-asset-bytes"
+                ),
                 "/assets/asset-comment-2": b"comment-asset-bytes",
             }
             payload = payloads.get(path)
@@ -257,7 +430,9 @@ class _FakeGiteaHandler(BaseHTTPRequestHandler):
             self._send_json(state.pull())
             return
         if path == f"{root}/pulls/87/commits":
-            if state.unavailable_pull_evidence:
+            if state.unavailable_pull_evidence or (
+                state.unavailable_confirmation_evidence and state.issue_index_cycles >= 2
+            ):
                 self.send_error(404)
                 return
             state.pull_commit_cycles += 1
@@ -266,13 +441,41 @@ class _FakeGiteaHandler(BaseHTTPRequestHandler):
                 if state.mutate_pull_subresources and state.pull_commit_cycles >= 2
                 else "d" * 40
             )
-            self._send_list([{"sha": commit_sha}])
+            commits = [{"sha": commit_sha}]
+            if state.commit_order_confirmation_drift:
+                commits = [{"sha": "d" * 40}, {"sha": "e" * 40}]
+                if state.pull_commit_cycles >= 2:
+                    commits.reverse()
+            self._send_list(commits)
             return
         if path == f"{root}/pulls/87/files":
             if state.unavailable_pull_evidence:
                 self.send_error(404)
                 return
-            self._send_list([{"filename": "README.md", "status": "modified"}])
+            if state.rename_file or state.rename_file_confirmation_drift:
+                previous_filename = (
+                    "README-older.md"
+                    if state.rename_file_confirmation_drift
+                    and state.issue_index_cycles >= 2
+                    else "README.md"
+                )
+                self._send_list(
+                    [
+                        {
+                            "filename": "README-renamed.md",
+                            "previous_filename": previous_filename,
+                            "status": "renamed",
+                            "additions": 1,
+                            "deletions": 1,
+                            "changes": 2,
+                            "contents_url": "https://example.invalid/contents",
+                            "html_url": "https://example.invalid/html",
+                            "raw_url": "https://example.invalid/raw",
+                        }
+                    ]
+                )
+            else:
+                self._send_list([{"filename": "README.md", "status": "modified"}])
             return
         if path == f"{root}/pulls/87/reviews":
             if state.unavailable_pull_evidence:
@@ -290,10 +493,16 @@ class _FakeGiteaHandler(BaseHTTPRequestHandler):
             self._send_json({"state": "success", "sha": "c" * 40})
             return
         if path in {f"{root}/pulls/87.diff", f"{root}/pulls/87.patch"}:
-            if state.unavailable_pull_evidence:
+            if state.unavailable_pull_evidence or (
+                state.unavailable_confirmation_evidence and state.issue_index_cycles >= 2
+            ):
                 self.send_error(404)
                 return
-            payload = b"diff --git a/README.md b/README.md\n"
+            payload = (
+                b"diff --git a/changed.md b/changed.md\n"
+                if state.diff_confirmation_drift and state.issue_index_cycles >= 2
+                else b"diff --git a/README.md b/README.md\n"
+            )
             self.send_response(200)
             self.send_header("Content-Length", str(len(payload)))
             self.end_headers()
@@ -470,10 +679,35 @@ def _fully_reseal(snapshot: Path, manifest: dict[str, object]) -> None:
         asset = snapshot / mapping["path"]
         mapping["size"] = asset.stat().st_size
         mapping["sha256"] = hashlib.sha256(asset.read_bytes()).hexdigest()
-    payload_proof = export_gitea._captured_payload_proof(snapshot)
-    manifest["capture_consistency"]["payload"] = {
-        "initial": payload_proof,
-        "confirmation": payload_proof,
+    indexes = {
+        "labels": json.loads((snapshot / "api" / "labels.json").read_text()),
+        "issues": json.loads((snapshot / "api" / "issues.json").read_text()),
+        "pull_requests": json.loads(
+            (snapshot / "api" / "pull-requests.json").read_text()
+        ),
+        "comments": json.loads((snapshot / "api" / "comments.json").read_text()),
+    }
+    plan = json.loads((snapshot / "number-plan.json").read_text())
+    index_digest = export_gitea._semantic_digest(export_gitea._project_indexes(indexes))
+    item_digest = export_gitea._semantic_digest(
+        export_gitea._project_captured_items(
+            snapshot,
+            indexes,
+            plan,
+            manifest["asset_rewrite_mapping"],
+        )
+    )
+    manifest["capture_consistency"] = {
+        "projection_version": export_gitea.SEMANTIC_PROJECTION_VERSION,
+        "indexes": {
+            "initial_sha256": index_digest,
+            "confirmation_sha256": index_digest,
+        },
+        "items": {
+            "initial_sha256": item_digest,
+            "confirmation_sha256": item_digest,
+        },
+        "initial_raw_payload": export_gitea._captured_payload_proof(snapshot),
     }
     manifest["file_inventory"] = export_gitea._inventory(snapshot)
     _write_manifest(snapshot, manifest)
@@ -727,6 +961,249 @@ def test_mid_export_pull_subresource_mutation_fails_closed(
     with fake_gitea(state) as (state, origin):
         with pytest.raises(export_gitea.ExportError, match="item data changed"):
             _export(tmp_path, git_repository, state, origin)
+
+
+def test_semantic_projection_tolerates_only_classified_drift_and_preserves_raw_capture(
+    tmp_path: Path,
+    git_repository: Path,
+) -> None:
+    state = FakeGiteaState()
+    state.irrelevant_confirmation_drift = True
+    state.reorder_confirmation_sets = True
+    state.mergeable_confirmation_drift = True
+    state.rename_file = True
+    with fake_gitea(state) as (state, origin):
+        result = _export_result(tmp_path, git_repository, state, origin)
+
+    manifest = _validate(
+        result.path,
+        expected_manifest_sha256=result.manifest_sha256,
+    )
+    raw_issue = json.loads((result.path / "items" / "1" / "issue.json").read_text())
+    raw_pull = json.loads((result.path / "items" / "87" / "pull.json").read_text())
+    raw_files = json.loads((result.path / "items" / "87" / "files.json").read_text())
+    plan = json.loads((result.path / "number-plan.json").read_text())
+
+    assert raw_issue["user"]["last_login"] == "2026-08-02T00:00:00Z"
+    assert [label["id"] for label in raw_issue["labels"]] == [1, 2]
+    assert raw_pull["mergeable"] is True
+    assert raw_files[0]["previous_filename"] == "README.md"
+    assert "mergeable" not in plan[86]["pull"]
+    assert manifest["format_version"] == 2
+    assert manifest["capture_consistency"]["projection_version"] == 1
+    assert manifest["capture_consistency"]["indexes"]["initial_sha256"] == (
+        manifest["capture_consistency"]["indexes"]["confirmation_sha256"]
+    )
+    assert manifest["capture_consistency"]["items"]["initial_sha256"] == (
+        manifest["capture_consistency"]["items"]["confirmation_sha256"]
+    )
+
+
+@pytest.mark.parametrize(
+    "drift",
+    [
+        "semantic_comment_drift",
+        "unavailable_confirmation_evidence",
+        "diff_confirmation_drift",
+        "asset_confirmation_drift",
+        "commit_order_confirmation_drift",
+        "rename_file_confirmation_drift",
+        "merge_base_confirmation_drift",
+        "comment_parent_kind_drift",
+        "comment_parent_repository_drift",
+        "comment_parent_origin_drift",
+        "comment_parent_number_drift",
+    ],
+)
+def test_semantic_projection_rejects_migration_relevant_drift_and_cleans_staging(
+    drift: str,
+    tmp_path: Path,
+    git_repository: Path,
+) -> None:
+    state = FakeGiteaState()
+    setattr(state, drift, True)
+    destination = tmp_path / "exports" / "github-migration"
+    with fake_gitea(state) as (state, origin):
+        with pytest.raises(export_gitea.ExportError, match="changed during export"):
+            _export(tmp_path, git_repository, state, origin)
+    assert destination.is_dir()
+    assert list(destination.iterdir()) == []
+
+
+@pytest.mark.parametrize(
+    "mismatch",
+    [
+        "comment_parent_kind_mismatch",
+        "comment_parent_repository_mismatch",
+        "comment_parent_origin_mismatch",
+        "comment_parent_number_mismatch",
+    ],
+)
+def test_stable_false_global_comment_parent_fails_during_capture(
+    mismatch: str,
+    tmp_path: Path,
+    git_repository: Path,
+) -> None:
+    state = FakeGiteaState()
+    setattr(state, mismatch, True)
+    with fake_gitea(state) as (state, origin):
+        with pytest.raises(export_gitea.ExportError, match="parent association"):
+            _export(tmp_path, git_repository, state, origin)
+
+    destination = tmp_path / "exports" / "github-migration"
+    assert destination.is_dir()
+    assert list(destination.iterdir()) == []
+
+
+@pytest.mark.parametrize(
+    ("mismatch", "message"),
+    [
+        ("per_item_comment_parent_kind_mismatch", "parent association"),
+        ("per_item_comment_parent_repository_mismatch", "parent association"),
+        ("per_item_comment_parent_origin_mismatch", "parent association"),
+        ("per_item_comment_parent_number_mismatch", "parent association"),
+        ("per_item_comment_body_mismatch", "semantic content differs"),
+    ],
+)
+def test_stable_false_per_item_comment_copy_fails_during_capture(
+    mismatch: str,
+    message: str,
+    tmp_path: Path,
+    git_repository: Path,
+) -> None:
+    state = FakeGiteaState()
+    setattr(state, mismatch, True)
+    with fake_gitea(state) as (state, origin):
+        with pytest.raises(export_gitea.ExportError, match=message):
+            _export(tmp_path, git_repository, state, origin)
+
+    destination = tmp_path / "exports" / "github-migration"
+    assert destination.is_dir()
+    assert list(destination.iterdir()) == []
+
+
+@pytest.mark.parametrize(
+    ("issue_url", "pull_request_url", "message"),
+    [
+        (
+            "http://example.invalid/api/v1/repos/services/blockwart/issues/1",
+            "http://example.invalid/api/v1/repos/services/blockwart/pulls/1",
+            "conflicting",
+        ),
+        ("", "", "lacks a parent"),
+        (
+            "http://example.invalid/api/v1/repos/services/blockwart/pulls/1",
+            "",
+            "invalid parent kind",
+        ),
+    ],
+)
+def test_global_comment_parent_association_must_be_canonical_and_unambiguous(
+    issue_url: str,
+    pull_request_url: str,
+    message: str,
+) -> None:
+    with pytest.raises(export_gitea.ExportError, match=message):
+        export_gitea._project_comment(
+            {
+                "id": 1,
+                "body": "comment",
+                "issue_url": issue_url,
+                "pull_request_url": pull_request_url,
+            },
+            require_parent=True,
+        )
+
+
+@pytest.mark.parametrize("mismatch", ["origin", "repository", "kind", "number"])
+def test_resealed_false_global_comment_parent_fails_offline_validation(
+    mismatch: str,
+    exported_snapshot: Path,
+    tmp_path: Path,
+) -> None:
+    snapshot = _copy_snapshot(exported_snapshot, tmp_path / f"comment-parent-{mismatch}")
+    relative = "api/comments.json"
+    path = snapshot / relative
+    comments = json.loads(path.read_text())
+    comment = comments[0]
+    issue_url = comment["issue_url"]
+    if mismatch == "origin":
+        comment["issue_url"] = issue_url.replace(
+            urlsplit(issue_url).netloc, "other.invalid", 1
+        )
+    elif mismatch == "repository":
+        comment["issue_url"] = issue_url.replace(REPOSITORY, "services/other", 1)
+    elif mismatch == "kind":
+        comment["issue_url"] = ""
+        comment["pull_request_url"] = issue_url.replace("/issues/", "/pulls/", 1)
+    else:
+        comment["issue_url"] = issue_url.rsplit("/", 1)[0] + "/3"
+    path.write_bytes(export_gitea._canonical_json(comments))
+    os.chmod(path, 0o600)
+    _reseal(snapshot, relative)
+
+    with pytest.raises(export_gitea.ExportError, match="parent association"):
+        _validate(snapshot)
+
+
+@pytest.mark.parametrize(
+    ("mismatch", "message"),
+    [
+        ("origin", "parent association"),
+        ("repository", "parent association"),
+        ("kind", "parent association"),
+        ("number", "parent association"),
+        ("body", "semantic content differs"),
+    ],
+)
+def test_fully_resealed_false_per_item_comment_copy_fails_offline_validation(
+    mismatch: str,
+    message: str,
+    exported_snapshot: Path,
+    tmp_path: Path,
+) -> None:
+    snapshot = _copy_snapshot(
+        exported_snapshot, tmp_path / f"per-item-comment-{mismatch}"
+    )
+    relative = "items/1/comments.json"
+    path = snapshot / relative
+    comments = json.loads(path.read_text())
+    comment = comments[0]
+    issue_url = comment["issue_url"]
+    if mismatch == "origin":
+        comment["issue_url"] = issue_url.replace(
+            urlsplit(issue_url).netloc, "other.invalid", 1
+        )
+    elif mismatch == "repository":
+        comment["issue_url"] = issue_url.replace(REPOSITORY, "services/other", 1)
+    elif mismatch == "kind":
+        comment["issue_url"] = ""
+        comment["pull_request_url"] = issue_url.replace("/issues/", "/pulls/", 1)
+    elif mismatch == "number":
+        comment["issue_url"] = issue_url.rsplit("/", 1)[0] + "/3"
+    else:
+        comment["body"] = "fully resealed per-item mismatch"
+    path.write_bytes(export_gitea._canonical_json(comments))
+    os.chmod(path, 0o600)
+    manifest = json.loads((snapshot / "manifest.json").read_text())
+    _fully_reseal(snapshot, manifest)
+
+    with pytest.raises(export_gitea.ExportError, match=message):
+        _validate(snapshot)
+
+
+def test_unclassified_api_field_fails_closed_and_cleans_staging(
+    tmp_path: Path,
+    git_repository: Path,
+) -> None:
+    state = FakeGiteaState()
+    state.unclassified_issue_field = True
+    destination = tmp_path / "exports" / "github-migration"
+    with fake_gitea(state) as (state, origin):
+        with pytest.raises(export_gitea.ExportError, match="unclassified fields"):
+            _export(tmp_path, git_repository, state, origin)
+    assert destination.is_dir()
+    assert list(destination.iterdir()) == []
 
 
 def test_asset_redirect_fails_closed(tmp_path: Path, git_repository: Path) -> None:
