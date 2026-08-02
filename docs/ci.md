@@ -94,8 +94,15 @@ distinguished from product failures. Runner provisioning and automated deploymen
 infrastructure tasks.
 
 The real host differences remain outside the workflow: Gitea Actions uses the Fabrik runner and
-Gitea repository permissions, while GitHub Actions will use a GitHub-hosted or separately approved
-self-hosted runner, GitHub repository permissions, and GitHub's own event delivery and log
-retention. `actionlint` and byte parity prove static syntax and command parity only. GitHub runtime
-parity remains unproved until a later, separately authorized GitHub run succeeds on the exact
-imported `main` SHA.
+Gitea repository permissions, while GitHub Actions uses GitHub repository permissions and
+GitHub's own runner, event-delivery, and log-retention environment. `actionlint` and byte parity
+prove static syntax and command parity. Runtime parity is additionally proven by successful
+GitHub Actions runs on:
+
+- the exact imported Gitea `main` SHA `8d0bd2fcb097c09f1be8863539ef6527f3745d82`
+  ([run #1](https://github.com/reisball/blockwart/actions/runs/30751416724)); and
+- the canonical post-cutover GitHub `main` SHA
+  `ca83e17a0c8bb8b605ab661d8c9e57fe883bbcb9`
+  ([run #2](https://github.com/reisball/blockwart/actions/runs/30752565755)).
+
+These CI results do not imply deployment or production readiness.
