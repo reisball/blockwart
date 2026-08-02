@@ -45,12 +45,14 @@ generated files together. A dependency update is not a deployment.
 
 ## Contract Proof
 
-The Gitea workflow in `.gitea/workflows/ci.yml` runs the same commands:
+The Gitea and GitHub workflows in `.gitea/workflows/ci.yml` and
+`.github/workflows/ci.yml` are intentionally byte-identical. Each host runs the same proof:
 
 ```bash
 ruff check --no-cache .
 python -m compileall -q src tests scripts
-actionlint .gitea/workflows/ci.yml
+cmp .gitea/workflows/ci.yml .github/workflows/ci.yml
+actionlint .gitea/workflows/ci.yml .github/workflows/ci.yml
 pytest -q
 python scripts/update_openapi_contract.py --check
 ./scripts/ci/package-smoke.sh
@@ -83,9 +85,17 @@ contract. After an approved API change, update and review it with:
 python scripts/update_openapi_contract.py
 ```
 
-CI uses no live Blockwart instance, production database, or production secret. A trusted
-Gitea Actions runner labeled `ubuntu-latest` must provide Python 3.12 setup support, `curl`, and a
-working Docker daemon. Before installing dependencies, the workflow records load average, Linux
-pressure-stall information, root-filesystem usage, and a compact Docker summary so host-level
-resource starvation can be distinguished from product failures. Runner provisioning and automated
-deployment are separate infrastructure tasks.
+CI uses no live Blockwart instance, production database, or production secret. On both hosts, a
+trusted Linux runner labeled `ubuntu-latest` must support `actions/checkout@v4`,
+`actions/setup-python@v5`, Python 3.12, `curl`, and a working Docker daemon. Before installing
+dependencies, the workflow records load average, Linux pressure-stall information,
+root-filesystem usage, and a compact Docker summary so host-level resource starvation can be
+distinguished from product failures. Runner provisioning and automated deployment are separate
+infrastructure tasks.
+
+The real host differences remain outside the workflow: Gitea Actions uses the Fabrik runner and
+Gitea repository permissions, while GitHub Actions will use a GitHub-hosted or separately approved
+self-hosted runner, GitHub repository permissions, and GitHub's own event delivery and log
+retention. `actionlint` and byte parity prove static syntax and command parity only. GitHub runtime
+parity remains unproved until a later, separately authorized GitHub run succeeds on the exact
+imported `main` SHA.
