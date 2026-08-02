@@ -53,6 +53,10 @@ class FakeGiteaState:
         self.comment_parent_repository_drift = False
         self.comment_parent_origin_drift = False
         self.comment_parent_number_drift = False
+        self.comment_parent_kind_mismatch = False
+        self.comment_parent_repository_mismatch = False
+        self.comment_parent_origin_mismatch = False
+        self.comment_parent_number_mismatch = False
         self.unclassified_issue_field = False
         self.issue_index_cycles = 0
         self.pull_commit_cycles = 0
@@ -181,28 +185,48 @@ class FakeGiteaState:
                 parent_number = (
                     3
                     if number == 1
-                    and self.comment_parent_number_drift
-                    and self.issue_index_cycles >= 2
+                    and (
+                        self.comment_parent_number_mismatch
+                        or (
+                            self.comment_parent_number_drift
+                            and self.issue_index_cycles >= 2
+                        )
+                    )
                     else number
                 )
                 repository = (
                     "services/other"
                     if number == 1
-                    and self.comment_parent_repository_drift
-                    and self.issue_index_cycles >= 2
+                    and (
+                        self.comment_parent_repository_mismatch
+                        or (
+                            self.comment_parent_repository_drift
+                            and self.issue_index_cycles >= 2
+                        )
+                    )
                     else REPOSITORY
                 )
                 origin = (
                     "http://other.invalid"
                     if number == 1
-                    and self.comment_parent_origin_drift
-                    and self.issue_index_cycles >= 2
+                    and (
+                        self.comment_parent_origin_mismatch
+                        or (
+                            self.comment_parent_origin_drift
+                            and self.issue_index_cycles >= 2
+                        )
+                    )
                     else self.origin
                 )
                 if (
                     number == 1
-                    and self.comment_parent_kind_drift
-                    and self.issue_index_cycles >= 2
+                    and (
+                        self.comment_parent_kind_mismatch
+                        or (
+                            self.comment_parent_kind_drift
+                            and self.issue_index_cycles >= 2
+                        )
+                    )
                 ):
                     result.append(
                         {
@@ -950,6 +974,31 @@ def test_semantic_projection_rejects_migration_relevant_drift_and_cleans_staging
 
 
 @pytest.mark.parametrize(
+    "mismatch",
+    [
+        "comment_parent_kind_mismatch",
+        "comment_parent_repository_mismatch",
+        "comment_parent_origin_mismatch",
+        "comment_parent_number_mismatch",
+    ],
+)
+def test_stable_false_global_comment_parent_fails_during_capture(
+    mismatch: str,
+    tmp_path: Path,
+    git_repository: Path,
+) -> None:
+    state = FakeGiteaState()
+    setattr(state, mismatch, True)
+    with fake_gitea(state) as (state, origin):
+        with pytest.raises(export_gitea.ExportError, match="parent association"):
+            _export(tmp_path, git_repository, state, origin)
+
+    destination = tmp_path / "exports" / "github-migration"
+    assert destination.is_dir()
+    assert list(destination.iterdir()) == []
+
+
+@pytest.mark.parametrize(
     ("issue_url", "pull_request_url", "message"),
     [
         (
@@ -980,6 +1029,37 @@ def test_global_comment_parent_association_must_be_canonical_and_unambiguous(
             },
             require_parent=True,
         )
+
+
+@pytest.mark.parametrize("mismatch", ["origin", "repository", "kind", "number"])
+def test_resealed_false_global_comment_parent_fails_offline_validation(
+    mismatch: str,
+    exported_snapshot: Path,
+    tmp_path: Path,
+) -> None:
+    snapshot = _copy_snapshot(exported_snapshot, tmp_path / f"comment-parent-{mismatch}")
+    relative = "api/comments.json"
+    path = snapshot / relative
+    comments = json.loads(path.read_text())
+    comment = comments[0]
+    issue_url = comment["issue_url"]
+    if mismatch == "origin":
+        comment["issue_url"] = issue_url.replace(
+            urlsplit(issue_url).netloc, "other.invalid", 1
+        )
+    elif mismatch == "repository":
+        comment["issue_url"] = issue_url.replace(REPOSITORY, "services/other", 1)
+    elif mismatch == "kind":
+        comment["issue_url"] = ""
+        comment["pull_request_url"] = issue_url.replace("/issues/", "/pulls/", 1)
+    else:
+        comment["issue_url"] = issue_url.rsplit("/", 1)[0] + "/3"
+    path.write_bytes(export_gitea._canonical_json(comments))
+    os.chmod(path, 0o600)
+    _reseal(snapshot, relative)
+
+    with pytest.raises(export_gitea.ExportError, match="parent association"):
+        _validate(snapshot)
 
 
 def test_unclassified_api_field_fails_closed_and_cleans_staging(
