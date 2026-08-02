@@ -53,11 +53,26 @@ that count differs from the baseline. Then run:
 The tool creates one `exports/github-migration/<UTC>-<main-shortsha>` directory atomically. It
 refuses an existing final destination, uses directory mode 0700 and file mode 0600, records the
 full API and Git inventory in `manifest.json`, and protects that manifest with
-`manifest.sha256`. Before sealing, it repeats the indexes, every issue/PR subresource, diff/patch
-availability check, and asset download; any count, endpoint-availability, payload, or asset-byte
-change fails closed. Offline validation reconstructs asset bindings from the captured API objects,
-requires the complete PR evidence schema, and rejects every unmanifested filesystem object.
-Runtime snapshots remain ignored and must never be committed.
+`manifest.sha256`. Snapshot format 2 records semantic-consistency projection version 1 separately
+from the exact raw-payload proof. The first pass still archives the complete API objects, diff and
+patch bytes, and asset bytes without pruning; the file inventory and externally pinned manifest
+digest bind those raw files exactly.
+
+Before sealing, the exporter repeats the indexes, every issue/PR subresource, diff/patch
+availability check, and asset download. It compares both passes through explicit endpoint-specific
+migration projections: unordered label, assignee, asset, file, review, and status collections are
+sorted only by stable identities, while PR commit order remains significant. Reviewed display or
+computed metadata such as `mergeable` and embedded user activity may drift without invalidating a
+capture; `mergeable` remains present in the raw `pull.json` but is not copied into the derived
+number plan. Unknown API fields stop the export until they are explicitly classified instead of
+being silently discarded.
+
+Counts, identities, migration content and timestamps, parent associations, endpoint availability,
+refs, PR state/base/head/merge data, diff/patch bytes, and asset identities/associations/bytes remain
+fail-closed. Offline validation reconstructs the same semantic projections from the complete raw
+initial capture, verifies its exact raw-payload proof, reconstructs asset bindings, requires the
+complete PR evidence schema, and rejects every unmanifested filesystem object. Runtime snapshots
+remain ignored and must never be committed.
 
 After the atomic rename, export prints both `export=<path>` and
 `manifest_sha256=<64 lowercase hex characters>`. Immediately record that digest in independent,
