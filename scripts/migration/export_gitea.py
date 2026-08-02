@@ -785,6 +785,7 @@ def _project_pull(value: Mapping[str, Any]) -> dict[str, Any]:
             "merged",
             "merged_at",
             "merge_commit_sha",
+            "merge_base",
             "pin_order",
             "user",
             "merged_by",
@@ -804,7 +805,6 @@ def _project_pull(value: Mapping[str, Any]) -> dict[str, Any]:
             "deletions",
             "diff_url",
             "html_url",
-            "merge_base",
             "mergeable",
             "patch_url",
             "url",
@@ -846,22 +846,56 @@ def _project_pull(value: Mapping[str, Any]) -> dict[str, Any]:
     return projected
 
 
-def _parent_number_from_comment(value: Mapping[str, Any]) -> int | None:
-    for field in ("issue_url", "pull_request_url"):
-        url = value.get(field)
-        if url in {None, ""}:
-            continue
-        if not isinstance(url, str):
-            raise ExportError(f"comment {field} must be text or null")
-        match = re.search(r"/(?:issues|pulls)/(\d+)(?:$|[/?#])", url)
-        if match is None:
-            raise ExportError(f"comment {field} does not contain an item number")
-        return int(match.group(1))
-    return None
+def _comment_parent_association(
+    value: Mapping[str, Any], *, required: bool
+) -> dict[str, Any] | None:
+    present = [
+        (field, value.get(field))
+        for field in ("issue_url", "pull_request_url")
+        if value.get(field) is not None and value.get(field) != ""
+    ]
+    if len(present) > 1:
+        raise ExportError("comment has conflicting issue and pull-request parents")
+    if not present:
+        if required:
+            raise ExportError("comment lacks a parent association")
+        return None
+
+    field, url = present[0]
+    if not isinstance(url, str):
+        raise ExportError(f"comment {field} must be text or null")
+    parsed = urllib.parse.urlsplit(url)
+    if parsed.username is not None or parsed.password is not None:
+        raise ExportError(f"comment {field} must not contain credentials")
+    if parsed.query or parsed.fragment:
+        raise ExportError(f"comment {field} must not contain a query or fragment")
+    scheme, hostname, port = _origin(url)
+    parts = [urllib.parse.unquote(part) for part in parsed.path.split("/") if part]
+    if len(parts) < 4:
+        raise ExportError(f"comment {field} is not a canonical repository item URL")
+    owner, repository, path_kind, number_text = parts[-4:]
+    expected_path_kind = "issues" if field == "issue_url" else "pulls"
+    if path_kind != expected_path_kind or not number_text.isdigit():
+        raise ExportError(f"comment {field} has an invalid parent kind or number")
+    if not re.fullmatch(r"[A-Za-z0-9_.-]+", owner) or not re.fullmatch(
+        r"[A-Za-z0-9_.-]+", repository
+    ):
+        raise ExportError(f"comment {field} has an invalid repository identity")
+    host = f"[{hostname}]" if ":" in hostname else hostname
+    default_port = 443 if scheme == "https" else 80
+    origin = f"{scheme}://{host}" if port == default_port else f"{scheme}://{host}:{port}"
+    return {
+        "kind": "issue" if field == "issue_url" else "pull_request",
+        "origin": origin,
+        "repository": f"{owner}/{repository}",
+        "number": int(number_text),
+    }
 
 
-def _project_comment(value: Mapping[str, Any]) -> dict[str, Any]:
-    parent_number = _parent_number_from_comment(value)
+def _project_comment(
+    value: Mapping[str, Any], *, require_parent: bool = False
+) -> dict[str, Any]:
+    parent = _comment_parent_association(value, required=require_parent)
     projected = _project_known_object(
         value,
         label="comment",
@@ -877,8 +911,8 @@ def _project_comment(value: Mapping[str, Any]) -> dict[str, Any]:
         },
         ignored_fields={"html_url", "issue_url", "pull_request_url"},
     )
-    if parent_number is not None:
-        projected["parent_number"] = parent_number
+    if parent is not None:
+        projected["parent"] = parent
     if "user" in projected:
         projected["user"] = _project_optional_object(
             projected["user"], _project_user, label="comment user"
@@ -968,7 +1002,14 @@ def _project_file(value: Mapping[str, Any]) -> dict[str, Any]:
     return _project_known_object(
         value,
         label="pull request file",
-        semantic_fields={"filename", "status", "additions", "deletions", "changes"},
+        semantic_fields={
+            "filename",
+            "previous_filename",
+            "status",
+            "additions",
+            "deletions",
+            "changes",
+        },
         ignored_fields={"contents_url", "html_url", "raw_url", "blob_url", "patch", "sha"},
     )
 
@@ -1103,7 +1144,7 @@ def _project_indexes(
     )
     comments = _project_collection(
         indexes["comments"],
-        _project_comment,
+        lambda item: _project_comment(item, require_parent=True),
         lambda item: _as_int(item.get("id"), label="comment id"),
         label="global comment index",
     )
