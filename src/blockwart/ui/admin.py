@@ -196,10 +196,15 @@ def update_principal_from_ui(
     session: Annotated[Session, Depends(get_session)],
     display_name: Annotated[str, Form(max_length=255)],
     active: Annotated[Literal["active", "inactive"], Form()],
-    platform_role: Annotated[Literal["", "admin"], Form()],
+    # A required bounded sequence preserves an explicit blank while rejecting omission/repetition.
+    platform_role_values: Annotated[
+        list[Literal["", "admin"]],
+        Form(alias="platform_role", min_length=1, max_length=1),
+    ],
     if_match: Annotated[str, Form()] = "",
 ) -> HTMLResponse:
     access = read_access_from_request(request)
+    platform_role = platform_role_values[0]
     try:
         _execute_admin_ui(
             session,

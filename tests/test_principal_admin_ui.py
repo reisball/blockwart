@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from collections.abc import Generator
 
 import pytest
@@ -84,6 +85,7 @@ def principal_admin_ui_state(alembic_session_factory):
             )
     return {
         "session_factory": alembic_session_factory,
+        "admin_id": admin.id,
         "target_id": target.id,
         "ordinary_id": ordinary.id,
         "ordinary_grant_id": grants[ordinary.id],
@@ -122,8 +124,8 @@ def _prepare_principal_update_guard(state) -> None:
             )
 
 
-def _principal_update_snapshot(state) -> tuple[object, ...]:
-    target_id = state["target_id"]
+def _principal_update_snapshot(state, principal_id: str | None = None) -> tuple[object, ...]:
+    target_id = principal_id or state["target_id"]
     with state["session_factory"]() as session:
         principal = session.get(Principal, target_id)
         assert principal is not None
@@ -307,6 +309,262 @@ def test_admin_ui_requires_complete_principal_update_without_side_effects(
     )
 
     assert response.status_code == 422
+    assert _principal_update_snapshot(principal_admin_ui_state) == before
+
+
+def test_admin_ui_rejects_multiple_platform_roles_without_side_effects(
+    principal_admin_ui_client: TestClient,
+    principal_admin_ui_state,
+) -> None:
+    issued = principal_admin_ui_state["admin_session"]
+    target_id = principal_admin_ui_state["target_id"]
+    _prepare_principal_update_guard(principal_admin_ui_state)
+    before = _principal_update_snapshot(principal_admin_ui_state)
+    _login(principal_admin_ui_client, issued)
+
+    response = principal_admin_ui_client.post(
+        f"/admin/principals/{target_id}",
+        data={
+            "csrf_token": issued.csrf_token,
+            "if_match": '"rev-1"',
+            "display_name": "Must Not Change",
+            "active": "active",
+            "platform_role": ["", "admin"],
+        },
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 422
+    assert _principal_update_snapshot(principal_admin_ui_state) == before
+
+
+@pytest.mark.parametrize(
+    ("principal_kind", "principal_id_key"),
+    (("human", "ordinary_id"), ("service_account", "target_id")),
+)
+def test_admin_ui_updates_principal_without_platform_role_across_full_lifecycle(
+    principal_admin_ui_client: TestClient,
+    principal_admin_ui_state,
+    principal_kind: str,
+    principal_id_key: str,
+) -> None:
+    issued = principal_admin_ui_state["admin_session"]
+    principal_id = principal_admin_ui_state[principal_id_key]
+    sessions = principal_admin_ui_state["session_factory"]
+    if principal_kind == "human":
+        credential_model = BrowserSession
+        credential_id = principal_admin_ui_state["ordinary_session"].session_id
+    else:
+        credential_model = ServiceToken
+        with sessions() as session:
+            with transaction(session):
+                credential_id = issue_service_token(
+                    session,
+                    principal_id=principal_id,
+                    name="lifecycle-regression",
+                ).token_id
+    _login(principal_admin_ui_client, issued)
+    renamed = f"Renamed {principal_kind}"
+
+    rename = principal_admin_ui_client.post(
+        f"/admin/principals/{principal_id}",
+        headers={"X-Correlation-ID": f"{principal_kind}-rename"},
+        data={
+            "csrf_token": issued.csrf_token,
+            "if_match": '"rev-1"',
+            "display_name": renamed,
+            "active": "active",
+            "platform_role": "",
+        },
+        follow_redirects=False,
+    )
+    assert rename.status_code == 303
+    with sessions() as session:
+        principal = session.get(Principal, principal_id)
+        credential = session.get(credential_model, credential_id)
+        assert principal is not None
+        assert (principal.display_name, principal.active, principal.platform_role) == (
+            renamed,
+            True,
+            None,
+        )
+        assert principal.revision == 2
+        assert credential is not None and credential.revoked_at is None
+
+    deactivate = principal_admin_ui_client.post(
+        f"/admin/principals/{principal_id}",
+        headers={"X-Correlation-ID": f"{principal_kind}-deactivate"},
+        data={
+            "csrf_token": issued.csrf_token,
+            "if_match": '"rev-2"',
+            "display_name": renamed,
+            "active": "inactive",
+            "platform_role": "",
+        },
+        follow_redirects=False,
+    )
+    assert deactivate.status_code == 303
+    with sessions() as session:
+        principal = session.get(Principal, principal_id)
+        credential = session.get(credential_model, credential_id)
+        assert principal is not None
+        assert principal.active is False
+        assert principal.platform_role is None
+        assert principal.revision == 3
+        assert credential is not None and credential.revoked_at is not None
+        revoked_at = credential.revoked_at
+
+    reactivate = principal_admin_ui_client.post(
+        f"/admin/principals/{principal_id}",
+        headers={"X-Correlation-ID": f"{principal_kind}-reactivate"},
+        data={
+            "csrf_token": issued.csrf_token,
+            "if_match": '"rev-3"',
+            "display_name": renamed,
+            "active": "active",
+            "platform_role": "",
+        },
+        follow_redirects=False,
+    )
+    assert reactivate.status_code == 303
+    with sessions() as session:
+        principal = session.get(Principal, principal_id)
+        credential = session.get(credential_model, credential_id)
+        events = session.scalars(
+            select(SecurityEvent)
+            .where(
+                SecurityEvent.principal_id == principal_id,
+                SecurityEvent.event_type == "principal_updated",
+            )
+            .order_by(SecurityEvent.id)
+        ).all()
+        assert principal is not None
+        assert principal.active is True
+        assert principal.platform_role is None
+        assert principal.revision == 4
+        assert credential is not None and credential.revoked_at == revoked_at
+        assert [(event.outcome, event.channel) for event in events] == [
+            ("success", "ui"),
+            ("success", "ui"),
+            ("success", "ui"),
+        ]
+        assert [json.loads(event.details_json) for event in events] == [
+            {
+                "active": active,
+                "actor_principal_id": principal_admin_ui_state["admin_id"],
+                "platform_role": "none",
+                "revision": revision,
+            }
+            for active, revision in ((1, 2), (0, 3), (1, 4))
+        ]
+        assert renamed not in " ".join(event.details_json for event in events)
+
+
+def test_admin_ui_demotes_admin_when_another_active_admin_exists(
+    principal_admin_ui_client: TestClient,
+    principal_admin_ui_state,
+) -> None:
+    issued = principal_admin_ui_state["admin_session"]
+    admin_id = principal_admin_ui_state["admin_id"]
+    sessions = principal_admin_ui_state["session_factory"]
+    with sessions() as session:
+        with transaction(session):
+            second_admin = create_human_principal(
+                session,
+                login="browser.second.admin",
+                display_name="Browser Second Admin",
+                password=PASSWORD,
+                platform_role=PlatformRole.ADMIN,
+            )
+            second_admin_id = second_admin.id
+    _login(principal_admin_ui_client, issued)
+
+    response = principal_admin_ui_client.post(
+        f"/admin/principals/{admin_id}",
+        data={
+            "csrf_token": issued.csrf_token,
+            "if_match": '"rev-1"',
+            "display_name": "Demoted Browser Admin",
+            "active": "active",
+            "platform_role": "",
+        },
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 303
+    with sessions() as session:
+        demoted = session.get(Principal, admin_id)
+        remaining = session.get(Principal, second_admin_id)
+        assert demoted is not None
+        assert (demoted.display_name, demoted.active, demoted.platform_role) == (
+            "Demoted Browser Admin",
+            True,
+            None,
+        )
+        assert demoted.revision == 2
+        assert remaining is not None and remaining.platform_role == PlatformRole.ADMIN
+
+
+@pytest.mark.parametrize(
+    ("active", "platform_role"),
+    (("active", ""), ("inactive", "admin")),
+)
+def test_admin_ui_rejects_last_active_admin_demotion_or_deactivation_atomically(
+    principal_admin_ui_client: TestClient,
+    principal_admin_ui_state,
+    active: str,
+    platform_role: str,
+) -> None:
+    issued = principal_admin_ui_state["admin_session"]
+    admin_id = principal_admin_ui_state["admin_id"]
+    before = _principal_update_snapshot(principal_admin_ui_state, admin_id)
+    _login(principal_admin_ui_client, issued)
+
+    response = principal_admin_ui_client.post(
+        f"/admin/principals/{admin_id}",
+        data={
+            "csrf_token": issued.csrf_token,
+            "if_match": '"rev-1"',
+            "display_name": "Must Not Change",
+            "active": active,
+            "platform_role": platform_role,
+        },
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 409
+    assert _principal_update_snapshot(principal_admin_ui_state, admin_id) == before
+
+
+@pytest.mark.parametrize(
+    ("csrf_token", "if_match", "expected_status"),
+    ((None, '"rev-0"', 412), ("invalid-csrf", '"rev-1"', 403)),
+)
+def test_admin_ui_rejects_stale_etag_or_invalid_csrf_without_principal_side_effects(
+    principal_admin_ui_client: TestClient,
+    principal_admin_ui_state,
+    csrf_token: str | None,
+    if_match: str,
+    expected_status: int,
+) -> None:
+    issued = principal_admin_ui_state["admin_session"]
+    target_id = principal_admin_ui_state["target_id"]
+    before = _principal_update_snapshot(principal_admin_ui_state)
+    _login(principal_admin_ui_client, issued)
+
+    response = principal_admin_ui_client.post(
+        f"/admin/principals/{target_id}",
+        data={
+            "csrf_token": csrf_token or issued.csrf_token,
+            "if_match": if_match,
+            "display_name": "Must Not Change",
+            "active": "active",
+            "platform_role": "",
+        },
+        follow_redirects=False,
+    )
+
+    assert response.status_code == expected_status
     assert _principal_update_snapshot(principal_admin_ui_state) == before
 
 
