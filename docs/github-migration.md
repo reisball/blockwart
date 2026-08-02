@@ -1,8 +1,15 @@
 # Gitea To GitHub Migration Runbook
 
-This runbook prepares a later, separately authorized migration. It does not authorize a GitHub
-write, a Gitea write freeze, an import, or a cutover. Gitea remains canonical, writable, and
-recoverable until the complete GitHub import and the exact-SHA GitHub Actions run have been proved.
+> **Status:** Completed on 2026-08-02. GitHub `reisball/blockwart` is the
+> canonical repository. The validated source snapshot used Gitea `main`
+> `8d0bd2fcb097c09f1be8863539ef6527f3745d82` and preserved 114 numbered
+> items, 320 comments, 48 target labels, seven attachments, the complete
+> `main` history, and the historical `task-070` branch. Gitea remains
+> unchanged as a pre-cutover rollback source.
+
+The procedure below is the preserved pre-cutover runbook. Its authorization
+boundaries and statements about Gitea being canonical describe the state before
+the completed migration recorded above.
 
 ## Required Inputs And Stop Conditions
 

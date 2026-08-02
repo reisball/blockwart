@@ -2,6 +2,10 @@
 
 Blockwart is a small infrastructure knowledge and credential-reference platform for Kai, Zoe, and other agents.
 
+The canonical repository is the private GitHub repository
+`reisball/blockwart`. The former Gitea repository `services/blockwart` is
+retained only as the pre-cutover rollback source.
+
 The MVP goal is narrow:
 
 - structured hosts, systems, network assets, devices, services, credential
