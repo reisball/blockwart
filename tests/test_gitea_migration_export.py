@@ -57,6 +57,11 @@ class FakeGiteaState:
         self.comment_parent_repository_mismatch = False
         self.comment_parent_origin_mismatch = False
         self.comment_parent_number_mismatch = False
+        self.per_item_comment_parent_kind_mismatch = False
+        self.per_item_comment_parent_repository_mismatch = False
+        self.per_item_comment_parent_origin_mismatch = False
+        self.per_item_comment_parent_number_mismatch = False
+        self.per_item_comment_body_mismatch = False
         self.unclassified_issue_field = False
         self.issue_index_cycles = 0
         self.pull_commit_cycles = 0
@@ -160,28 +165,70 @@ class FakeGiteaState:
             }
         return self.issue(number)
 
-    def comments(self, number: int) -> list[dict[str, object]]:
+    def comments(
+        self, number: int, *, global_copy: bool = False
+    ) -> list[dict[str, object]]:
         if number == 1:
             body = (
                 "issue comment changed"
                 if self.semantic_comment_drift and self.issue_index_cycles >= 2
                 else "issue comment"
             )
-            return [{"id": 9001, "body": body, "assets": []}]
-        if number == 2:
-            return [
-                {
-                    "id": 9002,
-                    "body": "comment attachment",
-                    "assets": [self.second_asset],
-                }
+            comments = [{"id": 9001, "body": body, "assets": []}]
+        elif number == 2:
+            comments = [
+                {"id": 9002, "body": "comment attachment", "assets": [self.second_asset]}
             ]
-        return []
+        elif number == 87:
+            comments = [{"id": 9087, "body": "pull request comment", "assets": []}]
+        else:
+            return []
+
+        parent_number = (
+            3
+            if not global_copy
+            and number == 1
+            and self.per_item_comment_parent_number_mismatch
+            else number
+        )
+        repository = (
+            "services/other"
+            if not global_copy
+            and number == 1
+            and self.per_item_comment_parent_repository_mismatch
+            else REPOSITORY
+        )
+        origin = (
+            "http://other.invalid"
+            if not global_copy
+            and number == 1
+            and self.per_item_comment_parent_origin_mismatch
+            else self.origin
+        )
+        is_pull = number == 87 or (
+            not global_copy
+            and number == 1
+            and self.per_item_comment_parent_kind_mismatch
+        )
+        for comment in comments:
+            if not global_copy and number == 1 and self.per_item_comment_body_mismatch:
+                comment["body"] = "stable per-item mismatch"
+            comment["issue_url"] = (
+                ""
+                if is_pull
+                else f"{origin}/api/v1/repos/{repository}/issues/{parent_number}"
+            )
+            comment["pull_request_url"] = (
+                f"{origin}/api/v1/repos/{repository}/pulls/{parent_number}"
+                if is_pull
+                else ""
+            )
+        return comments
 
     def global_comments(self) -> list[dict[str, object]]:
         result: list[dict[str, object]] = []
-        for number in (1, 2):
-            for comment in self.comments(number):
+        for number in (1, 2, 87):
+            for comment in self.comments(number, global_copy=True):
                 parent_number = (
                     3
                     if number == 1
@@ -228,6 +275,16 @@ class FakeGiteaState:
                         )
                     )
                 ):
+                    result.append(
+                        {
+                            **comment,
+                            "issue_url": "",
+                            "pull_request_url": (
+                                f"{origin}/api/v1/repos/{repository}/pulls/{parent_number}"
+                            ),
+                        }
+                    )
+                elif number == 87:
                     result.append(
                         {
                             **comment,
@@ -999,6 +1056,33 @@ def test_stable_false_global_comment_parent_fails_during_capture(
 
 
 @pytest.mark.parametrize(
+    ("mismatch", "message"),
+    [
+        ("per_item_comment_parent_kind_mismatch", "parent association"),
+        ("per_item_comment_parent_repository_mismatch", "parent association"),
+        ("per_item_comment_parent_origin_mismatch", "parent association"),
+        ("per_item_comment_parent_number_mismatch", "parent association"),
+        ("per_item_comment_body_mismatch", "semantic content differs"),
+    ],
+)
+def test_stable_false_per_item_comment_copy_fails_during_capture(
+    mismatch: str,
+    message: str,
+    tmp_path: Path,
+    git_repository: Path,
+) -> None:
+    state = FakeGiteaState()
+    setattr(state, mismatch, True)
+    with fake_gitea(state) as (state, origin):
+        with pytest.raises(export_gitea.ExportError, match=message):
+            _export(tmp_path, git_repository, state, origin)
+
+    destination = tmp_path / "exports" / "github-migration"
+    assert destination.is_dir()
+    assert list(destination.iterdir()) == []
+
+
+@pytest.mark.parametrize(
     ("issue_url", "pull_request_url", "message"),
     [
         (
@@ -1059,6 +1143,52 @@ def test_resealed_false_global_comment_parent_fails_offline_validation(
     _reseal(snapshot, relative)
 
     with pytest.raises(export_gitea.ExportError, match="parent association"):
+        _validate(snapshot)
+
+
+@pytest.mark.parametrize(
+    ("mismatch", "message"),
+    [
+        ("origin", "parent association"),
+        ("repository", "parent association"),
+        ("kind", "parent association"),
+        ("number", "parent association"),
+        ("body", "semantic content differs"),
+    ],
+)
+def test_fully_resealed_false_per_item_comment_copy_fails_offline_validation(
+    mismatch: str,
+    message: str,
+    exported_snapshot: Path,
+    tmp_path: Path,
+) -> None:
+    snapshot = _copy_snapshot(
+        exported_snapshot, tmp_path / f"per-item-comment-{mismatch}"
+    )
+    relative = "items/1/comments.json"
+    path = snapshot / relative
+    comments = json.loads(path.read_text())
+    comment = comments[0]
+    issue_url = comment["issue_url"]
+    if mismatch == "origin":
+        comment["issue_url"] = issue_url.replace(
+            urlsplit(issue_url).netloc, "other.invalid", 1
+        )
+    elif mismatch == "repository":
+        comment["issue_url"] = issue_url.replace(REPOSITORY, "services/other", 1)
+    elif mismatch == "kind":
+        comment["issue_url"] = ""
+        comment["pull_request_url"] = issue_url.replace("/issues/", "/pulls/", 1)
+    elif mismatch == "number":
+        comment["issue_url"] = issue_url.rsplit("/", 1)[0] + "/3"
+    else:
+        comment["body"] = "fully resealed per-item mismatch"
+    path.write_bytes(export_gitea._canonical_json(comments))
+    os.chmod(path, 0o600)
+    manifest = json.loads((snapshot / "manifest.json").read_text())
+    _fully_reseal(snapshot, manifest)
+
+    with pytest.raises(export_gitea.ExportError, match=message):
         _validate(snapshot)
 
 

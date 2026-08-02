@@ -926,11 +926,15 @@ def _project_comment(
 
 def _reconcile_comment_parents(
     global_comments: Sequence[Mapping[str, Any]],
+    per_item_comments: Mapping[int, Mapping[str, Any]],
     expected_parents: Mapping[int, Mapping[str, Any]],
 ) -> None:
     global_comment_ids = _unique(global_comments, "id", "global comment")
     expected_comment_ids = set(expected_parents)
-    if expected_comment_ids != global_comment_ids:
+    per_item_comment_ids = set(per_item_comments)
+    if expected_comment_ids != global_comment_ids or (
+        expected_comment_ids != per_item_comment_ids
+    ):
         missing = sorted(global_comment_ids - expected_comment_ids)
         extra = sorted(expected_comment_ids - global_comment_ids)
         detail = f"missing={missing[:3]} extra={extra[:3]}"
@@ -941,12 +945,20 @@ def _reconcile_comment_parents(
         for comment in global_comments
     }
     for comment_id in sorted(global_comments_by_id):
-        actual_parent = _comment_parent_association(
-            global_comments_by_id[comment_id], required=True
-        )
-        if actual_parent != expected_parents[comment_id]:
+        global_comment = global_comments_by_id[comment_id]
+        per_item_comment = per_item_comments[comment_id]
+        expected_parent = expected_parents[comment_id]
+        global_parent = _comment_parent_association(global_comment, required=True)
+        per_item_parent = _comment_parent_association(per_item_comment, required=True)
+        if global_parent != expected_parent or per_item_parent != expected_parent:
             raise ExportError(
                 f"comment {comment_id} parent association does not match captured item"
+            )
+        if _project_comment(global_comment, require_parent=True) != _project_comment(
+            per_item_comment, require_parent=True
+        ):
+            raise ExportError(
+                f"comment {comment_id} global/per-item semantic content differs"
             )
 
 
@@ -1439,6 +1451,7 @@ def _capture_items(
     root = f"repos/{repository}"
     assets: dict[str, dict[str, Any]] = {}
     plan: list[dict[str, Any]] = []
+    per_item_comments: dict[int, dict[str, Any]] = {}
     per_item_comment_parents: dict[int, dict[str, Any]] = {}
 
     combined: list[tuple[str, dict[str, Any]]] = [
@@ -1466,10 +1479,12 @@ def _capture_items(
             require_total=False,
         )
         comment_ids = _unique(comments, "id", f"item {number} comment")
-        overlap = set(per_item_comment_parents) & comment_ids
+        overlap = set(per_item_comments) & comment_ids
         if overlap:
             raise ExportError(f"comment appears under multiple items: {min(overlap)}")
-        for comment_id in comment_ids:
+        for comment in comments:
+            comment_id = _as_int(comment.get("id"), label=f"item {number} comment id")
+            per_item_comments[comment_id] = comment
             per_item_comment_parents[comment_id] = {
                 "kind": item_type,
                 "origin": client.base_url,
@@ -1604,7 +1619,9 @@ def _capture_items(
             }
         )
 
-    _reconcile_comment_parents(indexes["comments"], per_item_comment_parents)
+    _reconcile_comment_parents(
+        indexes["comments"], per_item_comments, per_item_comment_parents
+    )
 
     numbers = {entry["number"] for entry in plan}
     if TOMBSTONE_NUMBER in numbers:
@@ -2227,6 +2244,7 @@ def _validate_data(snapshot: Path, manifest: Mapping[str, Any]) -> set[str]:
             required_endpoint=True,
         )
 
+    per_item_comments: dict[int, dict[str, Any]] = {}
     per_item_comment_parents: dict[int, dict[str, Any]] = {}
     canonical_assets: dict[str, dict[str, Any]] = {}
     issue_index = {item["number"]: item for item in issues}
@@ -2265,10 +2283,12 @@ def _validate_data(snapshot: Path, manifest: Mapping[str, Any]) -> set[str]:
                 payload=_canonical_json(detail),
             )
         comment_ids = _unique(item_comments, "id", f"item {number} comment")
-        if set(per_item_comment_parents) & comment_ids:
+        if set(per_item_comments) & comment_ids:
             raise ExportError("a comment is stored under more than one item")
         parent_kind = "issue" if number in issue_index else "pull_request"
-        for comment_id in comment_ids:
+        for comment in item_comments:
+            comment_id = _as_int(comment.get("id"), label=f"item {number} comment id")
+            per_item_comments[comment_id] = comment
             per_item_comment_parents[comment_id] = {
                 "kind": parent_kind,
                 "origin": base_url,
@@ -2496,7 +2516,7 @@ def _validate_data(snapshot: Path, manifest: Mapping[str, Any]) -> set[str]:
         if plan_by_number[number] != expected_entry:
             raise ExportError(f"item {number} number plan does not match captured data")
 
-    _reconcile_comment_parents(comments, per_item_comment_parents)
+    _reconcile_comment_parents(comments, per_item_comments, per_item_comment_parents)
 
     expected_mappings: list[dict[str, Any]] = []
     for identity in sorted(canonical_assets.values(), key=lambda item: item["uuid"]):
