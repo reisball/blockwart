@@ -1878,7 +1878,7 @@ def _create_bundle(
             bare,
             "bundle",
             "create",
-            str(bundle_path),
+            str(bundle_path.resolve()),
             MAIN_BUNDLE_REF,
             ARCHIVE_BUNDLE_REF,
         )
@@ -2420,7 +2420,6 @@ def _validate_data(snapshot: Path, manifest: Mapping[str, Any]) -> set[str]:
                 if (
                     not isinstance(status_payload, dict)
                     or not isinstance(status_payload.get("state"), str)
-                    or not status_payload["state"]
                     or status_payload.get("sha") != head_sha
                 ):
                     raise ExportError(f"pull request {number} status payload is invalid")

@@ -38,6 +38,7 @@ class FakeGiteaState:
         self.mutate_pull_subresources = False
         self.unavailable_pull_evidence = False
         self.unavailable_confirmation_evidence = False
+        self.empty_commit_status = False
         self.redirect_asset = False
         self.irrelevant_confirmation_drift = False
         self.reorder_confirmation_sets = False
@@ -490,7 +491,17 @@ class _FakeGiteaHandler(BaseHTTPRequestHandler):
             if state.unavailable_pull_evidence:
                 self.send_error(404)
                 return
-            self._send_json({"state": "success", "sha": "c" * 40})
+            if state.empty_commit_status:
+                self._send_json(
+                    {
+                        "state": "",
+                        "sha": "c" * 40,
+                        "total_count": 0,
+                        "statuses": None,
+                    }
+                )
+            else:
+                self._send_json({"state": "success", "sha": "c" * 40})
             return
         if path in {f"{root}/pulls/87.diff", f"{root}/pulls/87.patch"}:
             if state.unavailable_pull_evidence or (
@@ -755,6 +766,56 @@ def test_export_returns_external_manifest_digest(
         result = _export_result(tmp_path, git_repository, state, origin)
     assert result.manifest_sha256 == _manifest_sha256(result.path)
     _validate(result.path, expected_manifest_sha256=result.manifest_sha256)
+
+
+def test_export_accepts_gitea_empty_combined_commit_status(
+    tmp_path: Path,
+    git_repository: Path,
+) -> None:
+    state = FakeGiteaState()
+    state.empty_commit_status = True
+    with fake_gitea(state) as (state, origin):
+        result = _export_result(tmp_path, git_repository, state, origin)
+    status = json.loads((result.path / "items" / "87" / "status.json").read_text())
+    assert status["state"] == ""
+    assert status["statuses"] is None
+    _validate(result.path, expected_manifest_sha256=result.manifest_sha256)
+
+
+def test_create_bundle_accepts_relative_snapshot_path(
+    tmp_path: Path,
+    git_repository: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    main_sha = subprocess.run(
+        ["git", "-C", git_repository, "rev-parse", "refs/heads/main"],
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    archive_sha = subprocess.run(
+        ["git", "-C", git_repository, "rev-parse", "refs/heads/task-070"],
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    monkeypatch.chdir(tmp_path)
+    snapshot = Path("relative-snapshot")
+    snapshot.mkdir()
+    bundle = export_gitea._create_bundle(
+        git_repository,
+        snapshot,
+        {"main": main_sha, "archive": archive_sha},
+    )
+    assert bundle.is_file()
+    listed = subprocess.run(
+        ["git", "bundle", "list-heads", str(bundle.resolve())],
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout
+    assert f"{main_sha} {export_gitea.MAIN_BUNDLE_REF}" in listed
+    assert f"{archive_sha} {export_gitea.ARCHIVE_BUNDLE_REF}" in listed
 
 
 def test_export_cli_prints_final_path_and_external_manifest_digest(
