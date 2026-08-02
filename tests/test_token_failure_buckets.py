@@ -278,6 +278,7 @@ def test_parallel_failures_are_capped_and_visible_across_sessions(
 
     script = """
 import json, sys
+from datetime import datetime
 from sqlalchemy.orm import Session
 from blockwart.db.session import build_engine
 from blockwart.services.token_failure_buckets import (
@@ -290,11 +291,11 @@ with Session(engine) as session:
         session, token='separate-process', source='203.0.113.2',
         policy=TokenFailurePolicy(window_seconds=60, global_limit=3, source_limit=50,
                                   token_limit=50, max_rows=100),
-        channel='mcp', request_id='process-check')
+        channel='mcp', request_id='process-check', now=datetime.fromisoformat(sys.argv[2]))
 print(json.dumps({'allowed': result.allowed, 'dimension': result.dimension}))
 """
     completed = subprocess.run(
-        [sys.executable, "-c", script, alembic_database.database_url],
+        [sys.executable, "-c", script, alembic_database.database_url, now.isoformat()],
         capture_output=True,
         check=True,
         text=True,
