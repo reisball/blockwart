@@ -199,13 +199,7 @@
       </form>
 
       <div class="explorer-top-actions">
-        {% include "_language_switcher.html" %}
-        <div class="theme-toggle compact-theme-toggle" role="group" aria-label="{{ t('nav.theme') }}">
-          <button class="theme-option" type="button" data-theme-value="dark">{{ t("nav.dark") }}</button>
-          <button class="theme-option" type="button" data-theme-value="light">{{ t("nav.light") }}</button>
-        </div>
-        <a class="icon-button" href="/settings/schema" aria-label="{{ t('nav.settings') }}">⚙</a>
-        {% if is_platform_admin %}<a class="icon-button" href="/admin/principals" aria-label="{{ t('nav.principals') }}">♙</a>{% endif %}
+        <a class="icon-button" href="/settings" aria-label="{{ t('nav.settings') }}">⚙</a>
         {% if can_create %}
           <a class="primary-button" href="/?{{ detail_query_string }}&create=1" aria-label="{{ t('asset.create') }}">
             ＋ <span class="asset-create-full">{{ t("asset.create") }}</span><span class="asset-create-short">{{ t("asset.create_short") }}</span>

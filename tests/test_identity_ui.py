@@ -86,10 +86,22 @@ def test_login_session_and_csrf_protected_logout(
     assert identity_client.cookies.get(AUTH_SESSION_COOKIE_NAME)
     assert identity_client.cookies.get(AUTH_CSRF_COOKIE_NAME)
 
+    catalog = identity_client.get("/?create=1")
+    settings = identity_client.get("/settings")
+    assert catalog.status_code == 200
+    assert 'role="dialog"' not in catalog.text
+    assert "Add asset" not in catalog.text
+    assert settings.status_code == 200
+    assert 'href="/settings/schema"' in settings.text
+    assert 'href="/admin/principals"' not in settings.text
+
     account = identity_client.get("/auth")
     assert account.status_code == 200
     assert "Browser User" in account.text
     assert principal.id in account.text
+    assert 'class="language-switcher"' in account.text
+    assert 'data-theme-value="dark"' in account.text
+    assert 'data-theme-value="light"' in account.text
     csrf_token = _hidden(account, "csrf_token")
 
     rejected = identity_client.post(

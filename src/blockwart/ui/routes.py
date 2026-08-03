@@ -257,7 +257,6 @@ def _index_template_context(
     network_category: str = "",
     include_inherited_services: bool = False,
 ) -> dict[str, Any]:
-    current_access = read_access_from_request(request)
     i18n = translation_context(request)
     translator = i18n["t"]
     localized_schemas = _localized_ui_schema_payload(
@@ -369,7 +368,6 @@ def _index_template_context(
         ),
         "can_write": can_write_enabled,
         "can_create": bool(create_parents),
-        "is_platform_admin": current_access.principal.is_admin,
         "csrf_token": request.cookies.get(AUTH_CSRF_COOKIE_NAME, ""),
         **i18n,
     }
@@ -479,6 +477,21 @@ def schema_settings(
             request,
             selected_kind=selected_kind,
         ),
+    )
+
+
+@router.get("/settings", response_class=HTMLResponse)
+def settings_hub(request: Request):
+    access = read_access_from_request(request)
+    i18n = translation_context(request)
+    return templates.TemplateResponse(
+        request,
+        "settings.html",
+        context={
+            "title": i18n["t"]("settings.title"),
+            "is_platform_admin": access.principal.is_admin,
+            **i18n,
+        },
     )
 
 

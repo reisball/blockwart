@@ -146,9 +146,12 @@ def test_explicit_german_locale_translates_the_explorer(client: TestClient) -> N
 def test_language_cookie_covers_all_ui_surfaces(client: TestClient) -> None:
     client.get("/?lang=de")
 
+    settings = client.get("/settings")
     schema = client.get("/settings/schema?kind=host")
     detail = client.get("/objects/fabrik")
 
+    assert '<html lang="de">' in settings.text
+    assert "Darstellung und Sprache" in settings.text
     assert '<html lang="de">' in schema.text
     assert "Schema-Einstellungen" in schema.text
     assert "CPU-Hersteller" in schema.text
@@ -262,11 +265,33 @@ def test_index_shows_kind_counts(client: TestClient) -> None:
     assert "credential_reference" not in response.text
     assert "Add asset" in response.text
     assert 'href="/?view=topology' in response.text
-    assert 'href="/settings/schema"' in response.text
+    assert 'href="/settings"' in response.text
+    assert 'href="/settings/schema"' not in response.text
     assert 'class="panel panel-sticky"' not in response.text
+    assert 'data-theme-value="dark"' not in response.text
+    assert 'data-theme-value="light"' not in response.text
+    assert "/static/theme.js" in response.text
+
+
+def test_settings_page_bundles_configuration_controls(client: TestClient) -> None:
+    response = client.get("/settings")
+    schema = client.get("/settings/schema")
+
+    assert response.status_code == 200
+    assert "Settings" in response.text
+    assert "Appearance and language" in response.text
+    assert 'href="/settings/schema"' in response.text
+    assert 'href="/admin/principals"' not in response.text
+    assert 'class="language-switcher"' in response.text
     assert 'data-theme-value="dark"' in response.text
     assert 'data-theme-value="light"' in response.text
-    assert "/static/theme.js" in response.text
+    assert 'aria-labelledby="settings-appearance-title"' in response.text
+    assert 'aria-labelledby="settings-schema-title"' in response.text
+    assert schema.status_code == 200
+    assert 'href="/settings"' in schema.text
+    assert 'class="language-switcher"' not in schema.text
+    assert 'data-theme-value="dark"' not in schema.text
+    assert 'data-theme-value="light"' not in schema.text
 
 
 def test_create_object_form_is_hidden_behind_button(client: TestClient) -> None:
@@ -1047,8 +1072,9 @@ def test_object_detail_shows_data_and_relationships(client: TestClient) -> None:
         in unescape(response.text)
     )
     assert "Create relationship" not in response.text
-    assert 'data-theme-value="dark"' in response.text
-    assert 'data-theme-value="light"' in response.text
+    assert 'href="/settings"' in response.text
+    assert 'data-theme-value="dark"' not in response.text
+    assert 'data-theme-value="light"' not in response.text
     assert "/static/theme.js" in response.text
 
 
@@ -1067,8 +1093,9 @@ def test_object_detail_is_integrated_into_the_explorer_shell(
     assert 'class="integrated-detail"' in document
     assert 'href="/?view=catalog&q=&kind="' in document
     assert "← Back to catalog" in document
-    assert 'data-theme-value="dark"' in document
-    assert 'data-theme-value="light"' in document
+    assert 'href="/settings"' in document
+    assert 'data-theme-value="dark"' not in document
+    assert 'data-theme-value="light"' not in document
     assert '<header class="topbar">' not in document
 
 
