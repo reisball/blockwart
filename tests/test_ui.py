@@ -993,7 +993,7 @@ def test_catalog_tree_toggle_overrides_global_button_minimum_size(
     stylesheet_response = client.get("/static/explorer.css")
 
     assert catalog_response.status_code == 200
-    assert '/static/explorer.css?v=008"' in catalog_response.text
+    assert '/static/explorer.css?v=009"' in catalog_response.text
     assert stylesheet_response.status_code == 200
     tree_toggle_rule = re.search(
         r"\.tree-toggle\s*\{(?P<body>[^}]*)\}",

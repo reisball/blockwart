@@ -362,6 +362,16 @@ DEVICE_SCHEMA_FIELDS = (
 )
 DEVICE_CREATE_FIELDS = COMMON_CREATE_FIELDS + DEVICE_SCHEMA_FIELDS
 
+DEVICE_UI_PANELS = (
+    UiPanel("overview", "panel.overview", "overview"),
+    UiPanel("device", "panel.device", "device"),
+    UiPanel("network", "panel.network", "network"),
+    UiPanel("access", "panel.access", "access"),
+    UiPanel("relationships", "panel.relationships", "relationship-add"),
+    UiPanel("comment", "panel.comment", "comment"),
+    UiPanel("audit", "panel.audit", "audit"),
+)
+
 
 UI_SCHEMAS: dict[str, UiTypeSchema] = {
     "host": UiTypeSchema(
@@ -398,7 +408,7 @@ UI_SCHEMAS: dict[str, UiTypeSchema] = {
         supports_platform=False,
         fields=COMMON_SCHEMA_FIELDS + DEVICE_SCHEMA_FIELDS + ENDPOINT_SCHEMA_FIELDS,
         create_fields=DEVICE_CREATE_FIELDS,
-        panels=BASE_UI_PANELS,
+        panels=DEVICE_UI_PANELS,
     ),
     "service": UiTypeSchema(
         kind="service",

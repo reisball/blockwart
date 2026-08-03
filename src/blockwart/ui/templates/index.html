@@ -1,5 +1,5 @@
 {% macro node_icon(kind) -%}
-  {% if kind == "host" %}□{% elif kind == "system" %}⬡{% elif kind == "service" %}◆{% elif kind == "network" %}⌁{% else %}?{% endif %}
+  {% if kind == "host" %}□{% elif kind == "system" %}⬡{% elif kind == "service" %}◆{% elif kind == "network" %}⌁{% elif kind == "device" %}▣{% else %}?{% endif %}
 {%- endmacro %}
 
 {% macro health_badge(asset) -%}
@@ -113,7 +113,7 @@
       }
     </script>
     <link rel="stylesheet" href="/static/app.css?v=062" />
-    <link rel="stylesheet" href="/static/explorer.css?v=008" />
+    <link rel="stylesheet" href="/static/explorer.css?v=009" />
     <script>
       window.BLOCKWART_UI_SCHEMAS = {{ ui_schemas|tojson }};
       window.BLOCKWART_EXPLORER_ASSETS = {{ explorer.assets|tojson }};
@@ -126,6 +126,8 @@
         selectAsset: {{ t("catalog.select_asset")|tojson }},
         noValue: {{ t("asset.no_value")|tojson }},
         details: {{ t("asset.details")|tojson }},
+        placementParent: {{ create_fields_by_key.relationship.label|tojson }},
+        attachmentParent: {{ t("device.attachment_parent")|tojson }},
         tree: {
           expand: {{ t("tree.expand", label="{label}")|tojson }},
           collapse: {{ t("tree.collapse", label="{label}")|tojson }}
@@ -157,7 +159,7 @@
       };
     </script>
     <script src="/static/theme.js?v=054" defer></script>
-    <script src="/static/index.js?v=062" defer></script>
+    <script src="/static/index.js?v=063" defer></script>
     <script src="/static/detail.js?v=002" defer></script>
   </head>
   <body class="explorer-body explorer-{{ view }}">
@@ -215,7 +217,7 @@
             <h2 class="section-title" id="create-object-title">{{ t("asset.create_title") }}</h2>
             <a class="button button-small button-muted" href="/?view={{ view }}&q={{ q|urlencode }}&kind={{ kind }}">{{ t("asset.close") }}</a>
           </div>
-          {% if error %}<div class="error">{{ error }}</div>{% endif %}
+          {% if error %}<div class="error" role="alert">{{ error }}</div>{% endif %}
           <form class="form-grid" method="post" action="/objects">
             <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
             <input type="hidden" name="idempotency_key" value="{{ form.idempotency_key }}" />
@@ -235,6 +237,20 @@
             <label data-create-field="labels"><span data-field-label="labels">{{ create_fields_by_key.labels.label }}</span>
               <input name="labels" data-field-input="labels" value="{{ form.labels }}" placeholder="{{ create_fields_by_key.labels.placeholder }}" autocomplete="off" {% if create_fields_by_key.labels.required %}required{% endif %} />
             </label>
+            <label data-create-field="device_category" data-device-field="category" {% if "device_category" not in form_ui_schema.create_fields %}hidden{% endif %}><span data-field-label="device_category">{{ create_fields_by_key.device_category.label }}</span>
+              <select name="device_category" data-field-input="device_category" {% if create_fields_by_key.device_category.required %}required{% endif %}>
+                <option value="">{{ t("device.none_category") }}</option>
+                {% for category in device_categories %}
+                  <option value="{{ category }}" {% if category == form.device_category %}selected{% endif %}>{{ t("device.category." ~ category) }}</option>
+                {% endfor %}
+              </select>
+            </label>
+            <label data-create-field="device_manufacturer" data-device-field="manufacturer" {% if "device_manufacturer" not in form_ui_schema.create_fields %}hidden{% endif %}><span data-field-label="device_manufacturer">{{ create_fields_by_key.device_manufacturer.label }}</span>
+              <input name="device_manufacturer" data-field-input="device_manufacturer" value="{{ form.device_manufacturer }}" maxlength="128" placeholder="{{ create_fields_by_key.device_manufacturer.placeholder }}" autocomplete="off" />
+            </label>
+            <label data-create-field="device_model" data-device-field="model" {% if "device_model" not in form_ui_schema.create_fields %}hidden{% endif %}><span data-field-label="device_model">{{ create_fields_by_key.device_model.label }}</span>
+              <input name="device_model" data-field-input="device_model" value="{{ form.device_model }}" maxlength="128" placeholder="{{ create_fields_by_key.device_model.placeholder }}" autocomplete="off" />
+            </label>
             <label data-create-field="platform" data-platform-field {% if "platform" not in form_ui_schema.create_fields %}hidden{% endif %}><span data-field-label="platform">{{ create_fields_by_key.platform.label }}</span>
               <select name="platform">
                 <option value="">{{ t("asset.none_platform") }}</option>
@@ -250,15 +266,15 @@
                 {% endfor %}
               </select>
             </label>
-            <label data-create-field="relationship"><span data-field-label="relationship">{{ create_fields_by_key.relationship.label }}</span>
-              <select name="relation_target_ref" required>
+            <label data-create-field="relationship"><span data-field-label="relationship" data-relationship-label>{{ t("device.attachment_parent") if form.kind == "device" else create_fields_by_key.relationship.label }}</span>
+              <select name="relation_target_ref" data-relation-target-select required>
                 {% for target in relation_targets %}
                   {% set target_ref = target.kind ~ ":" ~ target.id %}
-                  <option value="{{ target_ref }}" {% if target_ref == form.relation_target_ref or target.id == form.hosted_on_system_id %}selected{% endif %}>{{ display_names[target.id] }} · {{ target_ref }}</option>
+                  <option value="{{ target_ref }}" data-device-parent="{{ 'true' if target_ref in device_parent_refs else 'false' }}" {% if form.kind == "device" and target_ref not in device_parent_refs %}disabled{% endif %} {% if target_ref == form.relation_target_ref or target.id == form.hosted_on_system_id %}selected{% endif %}>{{ display_names[target.id] }} · {{ target_ref }}</option>
                 {% endfor %}
               </select>
             </label>
-            <input type="hidden" name="relation_type" value="hosts" />
+            <input type="hidden" name="relation_type" value="{{ 'attached_to' if form.kind == 'device' else 'hosts' }}" data-relation-type-input />
             <label data-create-field="summary"><span data-field-label="summary">{{ create_fields_by_key.summary.label }}</span>
               <textarea class="summary-input" name="summary" data-field-input="summary" placeholder="{{ create_fields_by_key.summary.placeholder }}" {% if create_fields_by_key.summary.required %}required{% endif %}>{{ form.summary }}</textarea>
             </label>
@@ -290,6 +306,9 @@
             </a>
             <a class="{% if kind == 'network' %}active{% endif %}" href="/?view=catalog&q={{ q|urlencode }}&kind=network">
               <span class="rail-icon network">⌁</span>{{ t("catalog.networks") }}<b>{{ object_counts.network or 0 }}</b>
+            </a>
+            <a class="{% if kind == 'device' %}active{% endif %}" href="/?view=catalog&q={{ q|urlencode }}&kind=device">
+              <span class="rail-icon device">▣</span>{{ t("catalog.devices") }}<b>{{ object_counts.device or 0 }}</b>
             </a>
           </nav>
           <div class="rail-heading rail-heading-spaced"><span>{{ t("asset.health") }}</span></div>
@@ -389,6 +408,17 @@
                         </td>
                       </tr>
                       {% for network in explorer.networks %}{{ asset_row(network, 1, "networks", 1) }}{% endfor %}
+                    {% endif %}
+                    {% if explorer.devices %}
+                      <tr class="group-row secondary-group" data-tree-node="devices" data-tree-label="{{ t('catalog.devices') }}" data-tree-depth="0">
+                        <td colspan="8">
+                          {{ tree_toggle("devices", t("catalog.devices")) }}
+                          <span class="node-icon device">▣</span>
+                          <strong>{{ t("catalog.devices") }}</strong>
+                          <span class="group-count">{{ t("catalog.asset_count", count=explorer.devices|length) }}</span>
+                        </td>
+                      </tr>
+                      {% for device in explorer.devices %}{{ asset_row(device, 1, "devices", 1) }}{% endfor %}
                     {% endif %}
                   {% endif %}
                 {% else %}
@@ -534,13 +564,43 @@
                 </div>
               </article>
             {% endif %}
-            {% if not explorer.clusters and not explorer.standalone_systems and not explorer.standalone_services and not explorer.networks %}
+            {% if explorer.device_chains %}
+              <section class="device-chain-workbench" aria-labelledby="device-chain-map-title">
+                <header>
+                  <p class="eyebrow">{{ t("device.chain_eyebrow") }}</p>
+                  <h2 id="device-chain-map-title">{{ t("device.chain_title") }}</h2>
+                  <p>{{ t("device.chain_help") }}</p>
+                </header>
+                {% for chain in explorer.device_chains %}
+                  <article class="device-chain-map" aria-label="{{ t('device.chain_number', number=loop.index) }}">
+                    {% for row in chain.rows %}
+                      <div class="device-chain-map-row" style="--device-indent: {{ row.depth * 28 }}px">
+                        {% if row.parent_ref %}
+                          <div class="device-chain-edge" aria-label="{{ t('device.attached_to_parent', parent=row.parent_ref) }}">
+                            <span aria-hidden="true">↓</span>
+                            <strong>{{ t("device.attachment") }}</strong>
+                            {% if row.metadata.link_kind %}<span class="badge">{{ t("device.link_kind") }}: {{ t("device.link_kind." ~ row.metadata.link_kind) }}</span>{% endif %}
+                            {% if row.metadata.primary %}<span class="badge relationship-primary">★ {{ t("device.primary") }}</span>{% endif %}
+                            {% if row.metadata.source_interface %}<span class="badge">{{ t("device.source_interface") }}: {{ row.metadata.source_interface }}</span>{% endif %}
+                            {% if row.metadata.target_interface_or_port %}<span class="badge">{{ t("device.target_interface_or_port") }}: {{ row.metadata.target_interface_or_port }}</span>{% endif %}
+                            {% if row.metadata.note %}<span class="device-link-note">{{ row.metadata.note }}</span>{% endif %}
+                          </div>
+                        {% endif %}
+                        {{ map_node(row.asset, "device-chain-node") }}
+                      </div>
+                    {% endfor %}
+                  </article>
+                {% endfor %}
+              </section>
+            {% endif %}
+            {% if not explorer.clusters and not explorer.standalone_systems and not explorer.standalone_services and not explorer.networks and not explorer.device_chains %}
               <div class="topology-empty">{{ t("topology.no_clusters") }}</div>
             {% endif %}
             <div class="map-legend" aria-label="{{ t('topology.legend') }}">
               <span><i class="legend-shape hardware"></i>{{ t("kind.host") }}</span>
               <span><i class="legend-shape host"></i>{{ t("kind.system") }}</span>
               <span><i class="legend-shape service"></i>{{ t("kind.service") }}</span>
+              <span><i class="legend-shape device"></i>{{ t("kind.device") }}</span>
               <span><span class="status-dot healthy"></span>{{ t("health.healthy") }}</span>
               <span><span class="status-dot degraded"></span>{{ t("health.degraded") }}</span>
             </div>

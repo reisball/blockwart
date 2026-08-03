@@ -17,6 +17,7 @@
       <span>{{ object.kind }}:{{ object.id }}</span>
     </div>
   </header>
+  {% if notice %}<div class="notice" role="status">{{ notice }}</div>{% endif %}
   {% if object.visibility == "stub" %}
     <div class="page detail-grid integrated-detail-grid">
       <section class="stack">
@@ -271,10 +272,101 @@
           </section>
         {% endif %}
 
+        {% if can_edit_device %}
+          <section class="panel" aria-labelledby="device-details-title">
+            <div class="panel-head">
+              <h2 class="section-title" id="device-details-title">{{ t("panel.device") }}</h2>
+              {% if can_write %}
+                {% if edit_section == "device" %}
+                  <a class="button button-small button-muted" href="{{ detail_href }}">{{ t("detail.cancel") }}</a>
+                {% else %}
+                  <a class="button button-small button-muted" href="{{ detail_edit_hrefs.device }}">{{ t("detail.edit") }}</a>
+                {% endif %}
+              {% endif %}
+            </div>
+            {% if edit_section == "device" %}
+              {% if error %}<div class="error" role="alert">{{ error }}</div>{% endif %}
+              <form class="form-grid" method="post" action="{{ detail_post_urls.overview }}">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+                <input type="hidden" name="if_match" value="{{ object_etag }}" />
+                {% for field in device_fields %}
+                  <label>{{ field.label }}{% if field.key == "device_category" %} <span class="required-marker" aria-hidden="true">*</span><span class="visually-hidden">{{ t("form.required") }}</span>{% endif %}
+                    {% if field.key == "device_category" %}
+                      <select name="device_category" required>
+                        <option value="">{{ t("device.none_category") }}</option>
+                        {% for category in device_categories %}
+                          <option value="{{ category }}" {% if category == field.value %}selected{% endif %}>{{ t("device.category." ~ category) }}</option>
+                        {% endfor %}
+                      </select>
+                    {% else %}
+                      <input name="{{ field.key }}" value="{{ field.value }}" maxlength="128" autocomplete="off" placeholder="{{ field.placeholder }}" />
+                    {% endif %}
+                  </label>
+                {% endfor %}
+                <div class="button-row">
+                  <button type="submit">{{ t("detail.save") }}</button>
+                  <a class="button button-muted" href="{{ detail_href }}">{{ t("detail.cancel") }}</a>
+                </div>
+              </form>
+            {% else %}
+              <div class="table-wrap">
+                <table class="table">
+                  <tbody>
+                    {% for field in device_fields %}
+                      <tr>
+                        <th>{{ field.label }}</th>
+                        <td>{{ t("device.category." ~ field.value) if field.key == "device_category" and field.value else (field.value or t("asset.no_value")) }}</td>
+                      </tr>
+                    {% endfor %}
+                  </tbody>
+                </table>
+              </div>
+            {% endif %}
+          </section>
+        {% endif %}
+
+        {% if show_device_chain %}
+          <section class="panel device-chain-panel" aria-labelledby="device-chain-detail-title">
+            <div class="panel-head">
+              <div>
+                <h2 class="section-title" id="device-chain-detail-title">{{ t("device.chain_title") }}</h2>
+                <p class="meta">{{ t("device.chain_help") }}</p>
+              </div>
+            </div>
+            {% if device_chain_rows %}
+              <ol class="device-chain-list">
+                {% for row in device_chain_rows %}
+                  <li class="device-chain-row{% if row.current %} current{% endif %}" style="--device-indent: {{ row.depth * 26 }}px">
+                    {% if row.parent_ref %}
+                      <div class="device-chain-edge" aria-label="{{ t('device.attached_to_parent', parent=row.parent_ref) }}">
+                        <span aria-hidden="true">↓</span>
+                        <strong>{{ t("device.attachment") }}</strong>
+                        {% if row.metadata.link_kind %}<span class="badge">{{ t("device.link_kind") }}: {{ t("device.link_kind." ~ row.metadata.link_kind) }}</span>{% endif %}
+                        {% if row.metadata.primary %}<span class="badge relationship-primary">★ {{ t("device.primary") }}</span>{% endif %}
+                        {% if row.metadata.source_interface %}<span class="badge">{{ t("device.source_interface") }}: {{ row.metadata.source_interface }}</span>{% endif %}
+                        {% if row.metadata.target_interface_or_port %}<span class="badge">{{ t("device.target_interface_or_port") }}: {{ row.metadata.target_interface_or_port }}</span>{% endif %}
+                        {% if row.metadata.note %}<span class="device-link-note">{{ row.metadata.note }}</span>{% endif %}
+                      </div>
+                    {% endif %}
+                    <a class="device-chain-asset" href="/objects/{{ row.node.id }}?{{ detail_query_string }}">
+                      <span class="node-icon {{ row.node.kind }}">{% if row.node.kind == "host" %}□{% elif row.node.kind == "system" %}⬡{% elif row.node.kind == "network" %}⌁{% else %}▣{% endif %}</span>
+                      <span><strong>{{ row.node.label }}</strong><small>{{ t("kind." ~ row.node.kind) }} · {{ row.node.ref }}</small></span>
+                      {% if row.current %}<span class="badge">{{ t("device.current") }}</span>{% endif %}
+                    </a>
+                  </li>
+                {% endfor %}
+              </ol>
+              {% if device_chain_rows|length == 1 %}<p class="meta device-chain-empty">{{ t("device.chain_empty") }}</p>{% endif %}
+            {% else %}
+              <p class="meta device-chain-empty">{{ t("device.chain_empty") }}</p>
+            {% endif %}
+          </section>
+        {% endif %}
+
         <section class="panel">
             <div class="panel-head">
               <h2 class="section-title">{{ t("panel.network") }}</h2>
-              {% if can_write %}
+              {% if can_write and can_edit_network %}
                 <a class="button button-small button-muted" href="{{ detail_edit_hrefs.network }}">{{ t("detail.edit") if network_has_editable_rows else t("detail.add") }}</a>
               {% endif %}
             </div>
@@ -744,6 +836,7 @@
               <a class="button button-small" href="{{ detail_edit_hrefs['relationship-add'] }}">{{ t("detail.add") }}</a>
             {% endif %}
           </div>
+          {% if edit_section == "relationships" and error %}<div class="error" role="alert">{{ error }}</div>{% endif %}
           {% if relationships %}
             {% for direction, items in relationship_groups.items() %}
               <h3>{{ t("relationship.outbound") if direction == "outbound" else t("relationship.inbound") }}</h3>
@@ -753,9 +846,23 @@
                     <strong>{{ relationship.relation_type }}</strong>
                     <a href="/objects/{{ relationship.other_id }}?{{ detail_query_string }}">{{ relationship.other_label }}</a>
                     <span class="meta">{{ relationship.other_ref }}</span>
+                    {% if relationship.metadata.link_kind %}<span class="badge">{{ t("device.link_kind") }}: {{ t("device.link_kind." ~ relationship.metadata.link_kind) }}</span>{% endif %}
+                    {% if relationship.metadata.primary %}<span class="badge relationship-primary">★ {{ t("device.primary") }}</span>{% endif %}
+                    {% if relationship.metadata.source_interface %}<span class="badge">{{ t("device.source_interface") }}: {{ relationship.metadata.source_interface }}</span>{% endif %}
+                    {% if relationship.metadata.target_interface_or_port %}<span class="badge">{{ t("device.target_interface_or_port") }}: {{ relationship.metadata.target_interface_or_port }}</span>{% endif %}
+                    {% if relationship.metadata.note %}<span class="relationship-note">{{ relationship.metadata.note }}</span>{% endif %}
                     {% for port in relationship.service_ports %}
                       <span class="badge">{{ port.label }} {{ port.value }}</span>
                     {% endfor %}
+                    {% if can_write and relationship.relation_type == "attached_to" %}
+                      <form class="relationship-detach-form" method="post" action="/objects/{{ object.id }}/relationships/detach?{{ detail_query_string }}">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+                        <input type="hidden" name="if_match" value="{{ object_etag }}" />
+                        <input type="hidden" name="from_ref" value="{{ relationship.from_ref }}" />
+                        <input type="hidden" name="to_ref" value="{{ relationship.to_ref }}" />
+                        <button class="button button-small button-muted" type="submit" aria-label="{{ t('device.detach_named', name=relationship.other_label) }}">{{ t("device.detach") }}</button>
+                      </form>
+                    {% endif %}
                   </li>
                 {% endfor %}
               </ul>
@@ -771,17 +878,52 @@
               <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
               <input type="hidden" name="if_match" value="{{ object_etag }}" />
               <h3>{{ t("relationship.create") }}</h3>
-              <input type="hidden" name="direction" value="{{ 'inbound' if object.kind == 'service' else 'outbound' }}" />
-              <input type="hidden" name="relation_type" value="hosts" />
-              <label>{{ t("relationship.target") }}
-                <select name="target_ref" required>
-                  {% for target in relationship_targets %}
-                    <option value="{{ target.kind }}:{{ target.id }}" {% if object.kind == "service" and loop.first %}selected{% endif %}>{{ target.kind }} · {{ target.label }} · {{ target.id }}</option>
-                  {% endfor %}
-                </select>
-              </label>
+              {% if object.kind == "device" %}
+                <input type="hidden" name="direction" value="outbound" />
+                <input type="hidden" name="relation_type" value="attached_to" />
+                <label>{{ t("device.attachment_parent") }}
+                  <select name="target_ref" required>
+                    {% for target in device_attachment_targets %}
+                      {% set target_ref = target.kind ~ ":" ~ target.id %}
+                      <option value="{{ target_ref }}" {% if relationship_form.target_ref == target_ref %}selected{% endif %}>{{ t("kind." ~ target.kind) }} · {{ target.label }} · {{ target.id }}</option>
+                    {% endfor %}
+                  </select>
+                </label>
+                {% if not device_attachment_targets %}<p class="meta">{{ t("device.no_attachment_targets") }}</p>{% endif %}
+                <label>{{ t("device.link_kind") }} <span class="field-optional">{{ t("form.optional") }}</span>
+                  <select name="link_kind">
+                    <option value="">{{ t("device.none_link_kind") }}</option>
+                    {% for link_kind in device_link_kinds %}
+                      <option value="{{ link_kind }}" {% if relationship_form.link_kind == link_kind %}selected{% endif %}>{{ t("device.link_kind." ~ link_kind) }}</option>
+                    {% endfor %}
+                  </select>
+                </label>
+                <label>{{ t("device.source_interface") }} <span class="field-optional">{{ t("form.optional") }}</span>
+                  <input name="source_interface" value="{{ relationship_form.source_interface or '' }}" maxlength="128" autocomplete="off" />
+                </label>
+                <label>{{ t("device.target_interface_or_port") }} <span class="field-optional">{{ t("form.optional") }}</span>
+                  <input name="target_interface_or_port" value="{{ relationship_form.target_interface_or_port or '' }}" maxlength="128" autocomplete="off" />
+                </label>
+                <label class="checkbox-label">
+                  <input type="checkbox" name="primary" value="true" {% if relationship_form.primary %}checked{% endif %} />
+                  <span>{{ t("device.primary_help") }}</span>
+                </label>
+                <label>{{ t("device.note") }} <span class="field-optional">{{ t("form.optional") }}</span>
+                  <textarea name="note" maxlength="512">{{ relationship_form.note or '' }}</textarea>
+                </label>
+              {% else %}
+                <input type="hidden" name="direction" value="{{ 'inbound' if object.kind == 'service' else 'outbound' }}" />
+                <input type="hidden" name="relation_type" value="hosts" />
+                <label>{{ t("relationship.target") }}
+                  <select name="target_ref" required>
+                    {% for target in relationship_targets %}
+                      <option value="{{ target.kind }}:{{ target.id }}" {% if object.kind == "service" and loop.first %}selected{% endif %}>{{ target.kind }} · {{ target.label }} · {{ target.id }}</option>
+                    {% endfor %}
+                  </select>
+                </label>
+              {% endif %}
               <div class="button-row">
-                <button type="submit">{{ t("relationship.save") }}</button>
+                <button type="submit" {% if object.kind == "device" and not device_attachment_targets %}disabled{% endif %}>{{ t("device.attach") if object.kind == "device" else t("relationship.save") }}</button>
                 <a class="button button-muted" href="{{ detail_href }}">{{ t("detail.cancel") }}</a>
               </div>
             </form>
