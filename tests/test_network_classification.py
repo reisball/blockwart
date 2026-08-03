@@ -4,6 +4,7 @@ import hashlib
 import json
 import sqlite3
 from pathlib import Path
+from urllib.parse import quote
 
 import pytest
 from sqlalchemy import create_engine, text
@@ -564,6 +565,42 @@ def test_network_classification_dry_run_preserves_live_wal_sidecars(
         } == before_hashes
 
 
+def test_network_classification_rejects_active_delete_journal_without_source_changes(
+    tmp_path: Path,
+    capsys,
+) -> None:
+    database_url, engine = _network_database(tmp_path)
+    engine.dispose()
+    database_path = tmp_path / "network-classification.sqlite3"
+    journal_path = database_path.with_name(f"{database_path.name}-journal")
+
+    with sqlite3.connect(database_path) as writer:
+        assert writer.execute("PRAGMA journal_mode=DELETE").fetchone() == ("delete",)
+        writer.execute("BEGIN IMMEDIATE")
+        writer.execute(
+            "UPDATE catalog_objects SET data_json = ? WHERE id = 'lan'",
+            ('{"schema_version":1,"network":{"category":"router"}}',),
+        )
+        assert journal_path.stat().st_size > 0
+        paths = (database_path, journal_path)
+        before_hashes = {
+            path: hashlib.sha256(path.read_bytes()).hexdigest() for path in paths
+        }
+        capsys.readouterr()
+
+        assert database_cli.main(["--database-url", database_url, "networks"]) == 1
+
+        assert "database_networks_error=failed" in capsys.readouterr().err
+        assert {
+            path: hashlib.sha256(path.read_bytes()).hexdigest() for path in paths
+        } == before_hashes
+        writer.rollback()
+        stored = writer.execute(
+            "SELECT data_json FROM catalog_objects WHERE id = 'lan'"
+        ).fetchone()[0]
+        assert json.loads(stored)["network"]["category"] == "segment"
+
+
 @pytest.mark.parametrize("mode", ["ro", "rw"])
 def test_network_classification_accepts_existing_sqlite_uri_url(
     tmp_path: Path,
@@ -604,6 +641,46 @@ def test_network_classification_accepts_existing_sqlite_uri_url(
         == 0
     )
     assert "database_networks_ok" in capsys.readouterr().out
+
+
+def test_network_classification_accepts_localhost_sqlite_uri(
+    tmp_path: Path,
+    capsys,
+) -> None:
+    _, engine = _network_database(tmp_path)
+    engine.dispose()
+    database_path = tmp_path / "network-classification.sqlite3"
+    encoded_path = quote(str(database_path), safe="/")
+    database_url = f"sqlite:///file://localhost{encoded_path}?mode=ro&uri=true"
+    capsys.readouterr()
+
+    assert database_cli.main(["--database-url", database_url, "networks"]) == 1
+
+    captured = capsys.readouterr()
+    assert "database_networks_error" in captured.out
+    assert "database_networks_error=failed" not in captured.err
+
+
+@pytest.mark.parametrize("mode", ["ro", "rw"])
+def test_network_classification_accepts_encoded_sqlite_uri_filename(
+    tmp_path: Path,
+    capsys,
+    mode: str,
+) -> None:
+    original_url, engine = _network_database(tmp_path)
+    engine.dispose()
+    original_path = Path(original_url.removeprefix("sqlite:///"))
+    database_path = tmp_path / "network ?#%.sqlite3"
+    original_path.rename(database_path)
+    encoded_path = quote(str(database_path), safe="/")
+    database_url = f"sqlite:///file:{encoded_path}?mode={mode}&uri=true"
+    capsys.readouterr()
+
+    assert database_cli.main(["--database-url", database_url, "networks"]) == 1
+
+    captured = capsys.readouterr()
+    assert "database_networks_error" in captured.out
+    assert "database_networks_error=failed" not in captured.err
 
 
 def test_network_classification_reads_from_non_writable_sqlite_directory(

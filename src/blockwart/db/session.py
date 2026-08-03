@@ -4,7 +4,7 @@ from collections.abc import Generator, Iterator
 from contextlib import contextmanager
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from urllib.parse import unquote
+from urllib.parse import unquote, urlsplit
 
 from sqlalchemy import create_engine, event, make_url
 from sqlalchemy.engine import Engine
@@ -76,7 +76,7 @@ def build_read_only_engine(database_url: str | None = None) -> Engine:
     ):
         source_path = _sqlite_database_path(str(parsed_url.database))
         snapshot_directory = TemporaryDirectory(prefix="blockwart-read-only-")
-        snapshot_path = Path(snapshot_directory.name) / source_path.name
+        snapshot_path = Path(snapshot_directory.name) / "snapshot.sqlite3"
         try:
             _copy_stable_sqlite_snapshot(source_path, snapshot_path)
         except Exception:
@@ -115,16 +115,25 @@ def build_read_only_engine(database_url: str | None = None) -> Engine:
 
 
 def _sqlite_database_path(database: str) -> Path:
-    path = database[5:] if database.lower().startswith("file:") else database
-    return Path(unquote(path))
+    if not database.lower().startswith("file:"):
+        return Path(database)
+    parsed_uri = urlsplit(database)
+    if parsed_uri.netloc and parsed_uri.netloc.lower() != "localhost":
+        raise ValueError("SQLite file URI authority must be empty or localhost")
+    return Path(unquote(parsed_uri.path))
 
 
 def _copy_stable_sqlite_snapshot(source_path: Path, snapshot_path: Path) -> None:
     source_wal_path = source_path.with_name(f"{source_path.name}-wal")
+    source_journal_path = source_path.with_name(f"{source_path.name}-journal")
     snapshot_wal_path = snapshot_path.with_name(f"{snapshot_path.name}-wal")
 
     for _attempt in range(3):
         try:
+            if source_journal_path.exists():
+                raise RuntimeError(
+                    "SQLite rollback-journal source requires recovery before inspection"
+                )
             before = _sqlite_snapshot_state(source_path, source_wal_path)
             shutil.copyfile(source_path, snapshot_path)
             if source_wal_path.exists():
@@ -134,6 +143,10 @@ def _copy_stable_sqlite_snapshot(source_path: Path, snapshot_path: Path) -> None
             source_hashes = _sqlite_snapshot_hashes(source_path, source_wal_path)
             snapshot_hashes = _sqlite_snapshot_hashes(snapshot_path, snapshot_wal_path)
             after = _sqlite_snapshot_state(source_path, source_wal_path)
+            if source_journal_path.exists():
+                raise RuntimeError(
+                    "SQLite rollback-journal source requires recovery before inspection"
+                )
         except FileNotFoundError:
             continue
         if before == after and source_hashes == snapshot_hashes:
