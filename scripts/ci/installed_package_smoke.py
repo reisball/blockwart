@@ -357,7 +357,7 @@ async def check_mcp(
                 {
                     "from_ref": "device:package-smoke-device",
                     "relation_type": "attached_to",
-                    "to_ref": "host:fabrik",
+                    "to_ref": "system:fabrik",
                     "metadata": {"link_kind": "zigbee", "primary": True},
                 }
             ]
@@ -368,7 +368,7 @@ async def check_mcp(
                     "if_match": str(attached_device_payload["etag"]),
                     "from_ref": "device:package-smoke-device",
                     "relation_type": "attached_to",
-                    "to_ref": "host:fabrik",
+                    "to_ref": "system:fabrik",
                 },
             )
             device_detached_payload = _tool_payload(device_detached)
