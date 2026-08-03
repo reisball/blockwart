@@ -7,6 +7,7 @@ from contextlib import contextmanager
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
+import blockwart.services.queries as queries_module
 from blockwart.api.deps import get_session
 from blockwart.db.session import transaction
 from blockwart.domain.auth import Permission, PrincipalContext, PrincipalType
@@ -317,19 +318,43 @@ def test_network_topology_reports_truncation_without_dangling_edges(
         assert topology["status"] == "incomplete"
         node_refs = {node["ref"] for node in topology["nodes"]}
         assert len(node_refs) <= 5
-        assert topology["paths"] == [
-            {
-                "refs": [
-                    "service:topology-service",
-                    "system:topology-system",
-                    "host:topology-host",
-                    "network:edge-switch",
-                    "network:core-router",
-                ],
-                "status": "complete",
-            }
-        ]
+        assert topology["paths"] == []
         assert all(
             edge["from_ref"] in node_refs and edge["to_ref"] in node_refs
             for edge in topology["edges"]
         )
+
+
+def test_network_topology_node_bound_stops_traversal(
+    alembic_session_factory,
+    unrestricted_read_access,
+    monkeypatch,
+) -> None:
+    terminal_lookups: list[str] = []
+    original_category_lookup = queries_module._network_category_for_ref
+
+    def record_category_lookup(ref, object_map):
+        terminal_lookups.append(ref)
+        return original_category_lookup(ref, object_map)
+
+    monkeypatch.setattr(
+        queries_module,
+        "_network_category_for_ref",
+        record_category_lookup,
+    )
+    with alembic_session_factory() as session:
+        with transaction(session):
+            _install_topology(session)
+        topology = query_network_topology(
+            session,
+            "topology-service",
+            unrestricted_read_access(session),
+            max_nodes=3,
+        )
+
+        assert topology is not None
+        assert topology["truncated"] is True
+        assert topology["status"] == "incomplete"
+        assert topology["paths"] == []
+        assert len(topology["nodes"]) == 3
+        assert terminal_lookups == []

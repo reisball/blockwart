@@ -668,6 +668,11 @@ def query_network_topology(
         nonlocal truncated
         if truncated and len(paths) >= max_paths:
             return
+        if network_ref not in included_refs:
+            if len(included_refs) >= max_nodes:
+                truncated = True
+                return
+            included_refs.add(network_ref)
         if network_ref in trail:
             append_path(refs, "incomplete")
             return

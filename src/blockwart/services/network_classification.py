@@ -10,7 +10,11 @@ import yaml
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from blockwart.domain.object_schema import NETWORK_CATEGORIES
+from blockwart.domain.object_schema import (
+    NETWORK_CATEGORIES,
+    ObjectSchemaError,
+    validate_object_data,
+)
 from blockwart.models import CatalogObject
 
 
@@ -66,7 +70,12 @@ def load_network_classification_evidence(
         raise NetworkClassificationError(
             "network mapping must contain only schema_version and networks"
         )
-    if payload.get("schema_version") != 1 or not isinstance(payload.get("networks"), list):
+    schema_version = payload.get("schema_version")
+    if (
+        type(schema_version) is not int
+        or schema_version != 1
+        or not isinstance(payload.get("networks"), list)
+    ):
         raise NetworkClassificationError("network mapping schema is invalid")
 
     evidence: dict[str, NetworkClassificationEvidence] = {}
@@ -148,6 +157,18 @@ def _classification_entry(
     except (TypeError, json.JSONDecodeError):
         raw_data = None
         blockers.append("invalid_data_json")
+
+    if isinstance(raw_data, Mapping):
+        try:
+            validate_object_data(
+                "network",
+                raw_data,
+                allow_legacy_network_without_category=True,
+            )
+        except ObjectSchemaError:
+            blockers.append("invalid_network_data")
+    elif raw_data is not None:
+        blockers.append("invalid_network_data")
 
     network = raw_data.get("network") if isinstance(raw_data, Mapping) else None
     raw_category = network.get("category") if isinstance(network, Mapping) else None
