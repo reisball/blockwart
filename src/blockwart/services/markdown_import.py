@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -26,6 +27,7 @@ from blockwart.services.catalog import (
     delete_relationship,
     upsert_object,
 )
+from blockwart.services.network_classification import NetworkClassificationEvidence
 from blockwart.services.seeds import SeedImportResult
 
 STATUS_MARKER_STATES = {
@@ -65,10 +67,19 @@ class MarkdownImportPlan:
     credential_reference_count: int
 
 
+class MarkdownImportNetworkError(ValueError):
+    """The reviewed mapping does not classify the exact imported Network set."""
+
+    def __init__(self, diagnostics: tuple[str, ...]) -> None:
+        super().__init__("Markdown import Network classification is incomplete")
+        self.diagnostics = diagnostics
+
+
 def build_tools_import_plan(
     tools_path: str | Path,
     *,
     references_root: str | Path | None = None,
+    network_evidence: Mapping[str, NetworkClassificationEvidence] | None = None,
 ) -> MarkdownImportPlan:
     path = Path(tools_path)
     references_base = Path(references_root) if references_root else path.parent
@@ -106,6 +117,7 @@ def build_tools_import_plan(
         source_references = _source_references(path, references_base, ref_cell)
         addresses = _addresses_from_cell(ip_port)
         ports = _ports_from_cell(ip_port)
+        documented_urls = _urls_from_cell(ip_port)
         system_ports = _system_ports(ports) if is_hosted_service else ports
         service_ports = _service_ports(ports) if is_hosted_service else ports
 
@@ -124,6 +136,7 @@ def build_tools_import_plan(
                 addresses,
                 system_ports,
                 [],
+                documented_urls,
             ),
             "import_notes": {
                 "tools_row_type": typ,
@@ -180,6 +193,7 @@ def build_tools_import_plan(
                         source_references=source_references,
                         access=access,
                         auth=auth,
+                        documented_urls=documented_urls,
                     ),
                 }
             )
@@ -202,6 +216,7 @@ def build_tools_import_plan(
             for system_ref in hosted_system_refs
         )
 
+    _apply_network_evidence(objects, network_evidence or {})
     _mark_unassigned_assets(objects, relationships)
     provenance = CatalogProvenance(
         source_type="import",
@@ -211,6 +226,7 @@ def build_tools_import_plan(
     ).model_dump()
     for obj in objects:
         obj["provenance"] = provenance
+        CatalogObjectIn.model_validate(obj)
     payload = {
         "schema_version": 1,
         "owner": "Kai + Zoe",
@@ -224,6 +240,46 @@ def build_tools_import_plan(
         object_count=len(objects),
         credential_reference_count=0,
     )
+
+
+def _apply_network_evidence(
+    objects: list[dict[str, Any]],
+    evidence: Mapping[str, NetworkClassificationEvidence],
+) -> None:
+    network_objects = {
+        str(obj["id"]): obj
+        for obj in objects
+        if obj.get("kind") == "network" and isinstance(obj.get("id"), str)
+    }
+    diagnostics = [
+        f"unknown_mapping_ref:network:{object_id}"
+        for object_id in sorted(set(evidence) - set(network_objects))
+    ]
+    for object_id, obj in sorted(network_objects.items()):
+        data = obj.get("data")
+        network = data.get("network") if isinstance(data, dict) else None
+        current_category = network.get("category") if isinstance(network, dict) else None
+        classification = evidence.get(object_id)
+        if classification is None and current_category is None:
+            diagnostics.append(f"missing_category_evidence:network:{object_id}")
+        elif (
+            classification is not None
+            and current_category is not None
+            and current_category != classification.target_category
+        ):
+            diagnostics.append(f"conflicting_category_evidence:network:{object_id}")
+    if diagnostics:
+        raise MarkdownImportNetworkError(tuple(diagnostics))
+
+    for object_id, obj in network_objects.items():
+        classification = evidence.get(object_id)
+        if classification is None:
+            continue
+        data = obj["data"]
+        data["network"]["category"] = classification.target_category
+        data["import_notes"]["network_category_evidence"] = (
+            classification.evidence_source
+        )
 
 
 def _mark_unassigned_assets(
@@ -257,9 +313,14 @@ def import_tools_markdown(
     tools_path: str | Path,
     *,
     references_root: str | Path | None = None,
+    network_evidence: Mapping[str, NetworkClassificationEvidence] | None = None,
 ) -> SeedImportResult:
     previously_covered_ids = active_owner_covered_object_ids(session)
-    plan = build_tools_import_plan(tools_path, references_root=references_root)
+    plan = build_tools_import_plan(
+        tools_path,
+        references_root=references_root,
+        network_evidence=network_evidence,
+    )
     objects = plan.payload["objects"]
     relationships = plan.payload["relationships"]
     if not isinstance(objects, list):
@@ -597,6 +658,7 @@ def _service_data(
     source_references: list[dict[str, str]],
     access: str,
     auth: str,
+    documented_urls: list[str],
 ) -> dict[str, Any]:
     data: dict[str, Any] = {
         "schema_version": 1,
@@ -609,6 +671,7 @@ def _service_data(
             addresses,
             ports,
             [],
+            documented_urls,
         ),
         "auth": {
             "mode": _auth_mode(_plain_text(auth or access)),
@@ -748,6 +811,15 @@ def _addresses_from_cell(value: str) -> list[dict[str, str]]:
     return addresses
 
 
+def _urls_from_cell(value: str) -> list[str]:
+    urls: list[str] = []
+    for raw_url in re.findall(r"https?://[^\s·`]+", value):
+        url = raw_url.rstrip(".,;)")
+        if url not in urls:
+            urls.append(url)
+    return urls
+
+
 def _ports_from_cell(value: str) -> list[dict[str, Any]]:
     ports = []
     seen = set()
@@ -868,6 +940,7 @@ def _access_methods(
     addresses: list[dict[str, str]],
     ports: list[dict[str, Any]],
     credential_references: list[str],
+    documented_urls: list[str],
 ) -> list[dict[str, Any]]:
     methods = []
     ip = addresses[0]["ip"] if addresses else ""
@@ -877,7 +950,14 @@ def _access_methods(
         if not text or text == "-":
             continue
         method_type = _method_type(text)
-        endpoint = _endpoint_for_method(method_type, ip, port_numbers)
+        endpoint = _endpoint_for_method(
+            method_type,
+            ip,
+            port_numbers,
+            documented_urls,
+        )
+        if not endpoint:
+            continue
         methods.append(
             {
                 "type": method_type,
@@ -899,7 +979,14 @@ def _method_type(value: str) -> str:
     return "other"
 
 
-def _endpoint_for_method(method_type: str, ip: str, ports: set[int]) -> str:
+def _endpoint_for_method(
+    method_type: str,
+    ip: str,
+    ports: set[int],
+    documented_urls: list[str],
+) -> str:
+    if documented_urls and method_type in {"web", "api", "other"}:
+        return documented_urls[0]
     if not ip:
         return ""
     if method_type == "ssh":

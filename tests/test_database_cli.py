@@ -226,6 +226,76 @@ def test_markdown_create_schema_uses_alembic(
     engine.dispose()
 
 
+def test_markdown_network_mapping_fails_before_schema_write_then_applies(
+    tmp_path: Path,
+    capsys,
+) -> None:
+    tools_path = tmp_path / "TOOLS.md"
+    tools_path.write_text(
+        "\n".join(
+            [
+                "| System | Typ | IP:Port | Status | Access | Auth | Nutzung | Ref | Skill |",
+                "|--------|-----|---------|--------|--------|------|---------|-----|-------|",
+                (
+                    "| Edge Router | Network | 192.0.2.1:443 | ✅ | Web | none | "
+                    "Pilot edge | [Details](references/edge.md) | - |"
+                ),
+            ]
+        ),
+        encoding="utf-8",
+    )
+    mapping_path = tmp_path / "network-mapping.yaml"
+    mapping_path.write_text(
+        "\n".join(
+            [
+                "schema_version: 1",
+                "networks:",
+                "  - object_id: edge-router",
+                "    target_category: router",
+                "    evidence_source: references/edge.md#role",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    database_path = tmp_path / "network-import.sqlite3"
+    database_url = f"sqlite:///{database_path}"
+    base_args = [
+        "--database-url",
+        database_url,
+        "--tools",
+        str(tools_path),
+        "--references-root",
+        str(tmp_path),
+        "--create-schema",
+        "--apply",
+    ]
+
+    assert import_markdown_cli.main(base_args) == 1
+    captured = capsys.readouterr()
+    assert not database_path.exists()
+    assert (
+        "markdown_import_network_diagnostic "
+        "code=missing_category_evidence:network:edge-router"
+    ) in captured.err
+    assert "markdown_import_error=network_classification_failed" in captured.err
+
+    assert (
+        import_markdown_cli.main(
+            [*base_args, "--network-mapping", str(mapping_path)]
+        )
+        == 0
+    )
+    assert "markdown_import_applied objects=1" in capsys.readouterr().out
+
+    engine = create_engine(database_url)
+    with engine.connect() as connection:
+        data_json = connection.execute(
+            text("SELECT data_json FROM catalog_objects WHERE id='edge-router'")
+        ).scalar_one()
+    engine.dispose()
+    assert json.loads(data_json)["network"]["category"] == "router"
+
+
 @pytest.mark.parametrize(
     ("cli_module", "argv", "expected_error"),
     [

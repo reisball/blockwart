@@ -7,7 +7,12 @@ from sqlalchemy.orm import Session
 from blockwart.models import CatalogObject, Relationship
 from blockwart.schemas.catalog import CatalogObjectIn
 from blockwart.services.catalog import upsert_object
-from blockwart.services.markdown_import import build_tools_import_plan, import_tools_markdown
+from blockwart.services.markdown_import import (
+    MarkdownImportNetworkError,
+    build_tools_import_plan,
+    import_tools_markdown,
+)
+from blockwart.services.network_classification import NetworkClassificationEvidence
 
 
 def _session(alembic_session_factory) -> Session:
@@ -400,3 +405,116 @@ def test_markdown_import_preserves_lifecycle_and_health_semantics(
         catalog_object["lifecycle"],
         catalog_object["health"],
     ) == expected
+
+
+def test_markdown_network_rows_require_exact_reviewed_category_evidence(
+    tmp_path: Path,
+) -> None:
+    tools_path = tmp_path / "TOOLS.md"
+    tools_path.write_text(
+        "\n".join(
+            [
+                "| System | Typ | IP:Port | Status | Access | Auth | Nutzung | Ref | Skill |",
+                "|--------|-----|---------|--------|--------|------|---------|-----|-------|",
+                (
+                    "| Edge Router | Network | 192.0.2.1:443 | ✅ | Web | none | "
+                    "Pilot edge | [Details](references/edge.md) | - |"
+                ),
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(MarkdownImportNetworkError) as exc_info:
+        build_tools_import_plan(tools_path, references_root=tmp_path)
+
+    assert exc_info.value.diagnostics == (
+        "missing_category_evidence:network:edge-router",
+    )
+
+
+def test_markdown_network_mapping_is_bound_to_the_exact_import_plan(
+    tmp_path: Path,
+) -> None:
+    tools_path = tmp_path / "TOOLS.md"
+    tools_path.write_text(
+        "\n".join(
+            [
+                "| System | Typ | IP:Port | Status | Access | Auth | Nutzung | Ref | Skill |",
+                "|--------|-----|---------|--------|--------|------|---------|-----|-------|",
+                (
+                    "| Edge Router | Network | 192.0.2.1:443 | ✅ | Web | none | "
+                    "Pilot edge | [Details](references/edge.md) | - |"
+                ),
+            ]
+        ),
+        encoding="utf-8",
+    )
+    evidence = {
+        "edge-router": NetworkClassificationEvidence(
+            object_id="edge-router",
+            target_category="router",
+            evidence_source="references/edge.md#role",
+        )
+    }
+
+    plan = build_tools_import_plan(
+        tools_path,
+        references_root=tmp_path,
+        network_evidence=evidence,
+    )
+    catalog_object = plan.payload["objects"][0]
+
+    assert catalog_object["data"]["network"]["category"] == "router"
+    assert catalog_object["data"]["import_notes"]["network_category_evidence"] == (
+        "references/edge.md#role"
+    )
+
+    with pytest.raises(MarkdownImportNetworkError) as exc_info:
+        build_tools_import_plan(
+            tools_path,
+            references_root=tmp_path,
+            network_evidence={
+                "unknown": NetworkClassificationEvidence(
+                    object_id="unknown",
+                    target_category="switch",
+                    evidence_source="references/edge.md#unknown",
+                )
+            },
+        )
+    assert exc_info.value.diagnostics == (
+        "unknown_mapping_ref:network:unknown",
+        "missing_category_evidence:network:edge-router",
+    )
+
+
+def test_markdown_import_uses_documented_urls_and_omits_unresolved_access(
+    tmp_path: Path,
+) -> None:
+    tools_path = tmp_path / "TOOLS.md"
+    tools_path.write_text(
+        "\n".join(
+            [
+                "| System | Typ | Ort | Status | Access/Auth | Nutzung | Ref |",
+                "|--------|-----|-----|--------|-------------|---------|-----|",
+                (
+                    "| Hosted API | External Service | https://example.invalid/api | ✅ | "
+                    "Web · REST API | Hosted API | - |"
+                ),
+                (
+                    "| Local Plugin | Gateway Plugin | Denkstube · ~/.local/plugin | ✅ | "
+                    "local config | Local plugin | - |"
+                ),
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    plan = build_tools_import_plan(tools_path, references_root=tmp_path)
+    objects = {item["id"]: item for item in plan.payload["objects"]}
+
+    assert {
+        method["endpoint"]
+        for method in objects["hosted-api"]["data"]["access_methods"]
+    } == {"https://example.invalid/api"}
+    assert objects["local-plugin"]["data"]["access_methods"] == []
