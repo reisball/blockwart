@@ -993,7 +993,7 @@ def test_catalog_tree_toggle_overrides_global_button_minimum_size(
     stylesheet_response = client.get("/static/explorer.css")
 
     assert catalog_response.status_code == 200
-    assert '/static/explorer.css?v=009"' in catalog_response.text
+    assert '/static/explorer.css?v=010"' in catalog_response.text
     assert stylesheet_response.status_code == 200
     tree_toggle_rule = re.search(
         r"\.tree-toggle\s*\{(?P<body>[^}]*)\}",
@@ -1262,6 +1262,90 @@ def test_relationship_add_form_is_hidden_behind_add_button(client: TestClient) -
     assert '<select name="relation_type"' not in form_html
     assert ">Richtung" not in form_html
     assert "<label>Relation" not in form_html
+
+
+def test_network_uplink_form_creates_and_replaces_metadata_through_commands(
+    client: TestClient,
+    session_factory,
+) -> None:
+    for object_id, category in (("ui-switch", "switch"), ("ui-router", "router")):
+        with session_factory() as session:
+            upsert_object(
+                session,
+                CatalogObjectIn(
+                    id=object_id,
+                    kind="network",
+                    label=object_id.replace("-", " ").title(),
+                    data={
+                        "schema_version": 1,
+                        "network": {"category": category},
+                    },
+                ),
+            )
+
+    form = client.get("/objects/ui-switch?edit=relationship-add")
+    assert form.status_code == 200
+    assert 'name="relation_type" value="uplinks_to"' in form.text
+    assert 'name="mode"' in form.text
+    assert "Ui Router" in form.text
+
+    created = client.post(
+        "/objects/ui-switch/relationships",
+        data={
+            "direction": "outbound",
+            "relation_type": "uplinks_to",
+            "target_ref": "network:ui-router",
+            "link_kind": "ethernet",
+            "mode": "trunk",
+            "source_interface": "eth0",
+            "target_interface_or_port": "port-1",
+            "primary": "true",
+            "note": "Primary lab uplink",
+        },
+        follow_redirects=False,
+    )
+    assert created.status_code == 303
+    assert created.headers["location"].endswith("notice=relationship-saved")
+
+    replaced = client.post(
+        "/objects/ui-switch/relationships",
+        data={
+            "direction": "outbound",
+            "relation_type": "uplinks_to",
+            "target_ref": "network:ui-router",
+            "link_kind": "ethernet",
+            "mode": "routed",
+            "source_interface": "eth1",
+            "target_interface_or_port": "wan",
+            "note": "Routed lab uplink",
+        },
+        follow_redirects=False,
+    )
+    assert replaced.status_code == 303
+
+    with session_factory() as session:
+        relationship = session.scalar(
+            select(Relationship).where(
+                Relationship.from_ref == "network:ui-switch",
+                Relationship.relation_type == "uplinks_to",
+                Relationship.to_ref == "network:ui-router",
+            )
+        )
+        actions = session.scalars(
+            select(AuditEvent.action)
+            .where(AuditEvent.object_id == "ui-switch")
+            .order_by(AuditEvent.id)
+        ).all()
+
+    assert relationship is not None
+    assert json.loads(relationship.metadata_json) == {
+        "link_kind": "ethernet",
+        "mode": "routed",
+        "note": "Routed lab uplink",
+        "source_interface": "eth1",
+        "target_interface_or_port": "wan",
+    }
+    assert actions[-2:] == ["relationship_create", "relationship_metadata_replace"]
 
 
 def test_create_object_form_redirects_to_detail(

@@ -557,6 +557,62 @@
             {% endif %}
         </section>
 
+        {% if network_topology %}
+          <section class="panel network-detail-panel">
+            <div class="panel-head">
+              <h2 class="section-title">{{ t("network_topology.detail_title") }}</h2>
+              <span class="badge network-status-{{ network_topology.status }}">{{ t("network_topology.status_" ~ network_topology.status) }}</span>
+            </div>
+            <p class="meta">
+              {% if network_topology.resolution %}
+                {{ t("network_topology.resolution_" ~ network_topology.resolution) }}
+                {% if network_topology.resolution_source_ref %} · <code>{{ network_topology.resolution_source_ref }}</code>{% endif %}
+              {% else %}
+                {{ t("network_topology.no_source") }}
+              {% endif %}
+              {% if network_topology.truncated %} · {{ t("network_topology.truncated") }}{% endif %}
+            </p>
+            {% if network_topology.paths %}
+              <div class="network-detail-paths">
+                {% for path in network_topology.paths %}
+                  <section class="network-path-card network-detail-path-card" aria-label="{{ t('network_topology.path_number', number=loop.index) }}">
+                    <div class="network-path-card-head">
+                      <strong>{{ t("network_topology.primary_path") if loop.first else t("network_topology.alternative_path", number=loop.index) }}</strong>
+                      <span class="badge network-status-{{ path.status }}">{{ t("network_topology.status_" ~ path.status) }}</span>
+                    </div>
+                    <ol class="network-detail-path">
+                      {% for row in path.rows %}
+                        <li>
+                          {% if row.relation_type %}
+                            <div class="network-path-edge">
+                              <span aria-hidden="true">↓</span>
+                              <strong>{{ t("relationship_type." ~ row.relation_type) }}</strong>
+                              {% if row.metadata.link_kind %}<span class="badge">{{ t("device.link_kind") }}: {{ t("device.link_kind." ~ row.metadata.link_kind) }}</span>{% endif %}
+                              {% if row.metadata.mode %}<span class="badge">{{ t("network_topology.mode") }}: {{ t("network_topology.link_mode_" ~ row.metadata.mode) }}</span>{% endif %}
+                              {% if row.metadata.primary %}<span class="badge relationship-primary">★ {{ t("device.primary") }}</span>{% endif %}
+                              {% if row.metadata.source_interface %}<span class="badge">{{ t("device.source_interface") }}: {{ row.metadata.source_interface }}</span>{% endif %}
+                              {% if row.metadata.target_interface_or_port %}<span class="badge">{{ t("device.target_interface_or_port") }}: {{ row.metadata.target_interface_or_port }}</span>{% endif %}
+                              {% if row.metadata.note %}<span class="network-link-note">{{ row.metadata.note }}</span>{% endif %}
+                            </div>
+                          {% endif %}
+                          <div class="network-detail-node">
+                            <span class="node-icon {{ row.node.kind }}">{{ node_icon(row.node.kind) }}</span>
+                            <strong>{{ row.node.label }}</strong>
+                            <code>{{ row.node.ref }}</code>
+                            {% if row.node.category %}<span class="network-category-badge">{{ t("network_category." ~ row.node.category) }}</span>{% endif %}
+                          </div>
+                        </li>
+                      {% endfor %}
+                    </ol>
+                  </section>
+                {% endfor %}
+              </div>
+            {% else %}
+              <p class="meta">{{ t("network_topology.no_path") }}</p>
+            {% endif %}
+          </section>
+        {% endif %}
+
         <section class="panel">
             <div class="panel-head">
               <h2 class="section-title">{{ t("panel.access") }}</h2>
@@ -847,6 +903,7 @@
                     <a href="/objects/{{ relationship.other_id }}?{{ detail_query_string }}">{{ relationship.other_label }}</a>
                     <span class="meta">{{ relationship.other_ref }}</span>
                     {% if relationship.metadata.link_kind %}<span class="badge">{{ t("device.link_kind") }}: {{ t("device.link_kind." ~ relationship.metadata.link_kind) }}</span>{% endif %}
+                    {% if relationship.metadata.mode %}<span class="badge">{{ t("network_topology.mode") }}: {{ t("network_topology.link_mode_" ~ relationship.metadata.mode) }}</span>{% endif %}
                     {% if relationship.metadata.primary %}<span class="badge relationship-primary">★ {{ t("device.primary") }}</span>{% endif %}
                     {% if relationship.metadata.source_interface %}<span class="badge">{{ t("device.source_interface") }}: {{ relationship.metadata.source_interface }}</span>{% endif %}
                     {% if relationship.metadata.target_interface_or_port %}<span class="badge">{{ t("device.target_interface_or_port") }}: {{ relationship.metadata.target_interface_or_port }}</span>{% endif %}
@@ -911,6 +968,47 @@
                 <label>{{ t("device.note") }} <span class="field-optional">{{ t("form.optional") }}</span>
                   <textarea name="note" maxlength="512">{{ relationship_form.note or '' }}</textarea>
                 </label>
+              {% elif can_edit_network_links %}
+                <input type="hidden" name="direction" value="outbound" />
+                <input type="hidden" name="relation_type" value="uplinks_to" />
+                <label>{{ t("network_topology.uplink_target") }}
+                  <select name="target_ref" required>
+                    {% for target in network_uplink_targets %}
+                      {% set target_ref = target.kind ~ ":" ~ target.id %}
+                      <option value="{{ target_ref }}" {% if relationship_form.target_ref == target_ref %}selected{% endif %}>{{ target.label }} · {{ target.id }}</option>
+                    {% endfor %}
+                  </select>
+                </label>
+                {% if not network_uplink_targets %}<p class="meta">{{ t("network_topology.no_uplink_targets") }}</p>{% endif %}
+                <label>{{ t("device.link_kind") }} <span class="field-optional">{{ t("form.optional") }}</span>
+                  <select name="link_kind">
+                    <option value="">{{ t("device.none_link_kind") }}</option>
+                    {% for link_kind in device_link_kinds %}
+                      <option value="{{ link_kind }}" {% if relationship_form.link_kind == link_kind %}selected{% endif %}>{{ t("device.link_kind." ~ link_kind) }}</option>
+                    {% endfor %}
+                  </select>
+                </label>
+                <label>{{ t("network_topology.mode") }} <span class="field-optional">{{ t("form.optional") }}</span>
+                  <select name="mode">
+                    <option value="">{{ t("network_topology.none_mode") }}</option>
+                    {% for link_mode in network_link_modes %}
+                      <option value="{{ link_mode }}" {% if relationship_form.mode == link_mode %}selected{% endif %}>{{ t("network_topology.link_mode_" ~ link_mode) }}</option>
+                    {% endfor %}
+                  </select>
+                </label>
+                <label>{{ t("device.source_interface") }} <span class="field-optional">{{ t("form.optional") }}</span>
+                  <input name="source_interface" value="{{ relationship_form.source_interface or '' }}" maxlength="128" autocomplete="off" />
+                </label>
+                <label>{{ t("device.target_interface_or_port") }} <span class="field-optional">{{ t("form.optional") }}</span>
+                  <input name="target_interface_or_port" value="{{ relationship_form.target_interface_or_port or '' }}" maxlength="128" autocomplete="off" />
+                </label>
+                <label class="checkbox-label">
+                  <input type="checkbox" name="primary" value="true" {% if relationship_form.primary %}checked{% endif %} />
+                  <span>{{ t("network_topology.primary_help") }}</span>
+                </label>
+                <label>{{ t("device.note") }} <span class="field-optional">{{ t("form.optional") }}</span>
+                  <textarea name="note" maxlength="512">{{ relationship_form.note or '' }}</textarea>
+                </label>
               {% else %}
                 <input type="hidden" name="direction" value="{{ 'inbound' if object.kind == 'service' else 'outbound' }}" />
                 <input type="hidden" name="relation_type" value="hosts" />
@@ -923,7 +1021,7 @@
                 </label>
               {% endif %}
               <div class="button-row">
-                <button type="submit" {% if object.kind == "device" and not device_attachment_targets %}disabled{% endif %}>{{ t("device.attach") if object.kind == "device" else t("relationship.save") }}</button>
+                <button type="submit" {% if object.kind == "device" and not device_attachment_targets %}disabled{% elif can_edit_network_links and not network_uplink_targets %}disabled{% endif %}>{{ t("device.attach") if object.kind == "device" else t("relationship.save") }}</button>
                 <a class="button button-muted" href="{{ detail_href }}">{{ t("detail.cancel") }}</a>
               </div>
             </form>

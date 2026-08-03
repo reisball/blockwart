@@ -15,12 +15,13 @@ from sqlalchemy.orm import Session
 
 from blockwart.api.deps import get_session
 from blockwart.domain.auth import GrantScope, Permission, Role
-from blockwart.domain.object_schema import DEVICE_CATEGORIES
+from blockwart.domain.object_schema import DEVICE_CATEGORIES, NETWORK_CATEGORIES
 from blockwart.domain.placement import PlacementError
 from blockwart.domain.relationships import (
     LINK_KINDS,
     NETWORK_DEVICE_CATEGORIES,
     RELATIONSHIP_TYPES,
+    UPLINK_MODES,
     RelationshipIntegrityError,
 )
 from blockwart.domain.security import find_secret_violations
@@ -65,6 +66,7 @@ from blockwart.services.queries import (
     query_catalog_browse,
     query_catalog_detail,
     query_device_graph,
+    query_network_topology,
 )
 from blockwart.ui.i18n import translation_context
 from blockwart.ui.paths import TEMPLATE_DIR
@@ -97,6 +99,7 @@ NETWORK_ENDPOINT_EDIT_KINDS = {"host", "system", "network", "service"}
 SERVICE_INFORMATION_OBJECT_KINDS = {"service"}
 ENDPOINT_TYPES = ENDPOINT_TYPE_OPTIONS
 DEVICE_LINK_KINDS = tuple(sorted(LINK_KINDS))
+NETWORK_LINK_MODES = tuple(sorted(UPLINK_MODES))
 
 
 def _metadata_timestamp(value: str | None, translator: Any) -> str:
@@ -250,6 +253,9 @@ def _index_template_context(
     selected_asset_ref_override: str = "",
     detail_mode: bool = False,
     detail_query_string: str = "",
+    topology_mode: str = "placement",
+    network_category: str = "",
+    include_inherited_services: bool = False,
 ) -> dict[str, Any]:
     current_access = read_access_from_request(request)
     i18n = translation_context(request)
@@ -296,12 +302,27 @@ def _index_template_context(
         for target in create_parents
         if _supports_device_attachment_parent(target)
     }
+    default_detail_params = [
+        ("view", view),
+        ("q", q),
+        ("kind", kind),
+    ]
+    if view == "topology" and topology_mode == "network":
+        default_detail_params.append(("topology_mode", topology_mode))
+        if network_category:
+            default_detail_params.append(("network_category", network_category))
+        if include_inherited_services:
+            default_detail_params.append(("services", "1"))
     return {
         "title": "Blockwart",
         "objects": read_model.objects,
         "q": q,
         "kind": kind,
         "view": view,
+        "topology_mode": topology_mode,
+        "network_category": network_category,
+        "network_categories": tuple(sorted(NETWORK_CATEGORIES)),
+        "include_inherited_services": include_inherited_services,
         "is_filtered": bool(q or kind),
         "object_kinds": OBJECT_KINDS,
         "object_statuses": OBJECT_STATUSES_UI,
@@ -337,13 +358,7 @@ def _index_template_context(
         "selected_asset_ref": selected_asset_ref,
         "detail_mode": detail_mode,
         "detail_query_string": detail_query_string
-        or urlencode(
-            [
-                ("view", view),
-                ("q", q),
-                ("kind", kind),
-            ]
-        ),
+        or urlencode(default_detail_params),
         "unassigned_count": (
             len(explorer["standalone_systems"])
             + len(explorer["standalone_services"])
@@ -403,14 +418,29 @@ def index(
     kind: str = "",
     create: str = "",
     view: str = "catalog",
+    topology_mode: str = "placement",
+    network_category: str = "",
+    services: str = "",
 ):
     normalized_kind = kind if kind in OBJECT_KINDS else ""
     selected_view = view if view in {"catalog", "topology"} else "catalog"
+    selected_topology_mode = (
+        topology_mode if topology_mode in {"placement", "network"} else "placement"
+    )
+    selected_network_category = (
+        network_category if network_category in NETWORK_CATEGORIES else ""
+    )
+    include_inherited_services = services in {"1", "true"}
     read_model = query_catalog_browse(
         session,
         read_access_from_request(request),
         query=q,
         kind=normalized_kind or None,
+        include_network_topology=(
+            selected_view == "topology" and selected_topology_mode == "network"
+        ),
+        include_inherited_services=include_inherited_services,
+        network_category=selected_network_category or None,
     )
     create_enabled = any(
         Permission.CREATE_CHILD in target.capabilities
@@ -429,6 +459,9 @@ def index(
             error=None,
             show_create_form=create_enabled and create == "1",
             can_write_enabled=False,
+            topology_mode=selected_topology_mode,
+            network_category=selected_network_category,
+            include_inherited_services=include_inherited_services,
         ),
     )
 
@@ -486,6 +519,7 @@ def _detail_template_context(
     principal_results: tuple[Any, ...],
     principal_query: str,
     device_graph: Mapping[str, Any] | None = None,
+    network_topology: Mapping[str, Any] | None = None,
     relationship_form: Mapping[str, Any] | None = None,
     data_json_override: str | None = None,
     form_rows: Mapping[str, list[Mapping[str, Any]]] | None = None,
@@ -611,6 +645,14 @@ def _detail_template_context(
             if _supports_device_attachment_parent(target)
         ],
         "device_link_kinds": DEVICE_LINK_KINDS,
+        "network_link_modes": NETWORK_LINK_MODES,
+        "network_topology": _network_topology_display(network_topology),
+        "network_uplink_targets": [
+            target
+            for target in read_model.relationship_targets
+            if _is_network_device(target)
+        ],
+        "can_edit_network_links": _is_network_device(catalog_object),
         "relationship_form": dict(relationship_form or {}),
         "network_address_rows": network_address_rows,
         "port_rows": port_rows,
@@ -689,6 +731,22 @@ def _detail_navigation_context(
     view = view_value if view_value in {"catalog", "topology"} else "catalog"
     kind_value = request.query_params.get("kind", "")
     kind = kind_value if kind_value in OBJECT_KINDS else ""
+    topology_mode_value = request.query_params.get("topology_mode", "")
+    topology_mode = (
+        topology_mode_value
+        if topology_mode_value in {"placement", "network"}
+        else "placement"
+    )
+    network_category_value = request.query_params.get("network_category", "")
+    network_category = (
+        network_category_value
+        if network_category_value in NETWORK_CATEGORIES
+        else ""
+    )
+    include_inherited_services = request.query_params.get("services", "") in {
+        "1",
+        "true",
+    }
     query = request.query_params.get("q", "")[:200]
     state_value = request.query_params.get("return_state", "")
     return_state = (
@@ -701,6 +759,12 @@ def _detail_navigation_context(
         ("q", query),
         ("kind", kind),
     ]
+    if view == "topology" and topology_mode == "network":
+        detail_params.append(("topology_mode", topology_mode))
+        if network_category:
+            detail_params.append(("network_category", network_category))
+        if include_inherited_services:
+            detail_params.append(("services", "1"))
     if return_state:
         detail_params.append(("return_state", return_state))
     detail_query_string = urlencode(detail_params)
@@ -710,6 +774,12 @@ def _detail_navigation_context(
         ("q", query),
         ("kind", kind),
     ]
+    if view == "topology" and topology_mode == "network":
+        return_params.append(("topology_mode", topology_mode))
+        if network_category:
+            return_params.append(("network_category", network_category))
+        if include_inherited_services:
+            return_params.append(("services", "1"))
     if return_state:
         return_params.append(("restore", return_state))
     return_query_string = urlencode(return_params)
@@ -728,6 +798,9 @@ def _detail_navigation_context(
         "view": view,
         "q": query,
         "kind": kind,
+        "topology_mode": topology_mode,
+        "network_category": network_category,
+        "include_inherited_services": include_inherited_services,
         "return_state": return_state,
         "detail_query_string": detail_query_string,
         "detail_href": detail_href,
@@ -778,6 +851,11 @@ def _render_object_detail(
     if detail_read_model is None:
         raise HTTPException(status_code=404, detail="Catalog object not found")
     device_graph = query_device_graph(
+        session,
+        object_id,
+        access,
+    )
+    network_topology = query_network_topology(
         session,
         object_id,
         access,
@@ -857,6 +935,11 @@ def _render_object_detail(
         selected_asset_ref_override=object_ref,
         detail_mode=True,
         detail_query_string=str(navigation["detail_query_string"]),
+        topology_mode=str(navigation["topology_mode"]),
+        network_category=str(navigation["network_category"]),
+        include_inherited_services=bool(
+            navigation["include_inherited_services"]
+        ),
     )
     context.update(
         _detail_template_context(
@@ -873,6 +956,7 @@ def _render_object_detail(
             principal_results=principal_results,
             principal_query=principal_query,
             device_graph=device_graph,
+            network_topology=network_topology,
             relationship_form=relationship_form,
             data_json_override=data_json_override,
             form_rows=form_rows,
@@ -1315,6 +1399,7 @@ def save_relationship(
     source_interface: Annotated[str, Form(max_length=128)] = "",
     target_interface_or_port: Annotated[str, Form(max_length=128)] = "",
     link_kind: Annotated[str, Form(max_length=32)] = "",
+    mode: Annotated[str, Form(max_length=32)] = "",
     primary: Annotated[str | None, Form()] = None,
     note: Annotated[str, Form(max_length=512)] = "",
 ):
@@ -1348,6 +1433,7 @@ def save_relationship(
             source_interface=source_interface,
             target_interface_or_port=target_interface_or_port,
             link_kind=link_kind,
+            mode=mode,
             primary=primary,
             note=note,
         )
@@ -1388,6 +1474,7 @@ def save_relationship(
                 "source_interface": source_interface,
                 "target_interface_or_port": target_interface_or_port,
                 "link_kind": link_kind,
+                "mode": mode,
                 "primary": primary is not None,
                 "note": note,
             },
@@ -2672,6 +2759,10 @@ def _device_summary(data: Mapping[str, Any]) -> dict[str, str]:
 def _supports_device_attachment_parent(catalog_object: Any) -> bool:
     if catalog_object.kind in {"host", "system", DEVICE_OBJECT_KIND}:
         return True
+    return _is_network_device(catalog_object)
+
+
+def _is_network_device(catalog_object: Any) -> bool:
     if catalog_object.kind != "network":
         return False
     data = getattr(catalog_object, "data", None)
@@ -2741,10 +2832,11 @@ def _relationship_metadata_from_form(
     source_interface: str,
     target_interface_or_port: str,
     link_kind: str,
+    mode: str,
     primary: str | None,
     note: str,
 ) -> dict[str, object]:
-    if relation_type != ATTACHMENT_RELATION_TYPE:
+    if relation_type not in {ATTACHMENT_RELATION_TYPE, "uplinks_to"}:
         return {}
     if primary is not None and primary not in {"1", "on", "true"}:
         raise ValueError("Invalid primary attachment value")
@@ -2759,6 +2851,8 @@ def _relationship_metadata_from_form(
             metadata[key] = cleaned
     if primary is not None:
         metadata["primary"] = True
+    if relation_type == "uplinks_to" and (clean_mode := mode.strip()):
+        metadata["mode"] = clean_mode
     return metadata
 
 
@@ -2828,6 +2922,59 @@ def _device_chain_rows(
     for remaining_ref in sorted(set(node_by_ref) - visited, key=node_key):
         add_branch(remaining_ref, 0)
     return rows
+
+
+def _network_topology_display(
+    topology: Mapping[str, Any] | None,
+) -> dict[str, Any] | None:
+    if not topology:
+        return None
+    node_by_ref = {
+        str(node.get("ref")): dict(node)
+        for node in topology.get("nodes", [])
+        if isinstance(node, Mapping) and node.get("ref")
+    }
+    edge_by_pair = {
+        frozenset((str(edge.get("from_ref")), str(edge.get("to_ref")))): edge
+        for edge in topology.get("edges", [])
+        if isinstance(edge, Mapping)
+        and edge.get("from_ref")
+        and edge.get("to_ref")
+    }
+    paths: list[dict[str, Any]] = []
+    for path in topology.get("paths", []):
+        if not isinstance(path, Mapping):
+            continue
+        refs = path.get("refs")
+        if not isinstance(refs, list):
+            continue
+        rows: list[dict[str, Any]] = []
+        previous_ref = ""
+        for raw_ref in reversed(refs):
+            ref = str(raw_ref)
+            node = node_by_ref.get(ref)
+            if node is None:
+                continue
+            edge = edge_by_pair.get(frozenset((previous_ref, ref))) if previous_ref else None
+            rows.append(
+                {
+                    "node": node,
+                    "relation_type": str(edge.get("relation_type") or "") if edge else "",
+                    "metadata": dict(edge.get("metadata") or {}) if edge else {},
+                }
+            )
+            previous_ref = ref
+        if rows:
+            paths.append({"rows": rows, "status": str(path.get("status") or "incomplete")})
+    return {
+        "object_ref": str(topology.get("object_ref") or ""),
+        "paths": paths,
+        "resolution": topology.get("resolution"),
+        "resolution_source": topology.get("resolution_source"),
+        "resolution_source_ref": topology.get("resolution_source_ref"),
+        "status": str(topology.get("status") or "unconnected"),
+        "truncated": bool(topology.get("truncated")),
+    }
 
 
 def _relationship_notice(request: Request) -> str | None:
