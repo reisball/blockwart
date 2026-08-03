@@ -12,7 +12,10 @@ from sqlalchemy.orm import Session
 from blockwart.domain.asset_state import AssetHealth, AssetLifecycle
 from blockwart.domain.auth import ObjectVisibility, Permission
 from blockwart.domain.placement import PlacementGraph
-from blockwart.domain.relationships import relationship_metadata
+from blockwart.domain.relationships import (
+    NETWORK_DEVICE_CATEGORIES,
+    relationship_metadata,
+)
 from blockwart.domain.ui_schema import get_ui_schema
 from blockwart.models import Relationship
 from blockwart.schemas.catalog import (
@@ -98,6 +101,39 @@ class DeviceGraphReadModel(TypedDict):
     edges: list[RelationshipReadModel]
     upstream_path: list[str]
     downstream_refs: list[str]
+
+
+class NetworkTopologyNodeReadModel(TypedDict):
+    ref: str
+    id: str
+    kind: str
+    label: str
+    visibility: Literal["stub", "detail"]
+    capabilities: list[Permission]
+    status: NotRequired[str]
+    data: NotRequired[dict[str, Any]]
+    category: NotRequired[str]
+    manufacturer: NotRequired[str]
+    model: NotRequired[str]
+    location: NotRequired[str]
+
+
+class NetworkTopologyPathReadModel(TypedDict):
+    refs: list[str]
+    status: Literal["complete", "incomplete"]
+
+
+class NetworkTopologyReadModel(TypedDict):
+    object_ref: str
+    nodes: list[NetworkTopologyNodeReadModel]
+    edges: list[RelationshipReadModel]
+    paths: list[NetworkTopologyPathReadModel]
+    resolution: Literal["direct", "inherited"] | None
+    resolution_source: Literal["host", "system", "placement_host", "network"] | None
+    resolution_source_ref: str | None
+    placement_path: list[str]
+    status: Literal["complete", "incomplete", "unconnected"]
+    truncated: bool
 
 
 class RelationshipCardReadModel(RelatedRelationshipReadModel):
@@ -529,6 +565,284 @@ def query_device_graph(
         "upstream_path": upstream_path,
         "downstream_refs": downstream_refs,
     }
+
+
+def query_network_topology(
+    session: Session,
+    object_id: str,
+    access: ReadAccess,
+    *,
+    max_paths: int = 256,
+    max_nodes: int = 512,
+) -> NetworkTopologyReadModel | None:
+    """Resolve the policy-projected network path for one readable anchor.
+
+    Placement is used only to find the inherited attachment source. Network
+    edges have already been filtered by ``_list_relationships`` and therefore
+    require ``read`` on both endpoints. A discover-only anchor is concealed.
+    """
+    all_objects = sort_for_browse(list_catalog_objects(session, access))
+    catalog_object = next(
+        (candidate for candidate in all_objects if candidate.id == object_id),
+        None,
+    )
+    if (
+        catalog_object is None
+        or catalog_object.visibility != ObjectVisibility.DETAIL
+    ):
+        return None
+    if max_paths < 1 or max_nodes < 1:
+        raise ValueError("network topology limits must be positive")
+
+    object_map: dict[str, CatalogObjectReadOut] = {
+        f"{candidate.kind}:{candidate.id}": candidate
+        for candidate in all_objects
+    }
+    relationships = _list_relationships(session, access)
+    placement_graph = PlacementGraph(object_map.values(), relationships)
+    current_ref = f"{catalog_object.kind}:{catalog_object.id}"
+    placement_path = placement_graph.parent_path_refs(current_ref)
+    attached_edges = [
+        edge
+        for edge in relationships
+        if edge["relation_type"] == "attached_to"
+    ]
+    attached_by_source: dict[str, list[RelationshipReadModel]] = {}
+    for edge in attached_edges:
+        attached_by_source.setdefault(edge["from_ref"], []).append(edge)
+    for edges in attached_by_source.values():
+        edges.sort(key=_network_edge_sort_key)
+
+    (
+        resolution,
+        resolution_source,
+        resolution_source_ref,
+        prefix_refs,
+        start_edges,
+    ) = _network_start(
+        catalog_object,
+        current_ref=current_ref,
+        placement_path=placement_path,
+        attached_by_source=attached_by_source,
+        object_map=object_map,
+    )
+    prefix_truncated = len(prefix_refs) > max_nodes
+    if prefix_truncated:
+        prefix_refs = prefix_refs[:max_nodes]
+
+    edge_set: dict[tuple[str, str, str], RelationshipReadModel] = {}
+    prefix_edge_keys = {
+        (edge["from_ref"], edge["relation_type"], edge["to_ref"])
+        for edge in relationships
+        if edge["relation_type"] == "hosts"
+        and edge["from_ref"] in prefix_refs
+        and edge["to_ref"] in prefix_refs
+    }
+    for edge in relationships:
+        key = (edge["from_ref"], edge["relation_type"], edge["to_ref"])
+        if key in prefix_edge_keys:
+            edge_set[key] = edge
+
+    uplinks_by_source: dict[str, list[RelationshipReadModel]] = {}
+    for edge in relationships:
+        if edge["relation_type"] != "uplinks_to":
+            continue
+        uplinks_by_source.setdefault(edge["from_ref"], []).append(edge)
+    for edges in uplinks_by_source.values():
+        edges.sort(key=_network_edge_sort_key)
+
+    paths: list[NetworkTopologyPathReadModel] = []
+    included_refs = set(prefix_refs)
+    truncated = prefix_truncated
+
+    def append_path(refs: list[str], path_status: Literal["complete", "incomplete"]) -> None:
+        nonlocal truncated
+        if len(paths) >= max_paths:
+            truncated = True
+            return
+        new_refs = [ref for ref in refs if ref not in included_refs]
+        if len(included_refs) + len(new_refs) > max_nodes:
+            truncated = True
+            return
+        included_refs.update(new_refs)
+        paths.append({"refs": refs, "status": path_status})
+
+    def walk_network(network_ref: str, refs: list[str], trail: set[str]) -> None:
+        nonlocal truncated
+        if truncated and len(paths) >= max_paths:
+            return
+        if network_ref not in included_refs:
+            if len(included_refs) >= max_nodes:
+                truncated = True
+                return
+            included_refs.add(network_ref)
+        if network_ref in trail:
+            append_path(refs, "incomplete")
+            return
+        outgoing = uplinks_by_source.get(network_ref, [])
+        if not outgoing:
+            category = _network_category_for_ref(network_ref, object_map)
+            append_path(
+                refs,
+                "complete" if category in {"router", "gateway"} else "incomplete",
+            )
+            return
+        if len(included_refs) >= max_nodes:
+            truncated = True
+            return
+        next_trail = {*trail, network_ref}
+        for edge in outgoing:
+            if len(paths) >= max_paths:
+                truncated = True
+                break
+            if (
+                edge["to_ref"] not in included_refs
+                and len(included_refs) >= max_nodes
+            ):
+                truncated = True
+                break
+            key = (edge["from_ref"], edge["relation_type"], edge["to_ref"])
+            edge_set[key] = edge
+            walk_network(edge["to_ref"], [*refs, edge["to_ref"]], next_trail)
+
+    if not prefix_truncated:
+        if resolution_source == "network" and resolution_source_ref is not None:
+            included_refs.add(resolution_source_ref)
+            walk_network(resolution_source_ref, prefix_refs, set())
+        else:
+            for edge in start_edges:
+                key = (edge["from_ref"], edge["relation_type"], edge["to_ref"])
+                edge_set[key] = edge
+                walk_network(edge["to_ref"], [*prefix_refs, edge["to_ref"]], set())
+
+    if truncated or any(path["status"] == "incomplete" for path in paths):
+        overall_status = "incomplete"
+    elif not paths:
+        overall_status: Literal["complete", "incomplete", "unconnected"] = "unconnected"
+    else:
+        overall_status = "complete"
+
+    projected_placement_path = [
+        ref for ref in placement_path if ref in included_refs
+    ]
+    if (
+        resolution_source_ref is not None
+        and resolution_source_ref not in included_refs
+    ):
+        resolution = None
+        resolution_source = None
+        resolution_source_ref = None
+
+    return {
+        "object_ref": current_ref,
+        "nodes": [
+            _network_topology_node(ref, object_map.get(ref))
+            for ref in sorted(included_refs)
+        ],
+        "edges": sorted(
+            (
+                edge
+                for edge in edge_set.values()
+                if edge["from_ref"] in included_refs
+                and edge["to_ref"] in included_refs
+            ),
+            key=_network_edge_sort_key,
+        ),
+        "paths": paths,
+        "resolution": resolution,
+        "resolution_source": resolution_source,
+        "resolution_source_ref": resolution_source_ref,
+        "placement_path": projected_placement_path,
+        "status": overall_status,
+        "truncated": truncated,
+    }
+
+
+def _network_start(
+    catalog_object: CatalogObjectReadOut,
+    *,
+    current_ref: str,
+    placement_path: list[str],
+    attached_by_source: dict[str, list[RelationshipReadModel]],
+    object_map: dict[str, CatalogObjectReadOut],
+) -> tuple[
+    Literal["direct", "inherited"] | None,
+    Literal["host", "system", "placement_host", "network"] | None,
+    str | None,
+    list[str],
+    list[RelationshipReadModel],
+]:
+    if catalog_object.kind == "network":
+        category = _network_category_for_ref(current_ref, object_map)
+        if category in NETWORK_DEVICE_CATEGORIES:
+            return "direct", "network", current_ref, [current_ref], []
+        return None, None, None, [current_ref], []
+
+    host_ref = next(
+        (ref for ref in reversed(placement_path) if ref.startswith("host:")),
+        None,
+    )
+    system_ref = next(
+        (ref for ref in reversed(placement_path) if ref.startswith("system:")),
+        None,
+    )
+
+    source_ref: str | None = None
+    resolution: Literal["direct", "inherited"] | None = None
+    source: Literal["host", "system", "placement_host", "network"] | None = None
+    if catalog_object.kind == "host":
+        source_ref, resolution, source = current_ref, "direct", "host"
+    elif catalog_object.kind == "system":
+        if attached_by_source.get(current_ref):
+            source_ref, resolution, source = current_ref, "direct", "system"
+        elif host_ref is not None:
+            source_ref, resolution, source = host_ref, "inherited", "placement_host"
+    elif catalog_object.kind == "service":
+        if system_ref is not None and attached_by_source.get(system_ref):
+            source_ref, resolution, source = system_ref, "inherited", "system"
+        elif host_ref is not None:
+            source_ref, resolution, source = host_ref, "inherited", "placement_host"
+
+    prefix_refs = [current_ref]
+    if source_ref is not None and source_ref != current_ref:
+        reverse_placement = list(reversed(placement_path))
+        for ref in reverse_placement:
+            prefix_refs.append(ref)
+            if ref == source_ref:
+                break
+    return (
+        resolution,
+        source,
+        source_ref,
+        prefix_refs,
+        attached_by_source.get(source_ref, []) if source_ref is not None else [],
+    )
+
+
+def _network_edge_sort_key(edge: RelationshipReadModel) -> tuple[bool, str, str, str, str]:
+    return (
+        edge["metadata"].get("primary") is not True,
+        edge["from_ref"],
+        edge["to_ref"],
+        edge["relation_type"],
+        json.dumps(edge["metadata"], sort_keys=True, separators=(",", ":")),
+    )
+
+
+def _network_category_for_ref(
+    ref: str,
+    object_map: dict[str, CatalogObjectReadOut],
+) -> str | None:
+    catalog_object = object_map.get(ref)
+    if (
+        catalog_object is None
+        or catalog_object.visibility != ObjectVisibility.DETAIL
+        or catalog_object.kind != "network"
+    ):
+        return None
+    network = catalog_object.data.get("network")
+    category = network.get("category") if isinstance(network, Mapping) else None
+    return category if isinstance(category, str) else None
 
 
 def build_topology_read_model(
@@ -1216,6 +1530,40 @@ def _device_graph_node(
         if catalog_object.kind == "device" and isinstance(device, Mapping):
             for field in ("manufacturer", "model", "category"):
                 value = device.get(field)
+                if isinstance(value, str):
+                    node[field] = value
+    return node
+
+
+def _network_topology_node(
+    ref: str,
+    catalog_object: CatalogObjectReadOut | None,
+) -> NetworkTopologyNodeReadModel:
+    """Build a network node without promoting discover-only data to detail."""
+    kind = catalog_object.kind if catalog_object else ref.split(":", 1)[0]
+    node: NetworkTopologyNodeReadModel = {
+        "ref": ref,
+        "id": catalog_object.id if catalog_object else object_id_from_ref(ref),
+        "kind": kind,
+        "label": primary_name_value(catalog_object) if catalog_object else ref,
+        "visibility": (
+            catalog_object.visibility
+            if catalog_object is not None
+            else ObjectVisibility.STUB
+        ),
+        "capabilities": (
+            catalog_object.capabilities if catalog_object is not None else []
+        ),
+    }
+    if (
+        catalog_object is not None
+        and catalog_object.visibility == ObjectVisibility.DETAIL
+    ):
+        node.update({"status": catalog_object.status, "data": catalog_object.data})
+        network = catalog_object.data.get("network")
+        if catalog_object.kind == "network" and isinstance(network, Mapping):
+            for field in ("category", "manufacturer", "model", "location"):
+                value = network.get(field)
                 if isinstance(value, str):
                     node[field] = value
     return node

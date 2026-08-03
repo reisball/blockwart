@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import sys
 from collections.abc import Sequence
 
@@ -11,11 +12,17 @@ from blockwart.db.migrations import (
     check_database_revision,
     upgrade_database,
 )
-from blockwart.db.session import build_engine, transaction
+from blockwart.db.session import build_engine, build_read_only_engine, transaction
 from blockwart.services.catalog import relationship_diagnostics
 from blockwart.services.interface_migration import (
     apply_interface_migration_plan,
     build_interface_migration_plan,
+)
+from blockwart.services.network_classification import (
+    NetworkClassificationError,
+    build_network_classification_plan,
+    classification_entry_payload,
+    load_network_classification_evidence,
 )
 from blockwart.services.placement_migration import (
     apply_placement_migration_plan,
@@ -38,8 +45,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="Apply a data-normalization plan. Default is a read-only dry run.",
     )
     parser.add_argument(
+        "--mapping",
+        help="Evidence-backed network category mapping YAML for the networks dry run.",
+    )
+    parser.add_argument(
         "action",
-        choices=("upgrade", "check", "integrity", "interfaces", "placements"),
+        choices=("upgrade", "check", "integrity", "interfaces", "placements", "networks"),
     )
     return parser
 
@@ -108,6 +119,44 @@ def main(argv: Sequence[str] | None = None) -> int:
                 f"diagnostics={len(plan.diagnostics)}"
             )
             return 1 if plan.diagnostics else 0
+        elif args.action == "networks":
+            if args.apply:
+                print(
+                    "network_classification_error=apply_not_available",
+                    file=sys.stderr,
+                )
+                return 1
+            revision = check_database_revision(args.database_url, read_only=True)
+            plan = _network_plan(args.database_url, mapping_path=args.mapping)
+            for diagnostic in plan.diagnostics:
+                print(
+                    "network_classification_diagnostic "
+                    + json.dumps(
+                        {"code": diagnostic},
+                        sort_keys=True,
+                        separators=(",", ":"),
+                    ),
+                    file=sys.stderr,
+                )
+            for entry in plan.entries:
+                print(
+                    "network_classification "
+                    + json.dumps(
+                        classification_entry_payload(entry),
+                        sort_keys=True,
+                        separators=(",", ":"),
+                    )
+                )
+            failed = bool(plan.diagnostics or plan.blocked_networks)
+            result = (
+                "database_networks_error" if failed else "database_networks_ok"
+            )
+            print(
+                f"{result} revision={revision} mode=dry-run "
+                f"scanned={plan.scanned_networks} changed={plan.changed_networks} "
+                f"blocked={plan.blocked_networks} diagnostics={len(plan.diagnostics)}"
+            )
+            return 1 if failed else 0
         else:
             revision = check_database_revision(args.database_url)
     except Exception:  # noqa: BLE001 - CLI boundary must redact database details
@@ -153,6 +202,23 @@ def _placement_plan(database_url: str | None, *, apply: bool):
                 with transaction(session):
                     apply_placement_migration_plan(session, plan)
             return plan
+    finally:
+        engine.dispose()
+
+
+def _network_plan(database_url: str | None, *, mapping_path: str | None):
+    config = build_alembic_config(database_url)
+    engine = build_read_only_engine(str(config.attributes["database_url"]))
+    try:
+        evidence = (
+            load_network_classification_evidence(mapping_path)
+            if mapping_path is not None
+            else {}
+        )
+        with Session(engine) as session:
+            return build_network_classification_plan(session, evidence)
+    except NetworkClassificationError:
+        raise
     finally:
         engine.dispose()
 

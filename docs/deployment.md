@@ -199,6 +199,18 @@ while rejecting every write to them. It does not classify or mutate those rows. 
 transitional revision to production until the separately reviewed Network classification dry run,
 mapping/apply plan, backup, and production acceptance are complete.
 
+Run the classification gate against a restored candidate database:
+
+```bash
+blockwart-db --database-url "$CANDIDATE_DATABASE_URL" \
+  --mapping reviewed-network-mapping.yaml networks
+```
+
+The mapping is evidence, not an apply instruction. Review every JSON line and
+require `blocked=0 diagnostics=0`. The command never writes; `--apply networks`
+fails closed until the later reviewed import/apply slice implements the paired
+transaction, owner-coverage proof, backup, and rollback evidence.
+
 1. Record the current application commit and image ID.
 2. Create a SQLite online backup outside `/opt/blockwart-data`.
 3. Run `PRAGMA integrity_check` against the backup and record the catalog, relationship, and audit

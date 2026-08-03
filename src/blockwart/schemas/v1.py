@@ -163,6 +163,59 @@ class V1DeviceGraphOut(BaseModel):
     downstream_refs: list[str] = Field(default_factory=list)
 
 
+class V1NetworkTopologyNodeBaseOut(BaseModel):
+    ref: str
+    id: str
+    kind: ObjectKind
+    label: str
+    capabilities: list[Permission] = Field(default_factory=list)
+
+
+class V1NetworkTopologyStubNodeOut(V1NetworkTopologyNodeBaseOut):
+    visibility: Literal["stub"] = "stub"
+
+
+class V1NetworkTopologyDetailNodeOut(V1NetworkTopologyNodeBaseOut):
+    visibility: Literal["detail"] = "detail"
+    status: str
+    data: dict[str, Any] = Field(default_factory=dict)
+    category: str | None = None
+    manufacturer: str | None = None
+    model: str | None = None
+    location: str | None = None
+
+
+V1NetworkTopologyNodeOut = Annotated[
+    V1NetworkTopologyDetailNodeOut | V1NetworkTopologyStubNodeOut,
+    Field(discriminator="visibility"),
+]
+
+
+class V1NetworkTopologyEdgeOut(BaseModel):
+    from_ref: str
+    relation_type: Literal["hosts", "attached_to", "uplinks_to"]
+    to_ref: str
+    metadata: V1RelationshipMetadata = Field(default_factory=V1RelationshipMetadata)
+
+
+class V1NetworkTopologyPathOut(BaseModel):
+    refs: list[str] = Field(default_factory=list)
+    status: Literal["complete", "incomplete"]
+
+
+class V1NetworkTopologyOut(BaseModel):
+    object_ref: str
+    nodes: list[V1NetworkTopologyNodeOut] = Field(default_factory=list)
+    edges: list[V1NetworkTopologyEdgeOut] = Field(default_factory=list)
+    paths: list[V1NetworkTopologyPathOut] = Field(default_factory=list)
+    resolution: Literal["direct", "inherited"] | None = None
+    resolution_source: Literal["host", "system", "placement_host", "network"] | None = None
+    resolution_source_ref: str | None = None
+    placement_path: list[str] = Field(default_factory=list)
+    status: Literal["complete", "incomplete", "unconnected"]
+    truncated: bool = False
+
+
 class V1RelationshipPageOut(BaseModel):
     items: list[V1RelationshipOut]
     next_cursor: str | None = None

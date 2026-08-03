@@ -3136,6 +3136,332 @@
         "title": "V1GrantUpdateIn",
         "type": "object"
       },
+      "V1NetworkTopologyDetailNodeOut": {
+        "properties": {
+          "capabilities": {
+            "items": {
+              "$ref": "#/components/schemas/Permission"
+            },
+            "title": "Capabilities",
+            "type": "array"
+          },
+          "category": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Category"
+          },
+          "data": {
+            "additionalProperties": true,
+            "title": "Data",
+            "type": "object"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "host",
+              "system",
+              "network",
+              "device",
+              "service",
+              "credential_reference",
+              "runbook",
+              "decision",
+              "project"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "location": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Location"
+          },
+          "manufacturer": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Manufacturer"
+          },
+          "model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model"
+          },
+          "ref": {
+            "title": "Ref",
+            "type": "string"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "visibility": {
+            "const": "detail",
+            "default": "detail",
+            "title": "Visibility",
+            "type": "string"
+          }
+        },
+        "required": [
+          "ref",
+          "id",
+          "kind",
+          "label",
+          "status"
+        ],
+        "title": "V1NetworkTopologyDetailNodeOut",
+        "type": "object"
+      },
+      "V1NetworkTopologyEdgeOut": {
+        "properties": {
+          "from_ref": {
+            "title": "From Ref",
+            "type": "string"
+          },
+          "metadata": {
+            "$ref": "#/components/schemas/V1RelationshipMetadata-Output"
+          },
+          "relation_type": {
+            "enum": [
+              "hosts",
+              "attached_to",
+              "uplinks_to"
+            ],
+            "title": "Relation Type",
+            "type": "string"
+          },
+          "to_ref": {
+            "title": "To Ref",
+            "type": "string"
+          }
+        },
+        "required": [
+          "from_ref",
+          "relation_type",
+          "to_ref"
+        ],
+        "title": "V1NetworkTopologyEdgeOut",
+        "type": "object"
+      },
+      "V1NetworkTopologyOut": {
+        "properties": {
+          "edges": {
+            "items": {
+              "$ref": "#/components/schemas/V1NetworkTopologyEdgeOut"
+            },
+            "title": "Edges",
+            "type": "array"
+          },
+          "nodes": {
+            "items": {
+              "discriminator": {
+                "mapping": {
+                  "detail": "#/components/schemas/V1NetworkTopologyDetailNodeOut",
+                  "stub": "#/components/schemas/V1NetworkTopologyStubNodeOut"
+                },
+                "propertyName": "visibility"
+              },
+              "oneOf": [
+                {
+                  "$ref": "#/components/schemas/V1NetworkTopologyDetailNodeOut"
+                },
+                {
+                  "$ref": "#/components/schemas/V1NetworkTopologyStubNodeOut"
+                }
+              ]
+            },
+            "title": "Nodes",
+            "type": "array"
+          },
+          "object_ref": {
+            "title": "Object Ref",
+            "type": "string"
+          },
+          "paths": {
+            "items": {
+              "$ref": "#/components/schemas/V1NetworkTopologyPathOut"
+            },
+            "title": "Paths",
+            "type": "array"
+          },
+          "placement_path": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Placement Path",
+            "type": "array"
+          },
+          "resolution": {
+            "anyOf": [
+              {
+                "enum": [
+                  "direct",
+                  "inherited"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Resolution"
+          },
+          "resolution_source": {
+            "anyOf": [
+              {
+                "enum": [
+                  "host",
+                  "system",
+                  "placement_host",
+                  "network"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Resolution Source"
+          },
+          "resolution_source_ref": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Resolution Source Ref"
+          },
+          "status": {
+            "enum": [
+              "complete",
+              "incomplete",
+              "unconnected"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "truncated": {
+            "default": false,
+            "title": "Truncated",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "object_ref",
+          "status"
+        ],
+        "title": "V1NetworkTopologyOut",
+        "type": "object"
+      },
+      "V1NetworkTopologyPathOut": {
+        "properties": {
+          "refs": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Refs",
+            "type": "array"
+          },
+          "status": {
+            "enum": [
+              "complete",
+              "incomplete"
+            ],
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "status"
+        ],
+        "title": "V1NetworkTopologyPathOut",
+        "type": "object"
+      },
+      "V1NetworkTopologyStubNodeOut": {
+        "properties": {
+          "capabilities": {
+            "items": {
+              "$ref": "#/components/schemas/Permission"
+            },
+            "title": "Capabilities",
+            "type": "array"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "host",
+              "system",
+              "network",
+              "device",
+              "service",
+              "credential_reference",
+              "runbook",
+              "decision",
+              "project"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "ref": {
+            "title": "Ref",
+            "type": "string"
+          },
+          "visibility": {
+            "const": "stub",
+            "default": "stub",
+            "title": "Visibility",
+            "type": "string"
+          }
+        },
+        "required": [
+          "ref",
+          "id",
+          "kind",
+          "label"
+        ],
+        "title": "V1NetworkTopologyStubNodeOut",
+        "type": "object"
+      },
       "V1ObjectAccessOut": {
         "properties": {
           "direct_grants": {
@@ -4352,6 +4678,143 @@
           }
         ],
         "summary": "Agent Object Context",
+        "tags": [
+          "agent-readonly"
+        ]
+      }
+    },
+    "/api/agent/objects/{object_id}/network-topology": {
+      "get": {
+        "operationId": "agent_network_topology_api_agent_objects__object_id__network_topology_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "object_id",
+            "required": true,
+            "schema": {
+              "title": "Object Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1NetworkTopologyOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Authentication required"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Permission denied"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Resource not found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "412": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Precondition failed"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Request validation failed"
+          },
+          "428": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Precondition required"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Internal server error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Service unavailable"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Agent Network Topology",
         "tags": [
           "agent-readonly"
         ]
@@ -9755,6 +10218,143 @@
           }
         ],
         "summary": "Get V1 Device Graph",
+        "tags": [
+          "api-v1-readonly"
+        ]
+      }
+    },
+    "/api/v1/objects/{object_id}/network-topology": {
+      "get": {
+        "operationId": "get_v1_network_topology_api_v1_objects__object_id__network_topology_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "object_id",
+            "required": true,
+            "schema": {
+              "title": "Object Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1NetworkTopologyOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Authentication required"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Permission denied"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Resource not found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "412": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Precondition failed"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Request validation failed"
+          },
+          "428": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Precondition required"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Internal server error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Service unavailable"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get V1 Network Topology",
         "tags": [
           "api-v1-readonly"
         ]

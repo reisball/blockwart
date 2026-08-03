@@ -180,6 +180,9 @@ RELATIONSHIP_PROPERTIES: JSON = {
 DEVICE_GRAPH_PROPERTIES: JSON = {
     "object_id": {"type": "string", "minLength": 1, "maxLength": 128},
 }
+NETWORK_TOPOLOGY_PROPERTIES: JSON = {
+    "object_id": {"type": "string", "minLength": 1, "maxLength": 128},
+}
 GRANT_ROLE_SCHEMA: JSON = {
     "type": "string",
     "enum": [
@@ -392,6 +395,17 @@ TOOLS: list[JSON] = [
         "inputSchema": {
             "type": "object",
             "properties": DEVICE_GRAPH_PROPERTIES,
+            "required": ["object_id"],
+            "additionalProperties": False,
+        },
+        "annotations": READ_ONLY_ANNOTATIONS,
+    },
+    {
+        "name": "blockwart.get_network_topology",
+        "description": "Return the authorized direct or inherited network paths for an object.",
+        "inputSchema": {
+            "type": "object",
+            "properties": NETWORK_TOPOLOGY_PROPERTIES,
             "required": ["object_id"],
             "additionalProperties": False,
         },
@@ -683,6 +697,12 @@ def call_tool(
         object_id = _required_string(args, "object_id")
         payload = fetch(
             f"/api/v1/objects/{quote(object_id, safe='')}/device-graph",
+            {},
+        )
+    elif name == "blockwart.get_network_topology":
+        object_id = _required_string(args, "object_id")
+        payload = fetch(
+            f"/api/v1/objects/{quote(object_id, safe='')}/network-topology",
             {},
         )
     elif name == "blockwart.get_object_access":

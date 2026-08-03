@@ -273,7 +273,10 @@ def _validate_value(field: FieldSpec, path: str, value: Any) -> None:
         valid = isinstance(value, (str, Mapping))
         default_message = "must be a string or object"
     elif field_type == "enum":
-        valid = value in field.enum_values
+        try:
+            valid = value in field.enum_values
+        except TypeError:
+            valid = False
         allowed = ", ".join(sorted(str(item) for item in field.enum_values))
         default_message = f"must be one of: {allowed}"
     elif field_type == "ip":

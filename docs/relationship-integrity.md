@@ -52,6 +52,12 @@ The device-to-device `attached_to` graph and network-device `uplinks_to` graph a
 parents or uplinks are valid, but only one edge per source and relationship type may carry
 `primary=true`. Missing `primary` is false and stays absent from canonical JSON.
 
+The Network read resolver consumes only the policy-projected `hosts`,
+`attached_to`, and `uplinks_to` snapshot. Placement edges may expose their
+existing discover-safe stubs, while every Network edge requires `read` on both
+endpoints. Alternative uplinks remain visible; `primary` changes deterministic
+ordering but never discards a route.
+
 The database independently enforces:
 
 - one unique `from_ref + relation_type + to_ref` triplet;
