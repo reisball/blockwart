@@ -626,6 +626,9 @@ def query_network_topology(
         attached_by_source=attached_by_source,
         object_map=object_map,
     )
+    prefix_truncated = len(prefix_refs) > max_nodes
+    if prefix_truncated:
+        prefix_refs = prefix_refs[:max_nodes]
 
     edge_set: dict[tuple[str, str, str], RelationshipReadModel] = {}
     prefix_edge_keys = {
@@ -650,7 +653,7 @@ def query_network_topology(
 
     paths: list[NetworkTopologyPathReadModel] = []
     included_refs = set(prefix_refs)
-    truncated = False
+    truncated = prefix_truncated
 
     def append_path(refs: list[str], path_status: Literal["complete", "incomplete"]) -> None:
         nonlocal truncated
@@ -690,14 +693,15 @@ def query_network_topology(
             edge_set[key] = edge
             walk_network(edge["to_ref"], [*refs, edge["to_ref"]], next_trail)
 
-    if resolution_source == "network" and resolution_source_ref is not None:
-        included_refs.add(resolution_source_ref)
-        walk_network(resolution_source_ref, prefix_refs, set())
-    else:
-        for edge in start_edges:
-            key = (edge["from_ref"], edge["relation_type"], edge["to_ref"])
-            edge_set[key] = edge
-            walk_network(edge["to_ref"], [*prefix_refs, edge["to_ref"]], set())
+    if not prefix_truncated:
+        if resolution_source == "network" and resolution_source_ref is not None:
+            included_refs.add(resolution_source_ref)
+            walk_network(resolution_source_ref, prefix_refs, set())
+        else:
+            for edge in start_edges:
+                key = (edge["from_ref"], edge["relation_type"], edge["to_ref"])
+                edge_set[key] = edge
+                walk_network(edge["to_ref"], [*prefix_refs, edge["to_ref"]], set())
 
     if truncated or any(path["status"] == "incomplete" for path in paths):
         overall_status = "incomplete"

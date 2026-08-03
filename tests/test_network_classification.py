@@ -254,3 +254,48 @@ def test_network_classification_mapping_rejects_boolean_schema_version(
 
     with pytest.raises(NetworkClassificationError, match="schema is invalid"):
         load_network_classification_evidence(mapping)
+
+
+def test_network_classification_blocks_json_null_stored_data(
+    tmp_path: Path,
+    capsys,
+) -> None:
+    database_url, engine = _network_database(tmp_path)
+    mapping = tmp_path / "network-mapping.yaml"
+    mapping.write_text(
+        "\n".join(
+            [
+                "schema_version: 1",
+                "networks:",
+                "  - object_id: edge",
+                "    target_category: switch",
+                "    evidence_source: references/network.md#edge-switch",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    with engine.begin() as connection:
+        connection.execute(
+            text("UPDATE catalog_objects SET data_json='null' WHERE id='edge'")
+        )
+    capsys.readouterr()
+    try:
+        assert (
+            database_cli.main(
+                [
+                    "--database-url",
+                    database_url,
+                    "--mapping",
+                    str(mapping),
+                    "networks",
+                ]
+            )
+            == 1
+        )
+        captured = capsys.readouterr()
+        edge = _classification_rows(captured.out)[0]
+        assert edge["action"] == "blocked"
+        assert edge["blockers"] == ["invalid_network_data"]
+        assert "database_networks_error" in captured.out
+    finally:
+        engine.dispose()

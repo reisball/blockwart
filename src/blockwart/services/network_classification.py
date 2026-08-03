@@ -167,7 +167,7 @@ def _classification_entry(
             )
         except ObjectSchemaError:
             blockers.append("invalid_network_data")
-    elif raw_data is not None:
+    elif "invalid_data_json" not in blockers:
         blockers.append("invalid_network_data")
 
     network = raw_data.get("network") if isinstance(raw_data, Mapping) else None
