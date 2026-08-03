@@ -492,6 +492,7 @@ def test_v1_publishes_explicit_command_methods_and_compatibility_reads(
         "/api/v1/objects/missing",
         "/api/v1/objects/missing/relationships",
         "/api/v1/objects/missing/audit-events",
+        "/api/v1/objects/missing/network-topology",
         "/api/v1/objects/missing/topology",
     ],
 )

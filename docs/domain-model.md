@@ -109,6 +109,23 @@ Existing Network rows without a category remain readable during the migration tr
 new or updated Network payload through the canonical schema service is fail-closed until it has an
 explicit category. No migration guesses or mutates that classification.
 
+`blockwart-db networks` is the write-free classification gate. It emits one
+canonical JSON record per existing Network with the exact current category,
+evidence-backed target category, evidence source, planned action, and blockers.
+An explicit mapping file uses schema version 1 and contains only `object_id`,
+`target_category`, and `evidence_source` rows. Missing evidence, unknown mapping
+references, invalid mappings, or malformed stored data fail closed. Even with a
+complete plan, `blockwart-db --apply networks` is deliberately unavailable;
+the reviewed apply transaction belongs to the later pilot-import slice.
+
+The shared Network resolver starts from direct host/system attachments or the
+canonical placement host inherited by a system/service. It traverses every
+authorized `uplinks_to` edge, treats `primary` only as a stable sort hint, and
+reports router/gateway terminals as complete. Other terminals are incomplete;
+missing start points are unconnected. Policy projection precedes traversal and
+path/count calculation, so unreadable neighbors leave no graph fragment or
+indirect count. API v1, Agent API, and MCP use this same resolver.
+
 ## Object identity
 
 `catalog_objects.id` is globally unique because it is the table's primary key.

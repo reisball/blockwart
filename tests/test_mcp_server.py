@@ -277,6 +277,10 @@ def test_mcp_client_completes_handshake_and_calls_every_read_only_tool() -> None
                             "blockwart.get_device_graph",
                             {"object_id": "host/fabrik"},
                         ),
+                        "blockwart.get_network_topology": await session.call_tool(
+                            "blockwart.get_network_topology",
+                            {"object_id": "host/fabrik"},
+                        ),
                     }
                     upstream_error = await session.call_tool(
                         "blockwart.search",
@@ -344,6 +348,7 @@ def test_mcp_client_completes_handshake_and_calls_every_read_only_tool() -> None
         "blockwart.delete_relationship",
         "blockwart.create_attached_device",
         "blockwart.get_device_graph",
+        "blockwart.get_network_topology",
         "blockwart.get_object_access",
         "blockwart.search_principals",
         "blockwart.list_admin_principals",
@@ -365,6 +370,7 @@ def test_mcp_client_completes_handshake_and_calls_every_read_only_tool() -> None
             "blockwart.get_admin_principal",
             "blockwart.preview_grant_scope",
             "blockwart.get_device_graph",
+            "blockwart.get_network_topology",
         }
     )
     assert all(
@@ -414,6 +420,9 @@ def test_mcp_client_completes_handshake_and_calls_every_read_only_tool() -> None
     assert result_payloads["blockwart.get_device_graph"]["path"] == (
         "/api/v1/objects/host%2Ffabrik/device-graph"
     )
+    assert result_payloads["blockwart.get_network_topology"]["path"] == (
+        "/api/v1/objects/host%2Ffabrik/network-topology"
+    )
 
     upstream_content = upstream_error.content[0]
     assert isinstance(upstream_content, mcp_types.TextContent)
@@ -448,7 +457,7 @@ def test_mcp_client_completes_handshake_and_calls_every_read_only_tool() -> None
     assert unknown_tool.isError is True
     assert json.loads(unknown_content.text)["error"]["code"] == "tool_not_found"
 
-    assert [request["method"] for request in requests] == ["GET"] * 10
+    assert [request["method"] for request in requests] == ["GET"] * 11
     assert [request["path"] for request in requests] == [
         "/api/v1/objects",
         "/api/v1/objects/host%2Ffabrik",
@@ -459,6 +468,7 @@ def test_mcp_client_completes_handshake_and_calls_every_read_only_tool() -> None
         "/api/v1/admin/principals/principal%2Fadmin",
         "/api/v1/objects/host%2Ffabrik/access/preview",
         "/api/v1/objects/host%2Ffabrik/device-graph",
+        "/api/v1/objects/host%2Ffabrik/network-topology",
         "/api/v1/objects",
     ]
     assert all(request["channel"] == "mcp" for request in requests)
@@ -673,6 +683,11 @@ def test_mcp_device_tools_preserve_metadata_headers_and_graph_parity() -> None:
         {"object_id": "fabrik/root"},
         fetcher=fetcher,
     )
+    call_tool(
+        "blockwart.get_network_topology",
+        {"object_id": "fabrik/root"},
+        fetcher=fetcher,
+    )
 
     assert [(method, path, body) for method, path, body, _ in requests] == [
         (
@@ -697,7 +712,10 @@ def test_mcp_device_tools_preserve_metadata_headers_and_graph_parity() -> None:
     assert requests[0][3]["Idempotency-Key"] == "mcp-device-create-0001"
     assert requests[1][3]["If-Match"] == '"rev-1"'
     assert all(headers["X-Blockwart-Channel"] == "mcp" for *_, headers in requests)
-    assert fetches == [("/api/v1/objects/fabrik%2Froot/device-graph", {})]
+    assert fetches == [
+        ("/api/v1/objects/fabrik%2Froot/device-graph", {}),
+        ("/api/v1/objects/fabrik%2Froot/network-topology", {}),
+    ]
 
 
 def test_unexpected_mcp_failure_logs_only_allowlisted_context(
@@ -906,6 +924,7 @@ def test_mcp_tools_publish_explicit_read_write_and_delete_hints() -> None:
         "blockwart.delete_relationship",
         "blockwart.create_attached_device",
         "blockwart.get_device_graph",
+        "blockwart.get_network_topology",
         "blockwart.get_object_access",
         "blockwart.search_principals",
         "blockwart.list_admin_principals",
@@ -928,6 +947,7 @@ def test_mcp_tools_publish_explicit_read_write_and_delete_hints() -> None:
             "blockwart.get_admin_principal",
             "blockwart.preview_grant_scope",
             "blockwart.get_device_graph",
+            "blockwart.get_network_topology",
         }
     )
     assert tools["blockwart.delete_object"]["annotations"]["destructiveHint"]

@@ -13,6 +13,9 @@ It wraps the object-authorized v1 API:
 - blockwart.delete_object -> DELETE /api/v1/objects/{object_id}
 - blockwart.create_relationship -> POST /api/v1/objects/{object_id}/relationships
 - blockwart.delete_relationship -> DELETE /api/v1/objects/{object_id}/relationships
+- blockwart.create_attached_device -> POST /api/v1/objects/{parent_id}/attached-devices
+- blockwart.get_device_graph -> GET /api/v1/objects/{object_id}/device-graph
+- blockwart.get_network_topology -> GET /api/v1/objects/{object_id}/network-topology
 - blockwart.get_object_access -> GET /api/v1/objects/{object_id}/access
 - blockwart.search_principals -> GET /api/v1/objects/{object_id}/access/principals
 - blockwart.list_admin_principals -> GET /api/v1/admin/principals
@@ -28,6 +31,9 @@ It wraps the object-authorized v1 API:
 filters plus canonical `source_type` and computed `stale`, `cursor`, `sort`,
 `direction`, and optional `include_total`.
 Resolved context comes from the same service implementation used by REST.
+`blockwart.get_network_topology` returns the same policy-projected direct or
+inherited paths, completion states, relationship metadata, and truncation signal
+as API v1; it does not reconstruct topology in the MCP wrapper.
 All tools require a service-account token and receive exactly that
 principal's authorized detail/stub projection.
 

@@ -140,6 +140,7 @@ async def check_mcp(
                 "blockwart.delete_relationship",
                 "blockwart.create_attached_device",
                 "blockwart.get_device_graph",
+                "blockwart.get_network_topology",
                 "blockwart.get_object_access",
                 "blockwart.search_principals",
                 "blockwart.list_admin_principals",
@@ -164,6 +165,7 @@ async def check_mcp(
                         "blockwart.get_admin_principal",
                         "blockwart.preview_grant_scope",
                         "blockwart.get_device_graph",
+                        "blockwart.get_network_topology",
                     }
                     else not tool.annotations.readOnlyHint
                 )
@@ -361,6 +363,16 @@ async def check_mcp(
                     "metadata": {"link_kind": "zigbee", "primary": True},
                 }
             ]
+            network_topology = await session.call_tool(
+                "blockwart.get_network_topology",
+                {"object_id": "package-smoke-device"},
+            )
+            network_topology_payload = _tool_payload(network_topology)
+            assert network_topology_payload["object_ref"] == (
+                "device:package-smoke-device"
+            )
+            assert network_topology_payload["status"] == "unconnected"
+            assert network_topology_payload["paths"] == []
             device_detached = await session.call_tool(
                 "blockwart.delete_relationship",
                 {
@@ -435,7 +447,7 @@ def main() -> None:
     print(
         "installed_package=ok "
         f"cwd={Path.cwd()} revision={readiness['revision']} "
-        f"openapi_paths={len(openapi['paths'])} mcp_protocol={protocol} mcp_calls=22"
+        f"openapi_paths={len(openapi['paths'])} mcp_protocol={protocol} mcp_calls=23"
     )
 
 

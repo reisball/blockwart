@@ -78,4 +78,5 @@ fi
 "$TEMP_DIR/venv/bin/blockwart-db" integrity
 "$TEMP_DIR/venv/bin/blockwart-db" interfaces
 "$TEMP_DIR/venv/bin/blockwart-db" placements
+"$TEMP_DIR/venv/bin/blockwart-db" networks
 echo "package_smoke=passed"

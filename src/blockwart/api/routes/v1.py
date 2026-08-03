@@ -25,6 +25,7 @@ from blockwart.schemas.v1 import (
     V1GrantCreateIn,
     V1GrantScopePreviewOut,
     V1GrantUpdateIn,
+    V1NetworkTopologyOut,
     V1ObjectAccessOut,
     V1ObjectCommandOut,
     V1ObjectPageOut,
@@ -62,6 +63,7 @@ from blockwart.services.read_access import ReadAccess
 from blockwart.services.v1 import (
     query_audit_page,
     query_device_graph_resource,
+    query_network_topology_resource,
     query_relationship_page,
     query_topology_resource,
 )
@@ -762,6 +764,22 @@ def get_v1_device_graph(
         upstream_path=resource.graph["upstream_path"],
         downstream_refs=resource.graph["downstream_refs"],
     )
+
+
+@router.get(
+    "/objects/{object_id}/network-topology",
+    response_model=V1NetworkTopologyOut,
+    response_model_exclude_none=True,
+)
+def get_v1_network_topology(
+    object_id: str,
+    session: Annotated[Session, Depends(get_session)],
+    access: Annotated[ReadAccess, Depends(require_api_read_access)],
+) -> V1NetworkTopologyOut:
+    resource = query_network_topology_resource(session, object_id, access)
+    if resource is None:
+        raise HTTPException(status_code=404, detail="Catalog object not found")
+    return V1NetworkTopologyOut.model_validate(resource.topology)
 
 
 def _invalid_cursor() -> HTTPException:

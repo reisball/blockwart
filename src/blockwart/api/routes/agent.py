@@ -10,6 +10,7 @@ from blockwart.domain.asset_state import AssetHealth, AssetLifecycle
 from blockwart.domain.provenance import SourceType
 from blockwart.schemas.agent import AgentContextOut, AgentSearchOut
 from blockwart.schemas.catalog import ObjectKind
+from blockwart.schemas.v1 import V1NetworkTopologyOut
 from blockwart.services.agent import (
     build_agent_context,
     get_agent_object_context,
@@ -17,6 +18,7 @@ from blockwart.services.agent import (
 )
 from blockwart.services.commands import revision_etag
 from blockwart.services.read_access import ReadAccess
+from blockwart.services.v1 import query_network_topology_resource
 
 router = APIRouter(
     prefix="/agent",
@@ -94,6 +96,22 @@ def agent_object_context(
     if isinstance(revision, int):
         response.headers["ETag"] = revision_etag(revision)
     return AgentContextOut(query=object_id, count=1, objects=[context])
+
+
+@router.get(
+    "/objects/{object_id}/network-topology",
+    response_model=V1NetworkTopologyOut,
+    response_model_exclude_none=True,
+)
+def agent_network_topology(
+    object_id: str,
+    session: Annotated[Session, Depends(get_session)],
+    access: Annotated[ReadAccess, Depends(require_api_read_access)],
+) -> V1NetworkTopologyOut:
+    resource = query_network_topology_resource(session, object_id, access)
+    if resource is None:
+        raise HTTPException(status_code=404, detail="Catalog object not found")
+    return V1NetworkTopologyOut.model_validate(resource.topology)
 
 
 @router.get("/context", response_model=AgentContextOut)

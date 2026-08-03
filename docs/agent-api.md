@@ -74,6 +74,15 @@ catalog REST API exposes the same `parent_path`; the UI and MCP use the same
 placement graph. Legacy `provides` and `data.system_id` values are migrated by
 Alembic and are not read fallbacks.
 
+### GET /api/agent/objects/{object_id}/network-topology
+
+Returns the same authorized network-topology resource as API v1. It resolves
+direct host/system attachments, placement inheritance for systems and services,
+all readable uplink alternatives, completion state, and deterministic bounds.
+Network neighbors and edge metadata require `read` on both endpoints; a
+discover-only anchor is concealed. New integrations may use the equivalent
+`/api/v1/objects/{object_id}/network-topology` resource directly.
+
 `placement_state` is derived as `root` for hardware, `assigned` for a system or
 service with one canonical parent, `unassigned` for an explicit unassigned
 marker without a parent, and `unknown` for legacy inventory that has neither a

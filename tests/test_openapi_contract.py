@@ -9,6 +9,7 @@ HTTP_METHODS = {"get", "post", "put", "patch", "delete"}
 EXPECTED_OPERATIONS = {
     "/api/agent/context": {"get"},
     "/api/agent/objects/{object_id}": {"get"},
+    "/api/agent/objects/{object_id}/network-topology": {"get"},
     "/api/agent/search": {"get"},
     "/api/health": {"get"},
     "/api/health/live": {"get"},
@@ -35,6 +36,7 @@ EXPECTED_OPERATIONS = {
     "/api/v1/objects/{object_id}/access/principals": {"get"},
     "/api/v1/objects/{object_id}/audit-events": {"get"},
     "/api/v1/objects/{object_id}/device-graph": {"get"},
+    "/api/v1/objects/{object_id}/network-topology": {"get"},
     "/api/v1/objects/{object_id}/relationships": {"get", "post", "delete"},
     "/api/v1/objects/{object_id}/topology": {"get"},
     "/api/v1/objects/{parent_id}/attached-devices": {"post"},

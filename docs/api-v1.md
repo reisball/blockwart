@@ -253,6 +253,29 @@ defaults to `desc`.
 Returns the canonical host → system → service topology for one object. This is
 a single resource rather than a page.
 
+### `GET /api/v1/objects/{object_id}/device-graph`
+
+Returns the readable connected `attached_to` component for one anchor. The
+response contains canonical edge metadata, a deterministic preferred upstream
+path, and every reachable downstream reference. Non-placement edges require
+`read` on both endpoints.
+
+### `GET /api/v1/objects/{object_id}/network-topology`
+
+Returns the policy-first network resolution for one readable host, system,
+service, or network device. Systems use their own `attached_to` edge when one
+exists and otherwise inherit the placement host; services inherit the explicit
+system attachment or placement host. Every readable `uplinks_to` alternative
+is retained and sorted deterministically, while `primary` affects order only.
+
+The response records `direct|inherited`, the exact resolution source and
+placement path, authorized nodes and edges, all bounded paths, per-path
+`complete|incomplete`, overall `complete|incomplete|unconnected`, and an
+explicit `truncated` flag. A terminal router or gateway is complete; another
+device without an uplink is incomplete. Traversal stops before an unreadable
+endpoint without disclosing its identity, category, metadata, path, or count.
+The existing `/topology` resource is unchanged.
+
 ## Errors and boundary
 
 All v1 errors use the shared REST envelope and `X-Correlation-ID`. Missing
