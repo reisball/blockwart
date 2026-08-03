@@ -116,7 +116,10 @@ An explicit mapping file uses schema version 1 and contains only `object_id`,
 `target_category`, and `evidence_source` rows. Missing evidence, unknown mapping
 references, invalid mappings, or malformed stored data fail closed. Even with a
 complete plan, `blockwart-db --apply networks` is deliberately unavailable;
-the reviewed apply transaction belongs to the later pilot-import slice.
+the reviewed apply transaction belongs to the later pilot-import slice. For a
+persistent SQLite source, the gate reads a stable temporary database/WAL
+snapshot so the source file, journal mode, and WAL/SHM sidecars remain byte-for-byte
+unchanged even when the source directory itself is not writable.
 
 The shared Network resolver starts from direct host/system attachments or the
 canonical placement host inherited by a system/service. It traverses every

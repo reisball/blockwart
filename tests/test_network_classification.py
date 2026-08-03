@@ -453,3 +453,203 @@ def test_network_classification_dry_run_preserves_sqlite_file_and_journal_mode(
     assert after_hash == before_hash
     assert not database_path.with_name(f"{database_path.name}-wal").exists()
     assert not database_path.with_name(f"{database_path.name}-shm").exists()
+
+
+def test_network_classification_dry_run_does_not_create_closed_wal_sidecars(
+    tmp_path: Path,
+    capsys,
+) -> None:
+    database_url, engine = _network_database(tmp_path)
+    engine.dispose()
+    database_path = tmp_path / "network-classification.sqlite3"
+    mapping = tmp_path / "network-mapping.yaml"
+    mapping.write_text(
+        "\n".join(
+            [
+                "schema_version: 1",
+                "networks:",
+                "  - object_id: edge",
+                "    target_category: switch",
+                "    evidence_source: references/network.md#edge-switch",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    with sqlite3.connect(database_path) as connection:
+        assert connection.execute("PRAGMA journal_mode=WAL").fetchone() == ("wal",)
+        connection.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+    wal_path = database_path.with_name(f"{database_path.name}-wal")
+    shm_path = database_path.with_name(f"{database_path.name}-shm")
+    if wal_path.exists():
+        assert wal_path.stat().st_size == 0
+        wal_path.unlink()
+    shm_path.unlink(missing_ok=True)
+    assert not wal_path.exists()
+    assert not shm_path.exists()
+    before_hash = hashlib.sha256(database_path.read_bytes()).hexdigest()
+    capsys.readouterr()
+
+    assert (
+        database_cli.main(
+            [
+                "--database-url",
+                database_url,
+                "--mapping",
+                str(mapping),
+                "networks",
+            ]
+        )
+        == 0
+    )
+
+    assert "database_networks_ok" in capsys.readouterr().out
+    assert hashlib.sha256(database_path.read_bytes()).hexdigest() == before_hash
+    assert not wal_path.exists()
+    assert not shm_path.exists()
+
+
+def test_network_classification_dry_run_preserves_live_wal_sidecars(
+    tmp_path: Path,
+    capsys,
+) -> None:
+    database_url, engine = _network_database(tmp_path)
+    engine.dispose()
+    database_path = tmp_path / "network-classification.sqlite3"
+    mapping = tmp_path / "network-mapping.yaml"
+    mapping.write_text(
+        "\n".join(
+            [
+                "schema_version: 1",
+                "networks:",
+                "  - object_id: edge",
+                "    target_category: switch",
+                "    evidence_source: references/network.md#edge-switch",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    wal_path = database_path.with_name(f"{database_path.name}-wal")
+    shm_path = database_path.with_name(f"{database_path.name}-shm")
+
+    with sqlite3.connect(database_path) as writer:
+        assert writer.execute("PRAGMA journal_mode=WAL").fetchone() == ("wal",)
+        writer.execute("UPDATE catalog_objects SET label = 'Edge Live WAL' WHERE id = 'edge'")
+        writer.commit()
+        assert wal_path.stat().st_size > 0
+        assert shm_path.stat().st_size > 0
+        paths = (database_path, wal_path, shm_path)
+        before_hashes = {
+            path: hashlib.sha256(path.read_bytes()).hexdigest() for path in paths
+        }
+        capsys.readouterr()
+
+        assert (
+            database_cli.main(
+                [
+                    "--database-url",
+                    database_url,
+                    "--mapping",
+                    str(mapping),
+                    "networks",
+                ]
+            )
+            == 0
+        )
+
+        output = capsys.readouterr().out
+        assert "database_networks_ok" in output
+        assert '\"label\":\"Edge Live WAL\"' in output
+        assert {
+            path: hashlib.sha256(path.read_bytes()).hexdigest() for path in paths
+        } == before_hashes
+
+
+@pytest.mark.parametrize("mode", ["ro", "rw"])
+def test_network_classification_accepts_existing_sqlite_uri_url(
+    tmp_path: Path,
+    capsys,
+    mode: str,
+) -> None:
+    database_directory = tmp_path / "database with space"
+    database_directory.mkdir()
+    _, engine = _network_database(database_directory)
+    engine.dispose()
+    database_path = database_directory / "network-classification.sqlite3"
+    database_url = f"sqlite:///file:{database_path}?mode={mode}&uri=true"
+    mapping = tmp_path / "network-mapping.yaml"
+    mapping.write_text(
+        "\n".join(
+            [
+                "schema_version: 1",
+                "networks:",
+                "  - object_id: edge",
+                "    target_category: switch",
+                "    evidence_source: references/network.md#edge-switch",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    capsys.readouterr()
+
+    assert (
+        database_cli.main(
+            [
+                "--database-url",
+                database_url,
+                "--mapping",
+                str(mapping),
+                "networks",
+            ]
+        )
+        == 0
+    )
+    assert "database_networks_ok" in capsys.readouterr().out
+
+
+def test_network_classification_reads_from_non_writable_sqlite_directory(
+    tmp_path: Path,
+    capsys,
+) -> None:
+    database_directory = tmp_path / "read-only-database"
+    database_directory.mkdir()
+    database_url, engine = _network_database(database_directory)
+    engine.dispose()
+    database_path = database_directory / "network-classification.sqlite3"
+    mapping = tmp_path / "network-mapping.yaml"
+    mapping.write_text(
+        "\n".join(
+            [
+                "schema_version: 1",
+                "networks:",
+                "  - object_id: edge",
+                "    target_category: switch",
+                "    evidence_source: references/network.md#edge-switch",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    before_hash = hashlib.sha256(database_path.read_bytes()).hexdigest()
+    before_names = {path.name for path in database_directory.iterdir()}
+    database_path.chmod(0o444)
+    database_directory.chmod(0o555)
+    capsys.readouterr()
+
+    try:
+        assert (
+            database_cli.main(
+                [
+                    "--database-url",
+                    database_url,
+                    "--mapping",
+                    str(mapping),
+                    "networks",
+                ]
+            )
+            == 0
+        )
+        assert "database_networks_ok" in capsys.readouterr().out
+        assert hashlib.sha256(database_path.read_bytes()).hexdigest() == before_hash
+        assert {path.name for path in database_directory.iterdir()} == before_names
+    finally:
+        database_directory.chmod(0o755)
+        database_path.chmod(0o644)

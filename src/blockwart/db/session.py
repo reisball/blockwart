@@ -1,5 +1,10 @@
+import hashlib
+import shutil
 from collections.abc import Generator, Iterator
 from contextlib import contextmanager
+from pathlib import Path
+from tempfile import TemporaryDirectory
+from urllib.parse import unquote
 
 from sqlalchemy import create_engine, event, make_url
 from sqlalchemy.engine import Engine
@@ -60,23 +65,108 @@ def build_engine(
 
 
 def build_read_only_engine(database_url: str | None = None) -> Engine:
-    """Open an inspection engine without persistent SQLite PRAGMA changes."""
+    """Open an inspection engine without changing a persistent SQLite source."""
     settings = get_settings()
     url = database_url or settings.database_url
     parsed_url = make_url(url)
+    snapshot_directory: TemporaryDirectory[str] | None = None
     if (
         parsed_url.get_backend_name() == "sqlite"
         and _is_persistent_sqlite(parsed_url.database)
     ):
+        source_path = _sqlite_database_path(str(parsed_url.database))
+        snapshot_directory = TemporaryDirectory(prefix="blockwart-read-only-")
+        snapshot_path = Path(snapshot_directory.name) / source_path.name
+        try:
+            _copy_stable_sqlite_snapshot(source_path, snapshot_path)
+        except Exception:
+            snapshot_directory.cleanup()
+            raise
         read_only_url = parsed_url.set(
-            database=f"file:{parsed_url.database}",
-            query={**dict(parsed_url.query), "mode": "ro", "uri": "true"},
+            database=f"file:{snapshot_path}",
+            query={
+                **{
+                    key: value
+                    for key, value in dict(parsed_url.query).items()
+                    if key not in {"immutable", "mode", "uri"}
+                },
+                "mode": "ro",
+                "uri": "true",
+            },
         )
         url = read_only_url.render_as_string(hide_password=False)
-    return build_engine(
-        url,
-        sqlite_configure_journal_mode=False,
+    try:
+        read_only_engine = build_engine(
+            url,
+            sqlite_configure_journal_mode=False,
+        )
+    except Exception:
+        if snapshot_directory is not None:
+            snapshot_directory.cleanup()
+        raise
+    if snapshot_directory is not None:
+        event.listen(
+            read_only_engine,
+            "engine_disposed",
+            lambda _engine: snapshot_directory.cleanup(),
+            once=True,
+        )
+    return read_only_engine
+
+
+def _sqlite_database_path(database: str) -> Path:
+    path = database[5:] if database.lower().startswith("file:") else database
+    return Path(unquote(path))
+
+
+def _copy_stable_sqlite_snapshot(source_path: Path, snapshot_path: Path) -> None:
+    source_wal_path = source_path.with_name(f"{source_path.name}-wal")
+    snapshot_wal_path = snapshot_path.with_name(f"{snapshot_path.name}-wal")
+
+    for _attempt in range(3):
+        try:
+            before = _sqlite_snapshot_state(source_path, source_wal_path)
+            shutil.copyfile(source_path, snapshot_path)
+            if source_wal_path.exists():
+                shutil.copyfile(source_wal_path, snapshot_wal_path)
+            else:
+                snapshot_wal_path.unlink(missing_ok=True)
+            source_hashes = _sqlite_snapshot_hashes(source_path, source_wal_path)
+            snapshot_hashes = _sqlite_snapshot_hashes(snapshot_path, snapshot_wal_path)
+            after = _sqlite_snapshot_state(source_path, source_wal_path)
+        except FileNotFoundError:
+            continue
+        if before == after and source_hashes == snapshot_hashes:
+            return
+
+    raise RuntimeError("SQLite source changed while creating read-only snapshot")
+
+
+def _sqlite_snapshot_state(database_path: Path, wal_path: Path) -> tuple[tuple, ...]:
+    return tuple(
+        (
+            suffix,
+            path.stat().st_dev,
+            path.stat().st_ino,
+            path.stat().st_size,
+            path.stat().st_mtime_ns,
+        )
+        for suffix, path in (("", database_path), ("-wal", wal_path))
+        if path.exists()
     )
+
+
+def _sqlite_snapshot_hashes(database_path: Path, wal_path: Path) -> tuple[bytes, ...]:
+    return tuple(
+        _file_sha256(path)
+        for path in (database_path, wal_path)
+        if path.exists()
+    )
+
+
+def _file_sha256(path: Path) -> bytes:
+    with path.open("rb") as file_handle:
+        return hashlib.file_digest(file_handle, "sha256").digest()
 
 
 def _configure_sqlite_connections(
