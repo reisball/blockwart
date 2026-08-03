@@ -299,3 +299,106 @@ def test_network_classification_blocks_json_null_stored_data(
         assert "database_networks_error" in captured.out
     finally:
         engine.dispose()
+
+
+@pytest.mark.parametrize("invalid_category", [[], {}])
+def test_network_classification_blocks_unhashable_stored_category(
+    tmp_path: Path,
+    capsys,
+    invalid_category,
+) -> None:
+    database_url, engine = _network_database(tmp_path)
+    mapping = tmp_path / "network-mapping.yaml"
+    mapping.write_text(
+        "\n".join(
+            [
+                "schema_version: 1",
+                "networks:",
+                "  - object_id: edge",
+                "    target_category: switch",
+                "    evidence_source: references/network.md#edge-switch",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    with engine.begin() as connection:
+        connection.execute(
+            text("UPDATE catalog_objects SET data_json=:data WHERE id='edge'"),
+            {
+                "data": json.dumps(
+                    {"schema_version": 1, "network": {"category": invalid_category}}
+                )
+            },
+        )
+    capsys.readouterr()
+    try:
+        assert (
+            database_cli.main(
+                [
+                    "--database-url",
+                    database_url,
+                    "--mapping",
+                    str(mapping),
+                    "networks",
+                ]
+            )
+            == 1
+        )
+        captured = capsys.readouterr()
+        edge = _classification_rows(captured.out)[0]
+        assert edge["action"] == "blocked"
+        assert edge["blockers"] == [
+            "invalid_current_category_type",
+            "invalid_network_data",
+        ]
+        assert "database_networks_error" in captured.out
+    finally:
+        engine.dispose()
+
+
+@pytest.mark.parametrize(
+    "target_category_yaml",
+    ["[]", "{}"],
+)
+def test_network_classification_mapping_rejects_container_target_category(
+    tmp_path: Path,
+    target_category_yaml: str,
+) -> None:
+    mapping = tmp_path / "container-category.yaml"
+    mapping.write_text(
+        "\n".join(
+            [
+                "schema_version: 1",
+                "networks:",
+                "  - object_id: edge",
+                f"    target_category: {target_category_yaml}",
+                "    evidence_source: references/network.md#edge-switch",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(NetworkClassificationError, match="invalid target_category"):
+        load_network_classification_evidence(mapping)
+
+
+def test_network_classification_mapping_rejects_duplicate_yaml_keys(
+    tmp_path: Path,
+) -> None:
+    mapping = tmp_path / "duplicate-key.yaml"
+    mapping.write_text(
+        "\n".join(
+            [
+                "schema_version: 1",
+                "networks:",
+                "  - object_id: edge",
+                "    object_id: overwritten",
+                "    target_category: switch",
+                "    evidence_source: references/network.md#edge-switch",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(NetworkClassificationError, match="file is invalid"):
+        load_network_classification_evidence(mapping)

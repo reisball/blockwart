@@ -687,8 +687,20 @@ def query_network_topology(
                 "complete" if category in {"router", "gateway"} else "incomplete",
             )
             return
+        if len(included_refs) >= max_nodes:
+            truncated = True
+            return
         next_trail = {*trail, network_ref}
         for edge in outgoing:
+            if len(paths) >= max_paths:
+                truncated = True
+                break
+            if (
+                edge["to_ref"] not in included_refs
+                and len(included_refs) >= max_nodes
+            ):
+                truncated = True
+                break
             key = (edge["from_ref"], edge["relation_type"], edge["to_ref"])
             edge_set[key] = edge
             walk_network(edge["to_ref"], [*refs, edge["to_ref"]], next_trail)

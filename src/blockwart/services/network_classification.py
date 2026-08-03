@@ -9,6 +9,8 @@ from typing import Any, Literal
 import yaml
 from sqlalchemy import select
 from sqlalchemy.orm import Session
+from yaml.constructor import ConstructorError
+from yaml.nodes import MappingNode
 
 from blockwart.domain.object_schema import (
     NETWORK_CATEGORIES,
@@ -20,6 +22,32 @@ from blockwart.models import CatalogObject
 
 class NetworkClassificationError(ValueError):
     pass
+
+
+class _UniqueKeySafeLoader(yaml.SafeLoader):
+    def construct_mapping(self, node: MappingNode, deep: bool = False) -> dict[Any, Any]:
+        self.flatten_mapping(node)
+        mapping: dict[Any, Any] = {}
+        for key_node, value_node in node.value:
+            key = self.construct_object(key_node, deep=deep)
+            try:
+                duplicate = key in mapping
+            except TypeError as exc:
+                raise ConstructorError(
+                    "while constructing a mapping",
+                    node.start_mark,
+                    "found an unhashable mapping key",
+                    key_node.start_mark,
+                ) from exc
+            if duplicate:
+                raise ConstructorError(
+                    "while constructing a mapping",
+                    node.start_mark,
+                    f"found duplicate key {key!r}",
+                    key_node.start_mark,
+                )
+            mapping[key] = self.construct_object(value_node, deep=deep)
+        return mapping
 
 
 @dataclass(frozen=True, slots=True)
@@ -63,7 +91,10 @@ def load_network_classification_evidence(
 ) -> dict[str, NetworkClassificationEvidence]:
     source_path = Path(path)
     try:
-        payload = yaml.safe_load(source_path.read_text(encoding="utf-8"))
+        payload = yaml.load(
+            source_path.read_text(encoding="utf-8"),
+            Loader=_UniqueKeySafeLoader,
+        )
     except (OSError, UnicodeError, yaml.YAMLError) as exc:
         raise NetworkClassificationError("network mapping file is invalid") from exc
     if not isinstance(payload, Mapping) or set(payload) != {"schema_version", "networks"}:
@@ -95,7 +126,10 @@ def load_network_classification_evidence(
             raise NetworkClassificationError(
                 f"network mapping entry {index} has invalid object_id"
             )
-        if target_category not in NETWORK_CATEGORIES:
+        if (
+            not isinstance(target_category, str)
+            or target_category not in NETWORK_CATEGORIES
+        ):
             raise NetworkClassificationError(
                 f"network mapping entry {index} has invalid target_category"
             )

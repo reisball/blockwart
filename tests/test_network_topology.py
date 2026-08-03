@@ -382,3 +382,28 @@ def test_network_topology_node_bound_caps_inherited_placement_prefix(
         ]
         assert topology["edges"] == []
         assert topology["paths"] == []
+
+
+def test_network_topology_direct_anchor_stops_at_exhausted_node_budget(
+    alembic_session_factory,
+    unrestricted_read_access,
+) -> None:
+    with alembic_session_factory() as session:
+        with transaction(session):
+            _install_topology(session)
+        topology = query_network_topology(
+            session,
+            "edge-switch",
+            unrestricted_read_access(session),
+            max_nodes=1,
+            max_paths=3,
+        )
+
+        assert topology is not None
+        assert topology["truncated"] is True
+        assert topology["status"] == "incomplete"
+        assert [node["ref"] for node in topology["nodes"]] == [
+            "network:edge-switch"
+        ]
+        assert topology["edges"] == []
+        assert topology["paths"] == []
