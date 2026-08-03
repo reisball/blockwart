@@ -223,6 +223,82 @@ def test_network_topology_resolves_inheritance_alternatives_and_agent_parity(
         ]
 
 
+def test_network_ui_renders_authorized_full_paths_and_keeps_placement_separate(
+    alembic_session_factory,
+    install_unrestricted_read_access,
+) -> None:
+    with alembic_session_factory() as session:
+        with transaction(session):
+            _install_topology(session)
+            create_relationship(
+                session,
+                from_ref="network:edge-switch",
+                relation_type="uplinks_to",
+                to_ref="network:system-ap",
+                metadata={
+                    "link_kind": "wifi",
+                    "note": "Fallback access-point leg",
+                },
+            )
+
+    with _client(alembic_session_factory, install_unrestricted_read_access) as client:
+        placement = client.get("/?view=topology&q=topology-service")
+        network = client.get(
+            "/?view=topology&topology_mode=network"
+            "&q=topology-service&kind=service&services=1"
+        )
+        filtered = client.get(
+            "/?view=topology&topology_mode=network"
+            "&q=topology-service&kind=service&services=1&network_category=mesh"
+        )
+        no_match = client.get(
+            "/?view=topology&topology_mode=network"
+            "&q=topology-service&kind=service&services=1&network_category=firewall"
+        )
+        detail = client.get(
+            "/objects/topology-service?view=topology&topology_mode=network"
+        )
+
+    assert placement.status_code == 200
+    assert 'class="network-path-workbench"' not in placement.text
+    assert "No matching placement topology." not in placement.text
+
+    assert network.status_code == 200
+    assert 'class="network-path-workbench"' in network.text
+    assert "Inherited attachment" in network.text
+    assert "Alternative path 2" in network.text
+    assert "Link type: Ethernet" in network.text
+    assert "Mode: Mesh" in network.text
+    assert network.text.index("Core Router") < network.text.index("Mesh Node")
+    assert network.text.index("Mesh Node") < network.text.index("Topology Service")
+    assert "Router" in network.text
+    assert "Switch" in network.text
+    network_html = network.text.replace("&amp;", "&")
+    assert 'name="topology_mode" value="network"' in network_html
+    assert 'name="services" value="1"' in network_html
+    assert (
+        'window.BLOCKWART_DETAIL_QUERY = "view=topology\\u0026q=topology-service'
+        '\\u0026kind=service\\u0026topology_mode=network\\u0026services=1"'
+    ) in network.text
+
+    assert filtered.status_code == 200
+    assert "Topology Service" in filtered.text
+    assert no_match.status_code == 200
+    assert "No authorized network paths match these filters." in no_match.text
+
+    assert detail.status_code == 200
+    assert "Network path" in detail.text
+    assert "Inherited attachment" in detail.text
+    assert "host:topology-host" in detail.text
+    detail_panel = detail.text.split('class="panel network-detail-panel"', 1)[1]
+    assert detail_panel.index("Core Router") < detail_panel.index("Topology Service")
+    assert "Primary path" in detail_panel
+    assert "Alternative path 3" in detail_panel
+    assert "Complete" in detail_panel
+    assert "Incomplete" in detail_panel
+    assert "Fallback access-point leg" in detail_panel
+
+
 def test_network_topology_stops_before_unreadable_network_neighbors(
     alembic_session_factory,
 ) -> None:

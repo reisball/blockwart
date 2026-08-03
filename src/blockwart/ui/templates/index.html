@@ -113,7 +113,7 @@
       }
     </script>
     <link rel="stylesheet" href="/static/app.css?v=062" />
-    <link rel="stylesheet" href="/static/explorer.css?v=009" />
+    <link rel="stylesheet" href="/static/explorer.css?v=010" />
     <script>
       window.BLOCKWART_UI_SCHEMAS = {{ ui_schemas|tojson }};
       window.BLOCKWART_EXPLORER_ASSETS = {{ explorer.assets|tojson }};
@@ -179,12 +179,17 @@
 
       <nav class="mode-nav" aria-label="{{ t('nav.view') }}">
         <a {% if view == "catalog" %}class="active"{% endif %} href="/?view=catalog&q={{ q|urlencode }}&kind={{ kind }}">{{ t("nav.catalog") }}</a>
-        <a {% if view == "topology" %}class="active"{% endif %} href="/?view=topology&q={{ q|urlencode }}&kind={{ kind }}">{{ t("nav.topology") }}</a>
+        <a {% if view == "topology" %}class="active"{% endif %} href="/?view=topology&q={{ q|urlencode }}&kind={{ kind }}{% if view == 'topology' and topology_mode == 'network' %}&topology_mode=network{% if network_category %}&network_category={{ network_category }}{% endif %}{% if include_inherited_services %}&services=1{% endif %}{% endif %}">{{ t("nav.topology") }}</a>
       </nav>
 
       <form class="top-search" method="get" action="/">
         <input type="hidden" name="view" value="{{ view }}" />
         <input type="hidden" name="kind" value="{{ kind }}" />
+        {% if view == "topology" and topology_mode == "network" %}
+          <input type="hidden" name="topology_mode" value="network" />
+          {% if network_category %}<input type="hidden" name="network_category" value="{{ network_category }}" />{% endif %}
+          {% if include_inherited_services %}<input type="hidden" name="services" value="1" />{% endif %}
+        {% endif %}
         <svg viewBox="0 0 24 24" aria-hidden="true">
           <circle cx="11" cy="11" r="6.5"></circle>
           <path d="m16 16 4 4"></path>
@@ -202,7 +207,7 @@
         <a class="icon-button" href="/settings/schema" aria-label="{{ t('nav.settings') }}">⚙</a>
         {% if is_platform_admin %}<a class="icon-button" href="/admin/principals" aria-label="{{ t('nav.principals') }}">♙</a>{% endif %}
         {% if can_create %}
-          <a class="primary-button" href="/?view={{ view }}&q={{ q|urlencode }}&kind={{ kind }}&create=1" aria-label="{{ t('asset.create') }}">
+          <a class="primary-button" href="/?{{ detail_query_string }}&create=1" aria-label="{{ t('asset.create') }}">
             ＋ <span class="asset-create-full">{{ t("asset.create") }}</span><span class="asset-create-short">{{ t("asset.create_short") }}</span>
           </a>
         {% endif %}
@@ -211,11 +216,11 @@
 
     {% if show_create_form %}
       <div class="modal-overlay explorer-modal" role="presentation">
-        <a class="modal-backdrop" href="/?view={{ view }}&q={{ q|urlencode }}&kind={{ kind }}" aria-label="{{ t('asset.close_create') }}"></a>
+        <a class="modal-backdrop" href="/?{{ detail_query_string }}" aria-label="{{ t('asset.close_create') }}"></a>
         <section class="panel modal-window" role="dialog" aria-modal="true" aria-labelledby="create-object-title">
           <div class="modal-head">
             <h2 class="section-title" id="create-object-title">{{ t("asset.create_title") }}</h2>
-            <a class="button button-small button-muted" href="/?view={{ view }}&q={{ q|urlencode }}&kind={{ kind }}">{{ t("asset.close") }}</a>
+            <a class="button button-small button-muted" href="/?{{ detail_query_string }}">{{ t("asset.close") }}</a>
           </div>
           {% if error %}<div class="error" role="alert">{{ error }}</div>{% endif %}
           <form class="form-grid" method="post" action="/objects">
@@ -280,7 +285,7 @@
             </label>
             <div class="button-row">
               <button type="submit">{{ t("asset.save") }}</button>
-              <a class="button button-muted" href="/?view={{ view }}&q={{ q|urlencode }}&kind={{ kind }}">{{ t("asset.cancel") }}</a>
+              <a class="button button-muted" href="/?{{ detail_query_string }}">{{ t("asset.cancel") }}</a>
             </div>
           </form>
         </section>
@@ -467,13 +472,26 @@
           </div>
         </section>
         <div class="map-toolbar">
+          <div class="topology-mode-switch" aria-label="{{ t('topology.mode_label') }}">
+            <a class="{% if topology_mode == 'placement' %}active{% endif %}" href="/?view=topology&topology_mode=placement&q={{ q|urlencode }}&kind={{ kind }}">{{ t("topology.mode_placement") }}</a>
+            <a class="{% if topology_mode == 'network' %}active{% endif %}" href="/?view=topology&topology_mode=network&q={{ q|urlencode }}&kind={{ kind }}{% if network_category %}&network_category={{ network_category }}{% endif %}{% if include_inherited_services %}&services=1{% endif %}">{{ t("topology.mode_network") }}</a>
+          </div>
           <div class="map-filters">
-            <a class="{% if not kind %}active{% endif %}" href="/?view=topology&q={{ q|urlencode }}">{{ t("topology.overview") }}</a>
+            <a class="{% if not kind %}active{% endif %}" href="/?view=topology&topology_mode={{ topology_mode }}&q={{ q|urlencode }}{% if network_category %}&network_category={{ network_category }}{% endif %}{% if include_inherited_services %}&services=1{% endif %}">{{ t("topology.overview") }}</a>
             {% for object_kind in object_kinds %}
-              <a class="{% if kind == object_kind %}active{% endif %}" href="/?view=topology&q={{ q|urlencode }}&kind={{ object_kind }}">{{ t("kind." ~ object_kind) }}</a>
+              <a class="{% if kind == object_kind %}active{% endif %}" href="/?view=topology&topology_mode={{ topology_mode }}&q={{ q|urlencode }}&kind={{ object_kind }}{% if network_category %}&network_category={{ network_category }}{% endif %}{% if include_inherited_services %}&services=1{% endif %}">{{ t("kind." ~ object_kind) }}</a>
             {% endfor %}
           </div>
         </div>
+        {% if topology_mode == "network" %}
+          <div class="network-filter-toolbar" aria-label="{{ t('network_topology.category_filters') }}">
+            <a class="{% if not network_category %}active{% endif %}" href="/?view=topology&topology_mode=network&q={{ q|urlencode }}&kind={{ kind }}{% if include_inherited_services %}&services=1{% endif %}">{{ t("network_topology.all_categories") }}</a>
+            {% for category in network_categories %}
+              <a class="{% if network_category == category %}active{% endif %}" href="/?view=topology&topology_mode=network&q={{ q|urlencode }}&kind={{ kind }}&network_category={{ category }}{% if include_inherited_services %}&services=1{% endif %}">{{ t("network_category." ~ category) }}</a>
+            {% endfor %}
+            {% if kind != "service" %}<a class="network-service-toggle {% if include_inherited_services %}active{% endif %}" href="/?view=topology&topology_mode=network&q={{ q|urlencode }}&kind={{ kind }}{% if network_category %}&network_category={{ network_category }}{% endif %}{% if not include_inherited_services %}&services=1{% endif %}">{{ t("network_topology.hide_services") if include_inherited_services else t("network_topology.show_services") }}</a>{% endif %}
+          </div>
+        {% endif %}
         <section class="map-workbench">
           {% if detail_mode %}
             <div class="topology-detail-main" data-main-scroll>
@@ -482,6 +500,7 @@
           {% else %}
             <div class="topology-canvas" data-main-scroll>
             <div class="canvas-grid" aria-hidden="true"></div>
+            {% if topology_mode == "placement" %}
             <header class="canvas-labels">
               <span>{{ t("topology.hardware_column") }}</span>
               <span>{{ t("topology.system_column") }}</span>
@@ -595,6 +614,71 @@
             {% endif %}
             {% if not explorer.clusters and not explorer.standalone_systems and not explorer.standalone_services and not explorer.networks and not explorer.device_chains %}
               <div class="topology-empty">{{ t("topology.no_clusters") }}</div>
+            {% endif %}
+            {% else %}
+              <section class="network-path-workbench" aria-labelledby="network-path-title">
+                <header>
+                  <p class="eyebrow">{{ t("network_topology.eyebrow") }}</p>
+                  <h2 id="network-path-title">{{ t("network_topology.title") }}</h2>
+                  <p>{{ t("network_topology.help") }}</p>
+                </header>
+                {% for section_status in ("complete", "incomplete", "unconnected") %}
+                  {% set section_groups = explorer.network_path_groups | selectattr("status", "equalto", section_status) | list %}
+                  {% if section_groups %}
+                    <section class="network-path-section network-path-section-{{ section_status }}">
+                      <h3>{{ t("network_topology.section_" ~ section_status, count=section_groups|length) }}</h3>
+                      {% for group in section_groups %}
+                        <article class="network-path-group">
+                          <header>
+                            {{ map_node(group.anchor, "network-path-anchor") }}
+                            <div class="network-path-summary">
+                              <span class="badge network-status-{{ group.status }}">{{ t("network_topology.status_" ~ group.status) }}</span>
+                              {% if group.resolution %}<span class="badge">{{ t("network_topology.resolution_" ~ group.resolution) }}</span>{% endif %}
+                              {% if group.resolution_source_ref %}<code>{{ group.resolution_source_ref }}</code>{% endif %}
+                              {% if group.truncated %}<span class="badge network-status-incomplete">{{ t("network_topology.truncated") }}</span>{% endif %}
+                            </div>
+                          </header>
+                          {% if group.paths %}
+                            <div class="network-path-alternatives">
+                              {% for path in group.paths %}
+                                <section class="network-path-card" aria-label="{{ t('network_topology.path_number', number=loop.index) }}">
+                                  <div class="network-path-card-head">
+                                    <strong>{{ t("network_topology.primary_path") if loop.first else t("network_topology.alternative_path", number=loop.index) }}</strong>
+                                    <span class="badge network-status-{{ path.status }}">{{ t("network_topology.status_" ~ path.status) }}</span>
+                                  </div>
+                                  {% for row in path.rows %}
+                                    <div class="network-path-row">
+                                      {% if row.relation_type %}
+                                        <div class="network-path-edge">
+                                          <span aria-hidden="true">↓</span>
+                                          <strong>{{ t("relationship_type." ~ row.relation_type) }}</strong>
+                                          {% if row.metadata.link_kind %}<span class="badge">{{ t("device.link_kind") }}: {{ t("device.link_kind." ~ row.metadata.link_kind) }}</span>{% endif %}
+                                          {% if row.metadata.mode %}<span class="badge">{{ t("network_topology.mode") }}: {{ t("network_topology.link_mode_" ~ row.metadata.mode) }}</span>{% endif %}
+                                          {% if row.metadata.primary %}<span class="badge relationship-primary">★ {{ t("device.primary") }}</span>{% endif %}
+                                          {% if row.metadata.source_interface %}<span class="badge">{{ t("device.source_interface") }}: {{ row.metadata.source_interface }}</span>{% endif %}
+                                          {% if row.metadata.target_interface_or_port %}<span class="badge">{{ t("device.target_interface_or_port") }}: {{ row.metadata.target_interface_or_port }}</span>{% endif %}
+                                          {% if row.metadata.note %}<span class="network-link-note">{{ row.metadata.note }}</span>{% endif %}
+                                        </div>
+                                      {% endif %}
+                                      {{ map_node(row.asset, "network-path-node") }}
+                                      {% if row.asset.category %}<span class="network-category-badge">{{ t("network_category." ~ row.asset.category) }}</span>{% endif %}
+                                    </div>
+                                  {% endfor %}
+                                </section>
+                              {% endfor %}
+                            </div>
+                          {% else %}
+                            <p class="network-path-empty">{{ t("network_topology.no_path") }}</p>
+                          {% endif %}
+                        </article>
+                      {% endfor %}
+                    </section>
+                  {% endif %}
+                {% endfor %}
+                {% if not explorer.network_path_groups %}
+                  <div class="topology-empty">{{ t("network_topology.no_matches") }}</div>
+                {% endif %}
+              </section>
             {% endif %}
             <div class="map-legend" aria-label="{{ t('topology.legend') }}">
               <span><i class="legend-shape hardware"></i>{{ t("kind.host") }}</span>

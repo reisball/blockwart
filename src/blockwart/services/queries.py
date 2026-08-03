@@ -163,6 +163,7 @@ class ExplorerAssetDetailReadModel(TypedDict):
     updated_at: str
     visibility: Literal["stub", "detail"]
     capabilities: list[Permission]
+    category: NotRequired[str]
 
 
 class ExplorerAssetStubReadModel(TypedDict):
@@ -204,6 +205,27 @@ class ExplorerDeviceChainReadModel(TypedDict):
     rows: list[ExplorerDeviceChainRowReadModel]
 
 
+class ExplorerNetworkPathRowReadModel(TypedDict):
+    asset: ExplorerAssetReadModel
+    relation_type: str
+    metadata: dict[str, Any]
+
+
+class ExplorerNetworkPathReadModel(TypedDict):
+    rows: list[ExplorerNetworkPathRowReadModel]
+    status: Literal["complete", "incomplete"]
+
+
+class ExplorerNetworkPathGroupReadModel(TypedDict):
+    anchor: ExplorerAssetReadModel
+    paths: list[ExplorerNetworkPathReadModel]
+    resolution: Literal["direct", "inherited"] | None
+    resolution_source: Literal["host", "system", "placement_host", "network"] | None
+    resolution_source_ref: str | None
+    status: Literal["complete", "incomplete", "unconnected"]
+    truncated: bool
+
+
 class ExplorerReadModel(TypedDict):
     clusters: list[ExplorerClusterReadModel]
     standalone_systems: list[ExplorerStandaloneSystemReadModel]
@@ -211,6 +233,7 @@ class ExplorerReadModel(TypedDict):
     networks: list[ExplorerAssetReadModel]
     devices: list[ExplorerAssetReadModel]
     device_chains: list[ExplorerDeviceChainReadModel]
+    network_path_groups: list[ExplorerNetworkPathGroupReadModel]
     assets: dict[str, ExplorerAssetReadModel]
 
 
@@ -297,6 +320,9 @@ def query_catalog_browse(
     *,
     query: str | None = None,
     kind: str | None = None,
+    include_network_topology: bool = False,
+    include_inherited_services: bool = False,
+    network_category: str | None = None,
 ) -> CatalogBrowseReadModel:
     """Build the public catalog explorer model without FastAPI dependencies."""
     all_objects = sort_for_browse(list_catalog_objects(session, access))
@@ -358,6 +384,9 @@ def query_catalog_browse(
             public_objects,
             relationships,
             included_refs=included_refs,
+            include_network_topology=include_network_topology,
+            include_inherited_services=include_inherited_services,
+            network_category=network_category,
         ),
     )
 
@@ -591,6 +620,23 @@ def query_network_topology(
         or catalog_object.visibility != ObjectVisibility.DETAIL
     ):
         return None
+    return _build_network_topology(
+        catalog_object,
+        all_objects,
+        _list_relationships(session, access),
+        max_paths=max_paths,
+        max_nodes=max_nodes,
+    )
+
+
+def _build_network_topology(
+    catalog_object: CatalogObjectReadOut,
+    all_objects: list[CatalogObjectReadOut],
+    relationships: list[RelationshipReadModel],
+    *,
+    max_paths: int,
+    max_nodes: int,
+) -> NetworkTopologyReadModel:
     if max_paths < 1 or max_nodes < 1:
         raise ValueError("network topology limits must be positive")
 
@@ -598,7 +644,6 @@ def query_network_topology(
         f"{candidate.kind}:{candidate.id}": candidate
         for candidate in all_objects
     }
-    relationships = _list_relationships(session, access)
     placement_graph = PlacementGraph(object_map.values(), relationships)
     current_ref = f"{catalog_object.kind}:{catalog_object.id}"
     placement_path = placement_graph.parent_path_refs(current_ref)
@@ -932,6 +977,9 @@ def build_explorer_read_model(
     relationships: list[RelationshipReadModel],
     *,
     included_refs: set[str] | None = None,
+    include_network_topology: bool = False,
+    include_inherited_services: bool = False,
+    network_category: str | None = None,
 ) -> ExplorerReadModel:
     """Build the shared catalog/topology hierarchy from canonical placement."""
     object_map = {
@@ -1043,6 +1091,18 @@ def build_explorer_read_model(
         assets,
         included_refs=included_refs,
     )
+    network_path_groups = (
+        _explorer_network_path_groups(
+            objects,
+            relationships,
+            assets,
+            included_refs=included_refs,
+            include_inherited_services=include_inherited_services,
+            network_category=network_category,
+        )
+        if include_network_topology
+        else []
+    )
     visible_refs = set(included_refs or assets)
     for cluster in clusters:
         visible_refs.add(cluster["host"]["ref"])
@@ -1068,6 +1128,13 @@ def build_explorer_read_model(
         for chain in device_chains
         for row in chain["rows"]
     )
+    visible_refs.update(
+        row["asset"]["ref"]
+        for group in network_path_groups
+        for path in group["paths"]
+        for row in path["rows"]
+    )
+    visible_refs.update(group["anchor"]["ref"] for group in network_path_groups)
     return {
         "clusters": clusters,
         "standalone_systems": standalone_systems,
@@ -1075,12 +1142,94 @@ def build_explorer_read_model(
         "networks": networks,
         "devices": devices,
         "device_chains": device_chains,
+        "network_path_groups": network_path_groups,
         "assets": {
             ref: asset
             for ref, asset in assets.items()
             if ref in visible_refs
         },
     }
+
+
+def _explorer_network_path_groups(
+    objects: list[CatalogObjectReadOut],
+    relationships: list[RelationshipReadModel],
+    assets: dict[str, ExplorerAssetReadModel],
+    *,
+    included_refs: set[str] | None,
+    include_inherited_services: bool,
+    network_category: str | None,
+) -> list[ExplorerNetworkPathGroupReadModel]:
+    edge_by_pair = {
+        frozenset((edge["from_ref"], edge["to_ref"])): edge
+        for edge in relationships
+        if edge["relation_type"] in {"hosts", "attached_to", "uplinks_to"}
+    }
+    groups: list[ExplorerNetworkPathGroupReadModel] = []
+    for catalog_object in objects:
+        object_ref = f"{catalog_object.kind}:{catalog_object.id}"
+        if catalog_object.visibility != ObjectVisibility.DETAIL:
+            continue
+        if catalog_object.kind not in {"host", "system", "service", "network"}:
+            continue
+        if included_refs is not None and object_ref not in included_refs:
+            continue
+        if (
+            catalog_object.kind == "service"
+            and not include_inherited_services
+            and included_refs is None
+        ):
+            continue
+        topology = _build_network_topology(
+            catalog_object,
+            objects,
+            relationships,
+            max_paths=256,
+            max_nodes=512,
+        )
+        if network_category and not any(
+            node.get("category") == network_category
+            for node in topology["nodes"]
+        ):
+            continue
+        paths: list[ExplorerNetworkPathReadModel] = []
+        for path in topology["paths"]:
+            rows: list[ExplorerNetworkPathRowReadModel] = []
+            previous_ref = ""
+            for ref in reversed(path["refs"]):
+                asset = assets.get(ref)
+                if asset is None:
+                    continue
+                edge = edge_by_pair.get(frozenset((previous_ref, ref))) if previous_ref else None
+                rows.append(
+                    {
+                        "asset": asset,
+                        "relation_type": edge["relation_type"] if edge else "",
+                        "metadata": dict(edge["metadata"]) if edge else {},
+                    }
+                )
+                previous_ref = ref
+            if rows:
+                paths.append({"rows": rows, "status": path["status"]})
+        groups.append(
+            {
+                "anchor": assets[object_ref],
+                "paths": paths,
+                "resolution": topology["resolution"],
+                "resolution_source": topology["resolution_source"],
+                "resolution_source_ref": topology["resolution_source_ref"],
+                "status": topology["status"],
+                "truncated": topology["truncated"],
+            }
+        )
+    return sorted(
+        groups,
+        key=lambda group: (
+            {"complete": 0, "incomplete": 1, "unconnected": 2}[group["status"]],
+            group["anchor"]["label"].casefold(),
+            group["anchor"]["ref"],
+        ),
+    )
 
 
 def _explorer_device_chains(
@@ -1690,7 +1839,7 @@ def _explorer_asset(
         if isinstance(raw_labels, list)
         else []
     )
-    return {
+    asset: ExplorerAssetDetailReadModel = {
         "ref": f"{catalog_object.kind}:{catalog_object.id}",
         "id": catalog_object.id,
         "kind": catalog_object.kind,
@@ -1709,6 +1858,16 @@ def _explorer_asset(
         "visibility": ObjectVisibility.DETAIL,
         "capabilities": catalog_object.capabilities,
     }
+    category_source = (
+        network
+        if catalog_object.kind == "network"
+        else catalog_object.data.get("device")
+    )
+    if isinstance(category_source, Mapping):
+        category = category_source.get("category")
+        if isinstance(category, str):
+            asset["category"] = category
+    return asset
 
 
 def _project_catalog_object(

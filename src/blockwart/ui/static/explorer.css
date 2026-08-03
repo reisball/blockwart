@@ -1371,6 +1371,217 @@ button.map-node {
   grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 
+.topology-mode-switch,
+.network-filter-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.topology-mode-switch a,
+.network-filter-toolbar a {
+  padding: 7px 10px;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  color: var(--explorer-muted);
+  font-size: 9px;
+  font-weight: 800;
+  text-decoration: none;
+}
+
+.topology-mode-switch a:hover,
+.topology-mode-switch a.active,
+.network-filter-toolbar a:hover,
+.network-filter-toolbar a.active {
+  border-color: var(--explorer-border);
+  background: var(--explorer-panel-3);
+  color: var(--explorer-text);
+}
+
+.network-filter-toolbar {
+  max-width: 1540px;
+  margin: 0 auto;
+  padding: 8px 12px;
+  overflow-x: auto;
+  border: 1px solid var(--explorer-border);
+  border-top: 0;
+  background: var(--explorer-panel-2);
+  white-space: nowrap;
+}
+
+.network-service-toggle {
+  margin-left: auto;
+}
+
+.network-path-workbench {
+  position: relative;
+  z-index: 2;
+  display: grid;
+  gap: 18px;
+}
+
+.network-path-workbench > header p:last-child {
+  max-width: 720px;
+  color: var(--explorer-muted);
+}
+
+.network-path-section {
+  display: grid;
+  gap: 10px;
+}
+
+.network-path-section > h3 {
+  margin: 0;
+  color: var(--explorer-muted);
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.network-path-group {
+  padding: 14px;
+  border: 1px solid var(--explorer-border);
+  border-radius: 12px;
+  background: rgb(17 24 38 / 82%);
+}
+
+:root[data-theme="light"] .network-path-group {
+  background: rgb(255 255 255 / 88%);
+}
+
+.network-path-group > header {
+  display: grid;
+  grid-template-columns: minmax(210px, 0.8fr) minmax(0, 1.2fr);
+  gap: 12px;
+  align-items: center;
+}
+
+.network-path-summary,
+.network-path-card-head,
+.network-path-edge,
+.network-detail-node {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 7px;
+}
+
+.network-path-summary code {
+  color: var(--explorer-muted);
+  font-size: 9px;
+}
+
+.network-path-alternatives {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.network-path-card {
+  padding: 10px;
+  border: 1px solid var(--explorer-border-soft);
+  border-radius: 10px;
+  background: var(--explorer-panel-2);
+}
+
+.network-path-card-head {
+  justify-content: space-between;
+  margin-bottom: 8px;
+  color: var(--explorer-muted);
+  font-size: 9px;
+}
+
+.network-path-row {
+  position: relative;
+}
+
+.network-path-row + .network-path-row {
+  margin-top: 4px;
+}
+
+.network-path-edge {
+  min-height: 30px;
+  margin-left: 18px;
+  padding: 3px 0 3px 13px;
+  border-left: 1px solid #3b587f;
+  color: var(--explorer-muted);
+  font-size: 8px;
+}
+
+.network-path-edge > span:first-child {
+  color: #7196d0;
+  font-size: 13px;
+}
+
+.network-path-node {
+  grid-template-columns: 30px minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+  min-height: 58px;
+  padding: 8px;
+}
+
+.network-category-badge {
+  display: inline-flex;
+  margin: 4px 0 0 40px;
+  padding: 3px 7px;
+  border: 1px solid #2d716d;
+  border-radius: 999px;
+  color: #7dd3ca;
+  font-size: 8px;
+  font-weight: 800;
+}
+
+:root[data-theme="light"] .network-category-badge {
+  color: #17645d;
+}
+
+.network-status-complete {
+  border-color: #2b765f;
+}
+
+.network-status-incomplete {
+  border-color: #9a7335;
+}
+
+.network-status-unconnected {
+  border-color: #8d4e5b;
+}
+
+.network-link-note,
+.network-path-empty {
+  color: var(--explorer-muted);
+  font-size: 9px;
+}
+
+.network-detail-paths {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.network-detail-path {
+  margin: 0;
+  padding: 10px;
+  list-style: none;
+  border: 1px solid var(--explorer-border-soft);
+  border-radius: 10px;
+}
+
+.network-detail-node {
+  padding: 7px;
+  border: 1px solid var(--explorer-border);
+  border-radius: 8px;
+  background: var(--explorer-panel-2);
+}
+
+.network-detail-node code {
+  margin-left: auto;
+  color: var(--explorer-muted);
+  font-size: 8px;
+}
+
 .topology-empty {
   position: relative;
   z-index: 2;
@@ -1786,6 +1997,16 @@ button.map-node {
     overflow-x: auto;
   }
 
+  .topology-mode-switch,
+  .network-filter-toolbar {
+    width: max-content;
+  }
+
+  .network-filter-toolbar {
+    width: 100%;
+    max-width: 100%;
+  }
+
   .map-filters {
     width: max-content;
   }
@@ -1808,6 +2029,21 @@ button.map-node {
     display: block;
     margin-bottom: 12px;
     padding: 10px;
+  }
+
+  .network-path-group > header,
+  .network-path-alternatives,
+  .network-detail-paths {
+    grid-template-columns: 1fr;
+  }
+
+  .map-legend {
+    position: relative;
+    left: auto;
+    bottom: auto;
+    flex-wrap: wrap;
+    gap: 8px 12px;
+    margin-top: 18px;
   }
 
   .hardware-node {
