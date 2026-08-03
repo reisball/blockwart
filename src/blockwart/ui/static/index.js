@@ -363,6 +363,9 @@
   const createKindSelect = document.querySelector("[data-kind-select]");
   const platformField = document.querySelector("[data-platform-field]");
   const primaryNameLabel = document.querySelector("[data-primary-name-label]");
+  const relationshipLabel = document.querySelector("[data-relationship-label]");
+  const relationTargetSelect = document.querySelector("[data-relation-target-select]");
+  const relationTypeInput = document.querySelector("[data-relation-type-input]");
   const createFields = Array.from(document.querySelectorAll("[data-create-field]"));
 
   function setFieldEnabled(field, enabled) {
@@ -377,6 +380,7 @@
       return;
     }
     const schema = uiSchemas[createKindSelect.value] || {};
+    const createsDevice = createKindSelect.value === "device";
     const allowedFields = new Set(schema.create_fields || []);
     const fieldDefinitions = new Map(
       (schema.create_field_definitions || []).map((field) => [field.key, field]),
@@ -404,6 +408,27 @@
     }
     if (platformField) {
       platformField.hidden = !allowedFields.has("platform");
+    }
+    if (relationshipLabel) {
+      relationshipLabel.textContent = createsDevice
+        ? (copy.attachmentParent || relationshipLabel.textContent)
+        : (copy.placementParent || relationshipLabel.textContent);
+    }
+    if (relationTypeInput) {
+      relationTypeInput.value = createsDevice ? "attached_to" : "hosts";
+    }
+    if (relationTargetSelect) {
+      for (const option of relationTargetSelect.options) {
+        option.disabled = createsDevice && option.dataset.deviceParent !== "true";
+      }
+      if (relationTargetSelect.selectedOptions[0]?.disabled) {
+        const firstEnabled = Array.from(relationTargetSelect.options).find(
+          (option) => !option.disabled,
+        );
+        if (firstEnabled) {
+          relationTargetSelect.value = firstEnabled.value;
+        }
+      }
     }
   }
 

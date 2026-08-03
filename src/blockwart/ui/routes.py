@@ -15,8 +15,11 @@ from sqlalchemy.orm import Session
 
 from blockwart.api.deps import get_session
 from blockwart.domain.auth import GrantScope, Permission, Role
+from blockwart.domain.object_schema import DEVICE_CATEGORIES
 from blockwart.domain.placement import PlacementError
 from blockwart.domain.relationships import (
+    LINK_KINDS,
+    NETWORK_DEVICE_CATEGORIES,
     RELATIONSHIP_TYPES,
     RelationshipIntegrityError,
 )
@@ -37,9 +40,11 @@ from blockwart.services.catalog import get_object
 from blockwart.services.commands import (
     CommandAuthorizationDenied,
     authorize_object_command,
+    create_attached_device,
     create_child_object,
     create_object_relationship,
     delete_catalog_object,
+    delete_object_relationship,
     revision_etag,
     update_catalog_object,
 )
@@ -59,6 +64,7 @@ from blockwart.services.queries import (
     primary_name_value,
     query_catalog_browse,
     query_catalog_detail,
+    query_device_graph,
 )
 from blockwart.ui.i18n import translation_context
 from blockwart.ui.paths import TEMPLATE_DIR
@@ -83,11 +89,14 @@ RELATION_TYPES = RELATIONSHIP_TYPES
 PLATFORM_TYPES = ("LXC", "VM", "WSL")
 SAFE_DATA_JSON_FALLBACK = "{\n  \"schema_version\": 1\n}"
 HARDWARE_OBJECT_KINDS = {"host", "system"}
+DEVICE_OBJECT_KIND = "device"
+ATTACHMENT_RELATION_TYPE = "attached_to"
 NETWORK_ADDRESS_EDIT_KINDS = {"host", "system", "network"}
 NETWORK_PORT_EDIT_KINDS: set[str] = set()
 NETWORK_ENDPOINT_EDIT_KINDS = {"host", "system", "network", "service"}
 SERVICE_INFORMATION_OBJECT_KINDS = {"service"}
 ENDPOINT_TYPES = ENDPOINT_TYPE_OPTIONS
+DEVICE_LINK_KINDS = tuple(sorted(LINK_KINDS))
 
 
 def _metadata_timestamp(value: str | None, translator: Any) -> str:
@@ -174,8 +183,11 @@ def _localized_audit_lines(
         ]
     template_key = {
         "create": "audit.create",
+        "create_attached_device": "audit.create_attached_device",
         "delete": "audit.delete",
         "relationship_create": "audit.relationship_create",
+        "relationship_delete": "audit.relationship_delete",
+        "relationship_metadata_replace": "audit.relationship_metadata_replace",
         "grant_create": "audit.grant_create",
         "grant_update": "audit.grant_update",
         "grant_revoke": "audit.grant_revoke",
@@ -279,6 +291,11 @@ def _index_template_context(
         for target in read_model.relation_targets
         if Permission.CREATE_CHILD in target.capabilities
     ]
+    device_parent_refs = {
+        f"{target.kind}:{target.id}"
+        for target in create_parents
+        if _supports_device_attachment_parent(target)
+    }
     return {
         "title": "Blockwart",
         "objects": read_model.objects,
@@ -289,12 +306,15 @@ def _index_template_context(
         "object_kinds": OBJECT_KINDS,
         "object_statuses": OBJECT_STATUSES_UI,
         "platform_types": PLATFORM_TYPES,
+        "device_categories": sorted(DEVICE_CATEGORIES),
         "ui_schemas": localized_schemas,
         "form_ui_schema": localized_schemas[selected_form_kind],
         "create_fields_by_key": {
-            **_fields_by_key(
-                localized_schemas["system"]["create_field_definitions"]
-            ),
+            **{
+                str(field["key"]): field
+                for schema in localized_schemas.values()
+                for field in schema["create_field_definitions"]
+            },
             **_fields_by_key(
                 localized_schemas[selected_form_kind][
                     "create_field_definitions"
@@ -309,6 +329,7 @@ def _index_template_context(
         "form": form,
         "systems": read_model.systems,
         "relation_targets": create_parents,
+        "device_parent_refs": device_parent_refs,
         "relation_types": RELATION_TYPES,
         "show_create_form": show_create_form,
         "index_relationships": read_model.index_relationships,
@@ -455,6 +476,7 @@ def _detail_template_context(
     read_model: Any,
     *,
     error: str | None,
+    notice: str | None,
     edit_section: str,
     can_write_enabled: bool,
     can_manage_access_enabled: bool,
@@ -463,6 +485,8 @@ def _detail_template_context(
     grant_scope_preview: Any | None,
     principal_results: tuple[Any, ...],
     principal_query: str,
+    device_graph: Mapping[str, Any] | None = None,
+    relationship_form: Mapping[str, Any] | None = None,
     data_json_override: str | None = None,
     form_rows: Mapping[str, list[Mapping[str, Any]]] | None = None,
 ) -> dict[str, Any]:
@@ -476,6 +500,7 @@ def _detail_template_context(
             "is_stub": True,
             "can_write": False,
             "error": None,
+            "notice": None,
             "edit_section": "",
             **i18n,
         }
@@ -491,6 +516,8 @@ def _detail_template_context(
     network = _network_summary(object_data)
     hardware = _hardware_summary(object_data)
     hardware_fields = _hardware_schema_fields(schema_fields, hardware)
+    device = _device_summary(object_data)
+    device_fields = _device_schema_fields(schema_fields, device)
     ports = _list_of_mappings(object_data.get("ports"))
     endpoints = _list_of_mappings(object_data.get("endpoints"))
     service_information = _service_information_summary(object_data)
@@ -501,7 +528,18 @@ def _detail_template_context(
     can_edit_network_addresses = catalog_object.kind in NETWORK_ADDRESS_EDIT_KINDS
     can_edit_network_ports = catalog_object.kind in NETWORK_PORT_EDIT_KINDS
     can_edit_network_endpoints = catalog_object.kind in NETWORK_ENDPOINT_EDIT_KINDS
+    can_edit_device = catalog_object.kind == DEVICE_OBJECT_KIND
     submitted_rows = form_rows or {}
+    submitted_device_rows = submitted_rows.get("device_fields") or []
+    if submitted_device_rows:
+        submitted_device = submitted_device_rows[0]
+        submitted_values = {
+            "device_category": str(submitted_device.get("category") or ""),
+            "device_manufacturer": str(submitted_device.get("manufacturer") or ""),
+            "device_model": str(submitted_device.get("model") or ""),
+        }
+        for field in device_fields:
+            field["value"] = submitted_values.get(field["key"], field["value"])
     network_address_rows = _mapping_rows_override(
         submitted_rows.get("network_addresses"),
         _padded_mappings(
@@ -558,6 +596,22 @@ def _detail_template_context(
         ),
         "ports": ports,
         "endpoints": endpoints,
+        "device": device,
+        "device_fields": device_fields,
+        "can_edit_device": can_edit_device,
+        "device_categories": tuple(sorted(DEVICE_CATEGORIES)),
+        "device_chain_rows": _device_chain_rows(device_graph),
+        "show_device_chain": bool(
+            catalog_object.kind == DEVICE_OBJECT_KIND
+            or (device_graph and device_graph.get("edges"))
+        ),
+        "device_attachment_targets": [
+            target
+            for target in read_model.relationship_targets
+            if _supports_device_attachment_parent(target)
+        ],
+        "device_link_kinds": DEVICE_LINK_KINDS,
+        "relationship_form": dict(relationship_form or {}),
         "network_address_rows": network_address_rows,
         "port_rows": port_rows,
         "endpoint_rows": endpoint_rows,
@@ -565,6 +619,11 @@ def _detail_template_context(
         "can_edit_network_addresses": can_edit_network_addresses,
         "can_edit_network_ports": can_edit_network_ports,
         "can_edit_network_endpoints": can_edit_network_endpoints,
+        "can_edit_network": bool(
+            can_edit_network_addresses
+            or can_edit_network_ports
+            or can_edit_network_endpoints
+        ),
         "network_has_editable_rows": bool(
             (can_edit_network_addresses and network["addresses"])
             or (can_edit_network_ports and ports)
@@ -604,6 +663,7 @@ def _detail_template_context(
         "object_statuses": OBJECT_STATUSES_UI,
         "platform_types": PLATFORM_TYPES,
         "error": error,
+        "notice": notice,
         "edit_section": edit_section,
         "can_write": can_write_enabled,
         "can_manage_access": can_manage_access_enabled,
@@ -658,6 +718,7 @@ def _detail_navigation_context(
         "overview",
         "hardware",
         "service-information",
+        "device",
         "network",
         "access",
         "permissions",
@@ -700,8 +761,10 @@ def _render_object_detail(
     *,
     read_model: Any | None = None,
     error: str | None,
+    notice: str | None = None,
     edit_section: str,
     can_write_enabled: bool,
+    relationship_form: Mapping[str, Any] | None = None,
     data_json_override: str | None = None,
     form_rows: Mapping[str, list[Mapping[str, Any]]] | None = None,
     status_code: int = 200,
@@ -714,6 +777,11 @@ def _render_object_detail(
     )
     if detail_read_model is None:
         raise HTTPException(status_code=404, detail="Catalog object not found")
+    device_graph = query_device_graph(
+        session,
+        object_id,
+        access,
+    )
     navigation = _detail_navigation_context(request, object_id)
     browse_read_model = query_catalog_browse(
         session,
@@ -795,6 +863,7 @@ def _render_object_detail(
             request,
             detail_read_model,
             error=error,
+            notice=notice or _relationship_notice(request),
             edit_section=edit_section,
             can_write_enabled=can_write_enabled,
             can_manage_access_enabled=can_manage_access_enabled,
@@ -803,6 +872,8 @@ def _render_object_detail(
             grant_scope_preview=grant_scope_preview,
             principal_results=principal_results,
             principal_query=principal_query,
+            device_graph=device_graph,
+            relationship_form=relationship_form,
             data_json_override=data_json_override,
             form_rows=form_rows,
         )
@@ -1059,6 +1130,9 @@ def save_object(
     labels: Annotated[str, Form()] = "",
     platform: Annotated[str, Form()] = "",
     hostname: Annotated[str | None, Form()] = None,
+    device_category: Annotated[str | None, Form()] = None,
+    device_manufacturer: Annotated[str | None, Form()] = None,
+    device_model: Annotated[str | None, Form()] = None,
     status: Annotated[str, Form()] = "active",
     summary: Annotated[str, Form()] = "",
     data_json: Annotated[str, Form()] = "{}",
@@ -1086,6 +1160,9 @@ def save_object(
         "labels": labels,
         "platform": platform,
         "hostname": hostname or "",
+        "device_category": device_category or "",
+        "device_manufacturer": device_manufacturer or "",
+        "device_model": device_model or "",
         "status": status,
         "summary": summary,
         "data_json": data_json,
@@ -1114,6 +1191,13 @@ def save_object(
             data.pop("platform", None)
         primary_value = (primary_name or hostname or label or object_id).strip()
         _apply_primary_name(data, ui_schema, primary_value)
+        if kind == DEVICE_OBJECT_KIND:
+            _apply_device_fields(
+                data,
+                category=device_category or "",
+                manufacturer=device_manufacturer,
+                model=device_model,
+            )
         hosted_on_system_id = hosted_on_system_id.strip()
         relation_target_ref = relation_target_ref.strip()
         if hosted_on_system_id and not relation_target_ref:
@@ -1131,26 +1215,53 @@ def save_object(
             raise ValueError("An authorized placement parent is required")
         if ":" not in relation_target_ref:
             raise ValueError("An authorized placement parent is required")
-        if relation_type != "hosts":
-            raise ValueError("Child creation requires the hosts placement relation")
-        _require_existing_ref(session, relation_target_ref)
         parent_kind, parent_id = relation_target_ref.split(":", 1)
-        parent = get_object(session, parent_id)
-        if parent is None or parent.kind != parent_kind:
-            raise ValueError("Placement parent does not exist")
         execute_ui_command(
             session,
             context,
-            lambda: create_child_object(
+            lambda: authorize_object_command(
                 session,
                 context,
-                parent_id=parent_id,
-                payload=payload,
-                idempotency_key=idempotency_key,
-                idempotency_ttl_seconds=request.app.state.settings.idempotency_ttl_seconds,
+                object_id=parent_id,
+                permission=Permission.CREATE_CHILD,
             ),
         )
-    except (json.JSONDecodeError, ValidationError, ValueError) as exc:
+        parent = get_object(session, parent_id)
+        if parent is None or parent.kind != parent_kind:
+            raise ValueError("Parent reference does not match the authorized object")
+        command_result = None
+        if kind == DEVICE_OBJECT_KIND:
+            if relation_type != ATTACHMENT_RELATION_TYPE:
+                raise ValueError("Device creation requires an attachment parent")
+            command_result = execute_ui_command(
+                session,
+                context,
+                lambda: create_attached_device(
+                    session,
+                    context,
+                    parent_id=parent_id,
+                    payload=payload,
+                    metadata={},
+                    idempotency_key=idempotency_key,
+                    idempotency_ttl_seconds=request.app.state.settings.idempotency_ttl_seconds,
+                ),
+            )
+        else:
+            if relation_type != "hosts":
+                raise ValueError("Child creation requires the hosts placement relation")
+            command_result = execute_ui_command(
+                session,
+                context,
+                lambda: create_child_object(
+                    session,
+                    context,
+                    parent_id=parent_id,
+                    payload=payload,
+                    idempotency_key=idempotency_key,
+                    idempotency_ttl_seconds=request.app.state.settings.idempotency_ttl_seconds,
+                ),
+            )
+    except (HTTPException, json.JSONDecodeError, ValidationError, ValueError) as exc:
         form["data_json"] = SAFE_DATA_JSON_FALLBACK
         read_model = query_catalog_browse(
             session,
@@ -1166,15 +1277,24 @@ def save_object(
                 kind="",
                 view="catalog",
                 form=form,
-                error=_safe_error_message(exc),
+                error=(
+                    str(exc.detail)
+                    if isinstance(exc, HTTPException)
+                    else _safe_error_message(exc)
+                ),
                 show_create_form=True,
                 can_write_enabled=True,
                 form_kind=kind,
             ),
-            status_code=422,
+            status_code=exc.status_code if isinstance(exc, HTTPException) else 422,
         )
+    notice = "device-created-replayed" if command_result.replayed else "device-created"
     return RedirectResponse(
-        url=_detail_redirect_url(request, payload.id),
+        url=(
+            f"{_detail_redirect_url(request, payload.id)}&notice={notice}"
+            if kind == DEVICE_OBJECT_KIND
+            else _detail_redirect_url(request, payload.id)
+        ),
         status_code=303,
     )
 
@@ -1192,6 +1312,11 @@ def save_relationship(
     relation_type: Annotated[str, Form()],
     target_ref: Annotated[str, Form()],
     if_match: Annotated[str, Form()] = "",
+    source_interface: Annotated[str, Form(max_length=128)] = "",
+    target_interface_or_port: Annotated[str, Form(max_length=128)] = "",
+    link_kind: Annotated[str, Form(max_length=32)] = "",
+    primary: Annotated[str | None, Form()] = None,
+    note: Annotated[str, Form(max_length=512)] = "",
 ):
     access = read_access_from_request(request)
     context = ui_write_context(request, access)
@@ -1213,13 +1338,20 @@ def save_relationship(
             raise ValueError("Unsupported relation type")
         if direction not in {"inbound", "outbound"}:
             raise ValueError("Unsupported relationship direction")
-        _require_existing_ref(session, target_ref)
         object_ref = f"{catalog_object.kind}:{catalog_object.id}"
         if direction == "inbound":
             from_ref, to_ref = target_ref, object_ref
         else:
             from_ref, to_ref = object_ref, target_ref
-        execute_ui_command(
+        metadata = _relationship_metadata_from_form(
+            relation_type,
+            source_interface=source_interface,
+            target_interface_or_port=target_interface_or_port,
+            link_kind=link_kind,
+            primary=primary,
+            note=note,
+        )
+        result = execute_ui_command(
             session,
             context,
             lambda: create_object_relationship(
@@ -1229,6 +1361,7 @@ def save_relationship(
                 from_ref=from_ref,
                 relation_type=relation_type,
                 to_ref=to_ref,
+                metadata=metadata,
                 expected_revision=_ui_expected_revision(
                     request,
                     if_match,
@@ -1250,10 +1383,88 @@ def save_relationship(
             error=error,
             edit_section="relationship-add",
             can_write_enabled=True,
-            status_code=422,
+            relationship_form={
+                "target_ref": target_ref,
+                "source_interface": source_interface,
+                "target_interface_or_port": target_interface_or_port,
+                "link_kind": link_kind,
+                "primary": primary is not None,
+                "note": note,
+            },
+            status_code=(
+                exc.status_code
+                if isinstance(exc, HTTPException)
+                and (
+                    relation_type == ATTACHMENT_RELATION_TYPE
+                    or exc.status_code in {403, 404, 412}
+                )
+                else 422
+            ),
+        )
+    notice_code = "relationship-noop"
+    if result.changed:
+        notice_code = (
+            "relationship-attached"
+            if relation_type == ATTACHMENT_RELATION_TYPE
+            else "relationship-saved"
         )
     return RedirectResponse(
-        url=_detail_redirect_url(request, object_id),
+        url=f"{_detail_redirect_url(request, object_id)}&notice={notice_code}",
+        status_code=303,
+    )
+
+
+@router.post(
+    "/objects/{object_id}/relationships/detach",
+    response_class=HTMLResponse,
+    dependencies=[Depends(require_browser_write_csrf)],
+)
+def detach_relationship(
+    request: Request,
+    object_id: str,
+    session: Annotated[Session, Depends(get_session)],
+    from_ref: Annotated[str, Form()],
+    to_ref: Annotated[str, Form()],
+    if_match: Annotated[str, Form()] = "",
+):
+    access = read_access_from_request(request)
+    context = ui_write_context(request, access)
+    execute_ui_command(
+        session,
+        context,
+        lambda: authorize_object_command(
+            session,
+            context,
+            object_id=object_id,
+            permission=Permission.WRITE,
+        ),
+    )
+    try:
+        execute_ui_command(
+            session,
+            context,
+            lambda: delete_object_relationship(
+                session,
+                context,
+                object_id=object_id,
+                from_ref=from_ref,
+                relation_type=ATTACHMENT_RELATION_TYPE,
+                to_ref=to_ref,
+                expected_revision=if_match,
+            ),
+        )
+    except HTTPException as exc:
+        return _render_object_detail(
+            request,
+            session,
+            object_id,
+            error=str(exc.detail),
+            edit_section="relationships",
+            can_write_enabled=True,
+            status_code=exc.status_code,
+        )
+    return RedirectResponse(
+        url=f"{_detail_redirect_url(request, object_id)}&notice=relationship-detached",
         status_code=303,
     )
 
@@ -1345,6 +1556,9 @@ def update_object(
     hardware_memory: Annotated[str | None, Form()] = None,
     hardware_gpu: Annotated[str | None, Form()] = None,
     hardware_storage: Annotated[str | None, Form()] = None,
+    device_category: Annotated[str | None, Form()] = None,
+    device_manufacturer: Annotated[str | None, Form()] = None,
+    device_model: Annotated[str | None, Form()] = None,
     service_sources: Annotated[str | None, Form()] = None,
     service_running_version: Annotated[str | None, Form()] = None,
     data_json: Annotated[str | None, Form()] = None,
@@ -1379,6 +1593,14 @@ def update_object(
         for value in (
             service_sources,
             service_running_version,
+        )
+    )
+    submitted_device = any(
+        value is not None
+        for value in (
+            device_category,
+            device_manufacturer,
+            device_model,
         )
     )
     try:
@@ -1441,6 +1663,22 @@ def update_object(
                 gpu=hardware_gpu if "hardware_gpu" in allowed_hardware_fields else None,
                 storage=hardware_storage if "hardware_storage" in allowed_hardware_fields else None,
             )
+        if target_kind == DEVICE_OBJECT_KIND and submitted_device:
+            allowed_device_fields = {
+                str(field["key"])
+                for field in schema_field_payload(ui_schema)
+                if str(field["key"]).startswith("device_")
+            }
+            _apply_device_fields(
+                data,
+                category=device_category if "device_category" in allowed_device_fields else None,
+                manufacturer=(
+                    device_manufacturer
+                    if "device_manufacturer" in allowed_device_fields
+                    else None
+                ),
+                model=device_model if "device_model" in allowed_device_fields else None,
+            )
         if target_kind in SERVICE_INFORMATION_OBJECT_KINDS and submitted_service_information:
             allowed_service_information_fields = {
                 str(field["key"])
@@ -1484,7 +1722,7 @@ def update_object(
                 ),
             ),
         )
-    except (json.JSONDecodeError, ValidationError, ValueError) as exc:
+    except (HTTPException, json.JSONDecodeError, ValidationError, ValueError) as exc:
         read_model = query_catalog_detail(
             session,
             object_id,
@@ -1497,15 +1735,34 @@ def update_object(
             session,
             object_id,
             read_model=read_model,
-            error=_safe_error_message(exc),
+            error=(
+                str(exc.detail)
+                if isinstance(exc, HTTPException)
+                else _safe_error_message(exc)
+            ),
             edit_section=(
-                "service-information"
+                "device"
+                if submitted_device
+                else "service-information"
                 if submitted_service_information
                 else "hardware" if submitted_hardware else "overview"
             ),
             can_write_enabled=True,
             data_json_override=SAFE_DATA_JSON_FALLBACK,
-            status_code=422,
+            form_rows=(
+                {
+                    "device_fields": [
+                        {
+                            "category": device_category or "",
+                            "manufacturer": device_manufacturer or "",
+                            "model": device_model or "",
+                        }
+                    ]
+                }
+                if submitted_device
+                else None
+            ),
+            status_code=exc.status_code if isinstance(exc, HTTPException) else 422,
         )
     return RedirectResponse(
         url=_detail_redirect_url(request, payload.id),
@@ -2071,6 +2328,9 @@ def _empty_form() -> dict[str, str]:
         "labels": "",
         "platform": "",
         "hostname": "",
+        "device_category": "",
+        "device_manufacturer": "",
+        "device_model": "",
         "status": "active",
         "summary": "",
         "data_json": SAFE_DATA_JSON_FALLBACK,
@@ -2392,6 +2652,197 @@ def _apply_service_information_fields(
         data["service_information"] = service_information
     else:
         data.pop("service_information", None)
+
+
+def _device_summary(data: Mapping[str, Any]) -> dict[str, str]:
+    device = data.get("device")
+    if not isinstance(device, Mapping):
+        return {
+            "category": "",
+            "manufacturer": "",
+            "model": "",
+        }
+    return {
+        "category": str(device.get("category") or ""),
+        "manufacturer": str(device.get("manufacturer") or ""),
+        "model": str(device.get("model") or ""),
+    }
+
+
+def _supports_device_attachment_parent(catalog_object: Any) -> bool:
+    if catalog_object.kind in {"host", "system", DEVICE_OBJECT_KIND}:
+        return True
+    if catalog_object.kind != "network":
+        return False
+    data = getattr(catalog_object, "data", None)
+    if not isinstance(data, Mapping):
+        return False
+    network = data.get("network")
+    return (
+        isinstance(network, Mapping)
+        and network.get("category") in NETWORK_DEVICE_CATEGORIES
+    )
+
+
+def _device_schema_fields(
+    schema_fields: list[dict[str, object]],
+    device: Mapping[str, str],
+) -> list[dict[str, str]]:
+    device_values = {
+        "device_category": device.get("category", ""),
+        "device_manufacturer": device.get("manufacturer", ""),
+        "device_model": device.get("model", ""),
+    }
+    return [
+        {
+            "key": str(field["key"]),
+            "label": str(field["label"]),
+            "placeholder": str(field["placeholder"] or ""),
+            "value": device_values.get(str(field["key"]), ""),
+        }
+        for field in schema_fields
+        if str(field["key"]).startswith("device_")
+    ]
+
+
+def _apply_device_fields(
+    data: dict[str, Any],
+    *,
+    category: str | None,
+    manufacturer: str | None,
+    model: str | None,
+) -> None:
+    device = dict(
+        data.get("device")
+        if isinstance(data.get("device"), Mapping)
+        else {}
+    )
+    for key, value in {
+        "category": category,
+        "manufacturer": manufacturer,
+        "model": model,
+    }.items():
+        if value is None:
+            continue
+        clean_value = value.strip()
+        if clean_value:
+            device[key] = clean_value
+        else:
+            device.pop(key, None)
+    if device:
+        data["device"] = device
+    else:
+        data.pop("device", None)
+
+
+def _relationship_metadata_from_form(
+    relation_type: str,
+    *,
+    source_interface: str,
+    target_interface_or_port: str,
+    link_kind: str,
+    primary: str | None,
+    note: str,
+) -> dict[str, object]:
+    if relation_type != ATTACHMENT_RELATION_TYPE:
+        return {}
+    if primary is not None and primary not in {"1", "on", "true"}:
+        raise ValueError("Invalid primary attachment value")
+    metadata: dict[str, object] = {}
+    for key, value in {
+        "source_interface": source_interface,
+        "target_interface_or_port": target_interface_or_port,
+        "link_kind": link_kind,
+        "note": note,
+    }.items():
+        if cleaned := value.strip():
+            metadata[key] = cleaned
+    if primary is not None:
+        metadata["primary"] = True
+    return metadata
+
+
+def _device_chain_rows(
+    graph: Mapping[str, Any] | None,
+) -> list[dict[str, Any]]:
+    if not graph:
+        return []
+    node_by_ref = {
+        str(node.get("ref")): node
+        for node in graph.get("nodes", [])
+        if isinstance(node, Mapping) and node.get("ref")
+    }
+    edges = [
+        edge
+        for edge in graph.get("edges", [])
+        if isinstance(edge, Mapping)
+        and edge.get("relation_type") == ATTACHMENT_RELATION_TYPE
+        and edge.get("from_ref") in node_by_ref
+        and edge.get("to_ref") in node_by_ref
+    ]
+    children_by_parent: dict[str, list[Mapping[str, Any]]] = {}
+    child_refs: set[str] = set()
+    for edge in edges:
+        child_ref = str(edge["from_ref"])
+        parent_ref = str(edge["to_ref"])
+        child_refs.add(child_ref)
+        children_by_parent.setdefault(parent_ref, []).append(edge)
+
+    def node_key(ref: str) -> tuple[str, str]:
+        node = node_by_ref[ref]
+        return (str(node.get("label") or ref).casefold(), ref)
+
+    def edge_key(edge: Mapping[str, Any]) -> tuple[bool, str, str]:
+        metadata = edge.get("metadata")
+        return (
+            not (isinstance(metadata, Mapping) and metadata.get("primary") is True),
+            *node_key(str(edge["from_ref"])),
+        )
+
+    rows: list[dict[str, Any]] = []
+    visited: set[str] = set()
+
+    def add_branch(
+        ref: str,
+        depth: int,
+        edge: Mapping[str, Any] | None = None,
+    ) -> None:
+        if ref in visited:
+            return
+        visited.add(ref)
+        rows.append(
+            {
+                "node": node_by_ref[ref],
+                "depth": depth,
+                "parent_ref": str(edge["to_ref"]) if edge else "",
+                "metadata": dict(edge.get("metadata") or {}) if edge else {},
+                "current": ref == graph.get("object_ref"),
+            }
+        )
+        for child_edge in sorted(children_by_parent.get(ref, []), key=edge_key):
+            add_branch(str(child_edge["from_ref"]), depth + 1, child_edge)
+
+    roots = sorted(set(node_by_ref) - child_refs, key=node_key)
+    for root_ref in roots:
+        add_branch(root_ref, 0)
+    for remaining_ref in sorted(set(node_by_ref) - visited, key=node_key):
+        add_branch(remaining_ref, 0)
+    return rows
+
+
+def _relationship_notice(request: Request) -> str | None:
+    notice = request.query_params.get("notice", "")
+    key = {
+        "device-created": "device.notice.created",
+        "device-created-replayed": "device.notice.created_replayed",
+        "relationship-attached": "device.notice.attached",
+        "relationship-detached": "device.notice.detached",
+        "relationship-noop": "device.notice.noop",
+        "relationship-saved": "relationship.notice.saved",
+    }.get(notice)
+    if key is None:
+        return None
+    return translation_context(request)["t"](key)
 
 
 def _access_methods(

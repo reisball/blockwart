@@ -157,11 +157,24 @@ class ExplorerStandaloneSystemReadModel(TypedDict):
     services: list[ExplorerAssetReadModel]
 
 
+class ExplorerDeviceChainRowReadModel(TypedDict):
+    asset: ExplorerAssetReadModel
+    depth: int
+    parent_ref: str
+    metadata: dict[str, Any]
+
+
+class ExplorerDeviceChainReadModel(TypedDict):
+    rows: list[ExplorerDeviceChainRowReadModel]
+
+
 class ExplorerReadModel(TypedDict):
     clusters: list[ExplorerClusterReadModel]
     standalone_systems: list[ExplorerStandaloneSystemReadModel]
     standalone_services: list[ExplorerAssetReadModel]
     networks: list[ExplorerAssetReadModel]
+    devices: list[ExplorerAssetReadModel]
+    device_chains: list[ExplorerDeviceChainReadModel]
     assets: dict[str, ExplorerAssetReadModel]
 
 
@@ -705,6 +718,17 @@ def build_explorer_read_model(
         for network_ref in _refs_for_kind(objects, "network")
         if is_included(network_ref)
     ]
+    devices = [
+        assets[device_ref]
+        for device_ref in _refs_for_kind(objects, "device")
+        if is_included(device_ref)
+    ]
+    device_chains = _explorer_device_chains(
+        objects,
+        relationships,
+        assets,
+        included_refs=included_refs,
+    )
     visible_refs = set(included_refs or assets)
     for cluster in clusters:
         visible_refs.add(cluster["host"]["ref"])
@@ -724,17 +748,130 @@ def build_explorer_read_model(
         )
     visible_refs.update(service["ref"] for service in standalone_services)
     visible_refs.update(network["ref"] for network in networks)
+    visible_refs.update(device["ref"] for device in devices)
+    visible_refs.update(
+        row["asset"]["ref"]
+        for chain in device_chains
+        for row in chain["rows"]
+    )
     return {
         "clusters": clusters,
         "standalone_systems": standalone_systems,
         "standalone_services": standalone_services,
         "networks": networks,
+        "devices": devices,
+        "device_chains": device_chains,
         "assets": {
             ref: asset
             for ref, asset in assets.items()
             if ref in visible_refs
         },
     }
+
+
+def _explorer_device_chains(
+    objects: list[CatalogObjectReadOut],
+    relationships: list[RelationshipReadModel],
+    assets: dict[str, ExplorerAssetReadModel],
+    *,
+    included_refs: set[str] | None,
+) -> list[ExplorerDeviceChainReadModel]:
+    device_refs = set(_refs_for_kind(objects, "device"))
+    attachment_edges = [
+        relationship
+        for relationship in relationships
+        if relationship["relation_type"] == "attached_to"
+        and relationship["from_ref"] in assets
+        and relationship["to_ref"] in assets
+    ]
+    incident_refs: dict[str, set[str]] = {}
+    for edge in attachment_edges:
+        incident_refs.setdefault(edge["from_ref"], set()).add(edge["to_ref"])
+        incident_refs.setdefault(edge["to_ref"], set()).add(edge["from_ref"])
+
+    components: list[set[str]] = []
+    consumed: set[str] = set()
+    for seed_ref in sorted(device_refs):
+        if seed_ref in consumed:
+            continue
+        component = {seed_ref}
+        pending = [seed_ref]
+        for pending_ref in pending:
+            for neighbor_ref in sorted(incident_refs.get(pending_ref, set())):
+                if neighbor_ref not in component:
+                    component.add(neighbor_ref)
+                    pending.append(neighbor_ref)
+        consumed.update(component & device_refs)
+        if included_refs is None or component & included_refs:
+            components.append(component)
+
+    chains: list[ExplorerDeviceChainReadModel] = []
+    for component in components:
+        component_edges = [
+            edge
+            for edge in attachment_edges
+            if edge["from_ref"] in component and edge["to_ref"] in component
+        ]
+        children_by_parent: dict[str, list[RelationshipReadModel]] = {}
+        child_refs: set[str] = set()
+        for edge in component_edges:
+            child_refs.add(edge["from_ref"])
+            children_by_parent.setdefault(edge["to_ref"], []).append(edge)
+
+        def asset_key(ref: str) -> tuple[str, str]:
+            return (assets[ref]["label"].casefold(), ref)
+
+        def edge_key(edge: RelationshipReadModel) -> tuple[bool, str, str]:
+            return (
+                edge["metadata"].get("primary") is not True,
+                *asset_key(edge["from_ref"]),
+            )
+
+        rows: list[ExplorerDeviceChainRowReadModel] = []
+        visited: set[str] = set()
+
+        def add_branch(
+            ref: str,
+            depth: int,
+            edge: RelationshipReadModel | None = None,
+            *,
+            _children_by_parent: dict[
+                str, list[RelationshipReadModel]
+            ] = children_by_parent,
+            _rows: list[ExplorerDeviceChainRowReadModel] = rows,
+            _visited: set[str] = visited,
+        ) -> None:
+            if ref in _visited:
+                return
+            _visited.add(ref)
+            _rows.append(
+                {
+                    "asset": assets[ref],
+                    "depth": depth,
+                    "parent_ref": edge["to_ref"] if edge else "",
+                    "metadata": dict(edge["metadata"]) if edge else {},
+                }
+            )
+            for child_edge in sorted(
+                _children_by_parent.get(ref, []),
+                key=edge_key,
+            ):
+                add_branch(child_edge["from_ref"], depth + 1, child_edge)
+
+        roots = sorted(component - child_refs, key=asset_key)
+        for root_ref in roots:
+            add_branch(root_ref, 0)
+        for remaining_ref in sorted(component - visited, key=asset_key):
+            add_branch(remaining_ref, 0)
+        chains.append({"rows": rows})
+
+    return sorted(
+        chains,
+        key=lambda chain: (
+            chain["rows"][0]["asset"]["label"].casefold(),
+            chain["rows"][0]["asset"]["ref"],
+        ),
+    )
 
 
 def group_relationships(

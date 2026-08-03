@@ -311,6 +311,12 @@
   color: #64e5d5;
 }
 
+.node-icon.device {
+  border-color: #79632f;
+  background: #3d321a;
+  color: #ffd67c;
+}
+
 .node-icon.unknown {
   border-color: #524d5d;
   background: #272633;
@@ -1410,6 +1416,11 @@ button.map-node {
   background: #503c76;
 }
 
+.legend-shape.device {
+  border-color: #b59038;
+  background: #6d541d;
+}
+
 .map-inspector {
   position: relative;
   display: flex;
@@ -1445,6 +1456,167 @@ button.map-node {
 .explorer-modal .modal-window {
   max-width: 760px;
   background: var(--explorer-panel);
+}
+
+.integrated-detail .notice {
+  margin: -8px 0 18px;
+  padding: 10px 12px;
+  border: 1px solid color-mix(in srgb, var(--explorer-green) 55%, var(--explorer-border));
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--explorer-green) 12%, var(--explorer-panel));
+  color: var(--explorer-text);
+}
+
+.device-chain-workbench {
+  position: relative;
+  z-index: 2;
+  display: grid;
+  gap: 12px;
+  margin-top: 18px;
+  padding: 18px;
+  border: 1px solid var(--explorer-border);
+  border-radius: 13px;
+  background: color-mix(in srgb, var(--explorer-panel) 88%, transparent);
+}
+
+.device-chain-workbench > header h2 {
+  margin: 0;
+  font-size: 18px;
+}
+
+.device-chain-workbench > header p:last-child {
+  max-width: 760px;
+  margin: 5px 0 0;
+  color: var(--explorer-muted);
+  font-size: 11px;
+}
+
+.device-chain-map {
+  display: grid;
+  gap: 3px;
+  padding: 12px;
+  border: 1px solid var(--explorer-border-soft);
+  border-radius: 10px;
+  background: var(--explorer-raised);
+}
+
+.device-chain-map-row {
+  display: grid;
+  gap: 5px;
+  width: min(520px, calc(100% - min(var(--device-indent), 168px)));
+  margin-left: min(var(--device-indent), 168px);
+}
+
+.device-chain-node {
+  grid-template-columns: 35px minmax(0, 1fr);
+  align-items: center;
+  gap: 9px;
+  min-height: 68px;
+  padding: 10px;
+  border-color: #79632f;
+}
+
+.device-chain-node .node-meta {
+  display: none;
+}
+
+.device-chain-edge {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  min-height: 30px;
+  color: var(--explorer-muted);
+  font-size: 10px;
+}
+
+.device-chain-edge > span[aria-hidden="true"] {
+  color: var(--explorer-amber);
+  font-size: 16px;
+}
+
+.device-chain-edge .badge,
+.device-chain-panel .badge {
+  min-height: 22px;
+  padding: 2px 7px;
+  font-size: 10px;
+}
+
+.relationship-primary {
+  border-style: double;
+  font-weight: 800;
+}
+
+.device-link-note,
+.relationship-note {
+  color: var(--explorer-text);
+  overflow-wrap: anywhere;
+}
+
+.device-chain-list {
+  display: grid;
+  gap: 3px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.device-chain-row {
+  display: grid;
+  gap: 4px;
+  width: min(620px, calc(100% - min(var(--device-indent), 156px)));
+  margin-left: min(var(--device-indent), 156px);
+}
+
+.device-chain-asset {
+  display: grid;
+  grid-template-columns: 30px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 9px;
+  padding: 9px;
+  border: 1px solid var(--explorer-border);
+  border-radius: 8px;
+  background: var(--explorer-panel-2);
+}
+
+.device-chain-row.current .device-chain-asset {
+  border-width: 2px;
+  border-color: var(--explorer-blue);
+}
+
+.device-chain-asset > span:nth-child(2) {
+  display: grid;
+  min-width: 0;
+}
+
+.device-chain-asset small {
+  overflow: hidden;
+  color: var(--explorer-muted);
+  font-family: var(--mono);
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.device-chain-empty {
+  margin-top: 10px;
+}
+
+.relationship-detach-form {
+  display: inline-flex;
+  margin-left: 8px;
+}
+
+.checkbox-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.checkbox-label input[type="checkbox"] {
+  width: 20px;
+  min-height: 20px;
+  margin: 0;
 }
 
 @media (max-width: 1240px) {
@@ -1663,5 +1835,19 @@ button.map-node {
   .map-inspector {
     border-top: 1px solid var(--explorer-border);
     border-left: 0;
+  }
+
+  .device-chain-workbench {
+    padding: 12px;
+  }
+
+  .device-chain-map-row,
+  .device-chain-row {
+    width: calc(100% - min(var(--device-indent), 56px));
+    margin-left: min(var(--device-indent), 56px);
+  }
+
+  .device-chain-edge {
+    align-items: flex-start;
   }
 }
