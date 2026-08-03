@@ -172,16 +172,34 @@ def test_admin_navigation_and_pages_are_hidden_from_non_admin(
     principal_admin_ui_state,
 ) -> None:
     _login(principal_admin_ui_client, principal_admin_ui_state["ordinary_session"])
+    ordinary_settings = principal_admin_ui_client.get("/settings")
     denied = principal_admin_ui_client.get("/admin/principals")
+    assert ordinary_settings.status_code == 200
+    assert 'href="/settings/schema"' in ordinary_settings.text
+    assert 'href="/admin/principals"' not in ordinary_settings.text
     assert denied.status_code == 403
 
     _login(principal_admin_ui_client, principal_admin_ui_state["admin_session"])
+    admin_settings = principal_admin_ui_client.get("/settings?lang=de")
     page = principal_admin_ui_client.get("/admin/principals?lang=de")
+    detail = principal_admin_ui_client.get(
+        f"/admin/principals/{principal_admin_ui_state['target_id']}?lang=de"
+    )
     catalog = principal_admin_ui_client.get("/")
+    assert admin_settings.status_code == 200
+    assert 'href="/admin/principals"' in admin_settings.text
     assert page.status_code == 200
     assert "Benutzer &amp; Agents" in page.text
     assert "browser.target" in page.text
-    assert "/admin/principals" in catalog.text
+    assert 'href="/settings"' in page.text
+    assert 'class="language-switcher"' not in page.text
+    assert 'data-theme-value="dark"' not in page.text
+    assert detail.status_code == 200
+    assert 'class="language-switcher"' not in detail.text
+    assert 'data-theme-value="dark"' not in detail.text
+    assert 'href="/settings"' in catalog.text
+    assert 'href="/admin/principals"' not in catalog.text
+    assert 'href="/settings/schema"' not in catalog.text
 
 
 def test_admin_principal_list_exposes_exhaustive_next_cursor_navigation(

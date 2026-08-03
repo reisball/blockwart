@@ -16,18 +16,11 @@
   <body>
     <header class="topbar">
       <div class="topbar-inner">
-        <a class="breadcrumb" href="/">{{ t("detail.back") }}</a>
+        <a class="breadcrumb" href="/settings">{{ t("settings.back") }}</a>
         <div class="title-row">
           <div>
             <h1>{{ t("schema.title") }}</h1>
             <div class="subtle">{{ t("schema.subtitle") }}</div>
-          </div>
-          <div class="top-actions">
-            {% include "_language_switcher.html" %}
-            <div class="theme-toggle" role="group" aria-label="{{ t('nav.theme') }}">
-              <button class="theme-option" type="button" data-theme-value="dark">{{ t("nav.dark") }}</button>
-              <button class="theme-option" type="button" data-theme-value="light">{{ t("nav.light") }}</button>
-            </div>
           </div>
         </div>
         <form class="toolbar" method="get" action="/settings/schema">

@@ -15,7 +15,6 @@
       <a class="breadcrumb" href="/admin/principals">{{ t("admin.principals.back") }}</a>
       <div class="title-row">
         <div><h1>{{ detail.principal.display_name }}</h1><div class="subtle"><code>{{ detail.principal.login }}</code> · {{ t("admin.type." ~ detail.principal.principal_type.value) }}</div></div>
-        <div class="top-actions">{% include "_language_switcher.html" %}<div class="theme-toggle" role="group" aria-label="{{ t('nav.theme') }}"><button class="theme-option" type="button" data-theme-value="dark">{{ t("nav.dark") }}</button><button class="theme-option" type="button" data-theme-value="light">{{ t("nav.light") }}</button></div></div>
       </div>
     </div></header>
     <main class="page">

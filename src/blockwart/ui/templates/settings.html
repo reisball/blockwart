@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="{{ locale }}">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="referrer" content="no-referrer" />
+    <link rel="icon" href="data:," />
+    <title>{{ title }}</title>
+    <script>
+      if (localStorage.getItem("blockwart-theme") === "light") {
+        document.documentElement.dataset.theme = "light";
+      }
+    </script>
+    <link rel="stylesheet" href="/static/app.css?v=063" />
+    <script src="/static/theme.js?v=054" defer></script>
+  </head>
+  <body>
+    <header class="topbar">
+      <div class="topbar-inner">
+        <a class="breadcrumb" href="/">{{ t("detail.back") }}</a>
+        <div class="title-row">
+          <div>
+            <h1>{{ t("settings.title") }}</h1>
+            <div class="subtle">{{ t("settings.subtitle") }}</div>
+          </div>
+        </div>
+      </div>
+    </header>
+
+    <main class="page">
+      <div class="stack">
+        <section class="panel" aria-labelledby="settings-appearance-title">
+          <div class="panel-head">
+            <div>
+              <h2 class="section-title" id="settings-appearance-title">{{ t("settings.appearance") }}</h2>
+              <p class="meta">{{ t("settings.appearance_description") }}</p>
+            </div>
+          </div>
+          <div class="top-actions">
+            {% include "_language_switcher.html" %}
+            <div class="theme-toggle" role="group" aria-label="{{ t('nav.theme') }}">
+              <button class="theme-option" type="button" data-theme-value="dark">{{ t("nav.dark") }}</button>
+              <button class="theme-option" type="button" data-theme-value="light">{{ t("nav.light") }}</button>
+            </div>
+          </div>
+        </section>
+
+        <section class="panel" aria-labelledby="settings-schema-title">
+          <div class="panel-head">
+            <div>
+              <h2 class="section-title" id="settings-schema-title">{{ t("schema.title") }}</h2>
+              <p class="meta">{{ t("settings.schema_description") }}</p>
+            </div>
+            <a class="button button-small" href="/settings/schema">{{ t("settings.open") }}</a>
+          </div>
+        </section>
+
+        {% if is_platform_admin %}
+          <section class="panel" aria-labelledby="settings-principals-title">
+            <div class="panel-head">
+              <div>
+                <h2 class="section-title" id="settings-principals-title">{{ t("admin.principals.title") }}</h2>
+                <p class="meta">{{ t("settings.principals_description") }}</p>
+              </div>
+              <a class="button button-small" href="/admin/principals">{{ t("settings.open") }}</a>
+            </div>
+          </section>
+        {% endif %}
+      </div>
+    </main>
+  </body>
+</html>
