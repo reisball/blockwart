@@ -12,7 +12,7 @@ from blockwart.db.migrations import (
     check_database_revision,
     upgrade_database,
 )
-from blockwart.db.session import build_engine, transaction
+from blockwart.db.session import build_engine, build_read_only_engine, transaction
 from blockwart.services.catalog import relationship_diagnostics
 from blockwart.services.interface_migration import (
     apply_interface_migration_plan,
@@ -120,7 +120,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             )
             return 1 if plan.diagnostics else 0
         elif args.action == "networks":
-            revision = check_database_revision(args.database_url)
+            revision = check_database_revision(args.database_url, read_only=True)
             if args.apply:
                 print(
                     "network_classification_error=apply_not_available",
@@ -208,7 +208,7 @@ def _placement_plan(database_url: str | None, *, apply: bool):
 
 def _network_plan(database_url: str | None, *, mapping_path: str | None):
     config = build_alembic_config(database_url)
-    engine = build_engine(str(config.attributes["database_url"]))
+    engine = build_read_only_engine(str(config.attributes["database_url"]))
     try:
         evidence = (
             load_network_classification_evidence(mapping_path)

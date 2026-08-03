@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import hashlib
 import json
+import sqlite3
 from pathlib import Path
 
 import pytest
@@ -402,3 +404,52 @@ def test_network_classification_mapping_rejects_duplicate_yaml_keys(
 
     with pytest.raises(NetworkClassificationError, match="file is invalid"):
         load_network_classification_evidence(mapping)
+
+
+def test_network_classification_dry_run_preserves_sqlite_file_and_journal_mode(
+    tmp_path: Path,
+    capsys,
+) -> None:
+    database_url, engine = _network_database(tmp_path)
+    engine.dispose()
+    database_path = tmp_path / "network-classification.sqlite3"
+    mapping = tmp_path / "network-mapping.yaml"
+    mapping.write_text(
+        "\n".join(
+            [
+                "schema_version: 1",
+                "networks:",
+                "  - object_id: edge",
+                "    target_category: switch",
+                "    evidence_source: references/network.md#edge-switch",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    with sqlite3.connect(database_path) as connection:
+        connection.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+        assert connection.execute("PRAGMA journal_mode=DELETE").fetchone() == (
+            "delete",
+        )
+    before_hash = hashlib.sha256(database_path.read_bytes()).hexdigest()
+    capsys.readouterr()
+
+    assert (
+        database_cli.main(
+            [
+                "--database-url",
+                database_url,
+                "--mapping",
+                str(mapping),
+                "networks",
+            ]
+        )
+        == 0
+    )
+    assert "database_networks_ok" in capsys.readouterr().out
+    after_hash = hashlib.sha256(database_path.read_bytes()).hexdigest()
+    with sqlite3.connect(database_path) as connection:
+        assert connection.execute("PRAGMA journal_mode").fetchone() == ("delete",)
+    assert after_hash == before_hash
+    assert not database_path.with_name(f"{database_path.name}-wal").exists()
+    assert not database_path.with_name(f"{database_path.name}-shm").exists()

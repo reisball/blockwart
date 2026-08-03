@@ -377,6 +377,10 @@ def test_network_topology_node_bound_caps_inherited_placement_prefix(
         assert topology is not None
         assert topology["truncated"] is True
         assert topology["status"] == "incomplete"
+        assert topology["resolution"] is None
+        assert topology["resolution_source"] is None
+        assert topology["resolution_source_ref"] is None
+        assert topology["placement_path"] == []
         assert [node["ref"] for node in topology["nodes"]] == [
             "service:topology-service"
         ]

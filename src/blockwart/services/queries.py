@@ -722,6 +722,17 @@ def query_network_topology(
     else:
         overall_status = "complete"
 
+    projected_placement_path = [
+        ref for ref in placement_path if ref in included_refs
+    ]
+    if (
+        resolution_source_ref is not None
+        and resolution_source_ref not in included_refs
+    ):
+        resolution = None
+        resolution_source = None
+        resolution_source_ref = None
+
     return {
         "object_ref": current_ref,
         "nodes": [
@@ -741,7 +752,7 @@ def query_network_topology(
         "resolution": resolution,
         "resolution_source": resolution_source,
         "resolution_source_ref": resolution_source_ref,
-        "placement_path": placement_path,
+        "placement_path": projected_placement_path,
         "status": overall_status,
         "truncated": truncated,
     }

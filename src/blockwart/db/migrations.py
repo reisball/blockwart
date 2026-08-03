@@ -12,7 +12,7 @@ from alembic.script import ScriptDirectory
 from sqlalchemy import MetaData, inspect
 
 from blockwart.config import get_settings
-from blockwart.db.session import build_engine
+from blockwart.db.session import build_engine, build_read_only_engine
 
 BASELINE_REVISION = "20260516_0001"
 MIGRATIONS_DIR = Path(__file__).resolve().parents[1] / "migrations"
@@ -57,14 +57,22 @@ def upgrade_database(database_url: str | None = None) -> str:
             engine.dispose()
 
 
-def check_database_revision(database_url: str | None = None) -> str:
+def check_database_revision(
+    database_url: str | None = None,
+    *,
+    read_only: bool = False,
+) -> str:
     engine = None
 
     try:
         config = build_alembic_config(database_url)
         effective_url = str(config.attributes["database_url"])
         expected_heads = set(ScriptDirectory.from_config(config).get_heads())
-        engine = build_engine(effective_url)
+        engine = (
+            build_read_only_engine(effective_url)
+            if read_only
+            else build_engine(effective_url)
+        )
         with engine.connect() as connection:
             current_heads = set(MigrationContext.configure(connection).get_current_heads())
     except DatabaseMigrationError:

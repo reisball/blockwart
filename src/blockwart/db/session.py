@@ -18,6 +18,7 @@ def build_engine(
     *,
     sqlite_busy_timeout_ms: int | None = None,
     sqlite_wal_enabled: bool | None = None,
+    sqlite_configure_journal_mode: bool = True,
 ) -> Engine:
     settings = get_settings()
     url = database_url or settings.database_url
@@ -49,9 +50,33 @@ def build_engine(
         _configure_sqlite_connections(
             configured_engine,
             busy_timeout_ms=busy_timeout_ms,
-            journal_mode=("wal" if wal_enabled else "delete") if persistent else None,
+            journal_mode=(
+                ("wal" if wal_enabled else "delete")
+                if persistent and sqlite_configure_journal_mode
+                else None
+            ),
         )
     return configured_engine
+
+
+def build_read_only_engine(database_url: str | None = None) -> Engine:
+    """Open an inspection engine without persistent SQLite PRAGMA changes."""
+    settings = get_settings()
+    url = database_url or settings.database_url
+    parsed_url = make_url(url)
+    if (
+        parsed_url.get_backend_name() == "sqlite"
+        and _is_persistent_sqlite(parsed_url.database)
+    ):
+        read_only_url = parsed_url.set(
+            database=f"file:{parsed_url.database}",
+            query={**dict(parsed_url.query), "mode": "ro", "uri": "true"},
+        )
+        url = read_only_url.render_as_string(hide_password=False)
+    return build_engine(
+        url,
+        sqlite_configure_journal_mode=False,
+    )
 
 
 def _configure_sqlite_connections(
