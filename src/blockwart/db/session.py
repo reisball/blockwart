@@ -127,35 +127,64 @@ def _copy_stable_sqlite_snapshot(source_path: Path, snapshot_path: Path) -> None
     source_wal_path = source_path.with_name(f"{source_path.name}-wal")
     source_journal_path = source_path.with_name(f"{source_path.name}-journal")
     snapshot_wal_path = snapshot_path.with_name(f"{snapshot_path.name}-wal")
+    snapshot_journal_path = snapshot_path.with_name(f"{snapshot_path.name}-journal")
 
     for _attempt in range(3):
         try:
-            if source_journal_path.exists():
-                raise RuntimeError(
-                    "SQLite rollback-journal source requires recovery before inspection"
-                )
-            before = _sqlite_snapshot_state(source_path, source_wal_path)
+            before = _sqlite_snapshot_state(
+                source_path,
+                source_wal_path,
+                source_journal_path,
+            )
             shutil.copyfile(source_path, snapshot_path)
-            if source_wal_path.exists():
-                shutil.copyfile(source_wal_path, snapshot_wal_path)
-            else:
-                snapshot_wal_path.unlink(missing_ok=True)
-            source_hashes = _sqlite_snapshot_hashes(source_path, source_wal_path)
-            snapshot_hashes = _sqlite_snapshot_hashes(snapshot_path, snapshot_wal_path)
-            after = _sqlite_snapshot_state(source_path, source_wal_path)
-            if source_journal_path.exists():
-                raise RuntimeError(
-                    "SQLite rollback-journal source requires recovery before inspection"
-                )
+            _copy_optional_sqlite_sidecar(source_wal_path, snapshot_wal_path)
+            _copy_optional_sqlite_sidecar(source_journal_path, snapshot_journal_path)
+            source_hashes = _sqlite_snapshot_hashes(
+                source_path,
+                source_wal_path,
+                source_journal_path,
+            )
+            snapshot_hashes = _sqlite_snapshot_hashes(
+                snapshot_path,
+                snapshot_wal_path,
+                snapshot_journal_path,
+            )
+            after = _sqlite_snapshot_state(
+                source_path,
+                source_wal_path,
+                source_journal_path,
+            )
         except FileNotFoundError:
             continue
         if before == after and source_hashes == snapshot_hashes:
+            if _rollback_journal_requires_recovery(snapshot_journal_path):
+                raise RuntimeError(
+                    "SQLite rollback-journal source requires recovery before inspection"
+                )
             return
 
     raise RuntimeError("SQLite source changed while creating read-only snapshot")
 
 
-def _sqlite_snapshot_state(database_path: Path, wal_path: Path) -> tuple[tuple, ...]:
+def _copy_optional_sqlite_sidecar(source_path: Path, snapshot_path: Path) -> None:
+    if source_path.exists():
+        shutil.copyfile(source_path, snapshot_path)
+    else:
+        snapshot_path.unlink(missing_ok=True)
+
+
+def _rollback_journal_requires_recovery(journal_path: Path) -> bool:
+    if not journal_path.exists() or journal_path.stat().st_size <= 512:
+        return False
+    with journal_path.open("rb") as journal_file:
+        return any(journal_file.read(8))
+
+
+def _sqlite_snapshot_state(
+    database_path: Path,
+    wal_path: Path,
+    journal_path: Path,
+) -> tuple[tuple, ...]:
     return tuple(
         (
             suffix,
@@ -164,15 +193,23 @@ def _sqlite_snapshot_state(database_path: Path, wal_path: Path) -> tuple[tuple, 
             path.stat().st_size,
             path.stat().st_mtime_ns,
         )
-        for suffix, path in (("", database_path), ("-wal", wal_path))
+        for suffix, path in (
+            ("", database_path),
+            ("-wal", wal_path),
+            ("-journal", journal_path),
+        )
         if path.exists()
     )
 
 
-def _sqlite_snapshot_hashes(database_path: Path, wal_path: Path) -> tuple[bytes, ...]:
+def _sqlite_snapshot_hashes(
+    database_path: Path,
+    wal_path: Path,
+    journal_path: Path,
+) -> tuple[bytes, ...]:
     return tuple(
         _file_sha256(path)
-        for path in (database_path, wal_path)
+        for path in (database_path, wal_path, journal_path)
         if path.exists()
     )
 

@@ -10,6 +10,7 @@ import pytest
 from sqlalchemy import create_engine, text
 
 from blockwart.cli import database as database_cli
+from blockwart.db import session as db_session
 from blockwart.services.network_classification import (
     NetworkClassificationError,
     load_network_classification_evidence,
@@ -88,6 +89,32 @@ def test_network_classification_dry_run_fails_closed_without_evidence(
         }
     finally:
         engine.dispose()
+
+
+@pytest.mark.parametrize(
+    "database_url",
+    [
+        "sqlite:////definitely-missing/blockwart.sqlite3",
+        "not-a-database-url",
+        "sqlite:///file://remote.invalid/share/blockwart.sqlite3?mode=ro&uri=true",
+    ],
+)
+def test_network_classification_apply_rejection_precedes_database_inspection(
+    database_url: str,
+    capsys,
+) -> None:
+    assert (
+        database_cli.main(
+            ["--database-url", database_url, "--apply", "networks"]
+        )
+        == 1
+    )
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert (
+        captured.err.strip()
+        == "network_classification_error=apply_not_available"
+    )
 
 
 def test_network_classification_mapping_is_evidenced_and_still_write_free(
@@ -576,12 +603,20 @@ def test_network_classification_rejects_active_delete_journal_without_source_cha
 
     with sqlite3.connect(database_path) as writer:
         assert writer.execute("PRAGMA journal_mode=DELETE").fetchone() == ("delete",)
+        writer.execute("CREATE TABLE journal_probe (payload BLOB)")
+        writer.commit()
+        writer.execute("PRAGMA cache_size=1")
         writer.execute("BEGIN IMMEDIATE")
+        writer.executemany(
+            "INSERT INTO journal_probe (payload) VALUES (?)",
+            [(b"x" * 4096,) for _ in range(128)],
+        )
         writer.execute(
             "UPDATE catalog_objects SET data_json = ? WHERE id = 'lan'",
             ('{"schema_version":1,"network":{"category":"router"}}',),
         )
         assert journal_path.stat().st_size > 0
+        assert any(journal_path.read_bytes()[:8])
         paths = (database_path, journal_path)
         before_hashes = {
             path: hashlib.sha256(path.read_bytes()).hexdigest() for path in paths
@@ -599,6 +634,92 @@ def test_network_classification_rejects_active_delete_journal_without_source_cha
             "SELECT data_json FROM catalog_objects WHERE id = 'lan'"
         ).fetchone()[0]
         assert json.loads(stored)["network"]["category"] == "segment"
+
+
+@pytest.mark.parametrize("journal_body", [b"", bytes(4096)])
+def test_network_classification_accepts_non_hot_stale_rollback_journal(
+    tmp_path: Path,
+    capsys,
+    journal_body: bytes,
+) -> None:
+    database_url, engine = _network_database(tmp_path)
+    engine.dispose()
+    database_path = tmp_path / "network-classification.sqlite3"
+    journal_path = database_path.with_name(f"{database_path.name}-journal")
+    journal_path.write_bytes(journal_body)
+    before_hashes = {
+        path: hashlib.sha256(path.read_bytes()).hexdigest()
+        for path in (database_path, journal_path)
+    }
+    capsys.readouterr()
+
+    assert database_cli.main(["--database-url", database_url, "networks"]) == 1
+
+    captured = capsys.readouterr()
+    assert "database_networks_error revision=" in captured.out
+    assert "database_networks_error=failed" not in captured.err
+    assert {
+        path: hashlib.sha256(path.read_bytes()).hexdigest()
+        for path in (database_path, journal_path)
+    } == before_hashes
+
+
+def test_network_classification_accepts_persist_commit_journal(
+    tmp_path: Path,
+    capsys,
+) -> None:
+    database_url, engine = _network_database(tmp_path)
+    engine.dispose()
+    database_path = tmp_path / "network-classification.sqlite3"
+    journal_path = database_path.with_name(f"{database_path.name}-journal")
+    with sqlite3.connect(database_path) as writer:
+        assert writer.execute("PRAGMA journal_mode=PERSIST").fetchone() == ("persist",)
+        writer.execute("UPDATE catalog_objects SET label = 'LAN Persist' WHERE id = 'lan'")
+        writer.commit()
+    assert journal_path.stat().st_size > 512
+    assert journal_path.read_bytes()[:8] == bytes(8)
+    before_hashes = {
+        path: hashlib.sha256(path.read_bytes()).hexdigest()
+        for path in (database_path, journal_path)
+    }
+    capsys.readouterr()
+
+    assert database_cli.main(["--database-url", database_url, "networks"]) == 1
+
+    captured = capsys.readouterr()
+    assert "database_networks_error revision=" in captured.out
+    assert "database_networks_error=failed" not in captured.err
+    assert {
+        path: hashlib.sha256(path.read_bytes()).hexdigest()
+        for path in (database_path, journal_path)
+    } == before_hashes
+
+
+def test_sqlite_snapshot_rejects_unstable_rollback_journal(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    source_path = tmp_path / "source.sqlite3"
+    snapshot_path = tmp_path / "snapshot.sqlite3"
+    journal_path = source_path.with_name(f"{source_path.name}-journal")
+    source_path.write_bytes(b"database")
+    journal_path.write_bytes(bytes(1024))
+    real_copyfile = db_session.shutil.copyfile
+
+    def copy_and_mutate(source, destination):
+        result = real_copyfile(source, destination)
+        if Path(source) == journal_path:
+            with journal_path.open("ab") as journal_file:
+                journal_file.write(b"x")
+        return result
+
+    monkeypatch.setattr(db_session.shutil, "copyfile", copy_and_mutate)
+
+    with pytest.raises(
+        RuntimeError,
+        match="SQLite source changed while creating read-only snapshot",
+    ):
+        db_session._copy_stable_sqlite_snapshot(source_path, snapshot_path)
 
 
 @pytest.mark.parametrize("mode", ["ro", "rw"])

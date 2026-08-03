@@ -120,13 +120,13 @@ def main(argv: Sequence[str] | None = None) -> int:
             )
             return 1 if plan.diagnostics else 0
         elif args.action == "networks":
-            revision = check_database_revision(args.database_url, read_only=True)
             if args.apply:
                 print(
                     "network_classification_error=apply_not_available",
                     file=sys.stderr,
                 )
                 return 1
+            revision = check_database_revision(args.database_url, read_only=True)
             plan = _network_plan(args.database_url, mapping_path=args.mapping)
             for diagnostic in plan.diagnostics:
                 print(

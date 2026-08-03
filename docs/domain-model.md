@@ -119,9 +119,11 @@ complete plan, `blockwart-db --apply networks` is deliberately unavailable;
 the reviewed apply transaction belongs to the later pilot-import slice. For a
 persistent SQLite source, the gate reads a stable temporary database/WAL
 snapshot so the source file, journal mode, and WAL/SHM sidecars remain byte-for-byte
-unchanged even when the source directory itself is not writable. An active or
-unrecovered rollback journal fails closed because a lock-free file copy cannot
-distinguish committed pages from an in-flight transaction.
+unchanged even when the source directory itself is not writable. A non-zero
+hot or unrecovered rollback journal fails closed because a lock-free file copy
+cannot distinguish committed pages from an in-flight transaction. Empty
+journals and zero-header journals retained after a successful SQLite `PERSIST`
+commit are stable non-hot sidecars and do not block the dry run.
 
 The shared Network resolver starts from direct host/system attachments or the
 canonical placement host inherited by a system/service. It traverses every
