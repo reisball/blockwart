@@ -199,6 +199,18 @@ while rejecting every write to them. It does not classify or mutate those rows. 
 transitional revision to production until the separately reviewed Network classification dry run,
 mapping/apply plan, backup, and production acceptance are complete.
 
+For a fresh Markdown import, bind the reviewed mapping directly to both the
+dry-run and apply commands. The importer requires exact coverage of all Network
+rows and rejects missing, unknown, or conflicting evidence before schema or
+catalog writes:
+
+```bash
+blockwart-import-markdown \
+  --tools /home/zoe/.openclaw/workspace/TOOLS.md \
+  --references-root /home/zoe/.openclaw/workspace \
+  --network-mapping seeds/pilot_network_mapping.yaml
+```
+
 Run the classification gate against a restored candidate database:
 
 ```bash
