@@ -273,6 +273,10 @@ def test_mcp_client_completes_handshake_and_calls_every_read_only_tool() -> None
                             "blockwart.preview_grant_scope",
                             {"object_id": "host/fabrik", "scope": "subtree"},
                         ),
+                        "blockwart.get_device_graph": await session.call_tool(
+                            "blockwart.get_device_graph",
+                            {"object_id": "host/fabrik"},
+                        ),
                     }
                     upstream_error = await session.call_tool(
                         "blockwart.search",
@@ -338,6 +342,8 @@ def test_mcp_client_completes_handshake_and_calls_every_read_only_tool() -> None
         "blockwart.delete_object",
         "blockwart.create_relationship",
         "blockwart.delete_relationship",
+        "blockwart.create_attached_device",
+        "blockwart.get_device_graph",
         "blockwart.get_object_access",
         "blockwart.search_principals",
         "blockwart.list_admin_principals",
@@ -358,6 +364,7 @@ def test_mcp_client_completes_handshake_and_calls_every_read_only_tool() -> None
             "blockwart.list_admin_principals",
             "blockwart.get_admin_principal",
             "blockwart.preview_grant_scope",
+            "blockwart.get_device_graph",
         }
     )
     assert all(
@@ -368,6 +375,7 @@ def test_mcp_client_completes_handshake_and_calls_every_read_only_tool() -> None
             "blockwart.delete_object",
             "blockwart.create_relationship",
             "blockwart.delete_relationship",
+            "blockwart.create_attached_device",
             "blockwart.create_grant",
             "blockwart.update_grant",
             "blockwart.revoke_grant",
@@ -380,15 +388,11 @@ def test_mcp_client_completes_handshake_and_calls_every_read_only_tool() -> None
         content = result.content[0]
         assert isinstance(content, mcp_types.TextContent)
         result_payloads[name] = json.loads(content.text)
-    assert result_payloads["blockwart.search"]["results"][0]["path"] == (
-        "/api/v1/objects"
-    )
+    assert result_payloads["blockwart.search"]["results"][0]["path"] == ("/api/v1/objects")
     assert result_payloads["blockwart.get_object_context"]["objects"][0]["path"] == (
         "/api/v1/objects/host%2Ffabrik"
     )
-    assert result_payloads["blockwart.get_context"]["objects"][0]["path"] == (
-        "/api/v1/context"
-    )
+    assert result_payloads["blockwart.get_context"]["objects"][0]["path"] == ("/api/v1/context")
     assert result_payloads["blockwart.get_object_access"]["path"] == (
         "/api/v1/objects/host%2Ffabrik/access"
     )
@@ -406,6 +410,9 @@ def test_mcp_client_completes_handshake_and_calls_every_read_only_tool() -> None
     )
     assert result_payloads["blockwart.preview_grant_scope"]["path"] == (
         "/api/v1/objects/host%2Ffabrik/access/preview"
+    )
+    assert result_payloads["blockwart.get_device_graph"]["path"] == (
+        "/api/v1/objects/host%2Ffabrik/device-graph"
     )
 
     upstream_content = upstream_error.content[0]
@@ -441,7 +448,7 @@ def test_mcp_client_completes_handshake_and_calls_every_read_only_tool() -> None
     assert unknown_tool.isError is True
     assert json.loads(unknown_content.text)["error"]["code"] == "tool_not_found"
 
-    assert [request["method"] for request in requests] == ["GET"] * 9
+    assert [request["method"] for request in requests] == ["GET"] * 10
     assert [request["path"] for request in requests] == [
         "/api/v1/objects",
         "/api/v1/objects/host%2Ffabrik",
@@ -451,6 +458,7 @@ def test_mcp_client_completes_handshake_and_calls_every_read_only_tool() -> None
         "/api/v1/admin/principals",
         "/api/v1/admin/principals/principal%2Fadmin",
         "/api/v1/objects/host%2Ffabrik/access/preview",
+        "/api/v1/objects/host%2Ffabrik/device-graph",
         "/api/v1/objects",
     ]
     assert all(request["channel"] == "mcp" for request in requests)
@@ -480,10 +488,7 @@ def test_mcp_forwards_bearer_only_from_runtime_environment(
     assert result["items"]
     assert requests[0]["authorization"] == f"Bearer {runtime_token}"
     assert runtime_token not in json.dumps(result)
-    assert all(
-        "token" not in tool["inputSchema"].get("properties", {})
-        for tool in TOOLS
-    )
+    assert all("token" not in tool["inputSchema"].get("properties", {}) for tool in TOOLS)
 
 
 def test_mcp_write_tools_forward_preconditions_without_credentials_in_arguments() -> None:
@@ -561,11 +566,7 @@ def test_mcp_write_tools_forward_preconditions_without_credentials_in_arguments(
             method,
             path,
             body,
-            {
-                key: value
-                for key, value in headers.items()
-                if key != "X-Correlation-ID"
-            },
+            {key: value for key, value in headers.items() if key != "X-Correlation-ID"},
         )
         for method, path, body, headers in calls
     ]
@@ -619,11 +620,84 @@ def test_mcp_write_tools_forward_preconditions_without_credentials_in_arguments(
         ),
     ]
     assert all(
-        not {"token", "authorization", "credential"} & set(
-            tool["inputSchema"].get("properties", {})
-        )
+        not {"token", "authorization", "credential"}
+        & set(tool["inputSchema"].get("properties", {}))
         for tool in TOOLS
     )
+
+
+def test_mcp_device_tools_preserve_metadata_headers_and_graph_parity() -> None:
+    requests = []
+    fetches = []
+
+    def requester(method, path, body, headers):
+        requests.append((method, path, body, headers))
+        return {"changed": True}
+
+    def fetcher(path, params):
+        fetches.append((path, params))
+        return {"object_ref": "host:fabrik", "nodes": [], "edges": []}
+
+    device = {
+        "id": "sensor",
+        "kind": "device",
+        "label": "Sensor",
+        "lifecycle": "active",
+        "health": "healthy",
+        "data": {"schema_version": 1, "device": {"category": "sensor"}},
+    }
+    call_tool(
+        "blockwart.create_attached_device",
+        {
+            "parent_id": "fabrik/root",
+            "idempotency_key": "mcp-device-create-0001",
+            "device": device,
+            "metadata": {"link_kind": "zigbee", "primary": True},
+        },
+        requester=requester,
+    )
+    call_tool(
+        "blockwart.create_relationship",
+        {
+            "object_id": "sensor",
+            "if_match": '"rev-1"',
+            "from_ref": "device:sensor",
+            "relation_type": "attached_to",
+            "to_ref": "host:fabrik/root",
+            "metadata": {"note": "installed"},
+        },
+        requester=requester,
+    )
+    call_tool(
+        "blockwart.get_device_graph",
+        {"object_id": "fabrik/root"},
+        fetcher=fetcher,
+    )
+
+    assert [(method, path, body) for method, path, body, _ in requests] == [
+        (
+            "POST",
+            "/api/v1/objects/fabrik%2Froot/attached-devices",
+            {
+                "device": device,
+                "metadata": {"link_kind": "zigbee", "primary": True},
+            },
+        ),
+        (
+            "POST",
+            "/api/v1/objects/sensor/relationships",
+            {
+                "from_ref": "device:sensor",
+                "relation_type": "attached_to",
+                "to_ref": "host:fabrik/root",
+                "metadata": {"note": "installed"},
+            },
+        ),
+    ]
+    assert requests[0][3]["Idempotency-Key"] == "mcp-device-create-0001"
+    assert requests[1][3]["If-Match"] == '"rev-1"'
+    assert all(headers["X-Blockwart-Channel"] == "mcp" for *_, headers in requests)
+    assert fetches == [("/api/v1/objects/fabrik%2Froot/device-graph", {})]
 
 
 def test_unexpected_mcp_failure_logs_only_allowlisted_context(
@@ -830,6 +904,8 @@ def test_mcp_tools_publish_explicit_read_write_and_delete_hints() -> None:
         "blockwart.delete_object",
         "blockwart.create_relationship",
         "blockwart.delete_relationship",
+        "blockwart.create_attached_device",
+        "blockwart.get_device_graph",
         "blockwart.get_object_access",
         "blockwart.search_principals",
         "blockwart.list_admin_principals",
@@ -851,6 +927,7 @@ def test_mcp_tools_publish_explicit_read_write_and_delete_hints() -> None:
             "blockwart.list_admin_principals",
             "blockwart.get_admin_principal",
             "blockwart.preview_grant_scope",
+            "blockwart.get_device_graph",
         }
     )
     assert tools["blockwart.delete_object"]["annotations"]["destructiveHint"]
@@ -1059,10 +1136,7 @@ def test_mcp_admin_tools_are_read_only_and_never_expose_credential_operations() 
         ),
         ("/api/v1/admin/principals/principal%2Froot", {}),
     ]
-    assert not any(
-        "password" in tool["name"] or "token" in tool["name"]
-        for tool in TOOLS
-    )
+    assert not any("password" in tool["name"] or "token" in tool["name"] for tool in TOOLS)
 
 
 def test_mcp_forwards_structured_filters_to_the_read_only_agent_api() -> None:
@@ -1115,9 +1189,7 @@ def test_mcp_forwards_structured_filters_to_the_read_only_agent_api() -> None:
             },
         )
     ]
-    assert json.loads(response["content"][0]["text"])["objects"][0]["ref"] == (
-        "host:baremetal-01"
-    )
+    assert json.loads(response["content"][0]["text"])["objects"][0]["ref"] == ("host:baremetal-01")
 
 
 def test_mcp_rejects_unknown_tools_without_fetching() -> None:

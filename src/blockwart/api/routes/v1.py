@@ -16,9 +16,11 @@ from blockwart.schemas.catalog import CatalogObjectIn, ObjectKind, ObjectStatus
 from blockwart.schemas.v1 import (
     ObjectSortField,
     SortDirection,
+    V1AttachedDeviceCreateIn,
     V1AuditPageOut,
     V1ContextPageOut,
     V1DeleteCommandOut,
+    V1DeviceGraphOut,
     V1GrantCommandOut,
     V1GrantCreateIn,
     V1GrantScopePreviewOut,
@@ -39,6 +41,7 @@ from blockwart.services.agent import (
     query_agent_objects_page,
 )
 from blockwart.services.commands import (
+    create_attached_device,
     create_child_object,
     create_object_relationship,
     delete_catalog_object,
@@ -58,6 +61,7 @@ from blockwart.services.pagination import InvalidCursor
 from blockwart.services.read_access import ReadAccess
 from blockwart.services.v1 import (
     query_audit_page,
+    query_device_graph_resource,
     query_relationship_page,
     query_topology_resource,
 )
@@ -287,6 +291,48 @@ def create_v1_child_object(
     )
 
 
+@router.post(
+    "/objects/{parent_id}/attached-devices",
+    response_model=V1ObjectCommandOut,
+    status_code=201,
+)
+def create_v1_attached_device(
+    parent_id: str,
+    payload: V1AttachedDeviceCreateIn,
+    request: Request,
+    response: Response,
+    session: Annotated[Session, Depends(get_session)],
+    access: Annotated[ReadAccess, Depends(require_api_read_access)],
+    idempotency_key: Annotated[str | None, Header(alias="Idempotency-Key")] = None,
+) -> V1ObjectCommandOut:
+    if idempotency_key is None:
+        raise HTTPException(status_code=400, detail="Idempotency-Key is required")
+    context = api_write_context(request, access)
+    settings: Settings = request.app.state.settings
+    metadata_payload = payload.metadata.model_dump(exclude_none=True) or None
+    result = execute_api_command(
+        session,
+        context,
+        lambda: create_attached_device(
+            session,
+            context,
+            parent_id=parent_id,
+            payload=payload.device,
+            metadata=metadata_payload,
+            idempotency_key=idempotency_key,
+            idempotency_ttl_seconds=settings.idempotency_ttl_seconds,
+        ),
+    )
+    response.headers["ETag"] = result.etag
+    response.headers["Location"] = f"/api/v1/objects/{result.catalog_object.id}"
+    return V1ObjectCommandOut(
+        catalog_object=result.catalog_object,
+        etag=result.etag,
+        changed=result.changed,
+        replayed=result.replayed,
+    )
+
+
 @router.put(
     "/objects/{object_id}",
     response_model=V1ObjectCommandOut,
@@ -374,6 +420,7 @@ def create_v1_relationship(
             relation_type=payload.relation_type,
             to_ref=payload.to_ref,
             expected_revision=if_match,
+            metadata=payload.metadata.model_dump() or None,
         ),
     )
     response.headers["ETag"] = result.etag
@@ -381,6 +428,7 @@ def create_v1_relationship(
         from_ref=result.from_ref,
         relation_type=result.relation_type,
         to_ref=result.to_ref,
+        metadata=result.metadata,
         object_id=result.object_id,
         revision=result.revision,
         etag=result.etag,
@@ -420,6 +468,7 @@ def delete_v1_relationship(
         from_ref=result.from_ref,
         relation_type=result.relation_type,
         to_ref=result.to_ref,
+        metadata=result.metadata,
         object_id=result.object_id,
         revision=result.revision,
         etag=result.etag,
@@ -477,10 +526,7 @@ def search_v1_access_principals(
         ),
     )
     return V1PrincipalSearchOut(
-        items=[
-            V1PrincipalSummaryOut.model_validate(principal)
-            for principal in principals
-        ]
+        items=[V1PrincipalSummaryOut.model_validate(principal) for principal in principals]
     )
 
 
@@ -693,6 +739,28 @@ def get_v1_topology(
     return V1TopologyOut(
         object_ref=resource.object_ref,
         chains=resource.topology["chains"],
+    )
+
+
+@router.get(
+    "/objects/{object_id}/device-graph",
+    response_model=V1DeviceGraphOut,
+    response_model_exclude_none=True,
+)
+def get_v1_device_graph(
+    object_id: str,
+    session: Annotated[Session, Depends(get_session)],
+    access: Annotated[ReadAccess, Depends(require_api_read_access)],
+) -> V1DeviceGraphOut:
+    resource = query_device_graph_resource(session, object_id, access)
+    if resource is None:
+        raise HTTPException(status_code=404, detail="Catalog object not found")
+    return V1DeviceGraphOut(
+        object_ref=resource.object_ref,
+        nodes=resource.graph["nodes"],
+        edges=resource.graph["edges"],
+        upstream_path=resource.graph["upstream_path"],
+        downstream_refs=resource.graph["downstream_refs"],
     )
 
 

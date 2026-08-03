@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 from blockwart.domain.asset_state import AssetHealth, AssetLifecycle
 from blockwart.domain.auth import ObjectVisibility, Permission
 from blockwart.domain.placement import PlacementGraph
+from blockwart.domain.relationships import relationship_metadata
 from blockwart.domain.ui_schema import get_ui_schema
 from blockwart.models import Relationship
 from blockwart.schemas.catalog import (
@@ -38,6 +39,7 @@ class RelationshipReadModel(TypedDict):
     from_ref: str
     relation_type: str
     to_ref: str
+    metadata: dict[str, Any]
 
 
 class RelatedRelationshipReadModel(RelationshipReadModel):
@@ -74,6 +76,28 @@ class TopologyChainReadModel(TypedDict):
 
 class TopologyReadModel(TypedDict):
     chains: list[TopologyChainReadModel]
+
+
+class DeviceGraphNodeReadModel(TypedDict):
+    ref: str
+    id: str
+    kind: str
+    label: str
+    visibility: Literal["stub", "detail"]
+    capabilities: list[Permission]
+    status: NotRequired[str]
+    data: NotRequired[dict[str, Any]]
+    manufacturer: NotRequired[str]
+    model: NotRequired[str]
+    category: NotRequired[str]
+
+
+class DeviceGraphReadModel(TypedDict):
+    object_ref: str
+    nodes: list[DeviceGraphNodeReadModel]
+    edges: list[RelationshipReadModel]
+    upstream_path: list[str]
+    downstream_refs: list[str]
 
 
 class RelationshipCardReadModel(RelatedRelationshipReadModel):
@@ -387,6 +411,111 @@ def query_catalog_topology(
             object_map,
         ),
     )
+
+
+def query_device_graph(
+    session: Session,
+    object_id: str,
+    access: ReadAccess,
+) -> DeviceGraphReadModel | None:
+    """Return the bounded ``attached_to`` graph for the requested object.
+
+    Only relationships where the caller can read both endpoints are returned.
+    The returned edges form the complete connected component after policy
+    projection. ``upstream_path`` follows the primary parent when present and
+    otherwise the first stable parent; ``downstream_refs`` contains every
+    reachable child. Neighbor data is returned only with ``READ`` visibility.
+    """
+    all_objects = sort_for_browse(list_catalog_objects(session, access))
+    catalog_object = next(
+        (
+            candidate
+            for candidate in all_objects
+            if candidate.id == object_id
+        ),
+        None,
+    )
+    if catalog_object is None:
+        return None
+    object_map: dict[str, CatalogObjectReadOut] = {
+        f"{candidate.kind}:{candidate.id}": candidate
+        for candidate in all_objects
+    }
+    relationships = _list_relationships(session, access)
+    current_ref = f"{catalog_object.kind}:{catalog_object.id}"
+    attached_edges = [
+        relationship
+        for relationship in relationships
+        if relationship["relation_type"] == "attached_to"
+    ]
+
+    incident_edges: dict[str, list[RelationshipReadModel]] = {}
+    outgoing_edges: dict[str, list[RelationshipReadModel]] = {}
+    incoming_edges: dict[str, list[RelationshipReadModel]] = {}
+    for edge in attached_edges:
+        incident_edges.setdefault(edge["from_ref"], []).append(edge)
+        incident_edges.setdefault(edge["to_ref"], []).append(edge)
+        outgoing_edges.setdefault(edge["from_ref"], []).append(edge)
+        incoming_edges.setdefault(edge["to_ref"], []).append(edge)
+
+    edge_set: dict[tuple[str, str, str], RelationshipReadModel] = {}
+    connected_refs = {current_ref}
+    pending_refs = [current_ref]
+    for pending_ref in pending_refs:
+        for edge in incident_edges.get(pending_ref, []):
+            edge_set[
+                (edge["from_ref"], edge["relation_type"], edge["to_ref"])
+            ] = edge
+            neighbor_ref = (
+                edge["to_ref"]
+                if edge["from_ref"] == pending_ref
+                else edge["from_ref"]
+            )
+            if neighbor_ref not in connected_refs:
+                connected_refs.add(neighbor_ref)
+                pending_refs.append(neighbor_ref)
+
+    upstream_path: list[str] = []
+    cursor_ref = current_ref
+    seen_upstream = {current_ref}
+    while candidates := outgoing_edges.get(cursor_ref):
+        parent_edge = min(
+            candidates,
+            key=lambda edge: (
+                edge["metadata"].get("primary") is not True,
+                edge["to_ref"],
+            ),
+        )
+        parent_ref = parent_edge["to_ref"]
+        if parent_ref in seen_upstream:
+            break
+        upstream_path.append(parent_ref)
+        seen_upstream.add(parent_ref)
+        cursor_ref = parent_ref
+
+    downstream_refs: list[str] = []
+    seen_downstream = {current_ref}
+    pending_downstream = [current_ref]
+    for parent_ref in pending_downstream:
+        for edge in incoming_edges.get(parent_ref, []):
+            child_ref = edge["from_ref"]
+            if child_ref in seen_downstream:
+                continue
+            seen_downstream.add(child_ref)
+            downstream_refs.append(child_ref)
+            pending_downstream.append(child_ref)
+
+    nodes = [
+        _device_graph_node(ref, object_map.get(ref))
+        for ref in sorted(connected_refs)
+    ]
+    return {
+        "object_ref": current_ref,
+        "nodes": nodes,
+        "edges": list(edge_set.values()),
+        "upstream_path": upstream_path,
+        "downstream_refs": downstream_refs,
+    }
 
 
 def build_topology_read_model(
@@ -754,6 +883,7 @@ def _list_relationships(
                 "from_ref": row.from_ref,
                 "relation_type": row.relation_type,
                 "to_ref": row.to_ref,
+                "metadata": relationship_metadata(row),
             }
         )
     return relationships
@@ -898,6 +1028,60 @@ def _system_service_refs(
     ):
         return to_ref, from_ref
     return from_ref, to_ref
+
+
+def _device_graph_node(
+    ref: str,
+    catalog_object: CatalogObjectReadOut | None,
+) -> DeviceGraphNodeReadModel:
+    """Build a device-graph node honoring read-access redaction."""
+    kind = (
+        catalog_object.kind
+        if catalog_object
+        else ref.split(":", 1)[0]
+    )
+    node: DeviceGraphNodeReadModel = {
+        "ref": ref,
+        "id": (
+            catalog_object.id
+            if catalog_object
+            else object_id_from_ref(ref)
+        ),
+        "kind": kind,
+        "label": (
+            primary_name_value(catalog_object)
+            if catalog_object
+            else ref
+        ),
+        "visibility": (
+            catalog_object.visibility
+            if catalog_object is not None
+            else ObjectVisibility.STUB
+        ),
+        "capabilities": (
+            catalog_object.capabilities
+            if catalog_object is not None
+            else []
+        ),
+    }
+    if (
+        catalog_object is not None
+        and catalog_object.visibility == ObjectVisibility.DETAIL
+    ):
+        data = catalog_object.data
+        node.update(
+            {
+                "status": catalog_object.status,
+                "data": data,
+            }
+        )
+        device = data.get("device")
+        if catalog_object.kind == "device" and isinstance(device, Mapping):
+            for field in ("manufacturer", "model", "category"):
+                value = device.get(field)
+                if isinstance(value, str):
+                    node[field] = value
+    return node
 
 
 def _relationship_node(

@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
@@ -17,6 +18,13 @@ from blockwart.domain.auth import (
     Role,
     permissions_for_role,
 )
+from blockwart.domain.relationships import (
+    RelationshipIntegrityError,
+    canonical_relationship_metadata_json,
+    relationship_metadata,
+    validate_relationship_collection,
+    validate_relationship_metadata,
+)
 from blockwart.domain.security import redact_secret_values
 from blockwart.models import (
     CatalogObject,
@@ -30,6 +38,7 @@ from blockwart.services.audit import add_audit_event
 from blockwart.services.catalog import (
     RevisionConflict,
     create_relationship,
+    current_endpoint_descriptors,
     delete_object,
     delete_relationship,
     get_object,
@@ -126,6 +135,7 @@ class RelationshipCommandResult:
     revision: int
     etag: str
     changed: bool
+    metadata: dict[str, object]
 
 
 def revision_etag(revision: int) -> str:
@@ -319,6 +329,136 @@ def create_child_object(
     )
 
 
+def create_attached_device(
+    session: Session,
+    context: WriteContext,
+    *,
+    parent_id: str,
+    payload: CatalogObjectIn,
+    metadata: Mapping[str, object] | None,
+    idempotency_key: str,
+    idempotency_ttl_seconds: int,
+    now: datetime | None = None,
+) -> ObjectCommandResult:
+    """Atomically create a device, attach it to an existing upstream endpoint.
+
+    Requires ``create_child`` on the upstream parent. The device is created
+    with a direct Owner self-grant and an ``attached_to`` relationship in a
+    single transaction. Relationship metadata is validated by the shared domain
+    layer and covered by the idempotency record.
+    """
+    timestamp = now or _now()
+    parent = _require_permission(
+        session,
+        context,
+        object_id=parent_id,
+        permission=Permission.CREATE_CHILD,
+    )
+    if payload.kind != "device":
+        raise CommandConflict("attached device creation requires kind=device")
+    canonical_metadata = _canonical_relationship_metadata("attached_to", metadata)
+    request_payload = {
+        "parent_id": parent_id,
+        "payload": payload.model_dump(mode="json"),
+        "metadata": canonical_metadata,
+    }
+    record, replay = _reserve_idempotency_record(
+        session,
+        context,
+        key=idempotency_key,
+        operation_context=f"create_attached_device:{parent_id}",
+        request_payload=request_payload,
+        ttl_seconds=idempotency_ttl_seconds,
+        now=timestamp,
+    )
+    if replay is not None:
+        return ObjectCommandResult(
+            catalog_object=CatalogObjectOut.model_validate(replay["catalog_object"]),
+            etag=str(replay["etag"]),
+            changed=bool(replay["changed"]),
+            replayed=True,
+        )
+    if session.get(CatalogObject, payload.id) is not None:
+        raise CommandConflict("catalog object id already exists")
+
+    created = upsert_object(session, payload, write_audit=False)
+    device_ref = f"{created.kind}:{created.id}"
+    parent_ref = f"{parent.kind}:{parent.id}"
+    try:
+        create_relationship(
+            session,
+            from_ref=device_ref,
+            relation_type="attached_to",
+            to_ref=parent_ref,
+            metadata=canonical_metadata,
+            write_audit=False,
+            touch_revisions=False,
+        )
+    except RelationshipIntegrityError as exc:
+        raise CommandConflict(str(exc)) from exc
+    session.add(
+        ObjectGrant(
+            principal_id=context.principal.id,
+            object_id=created.id,
+            role=Role.OWNER,
+            scope=GrantScope.SELF,
+            created_by_principal_id=context.principal.id,
+        )
+    )
+    parent_revision = _bump_object_revision(session, parent.id)
+    session.flush()
+    result = get_object(session, created.id)
+    child_row = session.get(CatalogObject, created.id)
+    if result is None or child_row is None:
+        raise CommandConflict("created object could not be loaded")
+    result = result.model_copy(
+        update={
+            "capabilities": sorted(
+                permissions_for_role(Role.OWNER),
+                key=lambda permission: permission.value,
+            )
+        }
+    )
+    _write_command_audit(
+        session,
+        context,
+        object_id=created.id,
+        action="create_attached_device",
+        old_revision=0,
+        new_revision=child_row.revision,
+        before=None,
+        after=_object_snapshot(child_row),
+        changes=[],
+        extra={
+            "object_ref": device_ref,
+            "parent_ref": parent_ref,
+            "relation_type": "attached_to",
+            "metadata": canonical_metadata,
+            "creator_owner_grant": {
+                "principal_id": context.principal.id,
+                "role": Role.OWNER,
+                "scope": GrantScope.SELF,
+            },
+            "affected_revisions": {
+                parent.id: parent_revision,
+            },
+        },
+    )
+    response = {
+        "catalog_object": result.model_dump(mode="json"),
+        "etag": revision_etag(result.revision),
+        "changed": True,
+    }
+    record.resource_id = result.id
+    record.response_json = _canonical_json(response)
+    session.flush()
+    return ObjectCommandResult(
+        catalog_object=result,
+        etag=revision_etag(result.revision),
+        changed=True,
+    )
+
+
 def delete_catalog_object(
     session: Session,
     context: WriteContext,
@@ -371,6 +511,7 @@ def create_object_relationship(
     relation_type: str,
     to_ref: str,
     expected_revision: int | str | None,
+    metadata: Mapping[str, object] | None = None,
 ) -> RelationshipCommandResult:
     target, peer, expected_revision = _relationship_command_objects(
         session,
@@ -380,6 +521,7 @@ def create_object_relationship(
         to_ref=to_ref,
         expected_revision=expected_revision,
     )
+    canonical_metadata = _canonical_relationship_metadata(relation_type, metadata)
     existing = session.scalar(
         select(Relationship).where(
             Relationship.from_ref == from_ref,
@@ -388,12 +530,32 @@ def create_object_relationship(
         )
     )
     if existing is not None:
-        return _relationship_result(
-            target,
-            from_ref=from_ref,
+        existing_metadata_json = canonical_relationship_metadata_json(
+            relation_type,
+            relationship_metadata(existing, relation_type=relation_type),
+        )
+        new_metadata_json = canonical_relationship_metadata_json(
+            relation_type,
+            canonical_metadata,
+        )
+        if existing_metadata_json == new_metadata_json:
+            return _relationship_result(
+                target,
+                from_ref=from_ref,
+                relation_type=relation_type,
+                to_ref=to_ref,
+                changed=False,
+                metadata=canonical_metadata,
+            )
+        return _replace_relationship_metadata(
+            session,
+            context,
+            target=target,
+            peer=peer,
+            relationship=existing,
             relation_type=relation_type,
-            to_ref=to_ref,
-            changed=False,
+            canonical_metadata=canonical_metadata,
+            expected_revision=expected_revision,
         )
     old_revision = target.revision
     new_revision = _claim_object_revision(
@@ -401,14 +563,18 @@ def create_object_relationship(
         object_id=target.id,
         expected_revision=expected_revision,
     )
-    create_relationship(
-        session,
-        from_ref=from_ref,
-        relation_type=relation_type,
-        to_ref=to_ref,
-        write_audit=False,
-        touch_revisions=False,
-    )
+    try:
+        create_relationship(
+            session,
+            from_ref=from_ref,
+            relation_type=relation_type,
+            to_ref=to_ref,
+            metadata=canonical_metadata,
+            write_audit=False,
+            touch_revisions=False,
+        )
+    except RelationshipIntegrityError as exc:
+        raise CommandConflict(str(exc)) from exc
     peer_revision = _bump_object_revision(session, peer.id)
     _write_command_audit(
         session,
@@ -422,12 +588,14 @@ def create_object_relationship(
             "from_ref": from_ref,
             "relation_type": relation_type,
             "to_ref": to_ref,
+            "metadata": canonical_metadata,
         },
         changes=[],
         extra={
             "from_ref": from_ref,
             "relation_type": relation_type,
             "to_ref": to_ref,
+            "metadata": canonical_metadata,
             "affected_revisions": {peer.id: peer_revision},
         },
     )
@@ -438,6 +606,101 @@ def create_object_relationship(
         relation_type=relation_type,
         to_ref=to_ref,
         changed=True,
+        metadata=canonical_metadata,
+    )
+
+
+def _replace_relationship_metadata(
+    session: Session,
+    context: WriteContext,
+    *,
+    target: CatalogObject,
+    peer: CatalogObject,
+    relationship: Relationship,
+    relation_type: str,
+    canonical_metadata: dict[str, object],
+    expected_revision: int,
+) -> RelationshipCommandResult:
+    """Idempotent relationship metadata replacement.
+
+    The caller must ensure the relationship row already exists. If the canonical
+    metadata equals the stored metadata, this path must not be reached (handled
+    as a no-op by ``create_object_relationship``).
+    """
+    old_metadata = relationship_metadata(relationship, relation_type=relation_type)
+    replacement_json = canonical_relationship_metadata_json(
+        relation_type,
+        canonical_metadata,
+    )
+    old_revision = target.revision
+    new_revision = _claim_object_revision(
+        session,
+        object_id=target.id,
+        expected_revision=expected_revision,
+    )
+    relationship_rows: list[Relationship | dict[str, object]] = list(
+        session.scalars(
+            select(Relationship).order_by(
+                Relationship.id,
+                Relationship.from_ref,
+                Relationship.relation_type,
+                Relationship.to_ref,
+            )
+        ).all()
+    )
+    candidate_rows: list[Relationship | dict[str, object]] = [
+        {
+            "from_ref": row.from_ref,
+            "relation_type": row.relation_type,
+            "to_ref": row.to_ref,
+            "metadata_json": replacement_json,
+        }
+        if row.id == relationship.id
+        else row
+        for row in relationship_rows
+    ]
+    validate_relationship_collection(
+        candidate_rows,
+        current_endpoint_descriptors(session),
+    )
+    relationship.metadata_json = replacement_json
+    peer_revision = _bump_object_revision(session, peer.id)
+    _write_command_audit(
+        session,
+        context,
+        object_id=target.id,
+        action="relationship_metadata_replace",
+        old_revision=old_revision,
+        new_revision=new_revision,
+        before={
+            "from_ref": relationship.from_ref,
+            "relation_type": relation_type,
+            "to_ref": relationship.to_ref,
+            "metadata": old_metadata,
+        },
+        after={
+            "from_ref": relationship.from_ref,
+            "relation_type": relation_type,
+            "to_ref": relationship.to_ref,
+            "metadata": canonical_metadata,
+        },
+        changes=[],
+        extra={
+            "from_ref": relationship.from_ref,
+            "relation_type": relation_type,
+            "to_ref": relationship.to_ref,
+            "metadata": canonical_metadata,
+            "affected_revisions": {peer.id: peer_revision},
+        },
+    )
+    target.revision = new_revision
+    return _relationship_result(
+        target,
+        from_ref=relationship.from_ref,
+        relation_type=relation_type,
+        to_ref=relationship.to_ref,
+        changed=True,
+        metadata=canonical_metadata,
     )
 
 
@@ -468,6 +731,10 @@ def delete_object_relationship(
     )
     if relationship is None:
         raise CommandNotFound("relationship not found")
+    canonical_metadata = relationship_metadata(
+        relationship,
+        relation_type=relation_type,
+    )
     old_revision = target.revision
     new_revision = _claim_object_revision(
         session,
@@ -493,6 +760,7 @@ def delete_object_relationship(
             "from_ref": from_ref,
             "relation_type": relation_type,
             "to_ref": to_ref,
+            "metadata": canonical_metadata,
         },
         after=None,
         changes=[],
@@ -500,6 +768,7 @@ def delete_object_relationship(
             "from_ref": from_ref,
             "relation_type": relation_type,
             "to_ref": to_ref,
+            "metadata": canonical_metadata,
             "affected_revisions": {peer.id: peer_revision},
         },
     )
@@ -510,6 +779,7 @@ def delete_object_relationship(
         relation_type=relation_type,
         to_ref=to_ref,
         changed=True,
+        metadata=canonical_metadata,
     )
 
 
@@ -639,6 +909,7 @@ def _claim_object_revision(
 
 
 def _bump_object_revision(session: Session, object_id: str) -> int:
+    row = session.get(CatalogObject, object_id)
     session.execute(
         update(CatalogObject)
         .where(CatalogObject.id == object_id)
@@ -648,7 +919,8 @@ def _bump_object_revision(session: Session, object_id: str) -> int:
         )
         .execution_options(synchronize_session=False)
     )
-    session.expire_all()
+    if row is not None:
+        session.expire(row, attribute_names=["revision", "updated_at"])
     revision = session.scalar(
         select(CatalogObject.revision).where(CatalogObject.id == object_id)
     )
@@ -857,6 +1129,7 @@ def _relationship_result(
     relation_type: str,
     to_ref: str,
     changed: bool,
+    metadata: dict[str, object],
 ) -> RelationshipCommandResult:
     return RelationshipCommandResult(
         from_ref=from_ref,
@@ -866,6 +1139,7 @@ def _relationship_result(
         revision=target.revision,
         etag=revision_etag(target.revision),
         changed=changed,
+        metadata=metadata,
     )
 
 
@@ -876,6 +1150,20 @@ def _canonical_json(value: object) -> str:
         separators=(",", ":"),
         sort_keys=True,
     )
+
+
+def _canonical_relationship_metadata(
+    relation_type: str,
+    metadata: Mapping[str, object] | None,
+) -> dict[str, object]:
+    """Validate and return canonical dict for relationship metadata.
+
+    Accepts ``None``/``{}`` and returns an empty dict so the command layer never
+    stores ``null`` metadata on a relationship row.
+    """
+    if metadata is None:
+        return {}
+    return validate_relationship_metadata(relation_type, metadata)
 
 
 def _now() -> datetime:

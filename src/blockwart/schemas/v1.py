@@ -1,13 +1,13 @@
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_serializer
 
 from blockwart.domain.auth import GrantScope, Permission, Role
 from blockwart.schemas.agent import (
     AgentCatalogContextRead,
     AgentCatalogObjectRead,
 )
-from blockwart.schemas.catalog import CatalogObjectOut, ObjectKind
+from blockwart.schemas.catalog import CatalogObjectIn, CatalogObjectOut, ObjectKind
 
 ObjectSortField = Literal["id", "label", "kind", "updated_at"]
 SortDirection = Literal["asc", "desc"]
@@ -29,10 +29,56 @@ class V1ContextPageOut(BaseModel):
     direction: SortDirection
 
 
+class V1RelationshipMetadata(BaseModel):
+    """Canonical optional metadata for link-shaped relationships.
+
+    Unset fields are omitted so empty metadata serializes as ``{}``.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    source_interface: str | None = Field(default=None, min_length=1, max_length=128)
+    target_interface_or_port: str | None = Field(default=None, min_length=1, max_length=128)
+    link_kind: (
+        Literal[
+            "ethernet",
+            "wifi",
+            "mesh",
+            "zigbee",
+            "bluetooth",
+            "usb",
+            "serial",
+            "gpio",
+            "power",
+            "virtual",
+            "other",
+        ]
+        | None
+    ) = None
+    primary: bool | None = None
+    note: str | None = Field(default=None, min_length=1, max_length=512)
+    mode: (
+        Literal[
+            "access",
+            "trunk",
+            "routed",
+            "bridged",
+            "mesh",
+            "other",
+        ]
+        | None
+    ) = None
+
+    @model_serializer(mode="wrap")
+    def _serialize_without_nulls(self, handler) -> dict[str, Any]:
+        return {key: value for key, value in handler(self).items() if value is not None}
+
+
 class V1RelationshipOut(BaseModel):
     from_ref: str
     relation_type: str
     to_ref: str
+    metadata: V1RelationshipMetadata = Field(default_factory=V1RelationshipMetadata)
 
 
 class V1ObjectCommandOut(BaseModel):
@@ -52,13 +98,69 @@ class V1RelationshipCommandIn(BaseModel):
     from_ref: str = Field(min_length=3, max_length=192)
     relation_type: str = Field(min_length=1, max_length=96)
     to_ref: str = Field(min_length=3, max_length=192)
+    metadata: V1RelationshipMetadata = Field(
+        default_factory=V1RelationshipMetadata,
+    )
 
 
-class V1RelationshipCommandOut(V1RelationshipCommandIn):
+class V1AttachedDeviceCreateIn(BaseModel):
+    device: CatalogObjectIn
+    metadata: V1RelationshipMetadata = Field(
+        default_factory=V1RelationshipMetadata,
+    )
+
+
+class V1RelationshipCommandOut(BaseModel):
+    from_ref: str
+    relation_type: str
+    to_ref: str
+    metadata: V1RelationshipMetadata = Field(default_factory=V1RelationshipMetadata)
     object_id: str
     revision: int = Field(ge=1)
     etag: str
     changed: bool
+
+
+class V1DeviceGraphNodeBaseOut(BaseModel):
+    ref: str
+    id: str
+    kind: ObjectKind
+    label: str
+    capabilities: list[Permission] = Field(default_factory=list)
+
+
+class V1DeviceGraphStubNodeOut(V1DeviceGraphNodeBaseOut):
+    visibility: Literal["stub"] = "stub"
+
+
+class V1DeviceGraphDetailNodeOut(V1DeviceGraphNodeBaseOut):
+    visibility: Literal["detail"] = "detail"
+    status: str
+    data: dict[str, Any] = Field(default_factory=dict)
+    manufacturer: str | None = None
+    model: str | None = None
+    category: str | None = None
+
+
+class V1DeviceGraphEdgeOut(BaseModel):
+    from_ref: str
+    relation_type: Literal["attached_to"]
+    to_ref: str
+    metadata: V1RelationshipMetadata = Field(default_factory=V1RelationshipMetadata)
+
+
+V1DeviceGraphNodeOut = Annotated[
+    V1DeviceGraphDetailNodeOut | V1DeviceGraphStubNodeOut,
+    Field(discriminator="visibility"),
+]
+
+
+class V1DeviceGraphOut(BaseModel):
+    object_ref: str
+    nodes: list[V1DeviceGraphNodeOut] = Field(default_factory=list)
+    edges: list[V1DeviceGraphEdgeOut] = Field(default_factory=list)
+    upstream_path: list[str] = Field(default_factory=list)
+    downstream_refs: list[str] = Field(default_factory=list)
 
 
 class V1RelationshipPageOut(BaseModel):

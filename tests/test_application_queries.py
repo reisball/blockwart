@@ -155,6 +155,7 @@ def test_application_queries_build_catalog_relationship_audit_and_topology_model
             "from_ref": "system:query-system",
             "relation_type": "hosts",
             "to_ref": "service:query-service",
+            "metadata": {},
         }
     ]
     assert detail.relationship_groups["inbound"][0]["other_ref"] == (
