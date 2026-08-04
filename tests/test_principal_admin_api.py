@@ -290,6 +290,47 @@ def test_service_token_secret_is_returned_once_with_no_store(
         assert first.json()["token"] not in serialized_events
 
 
+def test_admin_rotate_mcp_token_without_audience_preserves_audience(
+    principal_admin_api_client: TestClient,
+    principal_admin_api_state,
+) -> None:
+    sessions = principal_admin_api_state["session_factory"]
+    admin_token = principal_admin_api_state["tokens"]["admin"]
+    target_id = principal_admin_api_state["target_id"]
+    issued = principal_admin_api_client.post(
+        f"/api/v1/admin/principals/{target_id}/tokens",
+        headers={
+            **_auth(admin_token),
+            "If-Match": '"rev-1"',
+            "Idempotency-Key": "admin-api-mcp-token-issue-0001",
+        },
+        json={"name": "mcp-runtime", "audience": "mcp"},
+    )
+    assert issued.status_code == 200, issued.text
+    assert issued.json()["token_audience"] == "mcp"
+
+    rotated = principal_admin_api_client.post(
+        f"/api/v1/admin/principals/{target_id}/tokens/rotate",
+        headers={
+            **_auth(admin_token),
+            "If-Match": '"rev-2"',
+            "Idempotency-Key": "admin-api-mcp-token-rotate-0001",
+        },
+        json={"name": "mcp-runtime"},
+    )
+    assert rotated.status_code == 200, rotated.text
+    assert rotated.json()["token_audience"] == "mcp"
+    with sessions() as session:
+        token = session.scalar(
+            select(ServiceToken).where(
+                ServiceToken.principal_id == target_id,
+                ServiceToken.name == "mcp-runtime",
+            )
+        )
+        assert token is not None
+        assert token.audience == "mcp"
+
+
 def test_principal_update_requires_current_etag(
     principal_admin_api_client: TestClient,
     principal_admin_api_state,

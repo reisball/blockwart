@@ -40,21 +40,12 @@ def paginate_items[T](
     include_total: bool,
 ) -> CursorPage[T]:
     """Return one deterministic keyset page bound to the active query."""
-    fingerprint = _query_fingerprint(
+    position = decode_page_cursor(
+        cursor,
         resource=resource,
         sort=sort,
         direction=direction,
         query=query,
-    )
-    position = (
-        _decode_cursor(
-            cursor,
-            fingerprint=fingerprint,
-            sort=sort,
-            direction=direction,
-        )
-        if cursor
-        else None
     )
     ordered = sorted(items, key=key, reverse=direction == "desc")
     if position is not None:
@@ -68,10 +59,11 @@ def paginate_items[T](
     next_cursor = None
     if len(window) > limit and page_items:
         primary, tie_breaker = key(page_items[-1])
-        next_cursor = _encode_cursor(
-            fingerprint=fingerprint,
+        next_cursor = encode_page_cursor(
+            resource=resource,
             sort=sort,
             direction=direction,
+            query=query,
             primary=primary,
             tie_breaker=tie_breaker,
         )
@@ -79,6 +71,56 @@ def paginate_items[T](
         items=page_items,
         next_cursor=next_cursor,
         total=len(items) if include_total else None,
+    )
+
+
+def decode_page_cursor(
+    cursor: str | None,
+    *,
+    resource: str,
+    sort: str,
+    direction: SortDirection,
+    query: Mapping[str, object],
+) -> CursorKey | None:
+    """Decode a query-bound cursor for database-level keyset pagination."""
+    if not cursor:
+        return None
+    fingerprint = _query_fingerprint(
+        resource=resource,
+        sort=sort,
+        direction=direction,
+        query=query,
+    )
+    return _decode_cursor(
+        cursor,
+        fingerprint=fingerprint,
+        sort=sort,
+        direction=direction,
+    )
+
+
+def encode_page_cursor(
+    *,
+    resource: str,
+    sort: str,
+    direction: SortDirection,
+    query: Mapping[str, object],
+    primary: str,
+    tie_breaker: str,
+) -> str:
+    """Encode a query-bound cursor from the last row of a database page."""
+    fingerprint = _query_fingerprint(
+        resource=resource,
+        sort=sort,
+        direction=direction,
+        query=query,
+    )
+    return _encode_cursor(
+        fingerprint=fingerprint,
+        sort=sort,
+        direction=direction,
+        primary=primary,
+        tie_breaker=tie_breaker,
     )
 
 

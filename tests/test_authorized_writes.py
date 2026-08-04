@@ -3,10 +3,12 @@ from __future__ import annotations
 import json
 from collections.abc import Generator
 from concurrent.futures import ThreadPoolExecutor
+from uuid import uuid4
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import func, select
+from sqlalchemy import event as sqlalchemy_event
+from sqlalchemy import func, select, update
 from sqlalchemy.orm import Session
 
 from blockwart.api.deps import get_session
@@ -17,6 +19,7 @@ from blockwart.models import (
     AuditEvent,
     CatalogObject,
     IdempotencyRecord,
+    ObjectComment,
     ObjectGrant,
     Relationship,
     SecurityEvent,
@@ -185,7 +188,264 @@ def test_create_child_is_atomic_audited_and_idempotent(
         record = session.scalar(select(IdempotencyRecord))
         assert record is not None
         assert "create-child-key-0001" not in record.key_hash
-        assert "create-child-key-0001" not in record.response_json
+    assert "create-child-key-0001" not in record.response_json
+
+
+def test_object_comments_are_append_only_idempotent_audience_bound_and_redacted(
+    authorized_write_client: TestClient,
+    authorized_write_state,
+) -> None:
+    session_factory, principal_id, api_token = authorized_write_state
+    with session_factory() as session:
+        before = session.get(CatalogObject, "editable")
+        assert before is not None
+        before_revision = before.revision
+        before_updated_at = before.updated_at
+
+    headers = {
+        **_authorization(api_token),
+        "Idempotency-Key": "object-comment-key-0001",
+    }
+    payload = {"body": "# Work log\n\n**Restarted** safely."}
+    first = authorized_write_client.post(
+        "/api/v1/objects/editable/comments",
+        headers=headers,
+        json=payload,
+    )
+    replay = authorized_write_client.post(
+        "/api/v1/objects/editable/comments",
+        headers=headers,
+        json=payload,
+    )
+    conflict = authorized_write_client.post(
+        "/api/v1/objects/editable/comments",
+        headers=headers,
+        json={"body": "different"},
+    )
+    spoofed = authorized_write_client.post(
+        "/api/v1/objects/editable/comments",
+        headers={
+            **_authorization(api_token),
+            "Idempotency-Key": "object-comment-key-0002",
+            "X-Blockwart-Channel": "mcp",
+        },
+        json={"body": "spoofed origin"},
+    )
+    secret = authorized_write_client.post(
+        "/api/v1/objects/editable/comments",
+        headers={
+            **_authorization(api_token),
+            "Idempotency-Key": "object-comment-key-0003",
+        },
+        json={"body": "Bearer abcdefghijklmnopqrstuvwxyz123456"},
+    )
+
+    assert first.status_code == 201, first.text
+    assert first.headers["location"] == (
+        f"/objects/editable/comments#comment-{first.json()['comment']['id']}"
+    )
+    assert replay.status_code == 200, replay.text
+    assert conflict.status_code == 409
+    assert spoofed.status_code == 403
+    assert secret.status_code == 409
+    assert payload["body"] not in conflict.text + spoofed.text + secret.text
+    assert first.json()["comment"]["body"] == payload["body"]
+    assert first.json()["comment"]["format"] == "markdown"
+    assert first.json()["comment"]["origin"] == "api"
+    assert replay.json() == {**first.json(), "replayed": True}
+
+    page = authorized_write_client.get(
+        "/api/v1/objects/editable/comments?include_total=true",
+        headers=_authorization(api_token),
+    )
+    context = authorized_write_client.get(
+        "/api/v1/objects/editable",
+        headers=_authorization(api_token),
+    )
+    assert page.status_code == 200
+    assert page.json()["total"] == 1
+    assert page.json()["items"] == [first.json()["comment"]]
+    assert context.json()["recent_comments"] == [first.json()["comment"]]
+    assert context.headers["etag"] == first.headers["etag"]
+
+    assert authorized_write_client.get(
+        "/api/v1/objects/peer/comments",
+        headers=_authorization(api_token),
+    ).status_code == 404
+    assert authorized_write_client.post(
+        "/api/v1/objects/peer/comments",
+        headers={
+            **_authorization(api_token),
+            "Idempotency-Key": "object-comment-key-0004",
+        },
+        json={"body": "denied"},
+    ).status_code == 403
+    assert authorized_write_client.get(
+        "/api/v1/objects/missing/comments",
+        headers=_authorization(api_token),
+    ).status_code == 404
+
+    with session_factory() as session:
+        row = session.get(CatalogObject, "editable")
+        assert row is not None
+        assert row.revision == before_revision + 1
+        assert row.updated_at == before_updated_at
+        comments = list(session.scalars(select(ObjectComment)).all())
+        assert len(comments) == 1
+        events = list(
+            session.scalars(
+                select(AuditEvent).where(
+                    AuditEvent.object_id == "editable",
+                    AuditEvent.action == "comment_create",
+                )
+            ).all()
+        )
+        assert len(events) == 1
+        assert payload["body"] not in events[0].details_json
+        assert '"before"' not in events[0].details_json
+        assert '"after"' not in events[0].details_json
+        record = session.scalar(
+            select(IdempotencyRecord).where(
+                IdempotencyRecord.resource_id == comments[0].id
+            )
+        )
+        assert record is not None
+        assert payload["body"] not in (record.response_json or "")
+
+        with transaction(session):
+            mcp_token = issue_service_token(
+                session,
+                principal_id=principal_id,
+                name="comments-mcp",
+                audience="mcp",
+            )
+    mcp_added = authorized_write_client.post(
+        "/api/v1/objects/editable/comments",
+        headers={
+            **_authorization(mcp_token.value),
+            "Idempotency-Key": "object-comment-key-0005",
+            "X-Blockwart-Channel": "mcp",
+        },
+        json={"body": "MCP work log"},
+    )
+    assert mcp_added.status_code == 201, mcp_added.text
+    assert mcp_added.json()["comment"]["origin"] == "mcp"
+    assert authorized_write_client.post(
+        "/api/v1/objects/editable/comments",
+        headers={
+            **_authorization(mcp_token.value),
+            "Idempotency-Key": "object-comment-key-0006",
+        },
+        json={"body": "wrong API audience"},
+    ).status_code == 403
+
+
+def test_object_comment_pages_are_newest_first_bounded_and_instance_scoped(
+    authorized_write_client: TestClient,
+    authorized_write_state,
+) -> None:
+    session_factory, _, api_token = authorized_write_state
+    comments = []
+    for index in range(7):
+        response = authorized_write_client.post(
+            "/api/v1/objects/editable/comments",
+            headers={
+                **_authorization(api_token),
+                "Idempotency-Key": f"object-comment-page-key-{index:04d}",
+            },
+            json={"body": f"Comment {index}"},
+        )
+        assert response.status_code == 201, response.text
+        comments.append(response.json()["comment"])
+
+    expected = sorted(
+        comments,
+        key=lambda item: (item["created_at"], item["id"]),
+        reverse=True,
+    )
+    statements: list[str] = []
+
+    def capture_comment_sql(
+        _connection,
+        _cursor,
+        statement,
+        _parameters,
+        _context,
+        _executemany,
+    ) -> None:
+        if "object_comments" in statement:
+            statements.append(statement)
+
+    engine = session_factory.kw["bind"]
+    sqlalchemy_event.listen(engine, "before_cursor_execute", capture_comment_sql)
+    first = authorized_write_client.get(
+        "/api/v1/objects/editable/comments",
+        headers=_authorization(api_token),
+        params={"limit": 2, "include_total": "true"},
+    )
+    sqlalchemy_event.remove(engine, "before_cursor_execute", capture_comment_sql)
+    assert first.status_code == 200
+    assert first.json()["items"] == expected[:2]
+    assert first.json()["total"] == 7
+    assert first.json()["next_cursor"]
+    assert any(" LIMIT " in statement.upper() for statement in statements)
+    assert any("COUNT(" in statement.upper() for statement in statements)
+
+    second = authorized_write_client.get(
+        "/api/v1/objects/editable/comments",
+        headers=_authorization(api_token),
+        params={"limit": 2, "cursor": first.json()["next_cursor"]},
+    )
+    assert second.status_code == 200
+    assert second.json()["items"] == expected[2:4]
+    assert second.json()["total"] is None
+
+    context = authorized_write_client.get(
+        "/api/v1/objects/editable",
+        headers=_authorization(api_token),
+    )
+    assert context.status_code == 200
+    assert context.json()["recent_comments"] == expected[:5]
+
+    rebound = authorized_write_client.get(
+        "/api/v1/objects/deletable/comments",
+        headers=_authorization(api_token),
+        params={"limit": 2, "cursor": first.json()["next_cursor"]},
+    )
+    assert rebound.status_code == 400
+
+    with session_factory() as session:
+        current = session.get(CatalogObject, "editable")
+        assert current is not None
+        with transaction(session):
+            session.execute(
+                update(CatalogObject)
+                .where(CatalogObject.id == "editable")
+                .values(
+                    instance_id=uuid4().hex,
+                    created_at=current.created_at,
+                    updated_at=CatalogObject.updated_at,
+                )
+            )
+
+    replacement_page = authorized_write_client.get(
+        "/api/v1/objects/editable/comments?include_total=true",
+        headers=_authorization(api_token),
+    )
+    replacement_context = authorized_write_client.get(
+        "/api/v1/objects/editable",
+        headers=_authorization(api_token),
+    )
+    assert replacement_page.status_code == 200
+    assert replacement_page.json() == {
+        "items": [],
+        "next_cursor": None,
+        "total": 0,
+        "sort": "created_at",
+        "direction": "desc",
+    }
+    assert replacement_context.status_code == 200
+    assert replacement_context.json()["recent_comments"] == []
 
 
 def test_idempotency_key_conflict_has_no_partial_write(

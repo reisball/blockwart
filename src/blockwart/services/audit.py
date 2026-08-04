@@ -100,6 +100,8 @@ def render_audit_summary_english(
             "grant_revoke": "Revoked access from principal",
         }
         return f"{verbs[event]} {target}".strip()
+    if event == "comment_create":
+        return "Added object comment"
     if event in {"relationship_create", "seed_relationship_create"}:
         prefix = "Created relationship"
         if event == "seed_relationship_create":

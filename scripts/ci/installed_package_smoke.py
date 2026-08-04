@@ -94,6 +94,7 @@ def prepare_authorized_readers() -> tuple[str, str, str]:
                     session,
                     principal_id=service_principal.id,
                     name="package-smoke",
+                    audience="mcp",
                 )
                 browser_session = issue_browser_session(
                     session,
@@ -132,6 +133,8 @@ async def check_mcp(
             assert set(tools) == {
                 "blockwart.search",
                 "blockwart.get_object_context",
+                "blockwart.list_comments",
+                "blockwart.add_comment",
                 "blockwart.get_context",
                 "blockwart.create_child",
                 "blockwart.update_object",
@@ -158,6 +161,7 @@ async def check_mcp(
                     in {
                         "blockwart.search",
                         "blockwart.get_object_context",
+                        "blockwart.list_comments",
                         "blockwart.get_context",
                         "blockwart.get_object_access",
                         "blockwart.search_principals",
@@ -205,6 +209,22 @@ async def check_mcp(
                 ),
             ]
             assert all(not result.isError for result in read_results)
+            comment_created = await session.call_tool(
+                "blockwart.add_comment",
+                {
+                    "object_id": object_id,
+                    "body": "**Package smoke** comment",
+                    "idempotency_key": "package-smoke-comment-0001",
+                },
+            )
+            comment_payload = _tool_payload(comment_created)
+            assert comment_payload["comment"]["format"] == "markdown"
+            assert comment_payload["comment"]["origin"] == "mcp"
+            comments = await session.call_tool(
+                "blockwart.list_comments",
+                {"object_id": object_id, "limit": 5},
+            )
+            assert _tool_payload(comments)["items"] == [comment_payload["comment"]]
             access = await session.call_tool(
                 "blockwart.get_object_access",
                 {"object_id": object_id},
@@ -474,7 +494,7 @@ def main() -> None:
         token=api_token,
     )["objects"][0]
 
-    assert readiness["revision"] == "20260801_0013"
+    assert readiness["revision"] == "20260804_0014"
     assert "Blockwart" in index
     assert static_content_type == "text/css"
     assert not any(
@@ -500,7 +520,7 @@ def main() -> None:
     print(
         "installed_package=ok "
         f"cwd={Path.cwd()} revision={readiness['revision']} "
-        f"openapi_paths={len(openapi['paths'])} mcp_protocol={protocol} mcp_calls=25"
+        f"openapi_paths={len(openapi['paths'])} mcp_protocol={protocol} mcp_calls=27"
     )
 
 

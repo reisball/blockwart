@@ -26,6 +26,7 @@ from blockwart.schemas.admin import (
     PrincipalMutationOut,
     PrincipalUpdateIn,
     ServiceTokenIssueIn,
+    ServiceTokenRotateIn,
 )
 from blockwart.schemas.v1 import V1GrantCommandOut
 from blockwart.services.identity import IdentityError, utc_now
@@ -325,7 +326,7 @@ def issue_admin_principal_token(
 @router.post("/{principal_id}/tokens/rotate", response_model=PrincipalCredentialOut)
 def rotate_admin_principal_token(
     principal_id: str,
-    payload: ServiceTokenIssueIn,
+    payload: ServiceTokenRotateIn,
     request: Request,
     response: Response,
     session: Annotated[Session, Depends(get_session)],
@@ -380,7 +381,7 @@ def _token_command(
     session: Session,
     access: ReadAccess,
     principal_id: str,
-    payload: ServiceTokenIssueIn,
+    payload: ServiceTokenIssueIn | ServiceTokenRotateIn,
     request: Request,
     response: Response,
     if_match: str | None,
@@ -403,6 +404,7 @@ def _token_command(
             principal_id=principal_id,
             expected_revision=if_match,
             name=payload.name,
+            audience=payload.audience,
             expires_at=expires_at,
             actor_password=payload.current_admin_password,
             channel="api",
@@ -425,6 +427,7 @@ def _token_command(
         changed=result.changed,
         token=issued.value if issued is not None else None,
         token_name=issued.name if issued is not None else payload.name,
+        token_audience=issued.audience if issued is not None else payload.audience,
         token_expires_at=(
             format_rfc3339_utc(issued.expires_at)
             if issued is not None and issued.expires_at is not None

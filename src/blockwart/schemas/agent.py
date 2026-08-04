@@ -7,6 +7,7 @@ from blockwart.domain.auth import Permission
 from blockwart.domain.placement import PlacementState
 from blockwart.domain.provenance import CatalogProvenanceOut
 from blockwart.schemas.catalog import CatalogRecordDiagnostic, ObjectKind
+from blockwart.schemas.comments import CommentOut
 
 
 class AgentEndpoint(BaseModel):
@@ -83,6 +84,7 @@ class AgentCatalogObjectContext(AgentCatalogObjectSummary):
     updated_at: str | None = None
     dependencies: dict[str, list[str]] = Field(default_factory=dict)
     credential_references: list[str] = Field(default_factory=list)
+    recent_comments: list[CommentOut] = Field(default_factory=list)
 
 
 class AgentCatalogObjectStub(BaseModel):

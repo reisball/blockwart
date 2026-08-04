@@ -615,6 +615,47 @@ def test_admin_ui_discloses_new_service_token_only_in_direct_response(
     assert f"bwst_{token}" not in reload.text
 
 
+def test_admin_ui_rotation_without_audience_preserves_mcp_audience(
+    principal_admin_ui_client: TestClient,
+    principal_admin_ui_state,
+) -> None:
+    issued = principal_admin_ui_state["admin_session"]
+    target_id = principal_admin_ui_state["target_id"]
+    sessions = principal_admin_ui_state["session_factory"]
+    with sessions() as session:
+        with transaction(session):
+            issue_service_token(
+                session,
+                principal_id=target_id,
+                name="browser-mcp-token",
+                audience="mcp",
+            )
+    _login(principal_admin_ui_client, issued)
+
+    response = principal_admin_ui_client.post(
+        f"/admin/principals/{target_id}/tokens",
+        data={
+            "csrf_token": issued.csrf_token,
+            "if_match": '"rev-1"',
+            "idempotency_key": "browser-mcp-token-rotate-0001",
+            "name": "browser-mcp-token",
+            "current_admin_password": PASSWORD,
+            "rotate": "1",
+        },
+    )
+
+    assert response.status_code == 200
+    with sessions() as session:
+        token = session.scalar(
+            select(ServiceToken).where(
+                ServiceToken.principal_id == target_id,
+                ServiceToken.name == "browser-mcp-token",
+            )
+        )
+        assert token is not None
+        assert token.audience == "mcp"
+
+
 @pytest.mark.parametrize(
     "expires_in_seconds",
     ("299", "31536001", "9" * 1000),

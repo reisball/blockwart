@@ -18,6 +18,7 @@ Catalog browse and detail queries additionally resolve these internal models:
 - public object counts and deterministic browse ordering;
 - all relationships for one object, grouped by direction;
 - object audit history;
+- the five newest append-only object comments;
 - the canonical host → system → service topology;
 - relationship cards used by the existing HTML templates.
 
@@ -39,6 +40,12 @@ resolved endpoint, network, dependency, child, and credential-reference
 summaries while preserving the canonical parent path and placement state.
 It applies the same object visibility decision and strict stub fields as the
 catalog/UI projection.
+
+A readable detail adds the five newest entries as `recent_comments`. The
+entries remain exact Markdown or legacy plain-text source plus a format marker;
+rendered HTML is a browser-only projection. Discover-only stubs never contain
+comments. The exhaustive newest-first timeline is a separate opaque-cursor
+resource; see `object-comments.md`.
 
 Catalog topology and Agent context both resolve placement through
 `blockwart.domain.placement.PlacementGraph`. This keeps placement semantics in

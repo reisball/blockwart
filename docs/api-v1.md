@@ -90,9 +90,34 @@ strict stub as list/context reads. An object without `discover` returns
 `404 not_found`, indistinguishable from an absent ID.
 
 Full object reads include the monotone `revision` field and a strong
-`ETag: "rev-N"` response header. Stubs expose neither value.
+`ETag: "rev-N"` response header plus the five newest authorized entries in
+`recent_comments`. Each entry contains exact source text and `markdown` or
+`plain_text` format; the API never returns stored rendered HTML. Stubs expose
+neither revision nor comments.
 
 ## Commands
+
+### `GET|POST /api/v1/objects/{object_id}/comments`
+
+`GET` requires `read` and returns the newest-first comment timeline using the
+standard opaque cursor envelope, fixed `sort=created_at`, and
+`direction=desc`. `limit` is 1..100. Discover-only and missing objects both
+return `404`.
+
+`POST` requires `write`, an `Idempotency-Key`, and JSON `{"body":"..."}`.
+The exact 1..4000-character Markdown source is secret-scanned before storage.
+A new append returns `201`, a `Location` for the matching UI timeline anchor,
+the new object `ETag`, and its immutable comment; an exact replay returns `200`
+with `replayed=true`. No `If-Match` is
+used, so concurrent independent appends do not overwrite each other. The
+object revision advances atomically while business `updated_at` stays
+unchanged. API-origin comments require an authenticated `api`-audience token;
+clients cannot select or spoof the origin.
+
+Comments have no update or delete endpoint. A successful new append records
+one minimal `comment_create` audit event without the comment body; replays and
+failures record no object audit. The complete storage, Markdown, UI, MCP, and
+migration contract is in `object-comments.md`.
 
 ### `POST /api/v1/objects/{parent_id}/children`
 

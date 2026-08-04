@@ -20,6 +20,13 @@ the CLI writes them only to a newly created mode `0600` file. Rotating a
 password revokes all browser sessions for that principal. Deactivating a
 principal revokes all of its active sessions and service tokens.
 
+Every service token has a server-stored audience, `api` or `mcp`.
+It is selected only by protected issuance/rotation operations and is included in
+credential metadata, never inferred from a client header. Existing tokens
+migrate to `api`. The audience currently provides trusted provenance for
+comment appends: API comments require `api`, MCP comments require `mcp`; it
+does not add object permissions or bypass the bearer-token policy.
+
 The identity endpoint is:
 
 ```text
@@ -182,6 +189,12 @@ grant mutations advance the affected revision. The same effective-owner guard
 applies when a principal is deactivated or a placement edge is removed, so an
 existing object or descendant cannot be orphaned through a lifecycle shortcut.
 
+Object comments follow the same policy boundary: `read` reveals the timeline
+and the five-entry `recent_comments` projection, while `write` permits an
+append. Appends do not use optimistic `If-Match`, because they cannot overwrite
+another entry, but they are idempotent and advance the object revision.
+Discover-only stubs never release comments. See `object-comments.md`.
+
 ## Bootstrap and credential operations
 
 Run the schema upgrade before any auth command:
@@ -230,12 +243,16 @@ blockwart-auth create-service-account \
 blockwart-auth issue-token \
   --login inventory-agent \
   --name primary \
+  --audience api \
   --output-file /protected/runtime/blockwart-api-token
 ```
 
 The output path must not already exist. The token is never written to stdout.
 Use `rotate-token`, `revoke-token`, `set-password`, and
 `deactivate-principal` for their corresponding lifecycle operations.
+Use `--audience mcp` only for the token installed into an approved MCP runtime.
+Rotation can explicitly change the audience of an existing named token; if an
+API or CLI rotation omits the audience, the current value is preserved.
 
 ## Audit boundaries
 
@@ -254,6 +271,9 @@ limiter bucket and window.
 
 Object and grant mutations use the existing object audit stream and record the
 actor principal, channel, request ID, old/new revision, and structured change.
+Comment creation is intentionally narrower: it records the immutable comment
+ID, actor, trusted channel, request ID, and new revision, but never copies the
+comment body or a before/after document into audit or idempotency storage.
 Invalid authentication is recorded in the security stream. Concealed object
 denials intentionally use stable not-found responses and do not include object
 details.

@@ -1,6 +1,8 @@
 from datetime import datetime
+from uuid import uuid4
 
 from sqlalchemy import (
+    DDL,
     CheckConstraint,
     DateTime,
     Index,
@@ -8,6 +10,7 @@ from sqlalchemy import (
     String,
     Text,
     UniqueConstraint,
+    event,
     func,
     text,
 )
@@ -19,6 +22,10 @@ from blockwart.db.base import Base
 class CatalogObject(Base):
     __tablename__ = "catalog_objects"
     __table_args__ = (
+        UniqueConstraint(
+            "instance_id",
+            name="uq_catalog_objects_instance_id",
+        ),
         CheckConstraint(
             "revision >= 1",
             name="ck_catalog_objects_revision_positive",
@@ -28,8 +35,7 @@ class CatalogObject(Base):
             name="ck_catalog_objects_lifecycle",
         ),
         CheckConstraint(
-            "health IS NULL OR "
-            "health IN ('unknown','healthy','degraded','down','maintenance')",
+            "health IS NULL OR health IN ('unknown','healthy','degraded','down','maintenance')",
             name="ck_catalog_objects_health",
         ),
         CheckConstraint(
@@ -52,6 +58,12 @@ class CatalogObject(Base):
     )
 
     id: Mapped[str] = mapped_column(String(128), primary_key=True)
+    instance_id: Mapped[str] = mapped_column(
+        String(32),
+        nullable=False,
+        default=lambda: uuid4().hex,
+        server_default=text("(lower(hex(randomblob(16))))"),
+    )
     kind: Mapped[str] = mapped_column(String(64), index=True)
     label: Mapped[str] = mapped_column(String(255), index=True)
     status: Mapped[str] = mapped_column(String(64), default="unknown")
@@ -129,3 +141,77 @@ class AuditEvent(Base):
         server_default='{"event":"legacy","version":1}',
     )
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+
+
+class ObjectComment(Base):
+    """Immutable, object-instance-scoped operational comment."""
+
+    __tablename__ = "object_comments"
+    __table_args__ = (
+        CheckConstraint(
+            "origin IN ('ui','api','mcp','legacy')",
+            name="ck_object_comments_origin",
+        ),
+        CheckConstraint(
+            "format IN ('markdown','plain_text')",
+            name="ck_object_comments_format",
+        ),
+        CheckConstraint(
+            "origin = 'legacy' OR length(body) > 0",
+            name="ck_object_comments_body_nonempty",
+        ),
+        CheckConstraint(
+            "format <> 'markdown' OR length(body) <= 4000",
+            name="ck_object_comments_markdown_length",
+        ),
+        CheckConstraint(
+            "(origin = 'legacy' AND format = 'plain_text' "
+            "AND author_principal_id IS NULL AND author_login IS NULL "
+            "AND author_display_name IS NULL AND author_principal_type IS NULL) OR "
+            "(origin <> 'legacy' AND format = 'markdown' "
+            "AND author_principal_id IS NOT NULL AND author_login IS NOT NULL "
+            "AND author_display_name IS NOT NULL AND author_principal_type IS NOT NULL)",
+            name="ck_object_comments_attribution",
+        ),
+        Index(
+            "ix_object_comments_instance_created",
+            "object_id",
+            "object_instance_id",
+            "object_created_at",
+            "created_at",
+            "id",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    object_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    object_instance_id: Mapped[str] = mapped_column(String(32), nullable=False)
+    object_created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    author_principal_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    author_login: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    author_display_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    author_principal_type: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    origin: Mapped[str] = mapped_column(String(16), nullable=False)
+    format: Mapped[str] = mapped_column(String(16), nullable=False)
+    body: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+
+
+event.listen(
+    ObjectComment.__table__,
+    "after_create",
+    DDL(
+        "CREATE TRIGGER object_comments_no_update "
+        "BEFORE UPDATE ON object_comments BEGIN "
+        "SELECT RAISE(ABORT, 'object comments are append-only'); END"
+    ).execute_if(dialect="sqlite"),
+)
+event.listen(
+    ObjectComment.__table__,
+    "after_create",
+    DDL(
+        "CREATE TRIGGER object_comments_no_delete "
+        "BEFORE DELETE ON object_comments BEGIN "
+        "SELECT RAISE(ABORT, 'object comments are append-only'); END"
+    ).execute_if(dialect="sqlite"),
+)

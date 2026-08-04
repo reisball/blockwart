@@ -17,6 +17,7 @@ deleted by this classification.
 - [Agent API](agent-api.md), [API v1](api-v1.md), and the [API boundary
   contract](api-boundary-contract.md)
 - [MCP server](mcp.md)
+- [Object comments](object-comments.md)
 
 ## Active Security Documentation
 
@@ -30,6 +31,7 @@ deleted by this classification.
   integrity](relationship-integrity.md)
 - [Application read models](read-models.md) and [service
   interfaces](service-interfaces.md)
+- [Append-only object comments](object-comments.md)
 - [Catalog provenance and freshness](provenance.md)
 
 ## Historical Migration Evidence

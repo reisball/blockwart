@@ -23,6 +23,8 @@ automatically.
 - search and read authorized context through REST and MCP;
 - create, update, relate, and delete catalog objects through authorized UI,
   REST, and MCP commands;
+- keep an append-only, Markdown-capable operational comment timeline per
+  object through UI, REST, and MCP;
 - manage human and service-account identities separately from object grants;
 - enforce object-scoped RBAC, optimistic concurrency, idempotency, audit, and
   last-owner safeguards;
@@ -38,6 +40,7 @@ automatically.
 | REST API v1 | Stable object-authorized reads and commands | [API v1](docs/api-v1.md) |
 | Agent API | Read-only compatibility access for existing clients | [Agent API](docs/agent-api.md) |
 | MCP (`blockwart-mcp`) | Agent-native catalog reads and authorized commands over stdio | [MCP server](docs/mcp.md) |
+| Object comments | Human and agent operational history, separate from audit | [Object comments](docs/object-comments.md) |
 | Import CLI | Reviewed TOOLS.md/YAML ingestion without resolving secrets | [Markdown import](docs/markdown-import.md) |
 
 ## Agent quick start

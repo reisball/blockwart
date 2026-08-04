@@ -238,7 +238,7 @@ def create_child_object(
         "parent_id": parent_id,
         "payload": payload.model_dump(mode="json"),
     }
-    record, replay = _reserve_idempotency_record(
+    record, replay = reserve_idempotency_record(
         session,
         context,
         key=idempotency_key,
@@ -362,7 +362,7 @@ def create_attached_device(
         "payload": payload.model_dump(mode="json"),
         "metadata": canonical_metadata,
     }
-    record, replay = _reserve_idempotency_record(
+    record, replay = reserve_idempotency_record(
         session,
         context,
         key=idempotency_key,
@@ -929,7 +929,7 @@ def _bump_object_revision(session: Session, object_id: str) -> int:
     return int(revision)
 
 
-def _reserve_idempotency_record(
+def reserve_idempotency_record(
     session: Session,
     context: WriteContext,
     *,

@@ -9,7 +9,7 @@ from blockwart.models.auth import (
     ServiceToken,
     ServiceTokenFailureBucket,
 )
-from blockwart.models.catalog import AuditEvent, CatalogObject, Relationship
+from blockwart.models.catalog import AuditEvent, CatalogObject, ObjectComment, Relationship
 
 __all__ = [
     "AuditEvent",
@@ -18,6 +18,7 @@ __all__ = [
     "IdempotencyRecord",
     "LoginChallenge",
     "ObjectGrant",
+    "ObjectComment",
     "PasswordCredential",
     "Principal",
     "Relationship",

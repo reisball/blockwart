@@ -284,6 +284,7 @@ def issue_principal_token_from_ui(
     if_match: Annotated[str, Form()],
     idempotency_key: Annotated[str, Form(max_length=128)],
     rotate: Annotated[Literal["0", "1"], Form()],
+    audience: Annotated[Literal["api", "mcp"] | None, Form()] = None,
     expires_in_seconds: Annotated[
         int | None,
         Form(
@@ -307,6 +308,7 @@ def issue_principal_token_from_ui(
                 principal_id=principal_id,
                 expected_revision=if_match,
                 name=name,
+                audience=audience,
                 expires_at=expires_at,
                 actor_password=current_admin_password,
                 channel="ui",

@@ -278,6 +278,48 @@ TOOLS: list[JSON] = [
         "annotations": READ_ONLY_ANNOTATIONS,
     },
     {
+        "name": "blockwart.list_comments",
+        "description": (
+            "List the authorized append-only comment timeline for one known object. "
+            "Returns immutable Markdown or legacy plain-text source, never rendered HTML."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "object_id": {"type": "string", "minLength": 1, "maxLength": 128},
+                "limit": {"type": "integer", "minimum": 1, "maximum": 100, "default": 20},
+                "cursor": {"type": "string", "maxLength": 2048},
+                "include_total": {"type": "boolean", "default": False},
+            },
+            "required": ["object_id"],
+            "additionalProperties": False,
+        },
+        "annotations": READ_ONLY_ANNOTATIONS,
+    },
+    {
+        "name": "blockwart.add_comment",
+        "description": (
+            "Append one Markdown comment to an authorized object. Requires an MCP-audience "
+            "service token and an idempotency key; existing comments are never replaced."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "object_id": {"type": "string", "minLength": 1, "maxLength": 128},
+                "body": {"type": "string", "minLength": 1, "maxLength": 4000},
+                "idempotency_key": {
+                    "type": "string",
+                    "minLength": 16,
+                    "maxLength": 128,
+                    "pattern": "^[!-~]+$",
+                },
+            },
+            "required": ["object_id", "body", "idempotency_key"],
+            "additionalProperties": False,
+        },
+        "annotations": WRITE_ANNOTATIONS,
+    },
+    {
         "name": "blockwart.get_context",
         "description": (
             "Find objects by name, kind, parent, endpoint, state, or provenance and return "
@@ -638,6 +680,27 @@ def call_tool(
             "count": 1,
             "objects": [context],
         }
+    elif name == "blockwart.list_comments":
+        object_id = _required_string(args, "object_id")
+        payload = fetch(
+            f"/api/v1/objects/{quote(object_id, safe='')}/comments",
+            {
+                "limit": args.get("limit", 20),
+                "cursor": args.get("cursor"),
+                "include_total": args.get("include_total", False),
+            },
+        )
+    elif name == "blockwart.add_comment":
+        object_id = _required_string(args, "object_id")
+        payload = request(
+            "POST",
+            f"/api/v1/objects/{quote(object_id, safe='')}/comments",
+            {"body": _required_string(args, "body")},
+            {
+                "Idempotency-Key": _required_string(args, "idempotency_key"),
+                "X-Blockwart-Channel": "mcp",
+            },
+        )
     elif name == "blockwart.get_context":
         payload = _legacy_page_payload(
             fetch("/api/v1/context", _clean_params(args, default_limit=5)),
@@ -1207,9 +1270,7 @@ def _self_contained_create_payload(
     if not isinstance(metadata, dict):
         raise _invalid_upstream_response()
     object_ref = f"{object_kind}:{object_id}"
-    from_ref, to_ref = (
-        (parent_ref, object_ref) if parent_is_source else (object_ref, parent_ref)
-    )
+    from_ref, to_ref = (parent_ref, object_ref) if parent_is_source else (object_ref, parent_ref)
     return {
         **command_payload,
         "parent_ref": parent_ref,

@@ -13,6 +13,11 @@ from blockwart.domain.auth import GrantScope
 from blockwart.domain.provenance import SourceType
 from blockwart.schemas.agent import AgentCatalogContextRead
 from blockwart.schemas.catalog import CatalogObjectIn, ObjectKind, ObjectStatus
+from blockwart.schemas.comments import (
+    CommentCommandOut,
+    CommentCreateIn,
+    CommentPageOut,
+)
 from blockwart.schemas.v1 import (
     ObjectSortField,
     SortDirection,
@@ -50,6 +55,7 @@ from blockwart.services.commands import (
     revision_etag,
     update_catalog_object,
 )
+from blockwart.services.comments import add_object_comment, query_comment_page
 from blockwart.services.grant_management import (
     create_managed_grant,
     preview_grant_scope,
@@ -251,6 +257,82 @@ def get_v1_object(
     if isinstance(revision, int):
         response.headers["ETag"] = revision_etag(revision)
     return context
+
+
+@router.get(
+    "/objects/{object_id}/comments",
+    response_model=CommentPageOut,
+)
+def list_v1_object_comments(
+    object_id: str,
+    session: Annotated[Session, Depends(get_session)],
+    access: Annotated[ReadAccess, Depends(require_api_read_access)],
+    limit: Annotated[int, Query(ge=1, le=100)] = 20,
+    cursor: CursorParameter = None,
+    include_total: bool = False,
+) -> CommentPageOut:
+    try:
+        page = query_comment_page(
+            session,
+            access,
+            object_id=object_id,
+            limit=limit,
+            cursor=cursor,
+            include_total=include_total,
+        )
+    except InvalidCursor as exc:
+        raise _invalid_cursor() from exc
+    if page is None:
+        raise HTTPException(status_code=404, detail="Catalog object not found")
+    return CommentPageOut(
+        items=page.items,
+        next_cursor=page.next_cursor,
+        total=page.total,
+    )
+
+
+@router.post(
+    "/objects/{object_id}/comments",
+    response_model=CommentCommandOut,
+    status_code=201,
+)
+def create_v1_object_comment(
+    object_id: str,
+    payload: CommentCreateIn,
+    request: Request,
+    response: Response,
+    session: Annotated[Session, Depends(get_session)],
+    access: Annotated[ReadAccess, Depends(require_api_read_access)],
+    idempotency_key: Annotated[str | None, Header(alias="Idempotency-Key")] = None,
+) -> CommentCommandOut:
+    if idempotency_key is None:
+        raise HTTPException(status_code=400, detail="Idempotency-Key is required")
+    context = api_write_context(request, access)
+    settings: Settings = request.app.state.settings
+    result = execute_api_command(
+        session,
+        context,
+        lambda: add_object_comment(
+            session,
+            context,
+            object_id=object_id,
+            body=payload.body,
+            idempotency_key=idempotency_key,
+            idempotency_ttl_seconds=settings.idempotency_ttl_seconds,
+        ),
+    )
+    response.headers["ETag"] = result.etag
+    response.headers["Location"] = (
+        f"/objects/{object_id}/comments#comment-{result.comment.id}"
+    )
+    if result.replayed:
+        response.status_code = 200
+    return CommentCommandOut(
+        comment=result.comment,
+        revision=result.revision,
+        etag=result.etag,
+        replayed=result.replayed,
+    )
 
 
 @router.post(

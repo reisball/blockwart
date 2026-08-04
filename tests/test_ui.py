@@ -632,7 +632,7 @@ def test_host_detail_can_edit_host_hardware_fields(
         follow_redirects=False,
     )
 
-    assert response.status_code == 303
+    assert response.status_code == 303, response.text
     updated = client.get(f"/objects/{object_id}")
     assert "Beelink SER5" in updated.text
     assert "AMD" in updated.text
@@ -1121,7 +1121,7 @@ def test_object_detail_preserves_catalog_context_in_links_and_forms(
         in document
     )
     assert (
-        'action="/objects/n8n/comment?view=catalog&q=n8n&kind=system'
+        'action="/objects/n8n/comments?view=catalog&q=n8n&kind=system'
         '&return_state=CatalogState_123456"'
         in document
     )
@@ -1243,29 +1243,95 @@ def test_comment_form_updates_object_and_audit(
     session_factory,
 ) -> None:
     response = client.post(
-        "/objects/n8n/comment"
+        "/objects/n8n/comments"
         "?view=topology&q=n8n&kind=system&return_state=CommentState_123",
-        data={"comment": "Interner Kommentar"},
+        data={
+            "comment": "**Interner Kommentar**",
+            "idempotency_key": "ui-comment-test-0001",
+        },
         follow_redirects=False,
     )
 
-    assert response.status_code == 303
+    assert response.status_code == 303, response.text
     assert (
         response.headers["location"]
         == "/objects/n8n?view=topology&q=n8n&kind=system"
         "&return_state=CommentState_123"
     )
     detail = client.get("/objects/n8n")
-    assert "Interner Kommentar" in detail.text
-    assert "Changed Comment from empty to Interner Kommentar" in detail.text
+    assert "<strong>Interner Kommentar</strong>" in detail.text
+    assert "Added object comment" in detail.text
     with session_factory() as session:
         catalog_object = get_object(session, "n8n")
     assert catalog_object is not None
-    assert catalog_object.data["comment"] == "Interner Kommentar"
+    assert "comment" not in catalog_object.data
     assert (catalog_object.status, catalog_object.lifecycle, catalog_object.health) == (
         "active",
         "active",
         "unknown",
+    )
+
+
+def test_comment_markdown_is_safe_in_recent_and_full_timeline(
+    client: TestClient,
+) -> None:
+    body = (
+        "<script>alert(1)</script>\n\n"
+        "![tracker](https://tracker.invalid/pixel)\n\n"
+        "[safe](https://example.com/runbook)"
+    )
+    created = client.post(
+        "/objects/n8n/comments",
+        data={
+            "comment": body,
+            "idempotency_key": "ui-comment-markdown-safety-0001",
+        },
+        follow_redirects=False,
+    )
+    assert created.status_code == 303
+
+    for response in (
+        client.get("/objects/n8n"),
+        client.get("/objects/n8n/comments"),
+    ):
+        assert response.status_code == 200
+        assert "<script>alert(1)</script>" not in response.text
+        assert "<img" not in response.text
+        assert "&lt;script&gt;alert(1)&lt;/script&gt;" in response.text
+        assert 'href="https://example.com/runbook"' in response.text
+        assert 'rel="noopener noreferrer nofollow"' in response.text
+
+
+def test_comment_timeline_preserves_navigation_context_on_next_and_back(
+    client: TestClient,
+) -> None:
+    for index in range(21):
+        response = client.post(
+            "/objects/n8n/comments",
+            data={
+                "comment": f"Timeline entry {index}",
+                "idempotency_key": f"ui-comment-navigation-{index:04d}",
+            },
+            follow_redirects=False,
+        )
+        assert response.status_code == 303
+
+    state_token = "CommentTimelineState_123"
+    response = client.get(
+        "/objects/n8n/comments"
+        f"?view=topology&q=n8n&kind=system&return_state={state_token}"
+    )
+    assert response.status_code == 200
+    document = unescape(response.text)
+    assert (
+        'href="/objects/n8n?view=topology&q=n8n&kind=system'
+        f'&return_state={state_token}"'
+        in document
+    )
+    assert (
+        'href="/objects/n8n/comments?view=topology&q=n8n&kind=system'
+        f'&return_state={state_token}&cursor='
+        in document
     )
 
 

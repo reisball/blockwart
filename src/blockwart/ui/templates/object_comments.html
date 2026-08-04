@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="{{ locale }}">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>{{ title }}</title>
+    <link rel="stylesheet" href="/static/app.css" />
+  </head>
+  <body>
+    <main class="page stack">
+      <header class="integrated-detail-heading">
+        <a class="detail-back-button" href="{{ detail_url }}">← {{ t("comment.back") }}</a>
+        <div>
+          <p class="eyebrow">{{ t("comment.timeline") }}</p>
+          <h1>{{ object.label }}</h1>
+          <span>{{ object.kind }}:{{ object.id }}</span>
+        </div>
+      </header>
+      <section class="panel">
+        {% if comments %}
+          <ol class="comment-timeline">
+            {% for comment in comments %}
+              <li id="comment-{{ comment.id }}">
+                <div class="comment-body">{{ comment.rendered_html }}</div>
+                <div class="meta">
+                  {{ comment.author_display_name or t("comment.legacy_author") }} ·
+                  {{ comment.origin }} · <time>{{ comment.created_at }}</time>
+                </div>
+              </li>
+            {% endfor %}
+          </ol>
+        {% else %}
+          <p class="meta">{{ t("comment.empty") }}</p>
+        {% endif %}
+        {% if next_url %}
+          <div class="button-row"><a class="button button-muted" href="{{ next_url }}">{{ t("comment.next") }}</a></div>
+        {% endif %}
+      </section>
+    </main>
+  </body>
+</html>

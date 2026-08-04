@@ -1,4 +1,4 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import StrEnum
 from types import MappingProxyType
 
@@ -79,6 +79,7 @@ class PrincipalContext:
     display_name: str
     platform_role: PlatformRole | None = None
     revision: int = 1
+    service_token_audience: str | None = field(default=None, compare=False)
 
     @property
     def is_admin(self) -> bool:
