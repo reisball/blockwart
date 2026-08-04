@@ -248,7 +248,10 @@ QUERY_FILTER_PROPERTIES: JSON = {
 TOOLS: list[JSON] = [
     {
         "name": "blockwart.search",
-        "description": "Search Blockwart catalog summaries through the read-only agent API.",
+        "description": (
+            "Find candidate Blockwart objects as compact summaries. Use get_context when "
+            "the same call should search and return full authorized details."
+        ),
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -261,7 +264,9 @@ TOOLS: list[JSON] = [
     },
     {
         "name": "blockwart.get_object_context",
-        "description": "Get sanitized context for one Blockwart object by id.",
+        "description": (
+            "Get full sanitized details for exactly one Blockwart object when its id is known."
+        ),
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -274,7 +279,10 @@ TOOLS: list[JSON] = [
     },
     {
         "name": "blockwart.get_context",
-        "description": "Get a small sanitized context bundle from Blockwart.",
+        "description": (
+            "Find objects by name, kind, parent, endpoint, state, or provenance and return "
+            "their full sanitized details in one call. Use search for compact candidate lists."
+        ),
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -287,7 +295,11 @@ TOOLS: list[JSON] = [
     },
     {
         "name": "blockwart.create_child",
-        "description": "Create one authorized child object with durable idempotency.",
+        "description": (
+            "Create one authorized placement child in a single agent call. Returns the object, "
+            "typed parent, exact hosts relationship, Owner/self assignment, revision, ETag, "
+            "and idempotency status."
+        ),
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -336,7 +348,10 @@ TOOLS: list[JSON] = [
     },
     {
         "name": "blockwart.create_relationship",
-        "description": "Create or idempotently replace metadata for an authorized relationship.",
+        "description": (
+            "Create or idempotently replace an authorized relationship between existing "
+            "objects and return the exact relationship plus its new revision."
+        ),
         "inputSchema": {
             "type": "object",
             "properties": RELATIONSHIP_PROPERTIES,
@@ -370,7 +385,11 @@ TOOLS: list[JSON] = [
     },
     {
         "name": "blockwart.create_attached_device",
-        "description": "Atomically create a device and attach it to a parent endpoint.",
+        "description": (
+            "Create a device and attach it to a parent endpoint in a single agent call. Returns "
+            "the device, typed parent, exact attached_to relationship and metadata, Owner/self "
+            "assignment, revision, ETag, and idempotency status."
+        ),
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -391,7 +410,9 @@ TOOLS: list[JSON] = [
     },
     {
         "name": "blockwart.get_device_graph",
-        "description": "Return the authorized attached_to graph for an object.",
+        "description": (
+            "Return the authorized attached_to graph and relationship metadata for an object."
+        ),
         "inputSchema": {
             "type": "object",
             "properties": DEVICE_GRAPH_PROPERTIES,
@@ -402,7 +423,9 @@ TOOLS: list[JSON] = [
     },
     {
         "name": "blockwart.get_network_topology",
-        "description": "Return the authorized direct or inherited network paths for an object.",
+        "description": (
+            "Return authorized direct or inherited network paths and link metadata for an object."
+        ),
         "inputSchema": {
             "type": "object",
             "properties": NETWORK_TOPOLOGY_PROPERTIES,
@@ -623,14 +646,24 @@ def call_tool(
         )
     elif name == "blockwart.create_child":
         parent_id = _required_string(args, "parent_id")
-        payload = request(
+        requested_object = _required_object(args, "object")
+        command_payload = request(
             "POST",
             f"/api/v1/objects/{quote(parent_id, safe='')}/children",
-            _required_object(args, "object"),
+            requested_object,
             {
                 "Idempotency-Key": _required_string(args, "idempotency_key"),
                 "X-Blockwart-Channel": "mcp",
             },
+        )
+        parent = fetch(f"/api/v1/objects/{quote(parent_id, safe='')}", {})
+        payload = _self_contained_create_payload(
+            command_payload,
+            parent=parent,
+            requested_parent_id=parent_id,
+            requested_object=requested_object,
+            relation_type="hosts",
+            parent_is_source=True,
         )
     elif name == "blockwart.update_object":
         object_id = _required_string(args, "object_id")
@@ -678,13 +711,14 @@ def call_tool(
         )
     elif name == "blockwart.create_attached_device":
         parent_id = _required_string(args, "parent_id")
+        requested_device = _required_object(args, "device")
         body = {
-            "device": _required_object(args, "device"),
+            "device": requested_device,
         }
         metadata = args.get("metadata")
         if metadata:
             body["metadata"] = metadata
-        payload = request(
+        command_payload = request(
             "POST",
             f"/api/v1/objects/{quote(parent_id, safe='')}/attached-devices",
             body,
@@ -692,6 +726,16 @@ def call_tool(
                 "Idempotency-Key": _required_string(args, "idempotency_key"),
                 "X-Blockwart-Channel": "mcp",
             },
+        )
+        parent = fetch(f"/api/v1/objects/{quote(parent_id, safe='')}", {})
+        payload = _self_contained_create_payload(
+            command_payload,
+            parent=parent,
+            requested_parent_id=parent_id,
+            requested_object=requested_device,
+            relation_type="attached_to",
+            relationship_metadata=metadata,
+            parent_is_source=False,
         )
     elif name == "blockwart.get_device_graph":
         object_id = _required_string(args, "object_id")
@@ -1112,6 +1156,83 @@ def _required_integer(args: JSON, key: str) -> int:
     if not isinstance(value, int) or isinstance(value, bool) or value < 1:
         raise ToolInputError(f"{key} is required")
     return value
+
+
+def _self_contained_create_payload(
+    command_payload: JSON,
+    *,
+    parent: JSON,
+    requested_parent_id: str,
+    requested_object: JSON,
+    relation_type: str,
+    parent_is_source: bool,
+    relationship_metadata: object | None = None,
+) -> JSON:
+    catalog_object = command_payload.get("catalog_object")
+    if not isinstance(catalog_object, dict):
+        raise _invalid_upstream_response()
+
+    requested_id = requested_object.get("id")
+    requested_kind = requested_object.get("kind")
+    object_id = catalog_object.get("id")
+    object_kind = catalog_object.get("kind")
+    revision = catalog_object.get("revision")
+    etag = command_payload.get("etag")
+    if (
+        not isinstance(requested_id, str)
+        or not isinstance(requested_kind, str)
+        or object_id != requested_id
+        or object_kind != requested_kind
+        or isinstance(revision, bool)
+        or not isinstance(revision, int)
+        or revision < 1
+        or etag != f'"rev-{revision}"'
+        or not isinstance(command_payload.get("changed"), bool)
+        or not isinstance(command_payload.get("replayed"), bool)
+    ):
+        raise _invalid_upstream_response()
+
+    parent_id = parent.get("id")
+    parent_kind = parent.get("kind")
+    parent_ref = parent.get("ref")
+    if (
+        not isinstance(parent_id, str)
+        or parent_id != requested_parent_id
+        or not isinstance(parent_kind, str)
+        or parent_ref != f"{parent_kind}:{parent_id}"
+    ):
+        raise _invalid_upstream_response()
+
+    metadata = {} if relationship_metadata is None else relationship_metadata
+    if not isinstance(metadata, dict):
+        raise _invalid_upstream_response()
+    object_ref = f"{object_kind}:{object_id}"
+    from_ref, to_ref = (
+        (parent_ref, object_ref) if parent_is_source else (object_ref, parent_ref)
+    )
+    return {
+        **command_payload,
+        "parent_ref": parent_ref,
+        "relationship": {
+            "from_ref": from_ref,
+            "relation_type": relation_type,
+            "to_ref": to_ref,
+            "metadata": metadata,
+        },
+        "owner_assignment": {
+            "principal": "authenticated_caller",
+            "role": "owner",
+            "scope": "self",
+        },
+        "revision": revision,
+    }
+
+
+def _invalid_upstream_response() -> UpstreamError:
+    return UpstreamError(
+        "upstream_invalid_response",
+        "Blockwart Agent API returned an invalid response.",
+    )
 
 
 def _translate_http_error(exc: HTTPError) -> UpstreamError:

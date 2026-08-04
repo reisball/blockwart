@@ -262,21 +262,45 @@ async def check_mcp(
                 },
             )
             assert not grant_revoked.isError
-            created = await session.call_tool(
-                "blockwart.create_child",
-                {
-                    "parent_id": "fabrik",
-                    "idempotency_key": "package-smoke-create-0001",
-                    "object": {
-                        "id": "package-smoke-child",
-                        "kind": "service",
-                        "label": "Package Smoke Child",
-                        "status": "active",
-                        "data": {"schema_version": 1},
-                    },
+            child_create_args = {
+                "parent_id": "fabrik",
+                "idempotency_key": "package-smoke-create-0001",
+                "object": {
+                    "id": "package-smoke-child",
+                    "kind": "service",
+                    "label": "Package Smoke Child",
+                    "status": "active",
+                    "data": {"schema_version": 1},
                 },
-            )
+            }
+            created = await session.call_tool("blockwart.create_child", child_create_args)
             created_payload = _tool_payload(created)
+            assert created_payload["parent_ref"] == "system:fabrik"
+            assert created_payload["relationship"] == {
+                "from_ref": "system:fabrik",
+                "relation_type": "hosts",
+                "to_ref": "service:package-smoke-child",
+                "metadata": {},
+            }
+            assert created_payload["owner_assignment"] == {
+                "principal": "authenticated_caller",
+                "role": "owner",
+                "scope": "self",
+            }
+            assert created_payload["revision"] == (
+                created_payload["catalog_object"]["revision"]
+            )
+            assert created_payload["etag"] == f'"rev-{created_payload["revision"]}"'
+            assert created_payload["changed"] is True
+            assert created_payload["replayed"] is False
+            created_replay = await session.call_tool(
+                "blockwart.create_child",
+                child_create_args,
+            )
+            assert _tool_payload(created_replay) == {
+                **created_payload,
+                "replayed": True,
+            }
             created_etag = str(created_payload["etag"])
             relationship_args = {
                 "object_id": "package-smoke-child",
@@ -330,25 +354,54 @@ async def check_mcp(
                 },
             )
             assert not deleted.isError
+            attached_device_args = {
+                "parent_id": "fabrik",
+                "idempotency_key": "package-smoke-device-0001",
+                "device": {
+                    "id": "package-smoke-device",
+                    "kind": "device",
+                    "label": "Package Smoke Device",
+                    "status": "active",
+                    "data": {
+                        "schema_version": 1,
+                        "device": {"category": "sensor"},
+                    },
+                },
+                "metadata": {"link_kind": "zigbee", "primary": True},
+            }
             attached_device = await session.call_tool(
                 "blockwart.create_attached_device",
-                {
-                    "parent_id": "fabrik",
-                    "idempotency_key": "package-smoke-device-0001",
-                    "device": {
-                        "id": "package-smoke-device",
-                        "kind": "device",
-                        "label": "Package Smoke Device",
-                        "status": "active",
-                        "data": {
-                            "schema_version": 1,
-                            "device": {"category": "sensor"},
-                        },
-                    },
-                    "metadata": {"link_kind": "zigbee", "primary": True},
-                },
+                attached_device_args,
             )
             attached_device_payload = _tool_payload(attached_device)
+            assert attached_device_payload["parent_ref"] == "system:fabrik"
+            assert attached_device_payload["relationship"] == {
+                "from_ref": "device:package-smoke-device",
+                "relation_type": "attached_to",
+                "to_ref": "system:fabrik",
+                "metadata": {"link_kind": "zigbee", "primary": True},
+            }
+            assert attached_device_payload["owner_assignment"] == {
+                "principal": "authenticated_caller",
+                "role": "owner",
+                "scope": "self",
+            }
+            assert attached_device_payload["revision"] == (
+                attached_device_payload["catalog_object"]["revision"]
+            )
+            assert attached_device_payload["etag"] == (
+                f'"rev-{attached_device_payload["revision"]}"'
+            )
+            assert attached_device_payload["changed"] is True
+            assert attached_device_payload["replayed"] is False
+            attached_device_replay = await session.call_tool(
+                "blockwart.create_attached_device",
+                attached_device_args,
+            )
+            assert _tool_payload(attached_device_replay) == {
+                **attached_device_payload,
+                "replayed": True,
+            }
             device_graph = await session.call_tool(
                 "blockwart.get_device_graph",
                 {"object_id": "package-smoke-device"},
@@ -447,7 +500,7 @@ def main() -> None:
     print(
         "installed_package=ok "
         f"cwd={Path.cwd()} revision={readiness['revision']} "
-        f"openapi_paths={len(openapi['paths'])} mcp_protocol={protocol} mcp_calls=23"
+        f"openapi_paths={len(openapi['paths'])} mcp_protocol={protocol} mcp_calls=25"
     )
 
 
