@@ -25,6 +25,55 @@ It wraps the object-authorized v1 API:
 - blockwart.update_grant -> PUT /api/v1/objects/{object_id}/access/grants/{grant_id}
 - blockwart.revoke_grant -> DELETE /api/v1/objects/{object_id}/access/grants/{grant_id}
 
+## Agent intent guide
+
+Choose the smallest tool that directly answers the intent:
+
+- Use `blockwart.get_object_context` when the exact object ID is already known.
+- Use `blockwart.get_context` to find assets or services by name, kind, parent,
+  endpoint, state, or provenance and return their full authorized details in
+  the same call.
+- Use `blockwart.search` when a compact candidate list is preferable to full
+  detail payloads.
+- Use `blockwart.get_device_graph` or `blockwart.get_network_topology` when
+  relationship metadata or resolved paths are the requested detail.
+- Use `blockwart.get_object_access` only for grants and effective permissions;
+  access data is deliberately separate from catalog details.
+
+For example, `blockwart.get_context` with `q="n8n"` and `kind="service"`
+returns matching service details in one MCP call. Type-specific aliases such as
+`get_service_details` or `get_asset_details` would duplicate this contract and
+are intentionally not added.
+
+## Tool assessment
+
+The current surface is intentionally small. `directly sufficient` means the
+tool already performs one bounded intent. `response improved` means the tool
+keeps its operation but now returns a complete result proof. `intent tool`
+means it deliberately bundles lower-level API concerns behind one agent call.
+
+| Tool | Primary agent intent | Assessment | Rationale |
+|---|---|---|---|
+| `search` | Find compact candidates | `directly sufficient` | Avoids full detail payloads when selecting an object. |
+| `get_object_context` | Read one known object | `directly sufficient` | Returns full authorized catalog context by ID. |
+| `get_context` | Find objects and read details | `directly sufficient` | Search, filters, and full details already share one call; its description is now explicit. |
+| `create_child` | Create a placed child | `intent tool`, `response improved` | Resolves the parent internally and proves placement, ownership, revision, and idempotency. |
+| `update_object` | Update one known object | `directly sufficient` | The explicit current ETag preserves visible optimistic concurrency. |
+| `delete_object` | Delete one known object | `directly sufficient` | The destructive action and current ETag remain explicit. |
+| `create_relationship` | Link existing objects | `directly sufficient` | Its response already contains the exact relationship, metadata, revision, and ETag. |
+| `delete_relationship` | Unlink existing objects | `directly sufficient` | The exact edge and current ETag remain explicit. |
+| `create_attached_device` | Create and attach one device | `intent tool`, `response improved` | Resolves the parent internally and proves the attachment, metadata, ownership, revision, and idempotency. |
+| `get_device_graph` | Inspect device attachments | `directly sufficient` | Returns the authorized `attached_to` graph with link metadata. |
+| `get_network_topology` | Inspect network paths | `directly sufficient` | Returns bounded direct or inherited paths with metadata and truncation state. |
+| `get_object_access` | Inspect access | `directly sufficient` | Separates direct grants from effective permissions. |
+| `search_principals` | Select a grant principal | `directly sufficient` | Keeps principal choice explicit before a security write. |
+| `list_admin_principals` | List platform principals | `directly sufficient` | Provides bounded, cursor-paginated administrator discovery. |
+| `get_admin_principal` | Read one platform principal | `directly sufficient` | Returns one authorized principal and its filtered assignments. |
+| `preview_grant_scope` | Preview grant coverage | `directly sufficient` | Makes subtree impact visible before mutation. |
+| `create_grant` | Add object access | `directly sufficient` | Principal selection and the access-resource ETag stay explicit. |
+| `update_grant` | Change object access | `directly sufficient` | No hidden create/update branching or automatic CAS retry is introduced. |
+| `revoke_grant` | Remove object access | `directly sufficient` | Destructive intent, grant ID, and current ETag stay explicit. |
+
 `blockwart.search` and `blockwart.get_context` accept `host`, `system`, `network`, `device`, and
 `service` as kinds. Both tools also forward v1's structured `parent`, `ip`, `port`,
 `endpoint_type`, `protocol`, `exposure`, `status`, `lifecycle`, and `health`
@@ -48,6 +97,22 @@ and rollback implementation as REST and the browser UI. Update and delete
 arguments carry the last full-read `if_match` ETag. Child creation carries an
 `idempotency_key`; credentials remain runtime configuration and are never tool
 arguments. Delete tools publish MCP's destructive annotation.
+
+`blockwart.create_child` and `blockwart.create_attached_device` execute the
+unchanged API command and resolve its authoritative typed parent inside the
+same MCP call. Their additive result fields are:
+
+- `parent_ref`: the typed parent reference;
+- `relationship`: the exact `hosts` or `attached_to` edge and metadata;
+- `owner_assignment`: the API command's atomic Owner/self assignment to the
+  authenticated caller; and
+- `revision`: the created object's explicit revision alongside the existing
+  `etag`, `changed`, and `replayed` fields.
+
+The established `catalog_object`, `etag`, `changed`, and `replayed` fields stay
+unchanged for compatibility. The compact proof follows from the successful
+atomic API command; neither tool loads a complete device graph or retries a
+failed concurrency precondition.
 
 Grant read tools expose only minimized principal identity, separated direct
 grants and effective access, and safe canonical-scope previews. Grant write

@@ -503,9 +503,21 @@ def test_mcp_forwards_bearer_only_from_runtime_environment(
 
 def test_mcp_write_tools_forward_preconditions_without_credentials_in_arguments() -> None:
     calls = []
+    fetches = []
+
+    def fetcher(path, params):
+        fetches.append((path, params))
+        return {"id": "fabrik", "kind": "system", "ref": "system:fabrik"}
 
     def requester(method, path, body, headers):
         calls.append((method, path, body, headers))
+        if path.endswith("/children"):
+            return {
+                "catalog_object": {**body, "revision": 1},
+                "etag": '"rev-1"',
+                "changed": True,
+                "replayed": False,
+            }
         return {"changed": True}
 
     object_payload = {
@@ -516,13 +528,14 @@ def test_mcp_write_tools_forward_preconditions_without_credentials_in_arguments(
         "health": "healthy",
         "data": {"schema_version": 1},
     }
-    call_tool(
+    created = call_tool(
         "blockwart.create_child",
         {
             "parent_id": "fabrik",
             "idempotency_key": "mcp-create-key-0001",
             "object": object_payload,
         },
+        fetcher=fetcher,
         requester=requester,
     )
     call_tool(
@@ -634,6 +647,27 @@ def test_mcp_write_tools_forward_preconditions_without_credentials_in_arguments(
         & set(tool["inputSchema"].get("properties", {}))
         for tool in TOOLS
     )
+    assert fetches == [("/api/v1/objects/fabrik", {})]
+    created_payload = json.loads(created["content"][0]["text"])
+    assert created_payload == {
+        "catalog_object": {**object_payload, "revision": 1},
+        "changed": True,
+        "etag": '"rev-1"',
+        "owner_assignment": {
+            "principal": "authenticated_caller",
+            "role": "owner",
+            "scope": "self",
+        },
+        "parent_ref": "system:fabrik",
+        "relationship": {
+            "from_ref": "system:fabrik",
+            "metadata": {},
+            "relation_type": "hosts",
+            "to_ref": "service:demo",
+        },
+        "replayed": False,
+        "revision": 1,
+    }
 
 
 def test_mcp_device_tools_preserve_metadata_headers_and_graph_parity() -> None:
@@ -642,10 +676,23 @@ def test_mcp_device_tools_preserve_metadata_headers_and_graph_parity() -> None:
 
     def requester(method, path, body, headers):
         requests.append((method, path, body, headers))
+        if path.endswith("/attached-devices"):
+            return {
+                "catalog_object": {**body["device"], "revision": 1},
+                "etag": '"rev-1"',
+                "changed": True,
+                "replayed": False,
+            }
         return {"changed": True}
 
     def fetcher(path, params):
         fetches.append((path, params))
+        if path == "/api/v1/objects/fabrik%2Froot":
+            return {
+                "id": "fabrik/root",
+                "kind": "host",
+                "ref": "host:fabrik/root",
+            }
         return {"object_ref": "host:fabrik", "nodes": [], "edges": []}
 
     device = {
@@ -656,7 +703,7 @@ def test_mcp_device_tools_preserve_metadata_headers_and_graph_parity() -> None:
         "health": "healthy",
         "data": {"schema_version": 1, "device": {"category": "sensor"}},
     }
-    call_tool(
+    attached = call_tool(
         "blockwart.create_attached_device",
         {
             "parent_id": "fabrik/root",
@@ -664,6 +711,7 @@ def test_mcp_device_tools_preserve_metadata_headers_and_graph_parity() -> None:
             "device": device,
             "metadata": {"link_kind": "zigbee", "primary": True},
         },
+        fetcher=fetcher,
         requester=requester,
     )
     call_tool(
@@ -713,9 +761,69 @@ def test_mcp_device_tools_preserve_metadata_headers_and_graph_parity() -> None:
     assert requests[1][3]["If-Match"] == '"rev-1"'
     assert all(headers["X-Blockwart-Channel"] == "mcp" for *_, headers in requests)
     assert fetches == [
+        ("/api/v1/objects/fabrik%2Froot", {}),
         ("/api/v1/objects/fabrik%2Froot/device-graph", {}),
         ("/api/v1/objects/fabrik%2Froot/network-topology", {}),
     ]
+    attached_payload = json.loads(attached["content"][0]["text"])
+    assert attached_payload == {
+        "catalog_object": {**device, "revision": 1},
+        "changed": True,
+        "etag": '"rev-1"',
+        "owner_assignment": {
+            "principal": "authenticated_caller",
+            "role": "owner",
+            "scope": "self",
+        },
+        "parent_ref": "host:fabrik/root",
+        "relationship": {
+            "from_ref": "device:sensor",
+            "metadata": {"link_kind": "zigbee", "primary": True},
+            "relation_type": "attached_to",
+            "to_ref": "host:fabrik/root",
+        },
+        "replayed": False,
+        "revision": 1,
+    }
+
+
+def test_mcp_create_rejects_mismatched_parent_proof() -> None:
+    object_payload = {
+        "id": "demo",
+        "kind": "service",
+        "label": "Demo",
+        "lifecycle": "active",
+        "health": "healthy",
+        "data": {"schema_version": 1},
+    }
+
+    def requester(method, path, body, headers):
+        assert method == "POST"
+        assert path == "/api/v1/objects/fabrik/children"
+        return {
+            "catalog_object": {**body, "revision": 1},
+            "etag": '"rev-1"',
+            "changed": True,
+            "replayed": False,
+        }
+
+    def fetcher(path, params):
+        assert path == "/api/v1/objects/fabrik"
+        return {"id": "another-parent", "kind": "system", "ref": "system:another-parent"}
+
+    with pytest.raises(mcp_server.UpstreamError) as exc_info:
+        call_tool(
+            "blockwart.create_child",
+            {
+                "parent_id": "fabrik",
+                "idempotency_key": "mcp-create-key-0002",
+                "object": object_payload,
+            },
+            fetcher=fetcher,
+            requester=requester,
+        )
+
+    assert exc_info.value.code == "upstream_invalid_response"
 
 
 def test_unexpected_mcp_failure_logs_only_allowlisted_context(
@@ -955,6 +1063,20 @@ def test_mcp_tools_publish_explicit_read_write_and_delete_hints() -> None:
     assert tools["blockwart.revoke_grant"]["annotations"]["destructiveHint"]
     assert not tools["blockwart.update_object"]["annotations"]["destructiveHint"]
     assert not tools["blockwart.update_grant"]["annotations"]["destructiveHint"]
+
+
+def test_mcp_descriptions_route_fresh_agent_read_and_create_intents() -> None:
+    tools = {tool["name"]: tool for tool in TOOLS}
+
+    assert "compact summaries" in tools["blockwart.search"]["description"]
+    assert "when its id is known" in tools["blockwart.get_object_context"]["description"]
+    assert "full sanitized details in one call" in tools["blockwart.get_context"]["description"]
+    assert "single agent call" in tools["blockwart.create_child"]["description"]
+    assert "single agent call" in tools["blockwart.create_attached_device"]["description"]
+    assert not {
+        "blockwart.get_asset_details",
+        "blockwart.get_service_details",
+    } & set(tools)
 
 
 def test_mcp_search_and_context_support_host_and_structured_filters() -> None:
