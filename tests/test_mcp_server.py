@@ -240,6 +240,10 @@ def test_mcp_client_completes_handshake_and_calls_every_read_only_tool() -> None
                             "blockwart.get_object_context",
                             {"object_id": "host/fabrik"},
                         ),
+                        "blockwart.list_comments": await session.call_tool(
+                            "blockwart.list_comments",
+                            {"object_id": "host/fabrik", "limit": 3},
+                        ),
                         "blockwart.get_context": await session.call_tool(
                             "blockwart.get_context",
                             {"kind": "host", "limit": 2},
@@ -340,6 +344,8 @@ def test_mcp_client_completes_handshake_and_calls_every_read_only_tool() -> None
     assert set(tools) == {
         "blockwart.search",
         "blockwart.get_object_context",
+        "blockwart.list_comments",
+        "blockwart.add_comment",
         "blockwart.get_context",
         "blockwart.create_child",
         "blockwart.update_object",
@@ -363,6 +369,7 @@ def test_mcp_client_completes_handshake_and_calls_every_read_only_tool() -> None
         for name in {
             "blockwart.search",
             "blockwart.get_object_context",
+            "blockwart.list_comments",
             "blockwart.get_context",
             "blockwart.get_object_access",
             "blockwart.search_principals",
@@ -377,6 +384,7 @@ def test_mcp_client_completes_handshake_and_calls_every_read_only_tool() -> None
         tools[name].annotations and not tools[name].annotations.readOnlyHint
         for name in {
             "blockwart.create_child",
+            "blockwart.add_comment",
             "blockwart.update_object",
             "blockwart.delete_object",
             "blockwart.create_relationship",
@@ -457,10 +465,11 @@ def test_mcp_client_completes_handshake_and_calls_every_read_only_tool() -> None
     assert unknown_tool.isError is True
     assert json.loads(unknown_content.text)["error"]["code"] == "tool_not_found"
 
-    assert [request["method"] for request in requests] == ["GET"] * 11
+    assert [request["method"] for request in requests] == ["GET"] * 12
     assert [request["path"] for request in requests] == [
         "/api/v1/objects",
         "/api/v1/objects/host%2Ffabrik",
+        "/api/v1/objects/host%2Ffabrik/comments",
         "/api/v1/context",
         "/api/v1/objects/host%2Ffabrik/access",
         "/api/v1/objects/host%2Ffabrik/access/principals",
@@ -539,6 +548,15 @@ def test_mcp_write_tools_forward_preconditions_without_credentials_in_arguments(
         requester=requester,
     )
     call_tool(
+        "blockwart.add_comment",
+        {
+            "object_id": "demo/with space",
+            "body": "**MCP** work log",
+            "idempotency_key": "mcp-comment-key-0001",
+        },
+        requester=requester,
+    )
+    call_tool(
         "blockwart.update_object",
         {
             "object_id": "demo",
@@ -604,6 +622,15 @@ def test_mcp_write_tools_forward_preconditions_without_credentials_in_arguments(
             object_payload,
             {
                 "Idempotency-Key": "mcp-create-key-0001",
+                "X-Blockwart-Channel": "mcp",
+            },
+        ),
+        (
+            "POST",
+            "/api/v1/objects/demo%2Fwith%20space/comments",
+            {"body": "**MCP** work log"},
+            {
+                "Idempotency-Key": "mcp-comment-key-0001",
                 "X-Blockwart-Channel": "mcp",
             },
         ),
@@ -1024,6 +1051,8 @@ def test_mcp_tools_publish_explicit_read_write_and_delete_hints() -> None:
     assert names == {
         "blockwart.search",
         "blockwart.get_object_context",
+        "blockwart.list_comments",
+        "blockwart.add_comment",
         "blockwart.get_context",
         "blockwart.create_child",
         "blockwart.update_object",
@@ -1048,6 +1077,7 @@ def test_mcp_tools_publish_explicit_read_write_and_delete_hints() -> None:
         for name in {
             "blockwart.search",
             "blockwart.get_object_context",
+            "blockwart.list_comments",
             "blockwart.get_context",
             "blockwart.get_object_access",
             "blockwart.search_principals",
@@ -1063,6 +1093,7 @@ def test_mcp_tools_publish_explicit_read_write_and_delete_hints() -> None:
     assert tools["blockwart.revoke_grant"]["annotations"]["destructiveHint"]
     assert not tools["blockwart.update_object"]["annotations"]["destructiveHint"]
     assert not tools["blockwart.update_grant"]["annotations"]["destructiveHint"]
+    assert not tools["blockwart.add_comment"]["annotations"]["destructiveHint"]
 
 
 def test_mcp_descriptions_route_fresh_agent_read_and_create_intents() -> None:

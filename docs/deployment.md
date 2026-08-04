@@ -199,6 +199,16 @@ while rejecting every write to them. It does not classify or mutate those rows. 
 transitional revision to production until the separately reviewed Network classification dry run,
 mapping/apply plan, backup, and production acceptance are complete.
 
+Revision `0014` creates the append-only object-comment timeline, migrates each
+string `data.comment` losslessly as legacy plain text, and removes the old key.
+Before rollout, inspect a restored candidate for invalid/non-string legacy
+values, record object/comment/audit counts, and verify that object revisions
+advance once while `updated_at` and audit counts remain unchanged. All existing
+catalog rows also receive a unique internal instance ID; all existing service
+tokens become `api` audience. Once any timeline row exists, downgrade
+is intentionally refused; rollback requires the paired pre-`0014` backup and
+matching image. See `object-comments.md`.
+
 For a fresh Markdown import, bind the reviewed mapping directly to both the
 dry-run and apply commands. The importer requires exact coverage of all Network
 rows and rejects missing, unknown, or conflicting evidence before schema or
@@ -255,7 +265,8 @@ For rollback, stop Blockwart first, preserve the failed database for diagnosis, 
 verified pre-upgrade backup, select the matching previous image, and start the service again. Do
 not run an automatic Alembic downgrade on live data. The `0011` downgrade drops only the transient
 service-token failure-bucket table; the `0013` device/relationship foundation explicitly refuses a
-downgrade because its two SQLite rebuilds require the matching pre-migration backup. Primary
+downgrade because its two SQLite rebuilds require the matching pre-migration backup. Revision
+`0014` likewise refuses downgrade while any comment exists, preventing silent timeline loss. Primary
 recovery remains the matching verified pre-upgrade database plus pinned old image. Never supply a
 retired global-bypass credential to an old image.
 
@@ -330,4 +341,9 @@ wrapper into OpenClaw/Gateway config is a separate approval step.
 For an approved MCP deployment, inject a service-account token through the
 protected `BLOCKWART_API_TOKEN_FILE`. `BLOCKWART_API_TOKEN` is an environment
 fallback; configuring both sources is an error. The service account must have
-the exact object grants needed by its tools.
+the exact object grants needed by its tools. To enable comment writes, rotate
+the exact named runtime token with `blockwart-auth rotate-token --audience mcp`
+to a new protected output file, atomically replace the runtime secret file, and
+verify `blockwart.list_comments` plus one explicitly approved idempotent
+`blockwart.add_comment` smoke. Token rotation and runtime injection remain
+separate deployment approvals; migration does not rotate live credentials.

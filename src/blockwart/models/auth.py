@@ -146,6 +146,10 @@ class LoginChallenge(Base):
 class ServiceToken(Base):
     __tablename__ = "service_tokens"
     __table_args__ = (
+        CheckConstraint(
+            "audience IN ('api','mcp')",
+            name="ck_service_tokens_audience",
+        ),
         UniqueConstraint(
             "principal_id",
             "name",
@@ -170,6 +174,11 @@ class ServiceToken(Base):
         nullable=False,
     )
     name: Mapped[str] = mapped_column(String(128))
+    audience: Mapped[str] = mapped_column(
+        String(16),
+        default="api",
+        server_default=text("'api'"),
+    )
     token_prefix: Mapped[str] = mapped_column(String(24))
     token_hash: Mapped[str] = mapped_column(String(64))
     expires_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True, index=True)

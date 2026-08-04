@@ -38,7 +38,8 @@ WRITE_COMMANDS_REVISION = "20260731_0010"
 TOKEN_FAILURE_BUCKETS_REVISION = "20260731_0011"
 PLATFORM_ADMIN_REVISION = "20260731_0012"
 DEVICE_FOUNDATION_REVISION = "20260801_0013"
-HEAD_REVISION = DEVICE_FOUNDATION_REVISION
+OBJECT_COMMENTS_REVISION = "20260804_0014"
+HEAD_REVISION = OBJECT_COMMENTS_REVISION
 PROJECT_ALEMBIC_CONFIG = Path(__file__).resolve().parents[1] / "alembic.ini"
 LEGACY_SNAPSHOT = Path(__file__).resolve().parent / "fixtures" / "legacy_snapshot.sql"
 
@@ -247,6 +248,7 @@ def test_real_alembic_upgrade_creates_fresh_database_and_has_no_drift(
             "idempotency_records",
             "login_challenges",
             "object_grants",
+            "object_comments",
             "password_credentials",
             "principals",
             "relationships",
@@ -263,6 +265,7 @@ def test_real_alembic_upgrade_creates_fresh_database_and_has_no_drift(
         "idempotency_records",
         "login_challenges",
         "object_grants",
+        "object_comments",
         "password_credentials",
         "principals",
         "relationships",
@@ -1005,6 +1008,7 @@ def test_identity_and_authorization_migrations_preserve_catalog_data(
                 "browser_sessions",
                 "login_challenges",
                 "object_grants",
+                "object_comments",
                 "password_credentials",
                 "principals",
                 "security_events",
@@ -1023,6 +1027,7 @@ def test_identity_and_authorization_migrations_preserve_catalog_data(
         "browser_sessions": 0,
         "login_challenges": 0,
         "object_grants": 0,
+        "object_comments": 0,
         "password_credentials": 0,
         "principals": 0,
         "security_events": 0,
@@ -1926,6 +1931,7 @@ def downgrade() -> None:
             "idempotency_records",
             "login_challenges",
             "object_grants",
+            "object_comments",
             "password_credentials",
             "principals",
             "relationships",
@@ -1982,6 +1988,197 @@ def test_token_failure_bucket_migration_is_transient_and_downgrade_preserves_cat
         assert "service_token_failure_buckets" in inspect(engine).get_table_names()
     finally:
         engine.dispose()
+
+
+def test_object_comment_migration_is_lossless_append_only_and_fail_closed(
+    tmp_path: Path,
+) -> None:
+    database_path = tmp_path / "object-comments.sqlite3"
+    database_url = _database_url(database_path)
+    config = build_alembic_config(database_url)
+    command.upgrade(config, DEVICE_FOUNDATION_REVISION)
+    legacy_body = (
+        "# Legacy text\n\nBearer abcdefghijklmnopqrstuvwxyz123456\n"
+        + "x" * 4500
+    )
+    connection = sqlite3.connect(database_path)
+    try:
+        connection.execute(
+            "INSERT INTO principals "
+            "(id, principal_type, login, display_name, active, revision) "
+            "VALUES ('legacy-agent', 'service_account', 'legacy.agent', "
+            "'Legacy Agent', 1, 1)"
+        )
+        connection.execute(
+            "INSERT INTO service_tokens "
+            "(id, principal_id, name, token_prefix, token_hash) VALUES "
+            "('token-id', 'legacy-agent', 'legacy', 'prefix', ?) ",
+            ("0" * 64,),
+        )
+        connection.execute(
+            "INSERT INTO catalog_objects "
+            "(id, kind, label, status, lifecycle, health, data_json, provenance_json, "
+            "revision, created_at, updated_at) VALUES "
+            "('legacy-comment', 'system', 'Legacy', 'active', 'active', 'healthy', "
+            "?, '{}', 7, '2026-08-01 01:02:03', '2026-08-02 03:04:05')",
+            (json.dumps({"schema_version": 1, "comment": legacy_body}),),
+        )
+        connection.execute(
+            "INSERT INTO audit_events (object_id, action, actor, summary, details_json) "
+            "VALUES ('legacy-comment', 'create', 'legacy', 'legacy', "
+            "'{\"event\":\"legacy\",\"version\":1}')"
+        )
+        connection.commit()
+    finally:
+        connection.close()
+
+    command.upgrade(config, HEAD_REVISION)
+    connection = sqlite3.connect(database_path)
+    try:
+        migrated = connection.execute(
+            "SELECT object_id, origin, format, body, author_principal_id, "
+            "author_login, author_display_name, author_principal_type "
+            "FROM object_comments"
+        ).fetchone()
+        row = connection.execute(
+            "SELECT data_json, revision, updated_at FROM catalog_objects "
+            "WHERE id='legacy-comment'"
+        ).fetchone()
+        assert migrated == (
+            "legacy-comment",
+            "legacy",
+            "plain_text",
+            legacy_body,
+            None,
+            None,
+            None,
+            None,
+        )
+        assert json.loads(row[0]) == {"schema_version": 1}
+        assert row[1:] == (8, "2026-08-02 03:04:05")
+        assert connection.execute("SELECT audience FROM service_tokens").fetchone() == (
+            "api",
+        )
+        assert connection.execute(
+            "SELECT COUNT(*) FROM audit_events WHERE object_id='legacy-comment'"
+        ).fetchone() == (1,)
+        with pytest.raises(sqlite3.IntegrityError):
+            connection.execute(
+                "INSERT INTO object_comments "
+                "(id, object_id, object_instance_id, object_created_at, "
+                "author_principal_id, author_login, author_display_name, "
+                "author_principal_type, origin, format, body, created_at) "
+                "SELECT 'forged-format', id, instance_id, created_at, "
+                "'legacy-agent', 'legacy.agent', 'Legacy Agent', "
+                "'service_account', 'api', 'plain_text', 'forged', CURRENT_TIMESTAMP "
+                "FROM catalog_objects WHERE id='legacy-comment'"
+            )
+        with pytest.raises(sqlite3.IntegrityError):
+            connection.execute(
+                "INSERT INTO object_comments "
+                "(id, object_id, object_instance_id, object_created_at, "
+                "author_principal_id, author_login, author_display_name, "
+                "author_principal_type, origin, format, body, created_at) "
+                "SELECT 'forged-author', id, instance_id, created_at, "
+                "NULL, NULL, NULL, NULL, 'api', 'markdown', 'forged', "
+                "CURRENT_TIMESTAMP FROM catalog_objects WHERE id='legacy-comment'"
+            )
+        with pytest.raises(sqlite3.IntegrityError, match="append-only"):
+            connection.execute("UPDATE object_comments SET body='changed'")
+        with pytest.raises(sqlite3.IntegrityError, match="append-only"):
+            connection.execute("DELETE FROM object_comments")
+    finally:
+        connection.close()
+
+    with pytest.raises(RuntimeError, match="paired pre-migration backup"):
+        command.downgrade(config, DEVICE_FOUNDATION_REVISION)
+    assert _revision(database_url) == HEAD_REVISION
+
+
+def test_object_comment_migration_rejects_non_string_before_schema_mutation(
+    tmp_path: Path,
+) -> None:
+    database_path = tmp_path / "invalid-comment.sqlite3"
+    database_url = _database_url(database_path)
+    config = build_alembic_config(database_url)
+    command.upgrade(config, DEVICE_FOUNDATION_REVISION)
+    connection = sqlite3.connect(database_path)
+    try:
+        connection.execute(
+            "INSERT INTO catalog_objects "
+            "(id, kind, label, status, lifecycle, health, data_json, provenance_json) "
+            "VALUES ('invalid-comment', 'host', 'Invalid', 'active', 'active', "
+            "'healthy', '{\"comment\":[\"not text\"]}', '{}')"
+        )
+        connection.commit()
+    finally:
+        connection.close()
+
+    with pytest.raises(RuntimeError, match="non-string legacy comment"):
+        command.upgrade(config, HEAD_REVISION)
+
+    connection = sqlite3.connect(database_path)
+    try:
+        assert "object_comments" not in {
+            row[0]
+            for row in connection.execute(
+                "SELECT name FROM sqlite_master WHERE type='table'"
+            )
+        }
+        assert "audience" not in {
+            row[1] for row in connection.execute("PRAGMA table_info(service_tokens)")
+        }
+        assert _revision(database_url) == DEVICE_FOUNDATION_REVISION
+    finally:
+        connection.close()
+
+
+def test_object_comment_migration_preserves_empty_legacy_string_exactly(
+    tmp_path: Path,
+) -> None:
+    database_path = tmp_path / "empty-legacy-comment.sqlite3"
+    database_url = _database_url(database_path)
+    config = build_alembic_config(database_url)
+    command.upgrade(config, DEVICE_FOUNDATION_REVISION)
+    connection = sqlite3.connect(database_path)
+    try:
+        connection.execute(
+            "INSERT INTO catalog_objects "
+            "(id, kind, label, status, lifecycle, health, data_json, provenance_json, "
+            "revision, created_at, updated_at) VALUES "
+            "('empty-legacy', 'host', 'Empty legacy', 'active', 'active', "
+            "'healthy', '{\"comment\":\"\"}', '{}', 4, "
+            "'2026-08-01 01:02:03', '2026-08-02 03:04:05')"
+        )
+        connection.commit()
+    finally:
+        connection.close()
+
+    command.upgrade(config, HEAD_REVISION)
+    connection = sqlite3.connect(database_path)
+    try:
+        assert connection.execute(
+            "SELECT origin, format, body FROM object_comments "
+            "WHERE object_id='empty-legacy'"
+        ).fetchone() == ("legacy", "plain_text", "")
+        row = connection.execute(
+            "SELECT data_json, revision, updated_at, length(instance_id) "
+            "FROM catalog_objects WHERE id='empty-legacy'"
+        ).fetchone()
+        assert json.loads(row[0]) == {}
+        assert row[1:] == (5, "2026-08-02 03:04:05", 32)
+    finally:
+        connection.close()
+
+
+def test_object_comment_downgrade_is_allowed_only_while_timeline_is_empty(
+    tmp_path: Path,
+) -> None:
+    database_url = _database_url(tmp_path / "empty-comments.sqlite3")
+    config = build_alembic_config(database_url)
+    command.upgrade(config, HEAD_REVISION)
+    command.downgrade(config, DEVICE_FOUNDATION_REVISION)
+    assert _revision(database_url) == DEVICE_FOUNDATION_REVISION
 
 
 def test_alembic_check_detects_database_model_drift(tmp_path: Path) -> None:

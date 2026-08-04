@@ -515,15 +515,17 @@ def test_ui_database_error_is_redacted_and_rolled_back(
         _add_object(session, object_id="db-error-object")
         session.commit()
 
-    def fail_upsert(
+    def fail_add_comment(
         session: Session,
-        payload: CatalogObjectIn,
+        context,
+        *,
+        object_id: str,
         **kwargs,
     ):
-        session.get(CatalogObject, payload.id).label = "must roll back"
+        session.get(CatalogObject, object_id).label = "must roll back"
         session.add(
             AuditEvent(
-                object_id=payload.id,
+                object_id=object_id,
                 action="partial",
                 actor="test",
                 summary="must roll back",
@@ -532,15 +534,18 @@ def test_ui_database_error_is_redacted_and_rolled_back(
         session.flush()
         raise OperationalError("UPDATE", {}, RuntimeError("sensitive database detail"))
 
-    monkeypatch.setattr("blockwart.services.commands.upsert_object", fail_upsert)
+    monkeypatch.setattr("blockwart.ui.routes.add_object_comment", fail_add_comment)
 
     with _authorized_client(
         session_factory,
         install_unrestricted_read_access,
     ) as client:
         response = client.post(
-            "/objects/db-error-object/comment",
-            data={"comment": "trigger"},
+            "/objects/db-error-object/comments",
+            data={
+                "comment": "trigger",
+                "idempotency_key": "db-error-comment-0001",
+            },
             follow_redirects=False,
         )
 

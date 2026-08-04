@@ -15,6 +15,7 @@ from sqlalchemy.orm import Session
 
 from blockwart.api.deps import get_session
 from blockwart.domain.auth import GrantScope, Permission, Role
+from blockwart.domain.comment_markdown import render_comment_source
 from blockwart.domain.object_schema import DEVICE_CATEGORIES, NETWORK_CATEGORIES
 from blockwart.domain.placement import PlacementError
 from blockwart.domain.relationships import (
@@ -30,6 +31,7 @@ from blockwart.domain.ui_schema import (
     schema_field_payload,
     ui_schema_payload,
 )
+from blockwart.models import CatalogObject
 from blockwart.schemas.catalog import (
     ENDPOINT_TYPE_OPTIONS,
     OBJECT_STATUSES,
@@ -49,6 +51,7 @@ from blockwart.services.commands import (
     revision_etag,
     update_catalog_object,
 )
+from blockwart.services.comments import add_object_comment, query_comment_page
 from blockwart.services.grant_management import (
     actor_can_manage_owner_grants,
     create_managed_grant,
@@ -58,6 +61,7 @@ from blockwart.services.grant_management import (
     search_manageable_principals,
     update_managed_grant,
 )
+from blockwart.services.pagination import InvalidCursor
 from blockwart.services.queries import (
     CatalogBrowseReadModel,
     RelatedRelationshipReadModel,
@@ -194,6 +198,7 @@ def _localized_audit_lines(
         "grant_create": "audit.grant_create",
         "grant_update": "audit.grant_update",
         "grant_revoke": "audit.grant_revoke",
+        "comment_create": "audit.comment_create",
         "placement_assign": "audit.placement_assign",
         "seed_create": "audit.seed_create",
         "seed_update": "audit.seed_update",
@@ -626,7 +631,14 @@ def _detail_template_context(
         "relationship_groups": read_model.relationship_groups,
         "relationship_targets": read_model.relationship_targets,
         "relation_types": RELATION_TYPES,
-        "comment": str(object_data.get("comment") or ""),
+        "recent_comments": [
+            {
+                **comment.model_dump(),
+                "rendered_html": render_comment_source(comment.body, comment.format),
+            }
+            for comment in read_model.recent_comments
+        ],
+        "comment_idempotency_key": f"ui-comment-{uuid4().hex}",
         "audit_events": audit_events,
         "ui_schema": ui_schema,
         "schema_fields_by_key": _fields_by_key(schema_fields),
@@ -831,8 +843,9 @@ def _detail_navigation_context(
             "relationships": (
                 f"/objects/{object_id}/relationships?{detail_query_string}"
             ),
-            "comment": f"/objects/{object_id}/comment?{detail_query_string}",
+            "comments": f"/objects/{object_id}/comments?{detail_query_string}",
         },
+        "comments_all_url": f"/objects/{object_id}/comments?{detail_query_string}",
         "detail_return_href": f"/?{return_query_string}",
         "detail_back_label": translator(
             "detail.back_topology" if view == "topology" else "detail.back"
@@ -1570,7 +1583,7 @@ def detach_relationship(
 
 
 @router.post(
-    "/objects/{object_id}/comment",
+    "/objects/{object_id}/comments",
     response_class=HTMLResponse,
     dependencies=[Depends(require_browser_write_csrf)],
 )
@@ -1578,57 +1591,108 @@ def update_comment(
     request: Request,
     object_id: str,
     session: Annotated[Session, Depends(get_session)],
-    comment: Annotated[str, Form()] = "",
-    if_match: Annotated[str, Form()] = "",
+    comment: Annotated[str, Form(max_length=4000)] = "",
+    idempotency_key: Annotated[str, Form(max_length=128)] = "",
 ):
     access = read_access_from_request(request)
     context = ui_write_context(request, access)
-    execute_ui_command(
-        session,
-        context,
-        lambda: authorize_object_command(
+    try:
+        execute_ui_command(
             session,
             context,
-            object_id=object_id,
-            permission=Permission.WRITE,
-        ),
-    )
-    existing_object = get_object(session, object_id)
-    if existing_object is None:
-        raise HTTPException(status_code=404, detail="Catalog object not found")
-    data = _editable_data_copy(existing_object.data)
-    cleaned_comment = comment.strip()
-    if cleaned_comment:
-        data["comment"] = cleaned_comment
-    else:
-        data.pop("comment", None)
-    _reject_secret_shaped_form_data(data)
-    execute_ui_command(
-        session,
-        context,
-        lambda: update_catalog_object(
+            lambda: add_object_comment(
+                session,
+                context,
+                object_id=object_id,
+                body=comment,
+                idempotency_key=idempotency_key,
+                idempotency_ttl_seconds=(
+                    request.app.state.settings.idempotency_ttl_seconds
+                ),
+            ),
+        )
+    except HTTPException as exc:
+        return _render_object_detail(
+            request,
             session,
-            context,
-            object_id=object_id,
-            payload=CatalogObjectIn(
-                id=existing_object.id,
-                kind=existing_object.kind,
-                label=existing_object.label,
-                status=existing_object.status,
-                summary=existing_object.summary,
-                data=data,
-            ),
-            expected_revision=_ui_expected_revision(
-                request,
-                if_match,
-                existing_object.revision,
-            ),
-        ),
-    )
+            object_id,
+            error=str(exc.detail),
+            edit_section="",
+            can_write_enabled=True,
+            status_code=exc.status_code,
+        )
     return RedirectResponse(
         url=_detail_redirect_url(request, object_id),
         status_code=303,
     )
+
+
+@router.get(
+    "/objects/{object_id}/comments",
+    response_class=HTMLResponse,
+)
+def object_comments_page(
+    request: Request,
+    object_id: str,
+    session: Annotated[Session, Depends(get_session)],
+    cursor: str | None = None,
+) -> HTMLResponse:
+    if cursor is not None and len(cursor) > 2048:
+        raise HTTPException(status_code=400, detail="Invalid cursor")
+    access = read_access_from_request(request)
+    try:
+        page = query_comment_page(
+            session,
+            access,
+            object_id=object_id,
+            limit=20,
+            cursor=cursor,
+            include_total=False,
+        )
+    except InvalidCursor as exc:
+        raise HTTPException(status_code=400, detail="Invalid cursor") from exc
+    if page is None:
+        raise HTTPException(status_code=404, detail="Catalog object not found")
+    catalog_object = session.get(CatalogObject, object_id)
+    if catalog_object is None:
+        raise HTTPException(status_code=404, detail="Catalog object not found")
+    base_query = [
+        (key, value)
+        for key, value in request.query_params.multi_items()
+        if key != "cursor"
+    ]
+    next_url = None
+    if page.next_cursor is not None:
+        next_query = urlencode([*base_query, ("cursor", page.next_cursor)])
+        next_url = f"/objects/{object_id}/comments?{next_query}"
+    detail_query = urlencode(base_query)
+    detail_url = f"/objects/{object_id}"
+    if detail_query:
+        detail_url = f"{detail_url}?{detail_query}"
+    return templates.TemplateResponse(
+        request,
+        "object_comments.html",
+        context={
+            "title": f"{catalog_object.label} · Comments · Blockwart",
+            "object": catalog_object,
+            "comments": _comment_display_rows(page),
+            "next_url": next_url,
+            "detail_url": detail_url,
+            **translation_context(request),
+        },
+    )
+
+
+def _comment_display_rows(page) -> list[dict[str, Any]]:
+    if page is None:
+        return []
+    return [
+        {
+            **comment.model_dump(),
+            "rendered_html": render_comment_source(comment.body, comment.format),
+        }
+        for comment in page.items
+    ]
 
 
 @router.post(

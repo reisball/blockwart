@@ -170,7 +170,7 @@ def test_v1_object_list_enumerates_stable_keyset_pages(client: TestClient) -> No
                 "include_total": "true",
             },
         )
-        assert response.status_code == 200
+        assert response.status_code == 200, (cursor, response.text)
         payload = response.json()
         assert payload["sort"] == "label"
         assert payload["direction"] == "asc"
@@ -265,7 +265,7 @@ def test_v1_descending_label_pages_keep_the_id_tie_breaker(
                 "cursor": cursor,
             },
         )
-        assert response.status_code == 200
+        assert response.status_code == 200, (cursor, response.text)
         payload = response.json()
         seen.extend(
             (item["label"].casefold(), item["id"])
@@ -446,7 +446,7 @@ def test_v1_can_enumerate_more_than_the_legacy_agent_limit(
                 "include_total": "true",
             },
         )
-        assert response.status_code == 200
+        assert response.status_code == 200, (cursor, response.text)
         payload = response.json()
         total = payload["total"]
         seen.extend(item["id"] for item in payload["items"])

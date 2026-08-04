@@ -1084,6 +1084,38 @@ button:hover,
   min-height: 118px;
 }
 
+.comment-timeline {
+  display: grid;
+  gap: 14px;
+  margin: 16px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.comment-timeline > li {
+  padding: 14px 0 0;
+  border-top: 1px solid var(--border);
+}
+
+.comment-body {
+  overflow-wrap: anywhere;
+}
+
+.comment-body > :first-child {
+  margin-top: 0;
+}
+
+.comment-body > :last-child {
+  margin-bottom: 8px;
+}
+
+.comment-body pre {
+  overflow-x: auto;
+  padding: 10px;
+  border-radius: 7px;
+  background: var(--surface-muted, #f3f4f6);
+}
+
 .audit-log {
   display: grid;
   gap: 0;

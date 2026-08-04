@@ -19,6 +19,12 @@ Current local keys:
 
 `BLOCKWART_SECRET_REFERENCE` is a reference label only. It must never contain a raw secret value.
 
+Service-token audience is credential metadata, not environment configuration.
+`blockwart-auth issue-token --audience api|mcp` and the equivalent protected
+admin operations select it server-side. Existing tokens migrate as `api`; an
+approved MCP comment writer needs a deliberately rotated `mcp` token. The MCP
+wrapper still receives only that opaque value through its protected token file.
+
 ## Pilot Seed Import
 
 The pilot catalog seed lives at `seeds/pilot_objects.yaml`. Use the packaged CLI for local or

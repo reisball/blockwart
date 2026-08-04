@@ -27,10 +27,12 @@ from blockwart.schemas.catalog import (
     CatalogObjectReadOut,
     CatalogObjectStubOut,
 )
+from blockwart.schemas.comments import CommentOut
 from blockwart.services.catalog import (
     list_audit_events_for_object,
     list_objects,
 )
+from blockwart.services.comments import query_comment_page
 from blockwart.services.read_access import ReadAccess
 
 PUBLIC_KIND_PRIORITY = {
@@ -269,6 +271,7 @@ class CatalogDetailReadModel:
     relationship_groups: dict[str, list[RelatedRelationshipReadModel]]
     relationship_targets: list[CatalogObjectReadOut]
     audit_events: list[AuditEventReadModel]
+    recent_comments: list[CommentOut]
 
 
 def list_catalog_objects(
@@ -433,6 +436,18 @@ def query_catalog_detail(
         if catalog_object.visibility == ObjectVisibility.DETAIL
         else []
     )
+    comment_page = (
+        query_comment_page(
+            session,
+            access,
+            object_id=object_id,
+            limit=5,
+            cursor=None,
+            include_total=False,
+        )
+        if catalog_object.visibility == ObjectVisibility.DETAIL
+        else None
+    )
     return CatalogDetailReadModel(
         catalog_object=catalog_object,
         all_objects=all_objects,
@@ -455,6 +470,7 @@ def query_catalog_detail(
             }
             for event in audit_events
         ],
+        recent_comments=comment_page.items if comment_page is not None else [],
     )
 
 

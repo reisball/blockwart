@@ -67,6 +67,7 @@ Returns one object as agent context:
 - source references, last update timestamp, and structured upstream/downstream dependencies
 - canonical provenance and computed freshness
 - extracted credential-reference IDs
+- the five newest authorized object comments as exact source plus format
 
 Placement resolution uses only canonical `hosts` relationships. It supports
 `host -> system -> service` as well as a service placed directly on a host. The
@@ -113,6 +114,11 @@ Query parameters:
 Search and context use the same resolver and filter semantics. All Agent API
 routes remain GET-only and require
 `Authorization: Bearer <service-account token>`.
+
+Readable contexts expose `recent_comments`; discover-only stubs do not. The
+complete timeline and append command live only in REST v1 and MCP. Agent
+responses return Markdown or legacy plain-text source, never rendered HTML;
+see `object-comments.md`.
 
 All Agent timestamps use RFC3339 UTC with `Z`. Every summary and context object also exposes
 `record_state` plus `diagnostics`. A damaged `data_json` row remains discoverable by ID, label, or

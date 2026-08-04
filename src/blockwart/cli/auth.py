@@ -86,6 +86,12 @@ def build_parser() -> argparse.ArgumentParser:
         )
         token_parser.add_argument("--login", required=True)
         token_parser.add_argument("--name", required=True)
+        token_parser.add_argument(
+            "--audience",
+            choices=("api", "mcp"),
+            default=None,
+            help="Bind the token to REST API or MCP comment writes.",
+        )
         token_parser.add_argument("--output-file", type=Path, required=True)
         token_parser.add_argument(
             "--expires-in-seconds",
@@ -175,6 +181,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                             session,
                             principal_id=principal.id,
                             name=args.name,
+                            audience=args.audience or "api",
                             expires_at=expires_at,
                         )
                         if args.action == "issue-token"
@@ -182,6 +189,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                             session,
                             principal_id=principal.id,
                             name=args.name,
+                            audience=args.audience,
                             expires_at=expires_at,
                         )
                     )

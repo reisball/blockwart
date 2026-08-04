@@ -44,6 +44,7 @@ from blockwart.schemas.agent import (
 )
 from blockwart.schemas.catalog import CatalogRecordDiagnostic, ObjectKind
 from blockwart.schemas.v1 import ObjectSortField, SortDirection
+from blockwart.services.comments import recent_comments_for_object
 from blockwart.services.pagination import CursorPage, paginate_items
 from blockwart.services.read_access import ReadAccess
 from blockwart.services.record_integrity import read_catalog_record_data
@@ -581,6 +582,7 @@ class _AgentCatalogResolver:
             updated_at=format_rfc3339_utc(obj.updated_at),
             dependencies=self.dependencies(object_ref),
             credential_references=sorted(_collect_credential_references(data)),
+            recent_comments=recent_comments_for_object(self.session, obj, limit=5),
         )
 
     def stub(self, obj: CatalogObject) -> AgentCatalogObjectStub:

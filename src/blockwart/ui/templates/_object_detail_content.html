@@ -1029,20 +1029,37 @@
         </section>
 
         <section class="panel">
-          <h2 class="section-title">{{ t("comment.title") }}</h2>
+          <div class="panel-head">
+            <h2 class="section-title">{{ t("comment.title") }}</h2>
+            <a class="button button-small button-muted" href="{{ comments_all_url }}">{{ t("comment.all") }}</a>
+          </div>
           {% if can_write %}
-            <form class="form-grid comment-form" method="post" action="{{ detail_post_urls.comment }}">
+            <form class="form-grid comment-form" method="post" action="{{ detail_post_urls.comments }}">
               <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
-              <input type="hidden" name="if_match" value="{{ object_etag }}" />
+              <input type="hidden" name="idempotency_key" value="{{ comment_idempotency_key }}" />
               <label>{{ t("comment.label") }}
-                <textarea name="comment" placeholder="{{ t('comment.placeholder') }}">{{ comment }}</textarea>
+                <textarea name="comment" maxlength="4000" required placeholder="{{ t('comment.placeholder') }}"></textarea>
               </label>
+              <p class="meta">{{ t("comment.markdown_help") }}</p>
               <div class="button-row">
                 <button type="submit">{{ t("comment.save") }}</button>
               </div>
             </form>
+          {% endif %}
+          {% if recent_comments %}
+            <ol class="comment-timeline">
+              {% for comment in recent_comments %}
+                <li id="comment-{{ comment.id }}">
+                  <div class="comment-body">{{ comment.rendered_html }}</div>
+                  <div class="meta">
+                    {{ comment.author_display_name or t("comment.legacy_author") }} ·
+                    {{ comment.origin }} · <time>{{ comment.created_at }}</time>
+                  </div>
+                </li>
+              {% endfor %}
+            </ol>
           {% else %}
-            <p class="meta">{{ comment or t("comment.empty") }}</p>
+            <p class="meta">{{ t("comment.empty") }}</p>
           {% endif %}
         </section>
 

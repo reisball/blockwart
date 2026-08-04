@@ -120,6 +120,7 @@ class PrincipalAdminSummary:
 class PrincipalTokenView:
     id: str
     name: str
+    audience: str
     token_prefix: str
     active: bool
     expires_at: str | None
@@ -688,6 +689,7 @@ def issue_managed_service_token(
     rotate: bool = False,
     idempotency_key: str,
     idempotency_ttl_seconds: int,
+    audience: str | None = None,
     idempotency_request_expiry: str | None = None,
 ) -> PrincipalCredentialResult:
     require_platform_admin(access)
@@ -710,6 +712,7 @@ def issue_managed_service_token(
         request_payload={
             "principal_id": principal_id,
             "name": name,
+            "audience": audience,
             "expires_at": (
                 idempotency_request_expiry
                 if idempotency_request_expiry is not None
@@ -733,17 +736,29 @@ def issue_managed_service_token(
         expected_revision=expected_revision,
         principal_type=PrincipalType.SERVICE_ACCOUNT,
     )
-    operation = rotate_service_token if rotate else issue_service_token
     try:
-        issued = operation(
-            session,
-            principal_id=row.id,
-            name=name,
-            expires_at=expires_at,
-            channel=channel,
-            request_id=request_id,
-            actor_principal_id=access.principal.id,
-        )
+        if rotate:
+            issued = rotate_service_token(
+                session,
+                principal_id=row.id,
+                name=name,
+                audience=audience,
+                expires_at=expires_at,
+                channel=channel,
+                request_id=request_id,
+                actor_principal_id=access.principal.id,
+            )
+        else:
+            issued = issue_service_token(
+                session,
+                principal_id=row.id,
+                name=name,
+                audience=audience or "api",
+                expires_at=expires_at,
+                channel=channel,
+                request_id=request_id,
+                actor_principal_id=access.principal.id,
+            )
     except IdentityError as exc:
         raise ManagedPrincipalConflict(str(exc)) from exc
     _complete_secret_idempotency(
@@ -1067,6 +1082,7 @@ def _token_view(row: ServiceToken) -> PrincipalTokenView:
     return PrincipalTokenView(
         id=row.id,
         name=row.name,
+        audience=row.audience,
         token_prefix=row.token_prefix,
         active=active,
         expires_at=(

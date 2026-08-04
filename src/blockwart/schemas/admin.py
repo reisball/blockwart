@@ -79,6 +79,7 @@ class PrincipalTokenOut(BaseModel):
 
     id: str
     name: str
+    audience: Literal["api", "mcp"]
     token_prefix: str
     active: bool
     expires_at: str | None = None
@@ -135,6 +136,18 @@ class PasswordResetIn(BaseModel):
 
 class ServiceTokenIssueIn(BaseModel):
     name: str = Field(min_length=1, max_length=128)
+    audience: Literal["api", "mcp"] = "api"
+    expires_in_seconds: int | None = Field(
+        default=None,
+        ge=SERVICE_TOKEN_MIN_TTL_SECONDS,
+        le=SERVICE_TOKEN_MAX_TTL_SECONDS,
+    )
+    current_admin_password: str | None = Field(default=None, min_length=1, max_length=1024)
+
+
+class ServiceTokenRotateIn(BaseModel):
+    name: str = Field(min_length=1, max_length=128)
+    audience: Literal["api", "mcp"] | None = None
     expires_in_seconds: int | None = Field(
         default=None,
         ge=SERVICE_TOKEN_MIN_TTL_SECONDS,
@@ -152,5 +165,6 @@ class PrincipalCredentialOut(BaseModel):
     changed: bool
     token: str | None = None
     token_name: str | None = None
+    token_audience: Literal["api", "mcp"] | None = None
     token_expires_at: str | None = None
     disclosure: Literal["none", "one_time"] = "none"

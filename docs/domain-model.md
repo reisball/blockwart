@@ -140,6 +140,13 @@ The prefix in a typed reference such as `service:blockwart` is a kind assertion
 and routing aid, not a separate namespace. `host:shared` and `system:shared`
 cannot coexist as different objects.
 
+Operational comments are stored outside `catalog_objects.data_json` and bind
+to the global object ID, an internal random `instance_id`, and that row's
+creation timestamp. The instance ID is unique and retained across ordinary
+updates, so even a deleted-and-recreated ID with a colliding timestamp cannot
+inherit the previous object's timeline. Comments are append-only and do not
+replace the technical object audit; see `object-comments.md`.
+
 Seed input rejects duplicate IDs across kinds. A kind change retains the same
 global identity, but updating existing typed references during kind changes is
 part of the general referential-integrity contract in #34.

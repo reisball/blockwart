@@ -70,7 +70,9 @@ def test_human_password_is_argon2id_and_authentication_is_audited(
             )
 
         assert rejected is None
-        assert authenticated == principal
+        assert authenticated is not None
+        assert authenticated.id == principal.id
+        assert authenticated.service_token_audience is None
         events = list(
             session.scalars(
                 select(SecurityEvent).order_by(SecurityEvent.id)
@@ -163,14 +165,14 @@ def test_service_tokens_are_hashed_rotatable_expirable_and_revocable(
                 is None
             )
         with transaction(session):
-            assert (
-                authenticate_service_token(
-                    session,
-                    token=rotated.value,
-                    now=now + timedelta(minutes=3),
-                )
-                == principal
+            authenticated_rotated = authenticate_service_token(
+                session,
+                token=rotated.value,
+                now=now + timedelta(minutes=3),
             )
+            assert authenticated_rotated is not None
+            assert authenticated_rotated.id == principal.id
+            assert authenticated_rotated.service_token_audience == "api"
         with transaction(session):
             assert revoke_service_token(
                 session,

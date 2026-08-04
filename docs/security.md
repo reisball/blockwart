@@ -29,3 +29,15 @@ Production identity bootstrap, persistent services, and infrastructure exposure
 require their dedicated rollout and approval. Browser identity, challenge, CSRF,
 and clearing cookies are always `Secure`; deploy the browser surface only behind
 an explicitly trusted HTTPS reverse proxy that adds HSTS.
+
+Object comments use the same object policy and global secret detector. Their
+Markdown source is stored exactly, but browser HTML is produced only through a
+CommonMark parser with raw HTML disabled and an independent sanitizer. Images,
+embedded media, scripts, styles, event handlers, and unsafe link schemes never
+become active content. Audit and idempotency records contain comment IDs and
+redacted technical metadata, never comment bodies. See `object-comments.md`.
+
+Comment origin is authenticated provenance. A server-stored service-token
+audience binds a token to `api` or `mcp` comment writes, so the client-controlled
+channel header alone cannot claim MCP origin. Audience does not grant catalog
+access; normal `read` and `write` policy remains mandatory.

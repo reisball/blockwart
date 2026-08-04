@@ -70,6 +70,7 @@ class IssuedServiceToken:
     token_id: str
     principal_id: str
     name: str
+    audience: str
     value: str = field(repr=False)
     expires_at: datetime | None = None
 
@@ -318,6 +319,7 @@ def issue_service_token(
     *,
     principal_id: str,
     name: str,
+    audience: str = "api",
     expires_at: datetime | None = None,
     channel: str = "cli",
     request_id: str | None = None,
@@ -326,6 +328,8 @@ def issue_service_token(
 ) -> IssuedServiceToken:
     principal = _active_service_account(session, principal_id)
     normalized_name = normalize_token_name(name)
+    if audience not in {"api", "mcp"}:
+        raise IdentityError("service token audience must be api or mcp")
     existing = session.scalar(
         select(ServiceToken).where(
             ServiceToken.principal_id == principal.id,
@@ -342,6 +346,7 @@ def issue_service_token(
         id=token_id,
         principal_id=principal.id,
         name=normalized_name,
+        audience=audience,
         token_prefix=value[:24],
         token_hash=_secret_hash(value),
         expires_at=expires_at,
@@ -358,6 +363,7 @@ def issue_service_token(
         details={
             "credential_id": token_id,
             "credential_name": normalized_name,
+            "audience": audience,
             **(
                 {"actor_principal_id": actor_principal_id}
                 if actor_principal_id is not None
@@ -371,6 +377,7 @@ def issue_service_token(
         token_id=token_id,
         principal_id=principal.id,
         name=normalized_name,
+        audience=audience,
         value=value,
         expires_at=expires_at,
     )
@@ -381,6 +388,7 @@ def rotate_service_token(
     *,
     principal_id: str,
     name: str,
+    audience: str | None = None,
     expires_at: datetime | None = None,
     channel: str = "cli",
     request_id: str | None = None,
@@ -397,6 +405,8 @@ def rotate_service_token(
     )
     if row is None:
         raise IdentityNotFound("service token not found")
+    if audience is not None and audience not in {"api", "mcp"}:
+        raise IdentityError("service token audience must be api or mcp")
     timestamp = now or utc_now()
     _validate_future_expiry(expires_at, now=timestamp)
     value = _new_opaque_value(SERVICE_TOKEN_PREFIX, row.id)
@@ -406,6 +416,8 @@ def rotate_service_token(
     row.revoked_at = None
     row.rotated_at = timestamp
     row.last_used_at = None
+    if audience is not None:
+        row.audience = audience
     record_security_event(
         session,
         event_type="service_token_rotated",
@@ -416,6 +428,7 @@ def rotate_service_token(
         details={
             "credential_id": row.id,
             "credential_name": row.name,
+            "audience": row.audience,
             **(
                 {"actor_principal_id": actor_principal_id}
                 if actor_principal_id is not None
@@ -429,6 +442,7 @@ def rotate_service_token(
         token_id=row.id,
         principal_id=principal.id,
         name=row.name,
+        audience=row.audience,
         value=value,
         expires_at=expires_at,
     )
@@ -519,7 +533,7 @@ def authenticate_service_token(
         return None
     row.last_used_at = timestamp
     session.flush()
-    return principal_context(principal)
+    return principal_context(principal, service_token_audience=row.audience)
 
 
 def authenticate_bearer_header(
@@ -845,7 +859,11 @@ def record_security_event(
     session.flush()
 
 
-def principal_context(principal: Principal) -> PrincipalContext:
+def principal_context(
+    principal: Principal,
+    *,
+    service_token_audience: str | None = None,
+) -> PrincipalContext:
     return PrincipalContext(
         id=principal.id,
         principal_type=PrincipalType(principal.principal_type),
@@ -857,6 +875,7 @@ def principal_context(principal: Principal) -> PrincipalContext:
             else None
         ),
         revision=principal.revision,
+        service_token_audience=service_token_audience,
     )
 
 
