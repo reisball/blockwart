@@ -8,7 +8,7 @@ import os
 import re
 from collections.abc import Callable
 from pathlib import Path
-from typing import Any
+from typing import Any, get_args
 from urllib.error import HTTPError, URLError
 from urllib.parse import quote, urlencode, urlsplit
 from urllib.request import HTTPRedirectHandler, Request, build_opener
@@ -21,6 +21,9 @@ from jsonschema.protocols import Validator
 from jsonschema.validators import validator_for
 from mcp.server.lowlevel import NotificationOptions, Server
 
+from blockwart.schemas.catalog import ObjectKind
+
+ALL_OBJECT_KINDS: tuple[str, ...] = get_args(ObjectKind)
 DEFAULT_BASE_URL = "http://127.0.0.1:8000"
 API_TOKEN_ENV = "BLOCKWART_API_TOKEN"
 API_TOKEN_FILE_ENV = "BLOCKWART_API_TOKEN_FILE"
@@ -93,17 +96,7 @@ OBJECT_WRITE_SCHEMA: JSON = {
         },
         "kind": {
             "type": "string",
-            "enum": [
-                "host",
-                "system",
-                "network",
-                "device",
-                "service",
-                "credential_reference",
-                "runbook",
-                "decision",
-                "project",
-            ],
+            "enum": list(ALL_OBJECT_KINDS),
         },
         "label": {"type": "string", "minLength": 1},
         "status": {
@@ -203,7 +196,7 @@ QUERY_FILTER_PROPERTIES: JSON = {
     "q": {"type": "string", "description": "Search term"},
     "kind": {
         "type": "string",
-        "enum": ["host", "system", "network", "device", "service"],
+        "enum": list(ALL_OBJECT_KINDS),
     },
     "parent": {"type": "string", "description": "Typed parent reference"},
     "ip": {"type": "string", "description": "Resolved exact IP address"},
