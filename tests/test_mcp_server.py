@@ -244,6 +244,14 @@ def test_mcp_client_completes_handshake_and_calls_every_read_only_tool() -> None
                             "blockwart.list_comments",
                             {"object_id": "host/fabrik", "limit": 3},
                         ),
+                        "blockwart.list_audit_events": await session.call_tool(
+                            "blockwart.list_audit_events",
+                            {
+                                "object_id": "host/fabrik",
+                                "limit": 3,
+                                "include_total": True,
+                            },
+                        ),
                         "blockwart.get_context": await session.call_tool(
                             "blockwart.get_context",
                             {"kind": "host", "limit": 2},
@@ -345,6 +353,7 @@ def test_mcp_client_completes_handshake_and_calls_every_read_only_tool() -> None
         "blockwart.search",
         "blockwart.get_object_context",
         "blockwart.list_comments",
+        "blockwart.list_audit_events",
         "blockwart.add_comment",
         "blockwart.get_context",
         "blockwart.create_child",
@@ -370,6 +379,7 @@ def test_mcp_client_completes_handshake_and_calls_every_read_only_tool() -> None
             "blockwart.search",
             "blockwart.get_object_context",
             "blockwart.list_comments",
+            "blockwart.list_audit_events",
             "blockwart.get_context",
             "blockwart.get_object_access",
             "blockwart.search_principals",
@@ -406,6 +416,13 @@ def test_mcp_client_completes_handshake_and_calls_every_read_only_tool() -> None
     assert result_payloads["blockwart.get_object_context"]["objects"][0]["path"] == (
         "/api/v1/objects/host%2Ffabrik"
     )
+    assert result_payloads["blockwart.list_audit_events"]["path"] == (
+        "/api/v1/objects/host%2Ffabrik/audit-events"
+    )
+    assert result_payloads["blockwart.list_audit_events"]["query"] == {
+        "include_total": ["True"],
+        "limit": ["3"],
+    }
     assert result_payloads["blockwart.get_context"]["objects"][0]["path"] == ("/api/v1/context")
     assert result_payloads["blockwart.get_object_access"]["path"] == (
         "/api/v1/objects/host%2Ffabrik/access"
@@ -465,11 +482,12 @@ def test_mcp_client_completes_handshake_and_calls_every_read_only_tool() -> None
     assert unknown_tool.isError is True
     assert json.loads(unknown_content.text)["error"]["code"] == "tool_not_found"
 
-    assert [request["method"] for request in requests] == ["GET"] * 12
+    assert [request["method"] for request in requests] == ["GET"] * 13
     assert [request["path"] for request in requests] == [
         "/api/v1/objects",
         "/api/v1/objects/host%2Ffabrik",
         "/api/v1/objects/host%2Ffabrik/comments",
+        "/api/v1/objects/host%2Ffabrik/audit-events",
         "/api/v1/context",
         "/api/v1/objects/host%2Ffabrik/access",
         "/api/v1/objects/host%2Ffabrik/access/principals",
@@ -1019,6 +1037,16 @@ def test_mcp_rejects_oversized_token_file_without_an_upstream_request(
         ("blockwart.search", {"unexpected": "ignored"}),
         ("blockwart.get_context", {"port": 0}),
         ("blockwart.get_object_context", {"object_id": 123}),
+        ("blockwart.list_audit_events", {"object_id": "demo", "limit": 0}),
+        ("blockwart.list_audit_events", {"object_id": "demo", "limit": 101}),
+        (
+            "blockwart.list_audit_events",
+            {"object_id": "demo", "cursor": "x" * 2049},
+        ),
+        (
+            "blockwart.list_audit_events",
+            {"object_id": "demo", "direction": "asc"},
+        ),
         ("blockwart.search_principals", {"object_id": "demo", "query": "x"}),
         (
             "blockwart.create_grant",
@@ -1052,6 +1080,7 @@ def test_mcp_tools_publish_explicit_read_write_and_delete_hints() -> None:
         "blockwart.search",
         "blockwart.get_object_context",
         "blockwart.list_comments",
+        "blockwart.list_audit_events",
         "blockwart.add_comment",
         "blockwart.get_context",
         "blockwart.create_child",
@@ -1078,6 +1107,7 @@ def test_mcp_tools_publish_explicit_read_write_and_delete_hints() -> None:
             "blockwart.search",
             "blockwart.get_object_context",
             "blockwart.list_comments",
+            "blockwart.list_audit_events",
             "blockwart.get_context",
             "blockwart.get_object_access",
             "blockwart.search_principals",
@@ -1101,6 +1131,8 @@ def test_mcp_descriptions_route_fresh_agent_read_and_create_intents() -> None:
 
     assert "compact summaries" in tools["blockwart.search"]["description"]
     assert "when its id is known" in tools["blockwart.get_object_context"]["description"]
+    assert "newest-first" in tools["blockwart.list_audit_events"]["description"]
+    assert "comment content stays separate" in tools["blockwart.list_audit_events"]["description"]
     assert "full sanitized details in one call" in tools["blockwart.get_context"]["description"]
     assert "single agent call" in tools["blockwart.create_child"]["description"]
     assert "single agent call" in tools["blockwart.create_attached_device"]["description"]
@@ -1254,6 +1286,73 @@ def test_mcp_full_read_etag_is_reused_unchanged_for_update() -> None:
         object_payload,
     )
     assert requests[0][3]["If-Match"] == current["etag"] == '"rev-7"'
+
+
+def test_mcp_list_audit_events_projects_the_v1_page_without_comment_content() -> None:
+    calls = []
+    redacted_page = {
+        "items": [
+            {
+                "id": 42,
+                "action": "comment_create",
+                "actor": "principal-1",
+                "summary": "Added object comment",
+                "details": {
+                    "comment_id": "comment-1",
+                    "event": "comment_create",
+                    "password": "[redacted-secret-field]",
+                    "version": 1,
+                },
+                "created_at": "2026-08-05T12:34:56Z",
+            }
+        ],
+        "next_cursor": "opaque-audit-cursor",
+        "total": 3,
+        "sort": "created_at",
+        "direction": "desc",
+    }
+
+    def fake_fetch(path, params):
+        calls.append((path, params))
+        return redacted_page
+
+    response = call_tool(
+        "blockwart.list_audit_events",
+        {
+            "object_id": "demo/with space",
+            "limit": 1,
+            "cursor": "previous-audit-cursor",
+            "include_total": True,
+        },
+        fetcher=fake_fetch,
+    )
+
+    assert calls == [
+        (
+            "/api/v1/objects/demo%2Fwith%20space/audit-events",
+            {
+                "limit": 1,
+                "cursor": "previous-audit-cursor",
+                "include_total": True,
+            },
+        )
+    ]
+    payload = json.loads(response["content"][0]["text"])
+    assert payload == redacted_page
+    assert "body" not in json.dumps(payload)
+
+    calls.clear()
+    call_tool(
+        "blockwart.list_audit_events",
+        {"object_id": "demo"},
+        fetcher=fake_fetch,
+    )
+    assert calls == [
+        (
+            "/api/v1/objects/demo/audit-events",
+            {"limit": 50, "cursor": None, "include_total": False},
+        )
+    ]
 
 
 def test_mcp_context_calls_read_only_agent_context_endpoint() -> None:

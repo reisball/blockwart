@@ -134,6 +134,7 @@ async def check_mcp(
                 "blockwart.search",
                 "blockwart.get_object_context",
                 "blockwart.list_comments",
+                "blockwart.list_audit_events",
                 "blockwart.add_comment",
                 "blockwart.get_context",
                 "blockwart.create_child",
@@ -162,6 +163,7 @@ async def check_mcp(
                         "blockwart.search",
                         "blockwart.get_object_context",
                         "blockwart.list_comments",
+                        "blockwart.list_audit_events",
                         "blockwart.get_context",
                         "blockwart.get_object_access",
                         "blockwart.search_principals",
@@ -225,6 +227,14 @@ async def check_mcp(
                 {"object_id": object_id, "limit": 5},
             )
             assert _tool_payload(comments)["items"] == [comment_payload["comment"]]
+            audits = await session.call_tool(
+                "blockwart.list_audit_events",
+                {"object_id": object_id, "limit": 5, "include_total": True},
+            )
+            audit_payload = _tool_payload(audits)
+            assert audit_payload["direction"] == "desc"
+            assert audit_payload["total"] >= 1
+            assert comment_payload["comment"]["body"] not in json.dumps(audit_payload)
             access = await session.call_tool(
                 "blockwart.get_object_access",
                 {"object_id": object_id},
@@ -520,7 +530,7 @@ def main() -> None:
     print(
         "installed_package=ok "
         f"cwd={Path.cwd()} revision={readiness['revision']} "
-        f"openapi_paths={len(openapi['paths'])} mcp_protocol={protocol} mcp_calls=27"
+        f"openapi_paths={len(openapi['paths'])} mcp_protocol={protocol} mcp_calls=28"
     )
 
 

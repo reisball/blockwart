@@ -14,7 +14,7 @@ from blockwart.api.deps import get_session
 from blockwart.db.session import transaction
 from blockwart.domain.auth import GrantScope, Role
 from blockwart.main import create_app
-from blockwart.mcp.server import call_tool
+from blockwart.mcp.server import UpstreamError, call_tool
 from blockwart.models import CatalogObject
 from blockwart.schemas.catalog import CatalogObjectIn
 from blockwart.services.access import create_object_grant
@@ -322,6 +322,25 @@ def _authorization(token: str) -> dict[str, str]:
     return {"Authorization": f"Bearer {token}"}
 
 
+def _mcp_fetcher(client: TestClient, token: str):
+    def fetch(path: str, params: dict) -> dict:
+        response = client.get(
+            path,
+            params={key: value for key, value in params.items() if value is not None},
+            headers=_authorization(token),
+        )
+        if response.status_code >= 400:
+            error = response.json()["error"]
+            raise UpstreamError(
+                error["code"],
+                error["message"],
+                error.get("correlation_id"),
+            )
+        return response.json()
+
+    return fetch
+
+
 def test_api_requires_authentication_and_conceals_undiscoverable_objects(
     authorized_client,
 ) -> None:
@@ -588,6 +607,85 @@ def test_filters_counts_relationships_audit_and_cursor_do_not_leak_details(
     )
     assert changed_policy_cursor.status_code == 400
     assert changed_policy_cursor.json()["error"]["code"] == "invalid_request"
+
+
+def test_mcp_audit_events_preserve_v1_authorization_cursor_total_and_parity(
+    authorized_client,
+) -> None:
+    client, state = authorized_client
+    first_arguments = {
+        "object_id": "fabrik",
+        "limit": 1,
+        "include_total": True,
+    }
+    first_rest = client.get(
+        "/api/v1/objects/fabrik/audit-events",
+        params={"limit": 1, "include_total": True},
+        headers=_authorization(state.api_token),
+    )
+    first_mcp = call_tool(
+        "blockwart.list_audit_events",
+        first_arguments,
+        fetcher=_mcp_fetcher(client, state.api_token),
+    )
+    first_payload = json.loads(first_mcp["content"][0]["text"])
+
+    assert first_rest.status_code == 200
+    assert first_payload == first_rest.json()
+    assert first_payload["direction"] == "desc"
+    assert first_payload["sort"] == "created_at"
+    assert first_payload["total"] >= 2
+    assert first_payload["next_cursor"]
+
+    second_arguments = {
+        "object_id": "fabrik",
+        "limit": 1,
+        "cursor": first_payload["next_cursor"],
+    }
+    second_rest = client.get(
+        "/api/v1/objects/fabrik/audit-events",
+        params={"limit": 1, "cursor": first_payload["next_cursor"]},
+        headers=_authorization(state.api_token),
+    )
+    second_mcp = call_tool(
+        "blockwart.list_audit_events",
+        second_arguments,
+        fetcher=_mcp_fetcher(client, state.api_token),
+    )
+    second_payload = json.loads(second_mcp["content"][0]["text"])
+
+    assert second_rest.status_code == 200
+    assert second_payload == second_rest.json()
+    assert second_payload["items"][0]["id"] != first_payload["items"][0]["id"]
+
+    with pytest.raises(UpstreamError) as cursor_error:
+        call_tool(
+            "blockwart.list_audit_events",
+            second_arguments,
+            fetcher=_mcp_fetcher(client, state.other_api_token),
+        )
+    assert cursor_error.value.code == "invalid_request"
+
+    with pytest.raises(UpstreamError) as query_error:
+        call_tool(
+            "blockwart.list_audit_events",
+            {
+                "object_id": "lxc-137",
+                "cursor": first_payload["next_cursor"],
+            },
+            fetcher=_mcp_fetcher(client, state.api_token),
+        )
+    assert query_error.value.code == "invalid_request"
+
+    for object_id in ("blockwart", "hidden-db", "missing"):
+        with pytest.raises(UpstreamError) as concealed:
+            call_tool(
+                "blockwart.list_audit_events",
+                {"object_id": object_id},
+                fetcher=_mcp_fetcher(client, state.api_token),
+            )
+        assert concealed.value.code == "not_found"
+        assert PRIVATE_MARKER not in concealed.value.public_message
 
 
 def test_updated_at_sort_does_not_reveal_stub_timestamp(
