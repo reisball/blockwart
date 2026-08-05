@@ -75,6 +75,7 @@ class AgentRelationshipOut(BaseModel):
 
 
 class AgentCatalogObjectContext(AgentCatalogObjectSummary):
+    etag: str
     data: dict[str, Any] = Field(default_factory=dict)
     relationships: list[AgentRelationshipOut] = Field(default_factory=list)
     parent_path: list[AgentAssetReadNode] = Field(default_factory=list)

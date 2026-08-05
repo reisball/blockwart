@@ -319,6 +319,13 @@ def test_v1_context_page_and_detail_share_the_agent_projection(
     assert page.json()["items"][0]["kind"] == "service"
     assert detail.status_code == 200
     assert detail.json()["ref"] == "service:v1-runtime-api"
+    assert detail.json()["etag"] == detail.headers["etag"]
+    assert detail.json()["etag"] == f'"rev-{detail.json()["revision"]}"'
+    assert all(
+        item["etag"] == f'"rev-{item["revision"]}"'
+        for item in page.json()["items"]
+        if item["visibility"] == "detail"
+    )
     assert [node["ref"] for node in detail.json()["parent_path"]] == [
         "host:v1-host",
         "system:v1-runtime",

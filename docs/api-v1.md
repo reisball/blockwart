@@ -89,11 +89,15 @@ Credential values are never resolved. A discover-only object returns the same
 strict stub as list/context reads. An object without `discover` returns
 `404 not_found`, indistinguishable from an absent ID.
 
-Full object reads include the monotone `revision` field and a strong
-`ETag: "rev-N"` response header plus the five newest authorized entries in
-`recent_comments`. Each entry contains exact source text and `markdown` or
-`plain_text` format; the API never returns stored rendered HTML. Stubs expose
-neither revision nor comments.
+Full object reads include the monotone `revision` field, a strong `etag` body
+field, and the byte-identical `ETag: "rev-N"` response header plus the five
+newest authorized entries in `recent_comments`. Each entry contains exact
+source text and `markdown` or `plain_text` format; the API never returns stored
+rendered HTML. Discover-only stubs expose neither `revision`, body `etag`, HTTP
+`ETag`, nor comments. Concealed objects remain indistinguishable from absent
+IDs. Clients pass the returned body `etag` unchanged as `If-Match` on
+conditional object, relationship, and access-control mutations; comment
+appends and child creation use their separate contracts.
 
 ## Commands
 
@@ -320,8 +324,9 @@ Undocumented methods remain unavailable. In particular, collection-level
 
 The existing `/api/objects` catalog representation and `/api/agent/*`
 responses remain available without a removal date. They delegate to the same
-catalog, placement, and Agent query services but keep their historical
-response shapes.
+catalog, placement, and Agent query services. Their endpoints and response
+envelopes remain stable; readable Agent detail/context objects add the strong
+`etag` field documented above.
 
 New integrations should use `/api/v1`. The MCP wrapper now reads v1 and maps
 the page items back to its established `results`/`objects` payload fields,

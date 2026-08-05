@@ -58,6 +58,8 @@ deterministically from `status`. See `domain-model.md`.
 Returns one object as agent context:
 
 - summary fields
+- the monotone revision and current strong `etag` (`"rev-N"`), byte-identical
+  to the HTTP `ETag` header and reusable unchanged as `If-Match`
 - sanitized data
 - raw direct relationships
 - canonical root-to-parent path and immediate parent
@@ -114,6 +116,12 @@ Query parameters:
 Search and context use the same resolver and filter semantics. All Agent API
 routes remain GET-only and require
 `Authorization: Bearer <service-account token>`.
+
+Every readable full context in this bundle carries the same strong `etag`
+field as the single-object resource. Discover-only stubs expose neither
+`revision` nor body `etag`; the single-object stub response also omits the HTTP
+`ETag` header. Concealed objects remain omitted from collections and return
+the same `404` as absent IDs on direct reads.
 
 Readable contexts expose `recent_comments`; discover-only stubs do not. The
 complete timeline and append command live only in REST v1 and MCP. Agent
