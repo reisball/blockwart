@@ -8,6 +8,7 @@ It wraps the object-authorized v1 API:
 - blockwart.search -> GET /api/v1/objects
 - blockwart.get_object_context -> GET /api/v1/objects/{object_id}
 - blockwart.list_comments -> GET /api/v1/objects/{object_id}/comments
+- blockwart.list_audit_events -> GET /api/v1/objects/{object_id}/audit-events
 - blockwart.add_comment -> POST /api/v1/objects/{object_id}/comments
 - blockwart.get_context -> GET /api/v1/context
 - blockwart.create_child -> POST /api/v1/objects/{parent_id}/children
@@ -42,8 +43,10 @@ Choose the smallest tool that directly answers the intent:
 - Use `blockwart.get_object_access` only for grants and effective permissions;
   access data is deliberately separate from catalog details.
 - Use `blockwart.list_comments` for the complete newest-first operational
-  timeline and `blockwart.add_comment` to append a Markdown work note. The
-  five newest comments are already included by `get_object_context`.
+  comment timeline and `blockwart.add_comment` to append a Markdown work note.
+  Use `blockwart.list_audit_events` for the separate immutable system audit
+  timeline. The five newest comments are already included by
+  `get_object_context`; audit events are not.
 
 For example, `blockwart.get_context` with `q="n8n"` and `kind="service"`
 returns matching service details in one MCP call. Type-specific aliases such as
@@ -70,6 +73,7 @@ means it deliberately bundles lower-level API concerns behind one agent call.
 | `search` | Find compact candidates | `directly sufficient` | Avoids full detail payloads when selecting an object. |
 | `get_object_context` | Read one known object | `directly sufficient` | Returns full authorized catalog context and its write-ready ETag by ID. |
 | `list_comments` | Read an object's operational timeline | `directly sufficient` | Preserves the dedicated newest-first, opaque-cursor resource. |
+| `list_audit_events` | Read an object's system audit timeline | `directly sufficient` | Projects the existing redacted newest-first audit page without mixing in comment content. |
 | `add_comment` | Append an operational work note | `directly sufficient` | Keeps Markdown source and idempotency explicit without exposing audit internals. |
 | `get_context` | Find objects and read details | `directly sufficient` | Search, filters, full details, and per-object write-ready ETags already share one call. |
 | `create_child` | Create a placed child | `intent tool`, `response improved` | Resolves the parent internally and proves placement, ownership, revision, and idempotency. |
@@ -119,6 +123,15 @@ advance the object revision atomically, and never overwrite timeline entries.
 The result and `blockwart.list_comments` return source plus format, not rendered
 HTML. Markdown safety and migration behavior are specified in
 `object-comments.md`.
+
+`blockwart.list_audit_events` carries `object_id`, `limit`, the opaque
+`cursor`, and optional `include_total`. It directly projects
+`GET /api/v1/objects/{object_id}/audit-events`, preserving the REST default
+limit of 50, the 1..100 bounds, fixed `created_at desc` order, redacted event
+shape, and page metadata. Missing, undiscoverable, and discover-only objects
+all remain concealed as `404 not_found`; cursors remain bound to the principal,
+effective policy, object, resource, sort, and direction. Audit events never
+contain or inline operational comment bodies.
 
 `blockwart.create_child` and `blockwart.create_attached_device` execute the
 unchanged API command and resolve its authoritative typed parent inside the

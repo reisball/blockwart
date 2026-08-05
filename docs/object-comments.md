@@ -63,6 +63,9 @@ MCP maps those resources to `blockwart.list_comments` and
 `blockwart.add_comment`. The latter accepts only `object_id`, Markdown `body`,
 and `idempotency_key`. Its runtime service token must have the server-stored
 `mcp` audience. Normal API comment writes require an `api`-audience token.
+The separate immutable audit timeline is available as
+`blockwart.list_audit_events`; its `comment_create` entries never contain the
+comment body.
 
 The object detail page shows the five newest entries and links to the paged
 timeline. The v1 detail and agent context expose the same five authorized

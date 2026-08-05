@@ -15,6 +15,7 @@ from blockwart.api.deps import get_session
 from blockwart.db.session import transaction
 from blockwart.domain.auth import GrantScope, Permission, Role
 from blockwart.main import create_app
+from blockwart.mcp.server import call_tool
 from blockwart.models import (
     AuditEvent,
     CatalogObject,
@@ -127,6 +128,19 @@ def authorized_write_client(
 
 def _authorization(token: str) -> dict[str, str]:
     return {"Authorization": f"Bearer {token}"}
+
+
+def _successful_mcp_fetcher(client: TestClient, token: str):
+    def fetch(path: str, params: dict) -> dict:
+        response = client.get(
+            path,
+            params={key: value for key, value in params.items() if value is not None},
+            headers=_authorization(token),
+        )
+        response.raise_for_status()
+        return response.json()
+
+    return fetch
 
 
 def test_create_child_is_atomic_audited_and_idempotent(
@@ -267,6 +281,25 @@ def test_object_comments_are_append_only_idempotent_audience_bound_and_redacted(
     assert page.json()["items"] == [first.json()["comment"]]
     assert context.json()["recent_comments"] == [first.json()["comment"]]
     assert context.headers["etag"] == first.headers["etag"]
+
+    rest_audit = authorized_write_client.get(
+        "/api/v1/objects/editable/audit-events?include_total=true",
+        headers=_authorization(api_token),
+    )
+    mcp_audit = call_tool(
+        "blockwart.list_audit_events",
+        {"object_id": "editable", "include_total": True},
+        fetcher=_successful_mcp_fetcher(authorized_write_client, api_token),
+    )
+    mcp_audit_payload = json.loads(mcp_audit["content"][0]["text"])
+    assert rest_audit.status_code == 200
+    assert mcp_audit_payload == rest_audit.json()
+    assert payload["body"] not in json.dumps(mcp_audit_payload)
+    comment_event = next(
+        item for item in mcp_audit_payload["items"] if item["action"] == "comment_create"
+    )
+    assert comment_event["details"]["comment_id"] == first.json()["comment"]["id"]
+    assert not {"body", "before", "after"} & set(comment_event["details"])
 
     assert authorized_write_client.get(
         "/api/v1/objects/peer/comments",
@@ -921,6 +954,15 @@ def test_command_audit_redacts_secret_shaped_legacy_before_state(
         assert event is not None
         assert leaked_value not in event.details_json
         assert "[redacted-secret-field]" in event.details_json
+
+    mcp_audit = call_tool(
+        "blockwart.list_audit_events",
+        {"object_id": "editable"},
+        fetcher=_successful_mcp_fetcher(authorized_write_client, token),
+    )
+    mcp_audit_payload = json.loads(mcp_audit["content"][0]["text"])
+    assert leaked_value not in json.dumps(mcp_audit_payload)
+    assert "[redacted-secret-field]" in json.dumps(mcp_audit_payload)
 
 
 def test_browser_ui_uses_same_policy_etag_csrf_and_command_audit(

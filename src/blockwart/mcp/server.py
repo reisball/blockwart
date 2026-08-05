@@ -298,6 +298,25 @@ TOOLS: list[JSON] = [
         "annotations": READ_ONLY_ANNOTATIONS,
     },
     {
+        "name": "blockwart.list_audit_events",
+        "description": (
+            "List the immutable system audit timeline for one readable object in "
+            "deterministic newest-first order. Operational comment content stays separate."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "object_id": {"type": "string", "minLength": 1, "maxLength": 128},
+                "limit": {"type": "integer", "minimum": 1, "maximum": 100, "default": 50},
+                "cursor": {"type": "string", "maxLength": 2048},
+                "include_total": {"type": "boolean", "default": False},
+            },
+            "required": ["object_id"],
+            "additionalProperties": False,
+        },
+        "annotations": READ_ONLY_ANNOTATIONS,
+    },
+    {
         "name": "blockwart.add_comment",
         "description": (
             "Append one Markdown comment to an authorized object. Requires an MCP-audience "
@@ -689,6 +708,16 @@ def call_tool(
             f"/api/v1/objects/{quote(object_id, safe='')}/comments",
             {
                 "limit": args.get("limit", 20),
+                "cursor": args.get("cursor"),
+                "include_total": args.get("include_total", False),
+            },
+        )
+    elif name == "blockwart.list_audit_events":
+        object_id = _required_string(args, "object_id")
+        payload = fetch(
+            f"/api/v1/objects/{quote(object_id, safe='')}/audit-events",
+            {
+                "limit": args.get("limit", 50),
                 "cursor": args.get("cursor"),
                 "include_total": args.get("include_total", False),
             },
