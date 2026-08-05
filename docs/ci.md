@@ -40,6 +40,14 @@ The bootstrap and development extra currently pin or constrain pip below 26.2 be
 `pip-tools 7.6.0` imports a pip compatibility symbol removed in pip 26.2. Keep both
 guards until the pinned compiler version supports pip 26.2 or newer.
 
+The update command starts from empty temporary lock bodies and passes `--upgrade`, so it resolves
+the newest compatible runtime and development graphs. Check mode instead seeds each temporary
+body from its corresponding committed lock and passes `--no-upgrade`. It therefore preserves
+compatible committed versions even when newer releases exist, while still failing for missing
+locks or graph changes caused by stale, removed, or incompatible requirements. Check mode does not
+modify committed lock files: it renders comparison candidates below a temporary directory and
+compares them byte for byte with the committed locks. `pip` and `pip-tools` may cache elsewhere.
+
 Review the complete dependency diff, run the full proof below, and commit `pyproject.toml` and both
 generated files together. A dependency update is not a deployment.
 
@@ -49,10 +57,11 @@ The Gitea and GitHub workflows in `.gitea/workflows/ci.yml` and
 `.github/workflows/ci.yml` are intentionally byte-identical. Each host runs the same proof:
 
 ```bash
-ruff check --no-cache .
-python -m compileall -q src tests scripts
+./scripts/update-dependency-locks.sh --check
 cmp .gitea/workflows/ci.yml .github/workflows/ci.yml
 actionlint .gitea/workflows/ci.yml .github/workflows/ci.yml
+ruff check --no-cache .
+python -m compileall -q src tests scripts
 pytest -q
 python scripts/update_openapi_contract.py --check
 ./scripts/ci/package-smoke.sh
