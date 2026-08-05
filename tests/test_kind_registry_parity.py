@@ -47,13 +47,18 @@ def test_public_asset_kind_registries_are_exactly_equal() -> None:
         "UI schemas": set(UI_SCHEMAS),
         "MCP object writes": set(OBJECT_WRITE_SCHEMA["properties"]["kind"]["enum"])
         - NON_PUBLIC_KINDS,
-        "MCP queries": set(QUERY_FILTER_PROPERTIES["kind"]["enum"]),
     }
     for name, registry in registries.items():
         _assert_exact_registry(name, registry)
 
     assert set(VALID_REFERENCE_KINDS) == object_kinds == set(BUILTIN_SCHEMAS)
     assert OBJECT_STATUSES == ("active", "inactive", "deleted")
+
+    # MCP read filters (`blockwart.search` / `blockwart.get_context`) cover every
+    # canonical ObjectKind, not just the public asset subset: knowledge kinds are
+    # readable through MCP subject to the same authorization as REST v1.
+    assert set(OBJECT_WRITE_SCHEMA["properties"]["kind"]["enum"]) == object_kinds
+    assert set(QUERY_FILTER_PROPERTIES["kind"]["enum"]) == object_kinds
 
 
 def test_parity_guard_reports_missing_and_additional_kinds() -> None:

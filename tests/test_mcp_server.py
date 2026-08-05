@@ -1147,7 +1147,17 @@ def test_mcp_search_and_context_support_host_and_structured_filters() -> None:
 
     for name in ("blockwart.search", "blockwart.get_context"):
         properties = tools_by_name[name]["inputSchema"]["properties"]
-        assert "host" in properties["kind"]["enum"]
+        assert set(properties["kind"]["enum"]) == {
+            "host",
+            "system",
+            "network",
+            "device",
+            "service",
+            "credential_reference",
+            "runbook",
+            "decision",
+            "project",
+        }
         assert set(properties) >= {
             "q",
             "kind",
@@ -1168,6 +1178,51 @@ def test_mcp_search_and_context_support_host_and_structured_filters() -> None:
             "include_total",
             "limit",
         }
+
+
+@pytest.mark.parametrize("kind", ["credential_reference", "runbook", "decision", "project"])
+@pytest.mark.parametrize(
+    ("tool_name", "endpoint", "items_field"),
+    [
+        ("blockwart.search", "/api/v1/objects", "results"),
+        ("blockwart.get_context", "/api/v1/context", "objects"),
+    ],
+)
+def test_mcp_search_and_context_accept_every_knowledge_kind(
+    tool_name, endpoint, items_field, kind
+) -> None:
+    calls = []
+    # Represents what an authorized-but-concealed upstream response looks like: the
+    # v1 API already applied per-object authorization/concealment and secret-field
+    # redaction before this reaches MCP, which must forward it unchanged.
+    upstream_item = {
+        "ref": f"{kind}:demo",
+        "kind": kind,
+        "data": {"password": "[redacted-secret-field]"},
+    }
+
+    def fake_fetch(path, params):
+        calls.append((path, params))
+        return {
+            "items": [upstream_item],
+            "next_cursor": None,
+            "total": 1,
+            "sort": "id",
+            "direction": "asc",
+        }
+
+    response = call_tool(
+        tool_name,
+        {"kind": kind, "limit": 1},
+        fetcher=fake_fetch,
+    )
+
+    assert calls == [(endpoint, {"q": None, "kind": kind, "limit": 1})]
+    payload = json.loads(response["content"][0]["text"])
+    assert payload["kind"] == kind
+    assert payload["count"] == 1
+    assert payload[items_field] == [upstream_item]
+    assert response["isError"] is False
 
 
 def test_mcp_search_calls_read_only_agent_search_endpoint() -> None:
