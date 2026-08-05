@@ -1208,6 +1208,54 @@ def test_mcp_get_object_context_calls_read_only_agent_object_endpoint() -> None:
     ]
 
 
+def test_mcp_full_read_etag_is_reused_unchanged_for_update() -> None:
+    requests = []
+    object_payload = {
+        "id": "n8n",
+        "kind": "service",
+        "label": "n8n",
+        "lifecycle": "active",
+        "health": "healthy",
+        "data": {"schema_version": 1},
+    }
+
+    def fake_fetch(path, params):
+        assert (path, params) == ("/api/v1/objects/n8n", {})
+        return {
+            **object_payload,
+            "visibility": "detail",
+            "revision": 7,
+            "etag": '"rev-7"',
+        }
+
+    def fake_request(method, path, body, headers):
+        requests.append((method, path, body, headers))
+        return {"changed": True}
+
+    read = call_tool(
+        "blockwart.get_object_context",
+        {"object_id": "n8n"},
+        fetcher=fake_fetch,
+    )
+    current = json.loads(read["content"][0]["text"])["objects"][0]
+    call_tool(
+        "blockwart.update_object",
+        {
+            "object_id": current["id"],
+            "if_match": current["etag"],
+            "object": object_payload,
+        },
+        requester=fake_request,
+    )
+
+    assert requests[0][0:3] == (
+        "PUT",
+        "/api/v1/objects/n8n",
+        object_payload,
+    )
+    assert requests[0][3]["If-Match"] == current["etag"] == '"rev-7"'
+
+
 def test_mcp_context_calls_read_only_agent_context_endpoint() -> None:
     calls = []
 

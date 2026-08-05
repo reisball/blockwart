@@ -50,6 +50,14 @@ returns matching service details in one MCP call. Type-specific aliases such as
 `get_service_details` or `get_asset_details` would duplicate this contract and
 are intentionally not added.
 
+Every readable full detail contains `revision` and its current strong `etag`
+(`"rev-N"`). Pass that `etag` byte-for-byte as `if_match` to `update_object`,
+`delete_object`, relationship tools, or access-management writes. A fresh read
+after a successful non-delete mutation supplies the next current value;
+deletion leaves no object or successor ETag to read. Discover-only stubs
+contain neither field, so they cannot be used to infer or attempt a write
+precondition.
+
 ## Tool assessment
 
 The current surface is intentionally small. `directly sufficient` means the
@@ -60,10 +68,10 @@ means it deliberately bundles lower-level API concerns behind one agent call.
 | Tool | Primary agent intent | Assessment | Rationale |
 |---|---|---|---|
 | `search` | Find compact candidates | `directly sufficient` | Avoids full detail payloads when selecting an object. |
-| `get_object_context` | Read one known object | `directly sufficient` | Returns full authorized catalog context by ID. |
+| `get_object_context` | Read one known object | `directly sufficient` | Returns full authorized catalog context and its write-ready ETag by ID. |
 | `list_comments` | Read an object's operational timeline | `directly sufficient` | Preserves the dedicated newest-first, opaque-cursor resource. |
 | `add_comment` | Append an operational work note | `directly sufficient` | Keeps Markdown source and idempotency explicit without exposing audit internals. |
-| `get_context` | Find objects and read details | `directly sufficient` | Search, filters, and full details already share one call; its description is now explicit. |
+| `get_context` | Find objects and read details | `directly sufficient` | Search, filters, full details, and per-object write-ready ETags already share one call. |
 | `create_child` | Create a placed child | `intent tool`, `response improved` | Resolves the parent internally and proves placement, ownership, revision, and idempotency. |
 | `update_object` | Update one known object | `directly sufficient` | The explicit current ETag preserves visible optimistic concurrency. |
 | `delete_object` | Delete one known object | `directly sufficient` | The destructive action and current ETag remain explicit. |
@@ -101,7 +109,7 @@ tracebacks, headers, cookies, tokens, and payloads are excluded.
 
 Write tools use the same command, validation, policy, ETag, idempotency, audit,
 and rollback implementation as REST and the browser UI. Update and delete
-arguments carry the last full-read `if_match` ETag. Child creation carries an
+arguments carry the last full-read body `etag` unchanged as `if_match`. Child creation carries an
 `idempotency_key`; credentials remain runtime configuration and are never tool
 arguments. Delete tools publish MCP's destructive annotation.
 

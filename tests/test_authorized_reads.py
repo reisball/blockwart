@@ -463,6 +463,9 @@ def test_fabrik_projection_is_identical_and_stubs_are_strict_across_apis_and_mcp
     }
     assert set(agent_stub.json()["objects"][0]) == expected_agent_keys
     assert set(v1_stub.json()) == expected_agent_keys
+    assert "etag" not in catalog_stub.headers
+    assert "etag" not in agent_stub.headers
+    assert "etag" not in v1_stub.headers
     assert v1_stub.json()["visibility"] == "stub"
     assert v1_search.json()["items"] == [v1_stub.json()]
     assert v1_search.json()["total"] == 1

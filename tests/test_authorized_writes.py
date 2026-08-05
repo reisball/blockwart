@@ -841,6 +841,13 @@ def test_full_object_read_namespaces_publish_same_revision_etag(
     revision = catalog.json()["revision"]
     assert agent.json()["objects"][0]["revision"] == revision
     assert v1.json()["revision"] == revision
+    assert agent.json()["objects"][0]["etag"] == agent.headers["etag"]
+    assert v1.json()["etag"] == v1.headers["etag"]
+    assert v1.json()["etag"] == f'"rev-{revision}"'
+    assert authorized_write_client.get(
+        "/api/v1/objects/editable",
+        headers=auth,
+    ).json()["etag"] == v1.json()["etag"]
 
 
 def test_mcp_reported_channel_is_preserved_in_command_audit(

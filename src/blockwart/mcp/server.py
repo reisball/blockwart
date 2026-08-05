@@ -265,7 +265,8 @@ TOOLS: list[JSON] = [
     {
         "name": "blockwart.get_object_context",
         "description": (
-            "Get full sanitized details for exactly one Blockwart object when its id is known."
+            "Get full sanitized details for exactly one Blockwart object when its id is known, "
+            "including its current strong ETag for unchanged use as if_match on write tools."
         ),
         "inputSchema": {
             "type": "object",
@@ -323,7 +324,9 @@ TOOLS: list[JSON] = [
         "name": "blockwart.get_context",
         "description": (
             "Find objects by name, kind, parent, endpoint, state, or provenance and return "
-            "their full sanitized details in one call. Use search for compact candidate lists."
+            "their full sanitized details in one call, including current strong ETags. Reuse "
+            "an ETag unchanged as if_match on write tools; use search for compact candidate "
+            "lists."
         ),
         "inputSchema": {
             "type": "object",

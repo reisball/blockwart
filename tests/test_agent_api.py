@@ -174,6 +174,7 @@ def test_agent_object_context_includes_relationships_and_credential_refs(
     assert payload["count"] == 1
     obj = payload["objects"][0]
     assert obj["ref"] == "system:brieftraeger"
+    assert obj["etag"] == response.headers["etag"] == f'"rev-{obj["revision"]}"'
     assert obj["relationships"]
     assert "credential_reference:brieftraeger-ssh-login" in obj["credential_references"]
 

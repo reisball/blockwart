@@ -44,6 +44,7 @@ from blockwart.schemas.agent import (
 )
 from blockwart.schemas.catalog import CatalogRecordDiagnostic, ObjectKind
 from blockwart.schemas.v1 import ObjectSortField, SortDirection
+from blockwart.services.commands import revision_etag
 from blockwart.services.comments import recent_comments_for_object
 from blockwart.services.pagination import CursorPage, paginate_items
 from blockwart.services.read_access import ReadAccess
@@ -563,6 +564,7 @@ class _AgentCatalogResolver:
         ]
         return AgentCatalogObjectContext(
             **self.summary(obj).model_dump(),
+            etag=revision_etag(obj.revision),
             data=data,
             relationships=relationships,
             parent_path=[

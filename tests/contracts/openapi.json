@@ -169,6 +169,10 @@
             "title": "Endpoints",
             "type": "array"
           },
+          "etag": {
+            "title": "Etag",
+            "type": "string"
+          },
           "health": {
             "anyOf": [
               {
@@ -378,7 +382,8 @@
           "label",
           "status",
           "revision",
-          "provenance"
+          "provenance",
+          "etag"
         ],
         "title": "AgentCatalogObjectContext",
         "type": "object"
