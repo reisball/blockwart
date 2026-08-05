@@ -29,10 +29,19 @@ trap cleanup EXIT
 compile_lock() {
   local extra=$1
   local output=$2
+  local committed_lock=${3:-}
   local body="$TEMP_DIR/$(basename "$output").body"
   local -a extra_args=()
+  local -a upgrade_args=()
   if [[ -n "$extra" ]]; then
     extra_args=(--extra "$extra")
+  fi
+  if [[ "$MODE" == --check ]]; then
+    cp "$committed_lock" "$body"
+    upgrade_args=(--no-upgrade)
+  else
+    : >"$body"
+    upgrade_args=(--upgrade)
   fi
 
   "$PYTHON_BIN" -m piptools compile \
@@ -41,6 +50,7 @@ compile_lock() {
     --resolver backtracking \
     --strip-extras \
     --quiet \
+    "${upgrade_args[@]}" \
     "${extra_args[@]}" \
     --output-file "$body" \
     "$PROJECT_ROOT/pyproject.toml"
@@ -55,8 +65,8 @@ compile_lock() {
 }
 
 if [[ "$MODE" == --check ]]; then
-  compile_lock "" "$TEMP_DIR/runtime.txt"
-  compile_lock dev "$TEMP_DIR/dev.txt"
+  compile_lock "" "$TEMP_DIR/runtime.txt" "$PROJECT_ROOT/requirements/runtime.txt"
+  compile_lock dev "$TEMP_DIR/dev.txt" "$PROJECT_ROOT/requirements/dev.txt"
   cmp "$TEMP_DIR/runtime.txt" "$PROJECT_ROOT/requirements/runtime.txt"
   cmp "$TEMP_DIR/dev.txt" "$PROJECT_ROOT/requirements/dev.txt"
   echo "dependency_locks=up_to_date"
