@@ -30,7 +30,18 @@
           <label>{{ t("admin.principals.role") }}<select name="platform_role"><option value="" {% if not detail.principal.platform_role %}selected{% endif %}>{{ t("admin.role.none") }}</option><option value="admin" {% if detail.principal.platform_role %}selected{% endif %}>{{ t("admin.role.admin") }}</option></select></label>
           <div class="button-row"><button type="submit">{{ t("asset.save") }}</button></div>
         </form>
-        <dl class="detail-list"><div><dt>ID</dt><dd><code>{{ detail.principal.id }}</code></dd></div><div><dt>{{ t("admin.principal.revision") }}</dt><dd>{{ detail.principal.revision }}</dd></div><div><dt>{{ t("asset.updated") }}</dt><dd>{{ detail.principal.updated_at }}</dd></div></dl>
+        <dl class="detail-list"><div><dt>ID</dt><dd><code>{{ detail.principal.id }}</code></dd></div><div><dt>{{ t("admin.principal.revision") }}</dt><dd>{{ detail.principal.revision }}</dd></div><div><dt>{{ t("admin.principal.catalog_role") }}</dt><dd>{{ t("admin.catalog_role.catalog_owner") if detail.principal.catalog_role else t("admin.role.none") }}</dd></div><div><dt>{{ t("asset.updated") }}</dt><dd>{{ detail.principal.updated_at }}</dd></div></dl>
+      </section>
+
+      <section class="panel">
+        <h2 class="section-title">{{ t("admin.catalog_role.title") }}</h2>
+        <p class="meta">{{ t("admin.catalog_role.hint") }}</p>
+        <form class="form-grid" method="post" action="/admin/principals/{{ detail.principal.id }}/catalog-role" autocomplete="off">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}" /><input type="hidden" name="if_match" value="{{ detail.principal.etag }}" />
+          <label>{{ t("admin.principal.catalog_role") }}<select name="catalog_role"><option value="" {% if not detail.principal.catalog_role %}selected{% endif %}>{{ t("admin.role.none") }}</option><option value="catalog_owner" {% if detail.principal.catalog_role %}selected{% endif %}>{{ t("admin.catalog_role.catalog_owner") }}</option></select></label>
+          <label>{{ t("admin.reauthenticate") }}<input name="current_admin_password" type="password" maxlength="1024" autocomplete="current-password" required /></label>
+          <div class="button-row"><button type="submit">{{ t("asset.save") }}</button></div>
+        </form>
       </section>
 
       <section class="panel">

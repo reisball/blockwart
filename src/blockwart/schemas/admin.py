@@ -5,6 +5,7 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 from blockwart.domain.auth import (
+    CatalogRole,
     GrantScope,
     Permission,
     PlatformRole,
@@ -25,6 +26,7 @@ class PrincipalAdminSummaryOut(BaseModel):
     display_name: str
     active: bool
     platform_role: PlatformRole | None = None
+    catalog_role: CatalogRole | None = None
     revision: int = Field(ge=1)
     etag: str
     created_at: str
@@ -89,12 +91,20 @@ class PrincipalTokenOut(BaseModel):
     last_used_at: str | None = None
 
 
+class GlobalAuthorityOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    source: Literal["catalog_owner"]
+    permissions: list[Permission]
+
+
 class PrincipalAdminDetailOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     principal: PrincipalAdminSummaryOut
     direct_grants: list[DirectPrincipalGrantOut]
     effective_access: list[EffectivePrincipalGrantOut]
+    global_authorities: list[GlobalAuthorityOut] = Field(default_factory=list)
     service_tokens: list[PrincipalTokenOut]
 
 
@@ -127,6 +137,13 @@ class PrincipalMutationOut(BaseModel):
 
     principal: PrincipalAdminSummaryOut
     changed: bool
+
+
+class CatalogRoleMutationIn(BaseModel):
+    """Dedicated catalog-role command body, separate from generic principal update."""
+
+    catalog_role: CatalogRole | None
+    current_admin_password: str | None = Field(default=None, min_length=1, max_length=1024)
 
 
 class PasswordResetIn(BaseModel):

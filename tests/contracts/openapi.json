@@ -1688,6 +1688,47 @@
         "title": "CatalogRecordDiagnostic",
         "type": "object"
       },
+      "CatalogRole": {
+        "description": "Global catalog authority, independent of the platform-admin axis.",
+        "enum": [
+          "catalog_owner"
+        ],
+        "title": "CatalogRole",
+        "type": "string"
+      },
+      "CatalogRoleMutationIn": {
+        "description": "Dedicated catalog-role command body, separate from generic principal update.",
+        "properties": {
+          "catalog_role": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CatalogRole"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "current_admin_password": {
+            "anyOf": [
+              {
+                "maxLength": 1024,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Current Admin Password"
+          }
+        },
+        "required": [
+          "catalog_role"
+        ],
+        "title": "CatalogRoleMutationIn",
+        "type": "object"
+      },
       "CommentCommandOut": {
         "properties": {
           "comment": {
@@ -1969,6 +2010,28 @@
         "title": "EffectivePrincipalGrantOut",
         "type": "object"
       },
+      "GlobalAuthorityOut": {
+        "properties": {
+          "permissions": {
+            "items": {
+              "$ref": "#/components/schemas/Permission"
+            },
+            "title": "Permissions",
+            "type": "array"
+          },
+          "source": {
+            "const": "catalog_owner",
+            "title": "Source",
+            "type": "string"
+          }
+        },
+        "required": [
+          "source",
+          "permissions"
+        ],
+        "title": "GlobalAuthorityOut",
+        "type": "object"
+      },
       "GrantScope": {
         "enum": [
           "self",
@@ -2074,6 +2137,13 @@
             "title": "Effective Access",
             "type": "array"
           },
+          "global_authorities": {
+            "items": {
+              "$ref": "#/components/schemas/GlobalAuthorityOut"
+            },
+            "title": "Global Authorities",
+            "type": "array"
+          },
           "principal": {
             "$ref": "#/components/schemas/PrincipalAdminSummaryOut"
           },
@@ -2126,6 +2196,16 @@
           "active": {
             "title": "Active",
             "type": "boolean"
+          },
+          "catalog_role": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CatalogRole"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "created_at": {
             "title": "Created At",
@@ -4433,6 +4513,11 @@
       }
     },
     "securitySchemes": {
+      "BrowserSessionCookie": {
+        "in": "cookie",
+        "name": "blockwart_identity_session",
+        "type": "apiKey"
+      },
       "HTTPBearer": {
         "scheme": "bearer",
         "type": "http"
@@ -6533,6 +6618,186 @@
           }
         ],
         "summary": "Update Admin Principal",
+        "tags": [
+          "api-v1-admin"
+        ]
+      }
+    },
+    "/api/v1/admin/principals/{principal_id}/catalog-role": {
+      "post": {
+        "operationId": "set_admin_principal_catalog_role_api_v1_admin_principals__principal_id__catalog_role_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "principal_id",
+            "required": true,
+            "schema": {
+              "title": "Principal Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "If-Match",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "If-Match"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-CSRF-Token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 256,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Csrf-Token"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CatalogRoleMutationIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PrincipalMutationOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Authentication required"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Permission denied"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Resource not found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "412": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Precondition failed"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Request validation failed"
+          },
+          "428": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Precondition required"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Internal server error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Service unavailable"
+          }
+        },
+        "security": [
+          {
+            "BrowserSessionCookie": []
+          }
+        ],
+        "summary": "Set Admin Principal Catalog Role",
         "tags": [
           "api-v1-admin"
         ]

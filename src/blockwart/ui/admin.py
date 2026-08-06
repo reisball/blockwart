@@ -15,7 +15,13 @@ from sqlalchemy.orm import Session
 from blockwart.api.deps import get_session
 from blockwart.api.errors import request_correlation_id
 from blockwart.db.session import DatabaseTransactionError, transaction
-from blockwart.domain.auth import GrantScope, PlatformRole, PrincipalType, Role
+from blockwart.domain.auth import (
+    CatalogRole,
+    GrantScope,
+    PlatformRole,
+    PrincipalType,
+    Role,
+)
 from blockwart.models import CatalogObject
 from blockwart.schemas.admin import (
     SERVICE_TOKEN_MAX_TTL_SECONDS,
@@ -24,6 +30,7 @@ from blockwart.schemas.admin import (
 from blockwart.services.identity import IdentityError, utc_now
 from blockwart.services.pagination import InvalidCursor
 from blockwart.services.principal_management import (
+    CatalogOwnerDenied,
     ManagedPrincipalConflict,
     ManagedPrincipalNotFound,
     ManagedPrincipalPreconditionFailed,
@@ -41,6 +48,7 @@ from blockwart.services.principal_management import (
     reset_managed_human_password,
     revoke_managed_principal_grant,
     revoke_managed_service_token,
+    set_managed_catalog_role,
     update_managed_principal,
     update_managed_principal_grant,
 )
@@ -121,6 +129,7 @@ def principal_list_page(
             "next_url": next_url,
             "principal_types": tuple(PrincipalType),
             "platform_roles": tuple(PlatformRole),
+            "catalog_roles": tuple(CatalogRole),
             "csrf_token": request.cookies.get(AUTH_CSRF_COOKIE_NAME, ""),
             **translation_context(request),
         },
@@ -254,6 +263,45 @@ def reset_principal_password_from_ui(
                 principal_id=principal_id,
                 expected_revision=if_match,
                 new_password=new_password,
+                actor_password=current_admin_password,
+                channel="ui",
+                request_id=request_correlation_id(request),
+            ),
+        )
+    except HTTPException as exc:
+        return _render_principal_detail(
+            request,
+            session,
+            principal_id,
+            error=str(exc.detail),
+            status_code=exc.status_code,
+        )
+    return RedirectResponse(url=f"/admin/principals/{principal_id}", status_code=303)
+
+
+@router.post(
+    "/{principal_id}/catalog-role",
+    response_class=HTMLResponse,
+    dependencies=[Depends(require_browser_write_csrf)],
+)
+def set_principal_catalog_role_from_ui(
+    request: Request,
+    principal_id: str,
+    session: Annotated[Session, Depends(get_session)],
+    current_admin_password: Annotated[str, Form(max_length=1024)],
+    if_match: Annotated[str, Form()],
+    catalog_role: Annotated[str, Form(max_length=32)] = "",
+) -> HTMLResponse:
+    access = read_access_from_request(request)
+    try:
+        _execute_admin_ui(
+            session,
+            lambda: set_managed_catalog_role(
+                session,
+                access,
+                principal_id=principal_id,
+                expected_revision=if_match,
+                catalog_role=CatalogRole(catalog_role) if catalog_role else None,
                 actor_password=current_admin_password,
                 channel="ui",
                 request_id=request_correlation_id(request),
@@ -542,6 +590,7 @@ def _render_principal_detail(
             "roles": tuple(Role),
             "scopes": tuple(GrantScope),
             "platform_roles": tuple(PlatformRole),
+            "catalog_roles": tuple(CatalogRole),
             "csrf_token": request.cookies.get(AUTH_CSRF_COOKIE_NAME, ""),
             "idempotency_key": f"ui-token-{uuid4()}",
             "error": error,
@@ -579,6 +628,7 @@ def _principal_list_error(
             "next_url": None,
             "principal_types": tuple(PrincipalType),
             "platform_roles": tuple(PlatformRole),
+            "catalog_roles": tuple(CatalogRole),
             "csrf_token": request.cookies.get(AUTH_CSRF_COOKIE_NAME, ""),
             "error": error,
             **translation_context(request),
@@ -604,6 +654,14 @@ def _execute_admin_ui[T](
         raise HTTPException(status_code=403, detail="Platform admin permission denied") from exc
     except PlatformAdminDenied as exc:
         raise HTTPException(status_code=403, detail="Platform admin permission denied") from exc
+    except CatalogOwnerDenied as exc:
+        raise HTTPException(
+            status_code=403,
+            detail=(
+                "Catalog owner administration requires dual "
+                "platform-admin and catalog-owner role"
+            ),
+        ) from exc
     except ManagedPrincipalNotFound as exc:
         raise HTTPException(status_code=404, detail="Principal not found") from exc
     except ManagedPrincipalPreconditionRequired as exc:
