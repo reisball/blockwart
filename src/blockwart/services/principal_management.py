@@ -27,6 +27,7 @@ from blockwart.models import (
     ServiceToken,
 )
 from blockwart.services.access import (
+    LastCatalogOwnerError,
     ensure_principal_deactivation_preserves_owner_coverage,
 )
 from blockwart.services.commands import (
@@ -574,10 +575,15 @@ def update_managed_principal(
         )
     deactivating = row.active and not active
     if deactivating:
-        ensure_principal_deactivation_preserves_owner_coverage(
-            session,
-            principal_id=row.id,
-        )
+        try:
+            ensure_principal_deactivation_preserves_owner_coverage(
+                session,
+                principal_id=row.id,
+            )
+        except LastCatalogOwnerError as exc:
+            raise ManagedPrincipalConflict(
+                "at least one active catalog owner is required"
+            ) from exc
     if (
         row.active
         and row.platform_role == PlatformRole.ADMIN

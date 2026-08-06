@@ -15,7 +15,12 @@ from argon2.low_level import Type
 from sqlalchemy import delete, func, or_, select
 from sqlalchemy.orm import Session
 
-from blockwart.domain.auth import PlatformRole, PrincipalContext, PrincipalType
+from blockwart.domain.auth import (
+    CatalogRole,
+    PlatformRole,
+    PrincipalContext,
+    PrincipalType,
+)
 from blockwart.domain.security import find_secret_violations
 from blockwart.models import (
     BrowserSession,
@@ -26,6 +31,7 @@ from blockwart.models import (
     ServiceToken,
 )
 from blockwart.services.access import (
+    LastCatalogOwnerError,
     ensure_principal_deactivation_preserves_owner_coverage,
 )
 
@@ -146,6 +152,7 @@ def create_human_principal(
     display_name: str,
     password: str,
     platform_role: PlatformRole | str | None = None,
+    catalog_role: CatalogRole | str | None = None,
     now: datetime | None = None,
 ) -> PrincipalContext:
     normalized_login = normalize_login(login)
@@ -160,6 +167,7 @@ def create_human_principal(
         display_name=normalized_name,
         active=True,
         platform_role=(PlatformRole(platform_role) if platform_role is not None else None),
+        catalog_role=(CatalogRole(catalog_role) if catalog_role is not None else None),
         revision=1,
         created_at=timestamp,
         updated_at=timestamp,
@@ -184,6 +192,7 @@ def create_service_account(
     login: str,
     display_name: str,
     platform_role: PlatformRole | str | None = None,
+    catalog_role: CatalogRole | str | None = None,
     now: datetime | None = None,
 ) -> PrincipalContext:
     normalized_login = normalize_login(login)
@@ -198,6 +207,7 @@ def create_service_account(
         display_name=normalized_name,
         active=True,
         platform_role=(PlatformRole(platform_role) if platform_role is not None else None),
+        catalog_role=(CatalogRole(catalog_role) if catalog_role is not None else None),
         revision=1,
         created_at=timestamp,
         updated_at=timestamp,
@@ -749,10 +759,13 @@ def deactivate_principal(
         raise IdentityNotFound("principal not found")
     if not principal.active:
         return False
-    ensure_principal_deactivation_preserves_owner_coverage(
-        session,
-        principal_id=principal_id,
-    )
+    try:
+        ensure_principal_deactivation_preserves_owner_coverage(
+            session,
+            principal_id=principal_id,
+        )
+    except LastCatalogOwnerError as exc:
+        raise IdentityConflict("at least one active catalog owner is required") from exc
     timestamp = now or utc_now()
     principal.active = False
     principal.updated_at = timestamp
@@ -872,6 +885,11 @@ def principal_context(
         platform_role=(
             PlatformRole(principal.platform_role)
             if principal.platform_role is not None
+            else None
+        ),
+        catalog_role=(
+            CatalogRole(principal.catalog_role)
+            if principal.catalog_role is not None
             else None
         ),
         revision=principal.revision,

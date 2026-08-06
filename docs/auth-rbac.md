@@ -42,13 +42,29 @@ server-stored pre-authentication challenge. Authenticated browser sessions are
 opaque, revocable, time-limited, `Secure`, `HttpOnly`, and `SameSite=Strict`; state
 changes require the session-bound CSRF value.
 
+## Role axes
+
+Blockwart stores three independent authorization axes on a principal:
+
+| Axis | Stored as | Meaning |
+|---|---|---|
+| identity administration | `platform_role = admin` | identity and credential administration |
+| global catalog authority | `catalog_role = catalog_owner` | all six permissions on every object |
+| scoped catalog access | `object_grants` rows | one role at one object, `self` or `subtree` |
+
+The axes never imply each other. A platform admin has no catalog permission
+unless it also holds grants or the catalog-owner role, and a catalog owner
+cannot administer identities or credentials. Both role columns are nullable and
+constrained to their single allowed value, and both are guarded by SQLite
+triggers plus service checks that refuse to remove the last active holder.
+
 ## Platform administration
 
 Identity administration is a separate authorization axis. A principal may
 have the optional platform role `admin`, which permits user, service-account,
 credential-metadata, and lifecycle administration. It never grants catalog
 `discover`, `read`, `write`, `manage_access`, or `delete`; those permissions
-still come only from explicit object grants.
+still come only from explicit object grants or the global catalog-owner role.
 
 The admin-only browser UI lives at `/admin/principals`. It provides principal
 search, lifecycle changes, direct and effective assignment views, password
@@ -109,6 +125,33 @@ Other relationship types do not propagate grants. Effective authorization is
 calculated from the current graph in one recursive database query, so
 reparenting changes access without a stale application cache.
 
+## Global catalog owner
+
+An active principal with `catalog_role = catalog_owner` holds `discover`,
+`read`, `write`, `create_child`, `manage_access`, and `delete` on every object
+that currently exists, including objects created after the role was assigned.
+
+This is computed centrally in the policy service on every request. No wildcard
+grant, per-object grant, sentinel grant ID, or negative grant ID is ever
+materialized: the effective policy snapshot carries the authority as typed
+global provenance, while `grants_for()` keeps meaning real object grants only.
+Scoped grants stay additive and their direct and effective projections are
+unchanged. The provenance is part of the policy fingerprint, so assigning or
+removing the role immediately invalidates existing cursors and principal-scoped
+read state. An inactive catalog owner receives nothing.
+
+Owner-coverage computation treats any active catalog owner as covering every
+current object without creating a grant. Exclusion-based coverage checks used
+for deactivation and deletion ignore the excluded principal and then fall back
+to the remaining active catalog owners and scoped Owner grants.
+
+Normal catalog-role assignment and removal through the UI, REST, or MCP are not
+part of this foundation. They are deferred to the later slices of issue #136,
+which add dual authorization, re-authentication, ETag/CAS preconditions, and
+audit, together with disconnected-root creation. Until then the role is set
+only by the two protected local commands below, and it is deliberately absent
+from the generic principal create and update schema and service.
+
 ## Grant management
 
 An actor needs effective `manage_access` on the anchor object to list, create,
@@ -136,7 +179,8 @@ request ID, old/new revision, and structured before/after grant state. An exact
 duplicate create or unchanged update is a revision-preserving no-op and emits
 no extra audit event.
 
-Owner coverage is evaluated over the affected canonical placement set. A
+Owner coverage is evaluated over the affected canonical placement set, plus the
+whole catalog when the affected principal is an active catalog owner. A
 revoke, role downgrade, scope shrink, principal deactivation, placement
 change, or delete that would leave any existing affected object without an
 active effective Owner fails closed. A principal also cannot use a grant
@@ -203,20 +247,27 @@ Run the schema upgrade before any auth command:
 blockwart-db upgrade
 ```
 
-Create the first human platform admin and its explicit Owner grant atomically:
+Create the first human platform admin, its explicit Owner grant, and the global
+catalog owner atomically:
 
 ```bash
 blockwart-auth bootstrap-owner \
   --login kai \
   --display-name Kai \
   --object-id fabrik \
-  --scope subtree
+  --scope subtree \
+  --catalog-owner
 ```
 
 The command prompts on a TTY. Automation may use `--password-stdin`; never put
 a password in command-line arguments. Bootstrap is idempotent only when the
-complete requested principal, password credential, and Owner grant already
-exist. Any partial or conflicting identity state fails closed.
+complete requested principal, password credential, catalog-role choice, and
+Owner grant already exist. Any partial or conflicting identity state fails
+closed.
+
+`--catalog-owner` is an explicit choice, never an implicit migration
+promotion. Omitting it produces a valid catalog whose readiness and startup
+checks fail with `catalog_owner_missing` until a catalog owner is selected.
 
 Repeat `--object-id` for each disconnected canonical component. Creation of the
 principal, password credential, and all requested Owner grants is one transaction;
@@ -232,6 +283,33 @@ blockwart-auth promote-admin --login kai
 ```
 
 The operation is idempotent and writes a redacted security event.
+
+The same rule applies to the global catalog owner. An upgraded installation
+reaches `catalog_owner_missing` until one existing active human or service
+principal is selected locally:
+
+```bash
+blockwart-auth bootstrap-catalog-owner --login kai
+```
+
+The command is a bootstrap and recovery path, not a routine way to add owners:
+it succeeds only while there is no active catalog owner, is idempotent for the
+principal that already holds the role, takes no secret in arguments, prints and
+logs no secret, advances the principal revision on change, writes a redacted
+`catalog_owner_selected` security event with a protected-CLI actor, and leaves
+every existing object grant untouched.
+
+Neither bootstrap path can remove the last active catalog owner afterwards:
+demotion, deactivation, and deletion fail with the repository's normal safe
+conflict, and concurrent writers hit the same invariant in SQLite triggers.
+
+Alembic revision `20260806_0015` only adds the nullable, indexed
+`principals.catalog_role` column, its value constraint, and the two guard
+triggers. It promotes nobody and creates no grant. Because SQLite requires a
+batch table rebuild for the new constraint, the migration also recreates the
+existing last-platform-admin triggers verbatim. Downgrading past it drops the
+column and therefore every catalog-owner assignment while leaving principals,
+credentials, and object grants intact; reselect an owner after upgrading again.
 
 Service-account tokens use a protected output file:
 
@@ -284,5 +362,7 @@ Identity sessions do not by themselves enable writes: UI, REST, and MCP commands
 also require the matching object permission. Schema settings are read-only over
 HTTP, and normal object creation requires an authorized placement parent through
 the shared `create_child` command. New top-level roots remain an explicit seed or
-import control-plane operation. Production identity bootstrap, token injection,
-and runtime rollout still require their dedicated approval.
+import control-plane operation; catalog-owner-driven disconnected-root creation
+and the MCP write tools for it are deferred to the later #136 slices. Production
+identity bootstrap, token injection, and runtime rollout still require their
+dedicated approval.

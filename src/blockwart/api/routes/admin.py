@@ -471,6 +471,11 @@ def _execute_admin[T](
                 status_code=409,
                 detail="At least one active platform admin is required",
             ) from exc
+        if "last active catalog owner" in cause:
+            raise HTTPException(
+                status_code=409,
+                detail="At least one active catalog owner is required",
+            ) from exc
         raise
 
 

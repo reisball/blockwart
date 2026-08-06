@@ -1,18 +1,23 @@
 import io
+import json
 import stat
 from pathlib import Path
 
+import pytest
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from blockwart.cli import auth as auth_cli
+from blockwart.config import Settings
 from blockwart.db.migrations import upgrade_database
+from blockwart.db.readiness import DatabaseReadinessError, check_database_readiness
 from blockwart.db.session import build_engine
 from blockwart.models import (
     CatalogObject,
     ObjectGrant,
     PasswordCredential,
     Principal,
+    SecurityEvent,
     ServiceToken,
 )
 from blockwart.services.identity import authenticate_service_token
@@ -384,4 +389,241 @@ def test_service_token_is_written_once_to_new_mode_0600_file(
         principal = session.scalar(select(Principal).where(Principal.login == "mcp.reader"))
         assert principal is not None
         assert principal.revision == 4
+    engine.dispose()
+
+
+def test_bootstrap_owner_assigns_the_catalog_role_in_the_same_transaction(
+    tmp_path: Path,
+    monkeypatch,
+    capsys,
+) -> None:
+    database_url, engine = _database(tmp_path)
+    monkeypatch.setattr("sys.stdin", io.StringIO(f"{PASSWORD}\n"))
+
+    arguments = [
+        "--database-url",
+        database_url,
+        "bootstrap-owner",
+        "--login",
+        "kai.owner",
+        "--display-name",
+        "Kai Owner",
+        "--object-id",
+        "fabrik",
+        "--scope",
+        "subtree",
+        "--password-stdin",
+        "--catalog-owner",
+    ]
+    assert auth_cli.main(arguments) == 0
+    output = capsys.readouterr()
+    assert "mode=created" in output.out
+    assert "catalog_owner=1" in output.out
+    assert PASSWORD not in output.out
+    with Session(engine) as session:
+        principal = session.scalar(select(Principal))
+        assert principal is not None
+        assert principal.catalog_role == "catalog_owner"
+        assert principal.platform_role == "admin"
+        assert principal.revision == 1
+        assert len(session.scalars(select(ObjectGrant)).all()) == 1
+
+    monkeypatch.setattr("sys.stdin", io.StringIO(""))
+    assert auth_cli.main(arguments) == 0
+    assert "mode=unchanged" in capsys.readouterr().out
+    with Session(engine) as session:
+        assert len(session.scalars(select(Principal)).all()) == 1
+        assert len(session.scalars(select(ObjectGrant)).all()) == 1
+    engine.dispose()
+
+
+def test_bootstrap_owner_without_the_flag_leaves_the_catalog_role_unset(
+    tmp_path: Path,
+    monkeypatch,
+    capsys,
+) -> None:
+    database_url, engine = _database(tmp_path)
+    monkeypatch.setattr("sys.stdin", io.StringIO(f"{PASSWORD}\n"))
+
+    assert auth_cli.main(
+        [
+            "--database-url",
+            database_url,
+            "bootstrap-owner",
+            "--login",
+            "kai.owner",
+            "--display-name",
+            "Kai Owner",
+            "--object-id",
+            "fabrik",
+            "--password-stdin",
+        ]
+    ) == 0
+    assert "catalog_owner=0" in capsys.readouterr().out
+    with Session(engine) as session:
+        principal = session.scalar(select(Principal))
+        assert principal is not None
+        assert principal.catalog_role is None
+
+    with pytest.raises(DatabaseReadinessError) as gated:
+        check_database_readiness(Settings(database_url=database_url))
+    assert gated.value.code == "catalog_owner_missing"
+    engine.dispose()
+
+
+def test_catalog_owner_recovery_is_protected_idempotent_and_grant_free(
+    tmp_path: Path,
+    monkeypatch,
+    capsys,
+) -> None:
+    database_url, engine = _database(tmp_path)
+    monkeypatch.setattr("sys.stdin", io.StringIO(f"{PASSWORD}\n"))
+    assert auth_cli.main(
+        [
+            "--database-url",
+            database_url,
+            "bootstrap-owner",
+            "--login",
+            "kai.owner",
+            "--display-name",
+            "Kai Owner",
+            "--object-id",
+            "fabrik",
+            "--password-stdin",
+        ]
+    ) == 0
+    assert auth_cli.main(
+        [
+            "--database-url",
+            database_url,
+            "create-service-account",
+            "--login",
+            "spare.agent",
+            "--display-name",
+            "Spare Agent",
+        ]
+    ) == 0
+    capsys.readouterr()
+
+    assert auth_cli.main(
+        [
+            "--database-url",
+            database_url,
+            "bootstrap-catalog-owner",
+            "--login",
+            "kai.owner",
+        ]
+    ) == 0
+    output = capsys.readouterr()
+    assert "auth_bootstrap_catalog_owner_ok" in output.out
+    assert "changed=1" in output.out
+    assert PASSWORD not in output.out
+    assert output.err == ""
+    with Session(engine) as session:
+        principal = session.scalar(select(Principal).where(Principal.login == "kai.owner"))
+        assert principal is not None
+        assert principal.catalog_role == "catalog_owner"
+        assert principal.revision == 2
+        assert len(session.scalars(select(ObjectGrant)).all()) == 1
+        event = session.scalars(
+            select(SecurityEvent).where(SecurityEvent.event_type == "catalog_owner_selected")
+        ).one()
+        assert event.channel == "cli"
+        assert event.outcome == "success"
+        assert event.principal_id == principal.id
+        assert json.loads(event.details_json) == {"actor": "protected_cli"}
+        assert PASSWORD not in event.details_json
+
+    # Repeating the selection for the same owner stays a no-op.
+    assert auth_cli.main(
+        [
+            "--database-url",
+            database_url,
+            "bootstrap-catalog-owner",
+            "--login",
+            "kai.owner",
+        ]
+    ) == 0
+    assert "changed=0" in capsys.readouterr().out
+    with Session(engine) as session:
+        principal = session.scalar(select(Principal).where(Principal.login == "kai.owner"))
+        assert principal is not None
+        assert principal.revision == 2
+        assert len(session.scalars(
+            select(SecurityEvent).where(
+                SecurityEvent.event_type == "catalog_owner_selected"
+            )
+        ).all()) == 1
+
+    # It is never a routine way to add another owner.
+    assert auth_cli.main(
+        [
+            "--database-url",
+            database_url,
+            "bootstrap-catalog-owner",
+            "--login",
+            "spare.agent",
+        ]
+    ) == 1
+    assert "auth_bootstrap_catalog_owner_error=failed" in capsys.readouterr().err
+    with Session(engine) as session:
+        spare = session.scalar(select(Principal).where(Principal.login == "spare.agent"))
+        assert spare is not None
+        assert spare.catalog_role is None
+        assert spare.revision == 1
+
+    check_database_readiness(Settings(database_url=database_url))
+    engine.dispose()
+
+
+def test_catalog_owner_recovery_rejects_unknown_and_inactive_principals(
+    tmp_path: Path,
+    monkeypatch,
+    capsys,
+) -> None:
+    database_url, engine = _database(tmp_path)
+    monkeypatch.setattr("sys.stdin", io.StringIO(f"{PASSWORD}\n"))
+    assert auth_cli.main(
+        [
+            "--database-url",
+            database_url,
+            "bootstrap-owner",
+            "--login",
+            "kai.owner",
+            "--display-name",
+            "Kai Owner",
+            "--object-id",
+            "fabrik",
+            "--password-stdin",
+        ]
+    ) == 0
+    with Session(engine) as session:
+        session.add(
+            Principal(
+                id="00000000-0000-0000-0000-0000000000aa",
+                principal_type="service_account",
+                login="retired.agent",
+                display_name="Retired Agent",
+                active=False,
+            )
+        )
+        session.commit()
+    capsys.readouterr()
+
+    for login in ("missing.principal", "retired.agent"):
+        assert auth_cli.main(
+            [
+                "--database-url",
+                database_url,
+                "bootstrap-catalog-owner",
+                "--login",
+                login,
+            ]
+        ) == 1
+        assert "auth_bootstrap_catalog_owner_error=failed" in capsys.readouterr().err
+
+    with Session(engine) as session:
+        assert session.scalars(
+            select(Principal).where(Principal.catalog_role.is_not(None))
+        ).all() == []
     engine.dispose()

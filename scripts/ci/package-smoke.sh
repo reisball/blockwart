@@ -61,6 +61,7 @@ BOOTSTRAP_ARGS=(
   --display-name "Package Owner"
   --scope self
   --password-stdin
+  --catalog-owner
 )
 for anchor in "${OWNER_ANCHORS[@]}"; do
   BOOTSTRAP_ARGS+=(--object-id "$anchor")

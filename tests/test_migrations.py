@@ -39,7 +39,8 @@ TOKEN_FAILURE_BUCKETS_REVISION = "20260731_0011"
 PLATFORM_ADMIN_REVISION = "20260731_0012"
 DEVICE_FOUNDATION_REVISION = "20260801_0013"
 OBJECT_COMMENTS_REVISION = "20260804_0014"
-HEAD_REVISION = OBJECT_COMMENTS_REVISION
+CATALOG_OWNER_REVISION = "20260806_0015"
+HEAD_REVISION = CATALOG_OWNER_REVISION
 PROJECT_ALEMBIC_CONFIG = Path(__file__).resolve().parents[1] / "alembic.ini"
 LEGACY_SNAPSHOT = Path(__file__).resolve().parent / "fixtures" / "legacy_snapshot.sql"
 
@@ -2179,6 +2180,137 @@ def test_object_comment_downgrade_is_allowed_only_while_timeline_is_empty(
     command.upgrade(config, HEAD_REVISION)
     command.downgrade(config, DEVICE_FOUNDATION_REVISION)
     assert _revision(database_url) == DEVICE_FOUNDATION_REVISION
+
+
+def test_catalog_owner_migration_is_additive_and_guards_the_last_active_owner(
+    tmp_path: Path,
+) -> None:
+    database_path = tmp_path / "catalog-owner.sqlite3"
+    database_url = _database_url(database_path)
+    config = build_alembic_config(database_url)
+    command.upgrade(config, OBJECT_COMMENTS_REVISION)
+    connection = sqlite3.connect(database_path)
+    try:
+        connection.execute(
+            "INSERT INTO principals "
+            "(id, principal_type, login, display_name, active, platform_role, revision) "
+            "VALUES ('legacy-admin', 'human', 'legacy.admin', 'Legacy Admin', 1, "
+            "'admin', 3)"
+        )
+        connection.execute(
+            "INSERT INTO catalog_objects "
+            "(id, kind, label, status, lifecycle, health, data_json, "
+            "provenance_json, revision) VALUES "
+            "('legacy-root', 'host', 'Legacy Root', 'active', 'active', "
+            "'unknown', '{}', '{}', 1)"
+        )
+        connection.execute(
+            "INSERT INTO object_grants "
+            "(principal_id, object_id, role, scope, created_by_principal_id) "
+            "VALUES ('legacy-admin', 'legacy-root', 'owner', 'subtree', 'legacy-admin')"
+        )
+        connection.commit()
+    finally:
+        connection.close()
+
+    command.upgrade(config, CATALOG_OWNER_REVISION)
+    connection = sqlite3.connect(database_path)
+    try:
+        # The upgrade promotes nobody and creates no grant.
+        assert connection.execute(
+            "SELECT catalog_role, platform_role, revision FROM principals "
+            "WHERE id = 'legacy-admin'"
+        ).fetchone() == (None, "admin", 3)
+        assert connection.execute(
+            "SELECT COUNT(*) FROM principals WHERE catalog_role IS NOT NULL"
+        ).fetchone() == (0,)
+        assert connection.execute(
+            "SELECT principal_id, object_id, role, scope FROM object_grants"
+        ).fetchall() == [("legacy-admin", "legacy-root", "owner", "subtree")]
+        assert connection.execute("PRAGMA foreign_key_check").fetchall() == []
+        indexes = {
+            str(row[0])
+            for row in connection.execute(
+                "SELECT name FROM sqlite_master "
+                "WHERE type = 'index' AND tbl_name = 'principals'"
+            )
+        }
+        assert "ix_principals_catalog_role" in indexes
+        triggers = {
+            str(row[0])
+            for row in connection.execute(
+                "SELECT name FROM sqlite_master WHERE type = 'trigger'"
+            )
+        }
+        # The batch rebuild must not silently drop the last-admin guards.
+        assert {
+            "ck_principals_last_active_admin_update",
+            "ck_principals_last_active_admin_delete",
+            "ck_principals_last_active_catalog_owner_update",
+            "ck_principals_last_active_catalog_owner_delete",
+        } <= triggers
+
+        with pytest.raises(sqlite3.IntegrityError, match="CHECK constraint failed"):
+            connection.execute(
+                "UPDATE principals SET catalog_role = 'root' WHERE id = 'legacy-admin'"
+            )
+        connection.rollback()
+        connection.execute(
+            "UPDATE principals SET catalog_role = 'catalog_owner' "
+            "WHERE id = 'legacy-admin'"
+        )
+        connection.commit()
+        for statement in (
+            "UPDATE principals SET active = 0 WHERE id = 'legacy-admin'",
+            "UPDATE principals SET catalog_role = NULL WHERE id = 'legacy-admin'",
+            "DELETE FROM principals WHERE id = 'legacy-admin'",
+        ):
+            with pytest.raises(sqlite3.IntegrityError, match="last active catalog owner"):
+                connection.execute(statement)
+            connection.rollback()
+        connection.execute(
+            "INSERT INTO principals "
+            "(id, principal_type, login, display_name, active, catalog_role, revision) "
+            "VALUES ('second-owner', 'service_account', 'second.owner', "
+            "'Second Owner', 1, 'catalog_owner', 1)"
+        )
+        connection.execute(
+            "UPDATE principals SET catalog_role = NULL WHERE id = 'legacy-admin'"
+        )
+        connection.commit()
+        with pytest.raises(sqlite3.IntegrityError, match="last active catalog owner"):
+            connection.execute("DELETE FROM principals WHERE id = 'second-owner'")
+        connection.rollback()
+    finally:
+        connection.close()
+
+    command.downgrade(config, OBJECT_COMMENTS_REVISION)
+    connection = sqlite3.connect(database_path)
+    try:
+        columns = {
+            str(row[1]) for row in connection.execute("PRAGMA table_info(principals)")
+        }
+        triggers = {
+            str(row[0])
+            for row in connection.execute(
+                "SELECT name FROM sqlite_master WHERE type = 'trigger'"
+            )
+        }
+        assert "catalog_role" not in columns
+        assert "platform_role" in columns
+        assert "ck_principals_last_active_catalog_owner_update" not in triggers
+        assert "ck_principals_last_active_catalog_owner_delete" not in triggers
+        assert {
+            "ck_principals_last_active_admin_update",
+            "ck_principals_last_active_admin_delete",
+        } <= triggers
+        assert connection.execute("SELECT COUNT(*) FROM principals").fetchone() == (2,)
+        assert connection.execute(
+            "SELECT principal_id, object_id, role, scope FROM object_grants"
+        ).fetchall() == [("legacy-admin", "legacy-root", "owner", "subtree")]
+        assert connection.execute("PRAGMA foreign_key_check").fetchall() == []
+    finally:
+        connection.close()
 
 
 def test_alembic_check_detects_database_model_drift(tmp_path: Path) -> None:

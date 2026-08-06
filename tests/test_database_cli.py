@@ -22,14 +22,14 @@ def test_database_cli_upgrades_then_checks_database(tmp_path: Path, capsys) -> N
     database_url = f"sqlite:///{tmp_path / 'cli.sqlite3'}"
 
     assert database_cli.main(["--database-url", database_url, "upgrade"]) == 0
-    assert "database_upgrade_ok revision=20260804_0014" in capsys.readouterr().out
+    assert "database_upgrade_ok revision=20260806_0015" in capsys.readouterr().out
 
     assert database_cli.main(["--database-url", database_url, "check"]) == 0
-    assert "database_check_ok revision=20260804_0014" in capsys.readouterr().out
+    assert "database_check_ok revision=20260806_0015" in capsys.readouterr().out
 
     assert database_cli.main(["--database-url", database_url, "integrity"]) == 0
     assert (
-        "database_integrity_ok revision=20260804_0014 diagnostics=0"
+        "database_integrity_ok revision=20260806_0015 diagnostics=0"
         in capsys.readouterr().out
     )
 
@@ -221,7 +221,7 @@ def test_markdown_create_schema_uses_alembic(
     engine = create_engine(database_url)
     with engine.connect() as connection:
         assert connection.execute(text("SELECT version_num FROM alembic_version")).scalar_one() == (
-            "20260804_0014"
+            "20260806_0015"
         )
     engine.dispose()
 
@@ -467,7 +467,7 @@ def test_startup_aborts_before_exec_on_migration_failure(
 
 @pytest.mark.parametrize(
     "error_code",
-    ["owner_catalog_empty", "owner_coverage_incomplete"],
+    ["owner_catalog_empty", "owner_coverage_incomplete", "catalog_owner_missing"],
 )
 def test_startup_aborts_before_exec_on_owner_invariant_failure(
     monkeypatch: pytest.MonkeyPatch,

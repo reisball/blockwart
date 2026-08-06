@@ -43,7 +43,7 @@ expected_revision = sys.argv[1]
 payload = json.loads(os.environ["READY_PAYLOAD"])
 assert payload["ok"] is True
 assert payload["build_revision"] == expected_revision
-assert payload["revision"] == "20260804_0014"
+assert payload["revision"] == "20260806_0015"
 assert all(value == "ok" for value in payload["checks"].values())
 PY
 
@@ -145,7 +145,8 @@ printf '%s\n' 'container-smoke-owner-password' | docker run --rm -i \
   --display-name "Container Owner" \
   --object-id ci-legacy \
   --scope self \
-  --password-stdin
+  --password-stdin \
+  --catalog-owner
 
 docker run -d \
   --name "$MIGRATED_CONTAINER" \
