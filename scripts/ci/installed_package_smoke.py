@@ -138,6 +138,7 @@ async def check_mcp(
                 "blockwart.add_comment",
                 "blockwart.get_context",
                 "blockwart.create_child",
+                "blockwart.create_root",
                 "blockwart.update_object",
                 "blockwart.delete_object",
                 "blockwart.create_relationship",
