@@ -32,9 +32,35 @@ Failed REST requests under `/api` use this envelope:
 }
 ```
 
-Validation failures may add safe `details` containing only the field location, public
-message, and validation type. The rejected input and exception context are not copied
-into the response.
+Validation failures may add safe `details`. Each detail carries exactly the
+canonical published fields, in this order:
+
+- `code`: a stable machine-readable violation type from the schema projection's
+  `violation_policy` (for example `required_field_missing`, `value_not_allowed`,
+  `type_mismatch`, `forbidden_key`, or `invalid_value` for any unrecognized
+  rejection);
+- `location`: the rejected path inside the request (for example `body.data.network.category`);
+- `message`: the published description of the violation, regenerated from the
+  domain violation catalog;
+- `path`: the canonical catalog data path when the domain schema rejected the
+  value (for example `data.network.category`), or `null` when a rejection did
+  not map to a canonical data path;
+- `rule`: the published schema-rule name when a schema postcondition rejected
+  the write (for example `reject_credential_value_keys`), or `null` otherwise.
+
+These are the same fields `blockwart.describe_schema` publishes in its
+`violation_policy`, so a client contract cannot drift from what the server
+actually raises. The rejected input, Pydantic validation context, boundary
+validation type, exception text, and internal types are never copied into the
+response; an unrecognized violation falls back to the generic `invalid_value`
+code with `path` and `rule` set to `null`.
+
+> **Development-only contract migration:** earlier revisions documented a
+> `type` field that exposed the unstable internal Pydantic validation type.
+> `type` has been removed and replaced by the stable `code`, `path`, and
+> `rule` fields above. There is no compatibility alias for `type`; consumers
+> that read `type` must switch to `code` (the stable violation type) and
+> optionally `path`/`rule`.
 
 Stable codes currently include:
 
@@ -89,6 +115,13 @@ its existing last-resort secret redaction remains effective. Valid records use
 The MCP wrapper keeps its local `invalid_arguments`, `tool_not_found`, and
 `internal_error` contract. When the Agent API returns a structured REST error, MCP
 copies only its public code, message, and validated correlation ID into the MCP tool
-error. MCP sends its validated or generated ID on every outgoing API request. Legacy or
-malformed upstream errors remain the generic
-`upstream_http_error`; arbitrary upstream response details are not forwarded.
+error. For object-write tools (`blockwart.create_root`, `blockwart.create_child`,
+`blockwart.update_object`, and `blockwart.create_attached_device`) and for forwarded
+upstream HTTP 422 validation failures, MCP also forwards sanitized `details` carrying
+exactly the canonical fields above (`code`, `location`, `message`, `path`, `rule`).
+Arbitrary upstream details, raw inputs, secret values, internal validation context,
+and database diagnostics are never forwarded; an upstream detail that does not name a
+published violation code is dropped. Read and non-object-write tools keep their
+opaque `invalid_arguments` shape without `details`. MCP sends its validated or
+generated ID on every outgoing API request. Legacy or malformed upstream errors remain
+the generic `upstream_http_error`.

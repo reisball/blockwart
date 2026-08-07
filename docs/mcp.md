@@ -247,7 +247,26 @@ of scope.
 ## Error Contract
 
 Local tool validation, unknown-tool, and internal failures use stable public MCP error codes and do
-not include exception text. Structured Agent API errors preserve only the public REST code, message,
+not include exception text. Structured Agent API errors preserve the public REST code, message,
 and validated correlation ID. Legacy or malformed upstream error bodies become
-`upstream_http_error`; arbitrary upstream details are not forwarded. Catalog record-integrity
-markers and RFC3339 UTC timestamps pass through unchanged. See `api-boundary-contract.md`.
+`upstream_http_error`. Catalog record-integrity markers and RFC3339 UTC timestamps pass through
+unchanged. See `api-boundary-contract.md`.
+
+Object-write tool validation failures (`blockwart.create_root`, `blockwart.create_child`,
+`blockwart.update_object`, and `blockwart.create_attached_device`) return field-accurate,
+sanitized `details` on the `invalid_arguments` error. Each detail carries exactly the canonical
+fields the schema projection publishes: `code` (stable violation type), `location` (rejected
+argument path), `message` (published description), `path` (canonical catalog data path, or
+`null`), and `rule` (published schema-rule name, or `null`). Rejected argument values and
+jsonschema messages are never copied into a detail. Read and non-object-write tools keep their
+opaque `invalid_arguments` shape and do not add `details`.
+
+When the Agent API returns an HTTP 422 validation failure, MCP forwards sanitized field `details`
+from the upstream response onto the same canonical contract. MCP re-derives each detail locally:
+only a published violation `code`, a canonical `path`, and a published `rule` survive, and
+`message` is regenerated from the domain violation catalog, so an upstream message is never
+forwarded verbatim. Arbitrary upstream details, raw inputs, secret values, Pydantic context,
+internal validation types, and database diagnostics are never forwarded; an upstream detail that
+does not name a published violation code is dropped, and unknown violations fall back to the
+generic `invalid_value` code. Upstream errors without a recognized structured error body remain
+the generic `upstream_http_error` without `details`.
