@@ -48,6 +48,7 @@ from blockwart.services.agent import (
 )
 from blockwart.services.commands import (
     create_attached_device,
+    create_catalog_root,
     create_child_object,
     create_object_relationship,
     delete_catalog_object,
@@ -403,6 +404,44 @@ def create_v1_attached_device(
             parent_id=parent_id,
             payload=payload.device,
             metadata=metadata_payload,
+            idempotency_key=idempotency_key,
+            idempotency_ttl_seconds=settings.idempotency_ttl_seconds,
+        ),
+    )
+    response.headers["ETag"] = result.etag
+    response.headers["Location"] = f"/api/v1/objects/{result.catalog_object.id}"
+    return V1ObjectCommandOut(
+        catalog_object=result.catalog_object,
+        etag=result.etag,
+        changed=result.changed,
+        replayed=result.replayed,
+    )
+
+
+@router.post(
+    "/roots",
+    response_model=V1ObjectCommandOut,
+    status_code=201,
+)
+def create_v1_catalog_root(
+    payload: CatalogObjectIn,
+    request: Request,
+    response: Response,
+    session: Annotated[Session, Depends(get_session)],
+    access: Annotated[ReadAccess, Depends(require_api_read_access)],
+    idempotency_key: Annotated[str | None, Header(alias="Idempotency-Key")] = None,
+) -> V1ObjectCommandOut:
+    if idempotency_key is None:
+        raise HTTPException(status_code=400, detail="Idempotency-Key is required")
+    context = api_write_context(request, access)
+    settings: Settings = request.app.state.settings
+    result = execute_api_command(
+        session,
+        context,
+        lambda: create_catalog_root(
+            session,
+            context,
+            payload=payload,
             idempotency_key=idempotency_key,
             idempotency_ttl_seconds=settings.idempotency_ttl_seconds,
         ),

@@ -148,9 +148,10 @@ to the remaining active catalog owners and scoped Owner grants.
 Normal catalog-role assignment and removal are performed through one dedicated
 application command and its REST/UI surfaces, described below. The role is never
 part of the generic principal create or update mutation. Disconnected-root
-creation and the MCP write tools for it remain deferred to the later slices of
-issue #136. Until a catalog owner exists, the protected local commands below
-remain the only first-owner and recovery path.
+creation is a separate catalog write available to already-authorized active
+catalog owners, described below; it never assigns or removes any role. Until a
+catalog owner exists, the protected local commands below remain the only
+first-owner and recovery path.
 
 ## Catalog-owner administration
 
@@ -204,6 +205,35 @@ MCP may only read/display the catalog role and its effective authority through t
 existing read-only `list_admin_principals` and `get_admin_principal` projections.
 No MCP tool, argument, route, or generic update field assigns or removes the
 catalog role.
+
+## Catalog-owner root creation
+
+An active catalog owner may create a new disconnected top-level catalog root
+through the dedicated `create_root` application command, exposed on REST
+(`POST /api/v1/roots`), the browser UI (typed **Create root** form), and MCP
+(`blockwart.create_root`). This is a catalog write, not a role mutation, and it
+is the only creation path that does not require a placement parent.
+
+Authorization is resolved from current database state inside the command
+transaction: the actor must be active and hold `catalog_owner`. Platform-admin
+alone is denied, and the catalog owner needs no platform-admin role for this
+operation. The trusted channel must also match the credential: browser UI actors
+use their browser session, REST writes require an `api`-audience service token,
+and MCP writes require an `mcp`-audience service token.
+
+The command reuses the canonical object schema, reference, provenance,
+ACL-shaped-key rejection, secret scanning, normalization, idempotency, and
+revision semantics of object creation. It atomically creates the root and
+exactly one real direct `Owner/self` grant for the creating principal in the
+same transaction; a failed object, grant, or audit write rolls the whole
+transaction back, and idempotent replay never duplicates either. The root has
+no canonical placement parent and no synthetic relationship. Global authority
+is still never represented by a wildcard, sentinel, or subtree grant. The
+generic object create/update/import paths expose no root-creation bypass.
+
+Every creation emits the normal immutable `create_root` audit event with the
+trusted actor, channel, request ID, and revisions, and never includes secrets
+or raw credentials.
 
 ## Grant management
 
@@ -414,8 +444,8 @@ details.
 Identity sessions do not by themselves enable writes: UI, REST, and MCP commands
 also require the matching object permission. Schema settings are read-only over
 HTTP, and normal object creation requires an authorized placement parent through
-the shared `create_child` command. New top-level roots remain an explicit seed or
-import control-plane operation; catalog-owner-driven disconnected-root creation
-and the MCP write tools for it remain deferred to the later #136 slices. Production
+the shared `create_child` command. New top-level roots are created either as an
+explicit seed or import control-plane operation or by an active catalog owner
+through the dedicated `create_root` command described above. Production
 identity bootstrap, token injection, and runtime rollout still require their
 dedicated approval.

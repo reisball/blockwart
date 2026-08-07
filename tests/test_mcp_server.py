@@ -357,6 +357,7 @@ def test_mcp_client_completes_handshake_and_calls_every_read_only_tool() -> None
         "blockwart.add_comment",
         "blockwart.get_context",
         "blockwart.create_child",
+        "blockwart.create_root",
         "blockwart.update_object",
         "blockwart.delete_object",
         "blockwart.create_relationship",
@@ -394,6 +395,7 @@ def test_mcp_client_completes_handshake_and_calls_every_read_only_tool() -> None
         tools[name].annotations and not tools[name].annotations.readOnlyHint
         for name in {
             "blockwart.create_child",
+            "blockwart.create_root",
             "blockwart.add_comment",
             "blockwart.update_object",
             "blockwart.delete_object",
@@ -1084,6 +1086,7 @@ def test_mcp_tools_publish_explicit_read_write_and_delete_hints() -> None:
         "blockwart.add_comment",
         "blockwart.get_context",
         "blockwart.create_child",
+        "blockwart.create_root",
         "blockwart.update_object",
         "blockwart.delete_object",
         "blockwart.create_relationship",
