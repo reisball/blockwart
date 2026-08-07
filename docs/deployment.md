@@ -41,14 +41,17 @@ or `--password-stdin`:
 ```bash
 BLOCKWART_DATABASE_URL=sqlite:////tmp/blockwart.sqlite3 \
   blockwart-auth bootstrap-owner --login kai --display-name Kai \
-  --object-id COMPONENT_ROOT_ID --scope subtree
+  --object-id COMPONENT_ROOT_ID --scope subtree --catalog-owner
 ```
 
 `bootstrap-owner` makes that protected first human a platform admin while
-catalog access still comes only from the listed Owner anchors. For an existing
-database upgraded from an earlier release, explicitly run
-`blockwart-auth promote-admin --login kai`; migration `0012` never guesses an
-admin identity.
+scoped catalog access still comes only from the listed Owner anchors.
+`--catalog-owner` additionally assigns the independent global catalog-owner
+role in the same transaction; without it, startup and readiness fail with
+`catalog_owner_missing`. For an existing database upgraded from an earlier
+release, explicitly run `blockwart-auth promote-admin --login kai` and
+`blockwart-auth bootstrap-catalog-owner --login kai`; migrations `0012` and
+`0015` never guess an admin or catalog-owner identity.
 
 Then run the migration/readiness-gated launcher:
 
@@ -72,7 +75,7 @@ docker compose -f compose.example.yaml run --rm blockwart \
   blockwart-seed --create-schema --seed seeds/pilot_objects.yaml
 docker compose -f compose.example.yaml run --rm blockwart \
   blockwart-auth bootstrap-owner --login kai --display-name Kai \
-  --object-id COMPONENT_ROOT_ID --scope subtree
+  --object-id COMPONENT_ROOT_ID --scope subtree --catalog-owner
 docker compose -f compose.example.yaml up
 ```
 
@@ -80,11 +83,15 @@ This is an example only. It binds the published port to `127.0.0.1` and does not
 backups, monitoring, or service registration.
 
 The image command is `blockwart-start`. It runs the packaged Alembic upgrade against the effective
-`BLOCKWART_DATABASE_URL`, verifies the packaged head and full active effective Owner coverage,
-and only then replaces itself with Uvicorn with Uvicorn's implicit proxy-header processing
-disabled. Migration errors use the redacted
+`BLOCKWART_DATABASE_URL`, verifies the packaged head, full active effective Owner coverage, and an
+active global catalog owner, and only then replaces itself with Uvicorn with Uvicorn's implicit
+proxy-header processing disabled. Migration errors use the redacted
 `startup_error=database_migration_failed`; authorization-invariant failures use
-`startup_error=owner_catalog_empty` or `startup_error=owner_coverage_incomplete`.
+`startup_error=owner_catalog_empty`, `startup_error=owner_coverage_incomplete`, or
+`startup_error=catalog_owner_missing`. The last code means the catalog is fully owned but no
+active global catalog owner has been selected yet; see `auth-rbac.md` for the explicit
+`--catalog-owner` bootstrap choice and the `bootstrap-catalog-owner` recovery command. Nothing
+promotes an existing principal automatically.
 
 The image healthcheck calls `/api/health/ready`. An unhealthy result therefore means the process
 may still be alive but must not receive normal traffic.
@@ -97,7 +104,7 @@ The health endpoints have separate operational meanings:
   answer HTTP. They deliberately do not touch the database.
 - `GET /api/health/ready` returns `200` only when `SELECT 1` succeeds, the current Alembic revision
   exactly matches the packaged head, SQLite has the expected connection settings, every object in
-  a nonempty catalog has an active effective Owner, and a
+  a nonempty catalog has an active effective Owner, at least one active catalog owner exists, and a
   rolled-back write against the Alembic revision succeeds without changing data. The probe first
   acquires a write lock, changes the revision only inside that transaction, and rolls it back.
 
@@ -105,8 +112,10 @@ Readiness failures return `503` with a stable `error_code`, check statuses, pack
 revision, and current schema revision where available. The public response never includes database
 paths, SQL text, driver exceptions, or credentials. Expected codes are
 `database_missing`, `database_unavailable`, `schema_revision_mismatch`,
-`sqlite_configuration_invalid`, `database_not_writable`, `owner_catalog_empty`, and
-`owner_coverage_incomplete`.
+`sqlite_configuration_invalid`, `database_not_writable`, `owner_catalog_empty`,
+`owner_coverage_incomplete`, and `catalog_owner_missing`. Scoped Owner coverage is evaluated
+before the catalog-owner gate, so a partially owned catalog still reports the precise
+`owner_coverage_incomplete` cause.
 
 Example:
 
@@ -148,8 +157,9 @@ Perform the authorization transition against a restored candidate before changin
    `BLOCKWART_ADMIN_SESSION_TTL_SECONDS`, `BLOCKWART_ADMIN_COOKIE_SECURE`, and
    `BLOCKWART_AUTH_COOKIE_SECURE` settings from the deployment environment and secret injection.
 2. Upgrade the candidate, inventory every disconnected catalog component privately, and run one
-   atomic `bootstrap-owner` invocation with all required anchors. Require readiness to report
-   `authorization=ok` without exposing object identifiers.
+   atomic `bootstrap-owner` invocation with all required anchors and the explicit `--catalog-owner`
+   choice, or select the existing owner once with `bootstrap-catalog-owner`. Require readiness to
+   report `authorization=ok` without exposing object identifiers.
 3. Verify the public HTTPS certificate, HSTS response, localhost-only application bind, and
    `Secure`, `HttpOnly`, and `SameSite=Strict` attributes on identity responses.
 4. Prove `/admin`, `/admin/unlock`, and `/admin/lock` are absent, schema HTTP POST is rejected, and

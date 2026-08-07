@@ -12,6 +12,7 @@ from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.orm import Session
 
 from blockwart.domain.auth import (
+    CatalogRole,
     GrantScope,
     Permission,
     PrincipalContext,
@@ -312,6 +313,108 @@ def create_child_object(
             "affected_revisions": {
                 parent.id: parent_revision,
             },
+        },
+    )
+    response = {
+        "catalog_object": result.model_dump(mode="json"),
+        "etag": revision_etag(result.revision),
+        "changed": True,
+    }
+    record.resource_id = result.id
+    record.response_json = _canonical_json(response)
+    session.flush()
+    return ObjectCommandResult(
+        catalog_object=result,
+        etag=revision_etag(result.revision),
+        changed=True,
+    )
+
+
+def create_catalog_root(
+    session: Session,
+    context: WriteContext,
+    *,
+    payload: CatalogObjectIn,
+    idempotency_key: str,
+    idempotency_ttl_seconds: int,
+    now: datetime | None = None,
+) -> ObjectCommandResult:
+    """Atomically create one disconnected top-level catalog root.
+
+    Authorization is resolved from current database state inside the
+    transaction: the actor must be active and hold the ``catalog_owner`` role.
+    Platform-admin alone is not sufficient, and an active catalog owner needs
+    no platform-admin role for this catalog operation. The root and exactly
+    one real direct Owner/self grant for the creating principal commit
+    together; no placement parent, synthetic relationship, subtree grant,
+    wildcard, or sentinel grant is ever created. Catalog-role membership is
+    never changed by this catalog write.
+    """
+    timestamp = now or _now()
+    _require_active_catalog_owner(session, context)
+    request_payload = {"payload": payload.model_dump(mode="json")}
+    record, replay = reserve_idempotency_record(
+        session,
+        context,
+        key=idempotency_key,
+        operation_context="create_root",
+        request_payload=request_payload,
+        ttl_seconds=idempotency_ttl_seconds,
+        now=timestamp,
+    )
+    if replay is not None:
+        return ObjectCommandResult(
+            catalog_object=CatalogObjectOut.model_validate(replay["catalog_object"]),
+            etag=str(replay["etag"]),
+            changed=bool(replay["changed"]),
+            replayed=True,
+        )
+    if session.get(CatalogObject, payload.id) is not None:
+        raise CommandConflict("catalog object id already exists")
+
+    created = upsert_object(session, payload, write_audit=False)
+    object_ref = f"{created.kind}:{created.id}"
+    session.add(
+        ObjectGrant(
+            principal_id=context.principal.id,
+            object_id=created.id,
+            role=Role.OWNER,
+            scope=GrantScope.SELF,
+            created_by_principal_id=context.principal.id,
+        )
+    )
+    session.flush()
+    result = get_object(session, created.id)
+    root_row = session.get(CatalogObject, created.id)
+    if result is None or root_row is None:
+        raise CommandConflict("created object could not be loaded")
+    result = result.model_copy(
+        update={
+            "capabilities": sorted(
+                permissions_for_role(Role.OWNER),
+                key=lambda permission: permission.value,
+            )
+        }
+    )
+    _write_command_audit(
+        session,
+        context,
+        object_id=created.id,
+        action="create_root",
+        old_revision=0,
+        new_revision=root_row.revision,
+        before=None,
+        after=_object_snapshot(root_row),
+        changes=[],
+        extra={
+            "object_ref": object_ref,
+            "parent_ref": None,
+            "creator_owner_grant": {
+                "principal_id": context.principal.id,
+                "role": Role.OWNER,
+                "scope": GrantScope.SELF,
+            },
+            "affected_revisions": {},
         },
     )
     response = {
@@ -840,6 +943,34 @@ def _require_permission(
             permission=permission,
         )
     return row
+
+
+def _require_active_catalog_owner(session: Session, context: WriteContext) -> None:
+    """Require the actor to be an active catalog owner from current DB state.
+
+    The check re-reads the principal row inside the command transaction so a
+    stale access snapshot cannot satisfy the gate after a concurrent role or
+    activation change. Platform-admin alone is denied; the catalog-owner axis
+    is independent. The trusted channel must also match the token audience:
+    browser UI actors carry no service-token audience, while api/mcp channel
+    actors must hold the matching audience. One indistinguishable denial is
+    raised for every missing property.
+    """
+    if context.channel == "ui":
+        trusted_origin = context.principal.service_token_audience is None
+    else:
+        trusted_origin = context.principal.service_token_audience == context.channel
+    actor = session.get(Principal, context.principal.id)
+    if (
+        not trusted_origin
+        or actor is None
+        or not actor.active
+        or actor.catalog_role != CatalogRole.CATALOG_OWNER
+    ):
+        raise CommandAuthorizationDenied(
+            object_id="<catalog-root>",
+            permission=Permission.CREATE_CHILD,
+        )
 
 
 def _relationship_command_objects(

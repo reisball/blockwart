@@ -11,6 +11,7 @@ from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.orm import Session
 
 from blockwart.domain.auth import (
+    CatalogRole,
     GrantScope,
     Permission,
     PlatformRole,
@@ -27,6 +28,8 @@ from blockwart.models import (
     ServiceToken,
 )
 from blockwart.services.access import (
+    LastCatalogOwnerError,
+    ensure_active_catalog_owner_remains,
     ensure_principal_deactivation_preserves_owner_coverage,
 )
 from blockwart.services.commands import (
@@ -66,6 +69,30 @@ class PrincipalManagementError(RuntimeError):
 
 class PlatformAdminDenied(PrincipalManagementError):
     """The actor is not an active platform administrator."""
+
+
+class CatalogOwnerDenied(PrincipalManagementError):
+    """The actor is not simultaneously an active platform admin and catalog owner.
+
+    The denial carries the redacted evidence a channel handler needs to record a
+    single security event: the actor, the channel, and the request correlation
+    id. It never carries the target principal, the missing role axis, or any
+    credential material, so the recorded event cannot tell a requester which of
+    the two required roles was absent.
+    """
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        principal_id: str | None = None,
+        channel: str | None = None,
+        request_id: str | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.principal_id = principal_id
+        self.channel = channel
+        self.request_id = request_id
 
 
 class PlatformAdminReauthenticationDenied(PlatformAdminDenied):
@@ -109,11 +136,18 @@ class PrincipalAdminSummary:
     display_name: str
     active: bool
     platform_role: PlatformRole | None
+    catalog_role: CatalogRole | None
     revision: int
     etag: str
     created_at: str
     updated_at: str
     last_used_at: str | None
+
+
+@dataclass(frozen=True, slots=True)
+class GlobalAuthorityView:
+    source: str
+    permissions: tuple[Permission, ...]
 
 
 @dataclass(frozen=True, slots=True)
@@ -169,6 +203,7 @@ class PrincipalAdminDetail:
     principal: PrincipalAdminSummary
     direct_grants: tuple[DirectPrincipalGrantView, ...]
     effective_access: tuple[EffectivePrincipalGrantView, ...]
+    global_authorities: tuple[GlobalAuthorityView, ...]
     service_tokens: tuple[PrincipalTokenView, ...]
 
 
@@ -229,6 +264,31 @@ def record_failed_platform_admin_reauthentication(
         principal_id=denial.principal_id,
         request_id=denial.request_id,
         details={"reason": "invalid_credentials"},
+    )
+
+
+def record_catalog_owner_denial(
+    session: Session,
+    denial: CatalogOwnerDenied,
+) -> None:
+    """Record one redacted security event for a failed dual-role authorization.
+
+    This mirrors the failed platform-admin reauthentication evidence: the event
+    names the actor, the channel and the request id with a single stable reason,
+    and never the target principal, the missing role axis, or any credential.
+    Exactly one event is written per denial because only the one channel handler
+    that converts the denial into a `403` calls this.
+    """
+    if denial.channel is None:
+        return
+    record_security_event(
+        session,
+        event_type="catalog_owner_admin_authorization",
+        outcome="denied",
+        channel=denial.channel,
+        principal_id=denial.principal_id,
+        request_id=denial.request_id,
+        details={"reason": "dual_role_required"},
     )
 
 
@@ -409,10 +469,24 @@ def query_principal_detail(
         .order_by(func.lower(ServiceToken.name), ServiceToken.id)
     ).all()
     last_used = _last_used_by_principal(session, {principal.id}).get(principal.id)
+    global_authorities = tuple(
+        GlobalAuthorityView(
+            source=authority.source.value,
+            permissions=tuple(
+                sorted(
+                    (permission for permission in Permission
+                     if permission in authority.permissions),
+                    key=lambda permission: permission.value,
+                )
+            ),
+        )
+        for authority in target_policy.global_authorities
+    )
     return PrincipalAdminDetail(
         principal=_summary(principal, last_used_at=last_used),
         direct_grants=direct_grants,
         effective_access=tuple(effective_access),
+        global_authorities=global_authorities,
         service_tokens=tuple(_token_view(row) for row in tokens),
     )
 
@@ -557,6 +631,18 @@ def update_managed_principal(
         raise ManagedPrincipalNotFound("principal not found")
     if row.revision != expected:
         raise ManagedPrincipalPreconditionFailed("principal revision changed")
+    # Activating a principal that already carries the catalog-owner role would
+    # grant global catalog authority through the generic platform-admin path,
+    # bypassing the dedicated dual-role gate and its audit. Newly assigning the
+    # role to an inactive principal is rejected, but legacy rows and raw writes
+    # can still hold that state, so activation fails closed here as well. The
+    # safe sequence is to remove the role under the catalog-role workflow first
+    # and to reassign it there after activation.
+    if active and not row.active and row.catalog_role == CatalogRole.CATALOG_OWNER:
+        raise ManagedPrincipalConflict(
+            "an inactive catalog owner must have its catalog role removed "
+            "through catalog-role administration before it can be activated"
+        )
     normalized_name = normalize_display_name(display_name)
     resolved_role = PlatformRole(platform_role) if platform_role is not None else None
     changed = (
@@ -574,10 +660,15 @@ def update_managed_principal(
         )
     deactivating = row.active and not active
     if deactivating:
-        ensure_principal_deactivation_preserves_owner_coverage(
-            session,
-            principal_id=row.id,
-        )
+        try:
+            ensure_principal_deactivation_preserves_owner_coverage(
+                session,
+                principal_id=row.id,
+            )
+        except LastCatalogOwnerError as exc:
+            raise ManagedPrincipalConflict(
+                "at least one active catalog owner is required"
+            ) from exc
     if (
         row.active
         and row.platform_role == PlatformRole.ADMIN
@@ -622,6 +713,7 @@ def update_managed_principal(
             "actor_principal_id": access.principal.id,
             "active": int(row.active),
             "platform_role": row.platform_role or "none",
+            "catalog_role": row.catalog_role or "none",
             "revision": row.revision,
         },
     )
@@ -645,11 +737,20 @@ def reset_managed_human_password(
     channel: str,
     request_id: str | None = None,
 ) -> PrincipalCredentialResult:
+    """Reset a managed human's password.
+
+    Resetting the password of a human catalog owner takes over that principal's
+    global catalog authority, so such a target is gated on the dual-role,
+    human-reauthenticated catalog-owner-admin path before any password mutation
+    or session revocation happens. Every other target keeps the established
+    platform-admin contract.
+    """
     require_platform_admin(access)
-    _reauthenticate_human_admin(
+    _authorize_credential_administration(
         session,
         access,
-        password=actor_password,
+        principal_id=principal_id,
+        actor_password=actor_password,
         channel=channel,
         request_id=request_id,
     )
@@ -675,6 +776,241 @@ def reset_managed_human_password(
     )
 
 
+def require_catalog_owner_admin(
+    session: Session,
+    access: ReadAccess,
+    *,
+    channel: str | None = None,
+    request_id: str | None = None,
+) -> None:
+    """Require the actor to be simultaneously an active platform admin and catalog owner.
+
+    Both axes are resolved from current database state so a stale access snapshot
+    cannot satisfy the dual-role gate after a concurrent role change. Neither axis
+    alone is sufficient; the dedicated catalog-role denial is raised for any
+    missing axis so callers cannot distinguish which one failed. The channel and
+    request id travel with the denial so the channel handler can record one
+    redacted denial event.
+    """
+    actor = session.get(Principal, access.principal.id)
+    if (
+        actor is None
+        or not actor.active
+        or actor.platform_role != PlatformRole.ADMIN
+        or actor.catalog_role != CatalogRole.CATALOG_OWNER
+    ):
+        raise CatalogOwnerDenied(
+            "actor must be an active platform admin and catalog owner",
+            principal_id=access.principal.id,
+            channel=channel,
+            request_id=request_id,
+        )
+
+
+def _authorize_credential_administration(
+    session: Session,
+    access: ReadAccess,
+    *,
+    principal_id: str,
+    actor_password: str | None,
+    channel: str,
+    request_id: str | None,
+) -> None:
+    """Gate one credential issuance, rotation or password reset on the target's role.
+
+    A target whose current database row carries the global catalog-owner role —
+    active or inactive — may only have its credentials administered by an actor
+    that is at this moment both an active platform admin and an active catalog
+    owner, and that reauthenticates through the human-only catalog-owner-admin
+    path. The generic platform-admin service-account exemption never applies to
+    such a target, so a platform-admin-only service account can neither mint nor
+    rotate a token for a catalog-owner service principal nor reset a human
+    catalog owner's password. Every other target keeps the established
+    platform-admin contract unchanged.
+
+    The target's catalog role is read from current database state; the request
+    payload and the actor's access projection are never trusted for it. Callers
+    must invoke this before reserving idempotency, claiming a revision, issuing
+    or rotating a secret, mutating a password, revoking sessions, or writing any
+    success audit evidence.
+    """
+    target = session.get(Principal, principal_id)
+    if target is not None and target.catalog_role == CatalogRole.CATALOG_OWNER:
+        require_catalog_owner_admin(
+            session,
+            access,
+            channel=channel,
+            request_id=request_id,
+        )
+        _reauthenticate_catalog_owner_admin(
+            session,
+            access,
+            password=actor_password,
+            channel=channel,
+            request_id=request_id,
+        )
+        return
+    _reauthenticate_human_admin(
+        session,
+        access,
+        password=actor_password,
+        channel=channel,
+        request_id=request_id,
+    )
+
+
+def set_managed_catalog_role(
+    session: Session,
+    access: ReadAccess,
+    *,
+    principal_id: str,
+    expected_revision: int | str | None,
+    catalog_role: CatalogRole | str | None,
+    actor_password: str | None,
+    channel: str,
+    request_id: str | None = None,
+) -> PrincipalMutationResult:
+    """Assign or remove the global catalog-owner role on an existing principal.
+
+    The actor must be simultaneously an active platform admin and an active catalog
+    owner; neither axis alone is sufficient. Human actors must reauthenticate with
+    their current password; service-account actors are denied this human
+    control-plane action. A missing or stale principal ETag uses the established
+    428/412 behavior. An unchanged role is a revision-preserving no-op without a
+    success audit event. Removing the last active catalog owner fails closed at
+    the service and SQLite-trigger levels.
+    """
+    require_catalog_owner_admin(
+        session,
+        access,
+        channel=channel,
+        request_id=request_id,
+    )
+    _reauthenticate_catalog_owner_admin(
+        session,
+        access,
+        password=actor_password,
+        channel=channel,
+        request_id=request_id,
+    )
+    expected = _expected_revision(expected_revision)
+    row = session.get(Principal, principal_id)
+    if row is None:
+        raise ManagedPrincipalNotFound("principal not found")
+    if row.revision != expected:
+        raise ManagedPrincipalPreconditionFailed("principal revision changed")
+    resolved_role = CatalogRole(catalog_role) if catalog_role is not None else None
+    before_role = (
+        CatalogRole(row.catalog_role) if row.catalog_role is not None else None
+    )
+    if resolved_role == before_role:
+        return PrincipalMutationResult(
+            principal=_summary(
+                row,
+                last_used_at=_last_used_by_principal(session, {row.id}).get(row.id),
+            ),
+            changed=False,
+        )
+    # An inactive catalog owner could later be activated through the generic
+    # principal update, which produces global catalog permissions without this
+    # gate or its audit event, so the role is never parked on an inactive
+    # principal in the first place.
+    if resolved_role == CatalogRole.CATALOG_OWNER and not row.active:
+        raise ManagedPrincipalConflict(
+            "the catalog-owner role cannot be assigned to an inactive principal"
+        )
+    if resolved_role is None and before_role == CatalogRole.CATALOG_OWNER:
+        try:
+            ensure_active_catalog_owner_remains(
+                session,
+                excluded_principal_ids=(row.id,),
+            )
+        except LastCatalogOwnerError as exc:
+            raise ManagedPrincipalConflict(
+                "at least one active catalog owner is required"
+            ) from exc
+    result = session.execute(
+        update(Principal)
+        .where(Principal.id == row.id, Principal.revision == expected)
+        .values(
+            catalog_role=resolved_role,
+            revision=expected + 1,
+            updated_at=utc_now(),
+        )
+    )
+    if result.rowcount != 1:
+        raise ManagedPrincipalPreconditionFailed("principal revision changed")
+    session.flush()
+    session.expire(row)
+    session.refresh(row)
+    record_security_event(
+        session,
+        event_type="catalog_owner_role_changed",
+        outcome="success",
+        channel=channel,
+        principal_id=row.id,
+        request_id=request_id,
+        details={
+            "actor_principal_id": access.principal.id,
+            "before_catalog_role": before_role.value if before_role is not None else "none",
+            "after_catalog_role": resolved_role.value if resolved_role is not None else "none",
+            "revision": row.revision,
+        },
+    )
+    return PrincipalMutationResult(
+        principal=_summary(
+            row,
+            last_used_at=_last_used_by_principal(session, {row.id}).get(row.id),
+        ),
+        changed=True,
+    )
+
+
+def _reauthenticate_catalog_owner_admin(
+    session: Session,
+    access: ReadAccess,
+    *,
+    password: str | None,
+    channel: str,
+    request_id: str | None,
+) -> None:
+    """Catalog-role administration is a human control-plane action.
+
+    Service-account actors are always denied, even over the API; this command
+    never accepts a service-account bearer credential as substitute for a human
+    reauthentication.
+    """
+    if access.principal.principal_type != PrincipalType.HUMAN or password is None:
+        raise PlatformAdminReauthenticationDenied(
+            "catalog-role administration requires an authenticated human administrator",
+            principal_id=access.principal.id,
+            channel=channel,
+            request_id=request_id,
+        )
+    verified = authenticate_password(
+        session,
+        login=access.principal.login,
+        password=password,
+        channel=channel,
+        request_id=request_id,
+    )
+    actor = session.get(Principal, access.principal.id)
+    if (
+        verified is None
+        or verified.id != access.principal.id
+        or actor is None
+        or not actor.active
+        or actor.platform_role != PlatformRole.ADMIN
+        or actor.catalog_role != CatalogRole.CATALOG_OWNER
+    ):
+        raise PlatformAdminReauthenticationDenied(
+            "administrator re-authentication failed",
+            principal_id=access.principal.id,
+            channel=channel,
+            request_id=request_id,
+        )
+
+
 def issue_managed_service_token(
     session: Session,
     access: ReadAccess,
@@ -692,11 +1028,20 @@ def issue_managed_service_token(
     audience: str | None = None,
     idempotency_request_expiry: str | None = None,
 ) -> PrincipalCredentialResult:
+    """Issue or rotate a service token for a managed service account.
+
+    Minting or rotating a token for a catalog-owner service principal hands the
+    bearer global catalog authority on every audience, so such a target is gated
+    on the dual-role, human-reauthenticated catalog-owner-admin path before the
+    idempotency reservation, the revision claim and any token material exist.
+    Every other target keeps the established platform-admin contract.
+    """
     require_platform_admin(access)
-    _reauthenticate_human_admin(
+    _authorize_credential_administration(
         session,
         access,
-        password=actor_password,
+        principal_id=principal_id,
+        actor_password=actor_password,
         channel=channel,
         request_id=request_id,
     )
@@ -1062,6 +1407,9 @@ def _summary(
         active=row.active,
         platform_role=(
             PlatformRole(row.platform_role) if row.platform_role is not None else None
+        ),
+        catalog_role=(
+            CatalogRole(row.catalog_role) if row.catalog_role is not None else None
         ),
         revision=row.revision,
         etag=revision_etag(row.revision),

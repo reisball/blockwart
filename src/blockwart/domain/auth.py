@@ -12,6 +12,12 @@ class PlatformRole(StrEnum):
     ADMIN = "admin"
 
 
+class CatalogRole(StrEnum):
+    """Global catalog authority, independent of the platform-admin axis."""
+
+    CATALOG_OWNER = "catalog_owner"
+
+
 class Permission(StrEnum):
     DISCOVER = "discover"
     READ = "read"
@@ -70,6 +76,12 @@ ROLE_PERMISSIONS = MappingProxyType(
     }
 )
 
+CATALOG_ROLE_PERMISSIONS = MappingProxyType(
+    {
+        CatalogRole.CATALOG_OWNER: frozenset(Permission),
+    }
+)
+
 
 @dataclass(frozen=True)
 class PrincipalContext:
@@ -80,14 +92,23 @@ class PrincipalContext:
     platform_role: PlatformRole | None = None
     revision: int = 1
     service_token_audience: str | None = field(default=None, compare=False)
+    catalog_role: CatalogRole | None = None
 
     @property
     def is_admin(self) -> bool:
         return self.platform_role == PlatformRole.ADMIN
 
+    @property
+    def is_catalog_owner(self) -> bool:
+        return self.catalog_role == CatalogRole.CATALOG_OWNER
+
 
 def permissions_for_role(role: Role | str) -> frozenset[Permission]:
     return ROLE_PERMISSIONS[Role(role)]
+
+
+def permissions_for_catalog_role(role: CatalogRole | str) -> frozenset[Permission]:
+    return CATALOG_ROLE_PERMISSIONS[CatalogRole(role)]
 
 
 def roles_for_permission(permission: Permission | str) -> frozenset[Role]:

@@ -13,14 +13,24 @@ from sqlalchemy.orm import Session
 
 from blockwart.db.migrations import build_alembic_config, check_database_revision
 from blockwart.db.session import build_engine, transaction
-from blockwart.domain.auth import GrantScope, PlatformRole, PrincipalType, Role
+from blockwart.domain.auth import (
+    CatalogRole,
+    GrantScope,
+    PlatformRole,
+    PrincipalType,
+    Role,
+)
 from blockwart.models import (
     CatalogObject,
     ObjectGrant,
     PasswordCredential,
     Principal,
 )
-from blockwart.services.access import create_object_grant, ensure_complete_owner_coverage
+from blockwart.services.access import (
+    active_catalog_owner_ids,
+    create_object_grant,
+    ensure_complete_owner_coverage,
+)
 from blockwart.services.identity import (
     IdentityConflict,
     IdentityError,
@@ -64,6 +74,14 @@ def build_parser() -> argparse.ArgumentParser:
         "--scope",
         choices=tuple(scope.value for scope in GrantScope),
         default=GrantScope.SUBTREE,
+    )
+    bootstrap.add_argument(
+        "--catalog-owner",
+        action="store_true",
+        help=(
+            "Also assign the global catalog-owner role in the same transaction. "
+            "Without it the catalog stays inactive until a catalog owner is selected."
+        ),
     )
 
     create_human = subparsers.add_parser(
@@ -128,6 +146,14 @@ def build_parser() -> argparse.ArgumentParser:
         help="Explicitly promote one existing active human principal to platform admin.",
     )
     promote.add_argument("--login", required=True)
+
+    catalog_owner = subparsers.add_parser(
+        "bootstrap-catalog-owner",
+        help=(
+            "Select the first global catalog owner while no active catalog owner exists."
+        ),
+    )
+    catalog_owner.add_argument("--login", required=True)
     return parser
 
 
@@ -280,6 +306,8 @@ def main(argv: Sequence[str] | None = None) -> int:
                     "auth_promote_admin_ok "
                     f"principal_id={principal.id} changed={int(changed)}"
                 )
+            elif args.action == "bootstrap-catalog-owner":
+                result = _bootstrap_catalog_owner(session, args)
             else:
                 raise IdentityError("unsupported auth action")
     except Exception:  # noqa: BLE001 - CLI boundary must redact credentials and DB details
@@ -297,12 +325,14 @@ def main(argv: Sequence[str] | None = None) -> int:
 
 def _bootstrap_owner(session: Session, args: argparse.Namespace) -> str:
     object_ids = tuple(dict.fromkeys(args.object_ids))
+    catalog_owner = bool(args.catalog_owner)
     existing = _bootstrap_state(
         session,
         login=args.login,
         display_name=args.display_name,
         object_ids=object_ids,
         scope=GrantScope(args.scope),
+        catalog_owner=catalog_owner,
     )
     if existing is not None:
         principal, grants = existing
@@ -310,6 +340,7 @@ def _bootstrap_owner(session: Session, args: argparse.Namespace) -> str:
             mode="unchanged",
             principal_id=principal.id,
             grants=grants,
+            catalog_owner=catalog_owner,
         )
 
     principal_count = session.scalar(select(func.count()).select_from(Principal)) or 0
@@ -327,6 +358,7 @@ def _bootstrap_owner(session: Session, args: argparse.Namespace) -> str:
             display_name=args.display_name,
             password=password,
             platform_role=PlatformRole.ADMIN,
+            catalog_role=CatalogRole.CATALOG_OWNER if args.catalog_owner else None,
         )
         grants = tuple(
             create_object_grant(
@@ -340,11 +372,43 @@ def _bootstrap_owner(session: Session, args: argparse.Namespace) -> str:
             )
             for object_id in object_ids
         )
-        ensure_complete_owner_coverage(session)
+        ensure_complete_owner_coverage(
+            session,
+            require_catalog_owner=catalog_owner,
+        )
     return _bootstrap_result(
         mode="created",
         principal_id=principal_context.id,
         grants=grants,
+        catalog_owner=catalog_owner,
+    )
+
+
+def _bootstrap_catalog_owner(session: Session, args: argparse.Namespace) -> str:
+    """Select the first catalog owner locally when no active one exists."""
+    changed = False
+    with transaction(session):
+        principal = principal_by_login(session, args.login)
+        if principal is None or not principal.active:
+            raise IdentityError("active principal not found")
+        active_owner_ids = active_catalog_owner_ids(session)
+        if principal.id not in active_owner_ids:
+            if active_owner_ids:
+                raise IdentityConflict("an active catalog owner already exists")
+            principal.catalog_role = CatalogRole.CATALOG_OWNER
+            _advance_principal_revision(principal)
+            record_security_event(
+                session,
+                event_type="catalog_owner_selected",
+                outcome="success",
+                channel="cli",
+                principal_id=principal.id,
+                details={"actor": "protected_cli"},
+            )
+            changed = True
+    return (
+        "auth_bootstrap_catalog_owner_ok "
+        f"principal_id={principal.id} changed={int(changed)}"
     )
 
 
@@ -355,6 +419,7 @@ def _bootstrap_state(
     display_name: str,
     object_ids: tuple[str, ...],
     scope: GrantScope,
+    catalog_owner: bool,
 ) -> tuple[Principal, tuple[ObjectGrant, ...]] | None:
     try:
         principal = principal_by_login(session, login)
@@ -373,15 +438,20 @@ def _bootstrap_state(
             )
         ).all()
     )
+    expected_catalog_role = CatalogRole.CATALOG_OWNER if catalog_owner else None
     if (
         principal.principal_type == PrincipalType.HUMAN
         and principal.active
         and principal.platform_role == PlatformRole.ADMIN
+        and principal.catalog_role == expected_catalog_role
         and principal.display_name == " ".join(display_name.split())
         and credential is not None
         and {grant.object_id for grant in grants} == set(object_ids)
     ):
-        ensure_complete_owner_coverage(session)
+        ensure_complete_owner_coverage(
+            session,
+            require_catalog_owner=catalog_owner,
+        )
         return principal, grants
     raise IdentityConflict("bootstrap state is incomplete or conflicting")
 
@@ -391,19 +461,22 @@ def _bootstrap_result(
     mode: str,
     principal_id: str,
     grants: tuple[ObjectGrant, ...],
+    catalog_owner: bool,
 ) -> str:
     ordered = tuple(sorted(grants, key=lambda grant: grant.object_id))
+    suffix = f" catalog_owner={int(catalog_owner)}"
     if len(ordered) == 1:
         grant = ordered[0]
         return (
             f"auth_bootstrap_owner_ok mode={mode} principal_id={principal_id} "
             f"grant_id={grant.id} object_id={grant.object_id} scope={grant.scope}"
+            f"{suffix}"
         )
     return (
         f"auth_bootstrap_owner_ok mode={mode} principal_id={principal_id} "
         f"grant_ids={','.join(str(grant.id) for grant in ordered)} "
         f"object_ids={','.join(grant.object_id for grant in ordered)} "
-        f"scope={ordered[0].scope}"
+        f"scope={ordered[0].scope}{suffix}"
     )
 
 

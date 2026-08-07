@@ -5,7 +5,7 @@ from collections.abc import Iterable
 from sqlalchemy import and_, literal, select
 from sqlalchemy.orm import Session, aliased
 
-from blockwart.domain.auth import GrantScope, Role
+from blockwart.domain.auth import CatalogRole, GrantScope, Role
 from blockwart.domain.placement import CANONICAL_PLACEMENT_RELATION_TYPE
 from blockwart.models import CatalogObject, ObjectGrant, Principal, Relationship
 from blockwart.services.audit import add_audit_event
@@ -17,6 +17,10 @@ class AccessGrantError(ValueError):
 
 class LastOwnerError(AccessGrantError):
     """Removing the grant would leave an object without an effective owner."""
+
+
+class LastCatalogOwnerError(AccessGrantError):
+    """The change would remove the last active global catalog owner."""
 
 
 class OwnerCoverageError(AccessGrantError):
@@ -136,10 +140,48 @@ def ensure_principal_deactivation_preserves_owner_coverage(
     *,
     principal_id: str,
 ) -> None:
+    ensure_active_catalog_owner_remains(
+        session,
+        excluded_principal_ids=(principal_id,),
+    )
     ensure_owner_coverage_after_exclusions(
         session,
         excluded_principal_ids=(principal_id,),
     )
+
+
+def ensure_active_catalog_owner_remains(
+    session: Session,
+    *,
+    excluded_principal_ids: Iterable[str] = (),
+) -> None:
+    """Fail closed before a change would remove the last active catalog owner."""
+    excluded_principals = frozenset(excluded_principal_ids)
+    current = active_catalog_owner_ids(session)
+    if not current or not (current & excluded_principals):
+        return
+    if not current - excluded_principals:
+        raise LastCatalogOwnerError("at least one active catalog owner is required")
+
+
+def active_catalog_owner_ids(
+    session: Session,
+    *,
+    excluded_principal_ids: Iterable[str] = (),
+) -> set[str]:
+    excluded_principals = frozenset(excluded_principal_ids)
+    statement = (
+        select(Principal.id)
+        .where(
+            Principal.active.is_(True),
+            Principal.catalog_role == CatalogRole.CATALOG_OWNER,
+        )
+        .order_by(Principal.id)
+        .with_for_update()
+    )
+    if excluded_principals:
+        statement = statement.where(Principal.id.not_in(excluded_principals))
+    return {str(value) for value in session.scalars(statement).all()}
 
 
 def ensure_owner_coverage_after_exclusions(
@@ -164,6 +206,9 @@ def ensure_owner_coverage_after_exclusions(
         for grant in affected_grants
         for object_id in _grant_affected_object_ids(session, grant)
     }
+    if active_catalog_owner_ids(session) & excluded_principals:
+        # An excluded global owner currently covers the whole catalog.
+        affected_ids.update(session.scalars(select(CatalogObject.id)).all())
     if not affected_ids:
         return
     covered_ids = active_owner_covered_object_ids(
@@ -184,6 +229,12 @@ def active_owner_covered_object_ids(
     excluded_grants = frozenset(excluded_grant_ids)
     excluded_principals = frozenset(excluded_principal_ids)
     _locked_active_owner_grants(session)
+    if active_catalog_owner_ids(
+        session,
+        excluded_principal_ids=excluded_principals,
+    ):
+        # An active catalog owner covers every current object without a grant.
+        return set(session.scalars(select(CatalogObject.id)).all())
     list(
         session.scalars(
             select(Relationship)
@@ -221,13 +272,25 @@ def active_owner_covered_object_ids(
     return set(session.scalars(select(reach.c.object_id).distinct()).all())
 
 
-def ensure_complete_owner_coverage(session: Session) -> None:
-    """Require a nonempty catalog with active effective Owner coverage per object."""
+def ensure_complete_owner_coverage(
+    session: Session,
+    *,
+    require_catalog_owner: bool = True,
+) -> None:
+    """Require a nonempty, fully owned catalog with an active catalog owner.
+
+    Scoped coverage is evaluated first so a partially owned legacy catalog still
+    reports the precise `owner_coverage_incomplete` cause. The catalog-owner gate
+    is intentionally strict: complete legacy Owner grants never substitute for the
+    explicit global role, and nothing here promotes a principal.
+    """
     catalog_ids = set(session.scalars(select(CatalogObject.id)).all())
     if not catalog_ids:
         raise OwnerCoverageError("owner_catalog_empty")
     if catalog_ids != active_owner_covered_object_ids(session):
         raise OwnerCoverageError("owner_coverage_incomplete")
+    if require_catalog_owner and not active_catalog_owner_ids(session):
+        raise OwnerCoverageError("catalog_owner_missing")
 
 
 def ensure_owner_coverage_preserved(

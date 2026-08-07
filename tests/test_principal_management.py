@@ -6,7 +6,7 @@ import pytest
 from sqlalchemy import select
 
 from blockwart.db.session import transaction
-from blockwart.domain.auth import GrantScope, PlatformRole, Role
+from blockwart.domain.auth import CatalogRole, GrantScope, PlatformRole, Role
 from blockwart.models import BrowserSession, Principal, SecurityEvent, ServiceToken
 from blockwart.schemas.catalog import CatalogObjectIn
 from blockwart.services.access import create_object_grant
@@ -344,3 +344,92 @@ def test_repeated_service_token_revoke_is_revision_and_audit_noop(
                 )
             ).all()
         ) == 1
+
+
+def test_last_catalog_owner_deactivation_returns_a_safe_conflict(
+    alembic_session_factory,
+) -> None:
+    with alembic_session_factory() as session:
+        with transaction(session):
+            admin, target, _, _ = _setup(session)
+            stored = session.get(Principal, target.id)
+            assert stored is not None
+            stored.catalog_role = CatalogRole.CATALOG_OWNER
+        access = read_access_for_principal(session, admin)
+
+        with pytest.raises(ManagedPrincipalConflict, match="catalog owner"):
+            with transaction(session):
+                update_managed_principal(
+                    session,
+                    access,
+                    principal_id=target.id,
+                    expected_revision='"rev-1"',
+                    display_name="Managed Agent",
+                    active=False,
+                    platform_role=None,
+                    channel="ui",
+                )
+
+        stored = session.get(Principal, target.id)
+        assert stored is not None
+        assert stored.active is True
+        assert stored.revision == 1
+
+        with transaction(session):
+            session.add(
+                Principal(
+                    id="00000000-0000-0000-0000-0000000000cc",
+                    principal_type="service_account",
+                    login="standby.catalog.owner",
+                    display_name="Standby Catalog Owner",
+                    active=True,
+                    catalog_role=CatalogRole.CATALOG_OWNER,
+                    revision=1,
+                )
+            )
+        with transaction(session):
+            result = update_managed_principal(
+                session,
+                access,
+                principal_id=target.id,
+                expected_revision='"rev-1"',
+                display_name="Managed Agent",
+                active=False,
+                platform_role=None,
+                channel="ui",
+            )
+        assert result.changed is True
+        stored = session.get(Principal, target.id)
+        assert stored is not None
+        assert stored.active is False
+        assert stored.catalog_role == CatalogRole.CATALOG_OWNER
+
+
+def test_generic_principal_update_never_changes_the_catalog_role(
+    alembic_session_factory,
+) -> None:
+    with alembic_session_factory() as session:
+        with transaction(session):
+            admin, target, _, _ = _setup(session)
+            stored = session.get(Principal, target.id)
+            assert stored is not None
+            stored.catalog_role = CatalogRole.CATALOG_OWNER
+        access = read_access_for_principal(session, admin)
+
+        with transaction(session):
+            update_managed_principal(
+                session,
+                access,
+                principal_id=target.id,
+                expected_revision='"rev-1"',
+                display_name="Renamed Agent",
+                active=True,
+                platform_role=PlatformRole.ADMIN,
+                channel="ui",
+            )
+
+        stored = session.get(Principal, target.id)
+        assert stored is not None
+        assert stored.display_name == "Renamed Agent"
+        assert stored.platform_role == PlatformRole.ADMIN
+        assert stored.catalog_role == CatalogRole.CATALOG_OWNER

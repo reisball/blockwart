@@ -76,7 +76,7 @@ def test_network_classification_dry_run_fails_closed_without_evidence(
             },
         ]
         assert (
-            "database_networks_error revision=20260804_0014 mode=dry-run "
+            "database_networks_error revision=20260806_0015 mode=dry-run "
             "scanned=2 changed=0 blocked=1 diagnostics=0"
         ) in captured.out
         with engine.connect() as connection:
@@ -161,7 +161,7 @@ def test_network_classification_mapping_is_evidenced_and_still_write_free(
             "target_category": "switch",
         }
         assert (
-            "database_networks_ok revision=20260804_0014 mode=dry-run "
+            "database_networks_ok revision=20260806_0015 mode=dry-run "
             "scanned=2 changed=1 blocked=0 diagnostics=0"
         ) in captured.out
 

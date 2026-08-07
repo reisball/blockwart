@@ -138,6 +138,7 @@ async def check_mcp(
                 "blockwart.add_comment",
                 "blockwart.get_context",
                 "blockwart.create_child",
+                "blockwart.create_root",
                 "blockwart.update_object",
                 "blockwart.delete_object",
                 "blockwart.create_relationship",
@@ -504,7 +505,7 @@ def main() -> None:
         token=api_token,
     )["objects"][0]
 
-    assert readiness["revision"] == "20260804_0014"
+    assert readiness["revision"] == "20260806_0015"
     assert "Blockwart" in index
     assert static_content_type == "text/css"
     assert not any(

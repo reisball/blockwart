@@ -137,6 +137,18 @@ within `BLOCKWART_IDEMPOTENCY_TTL_SECONDS` (default 24 hours) returns the stored
 result without another object or audit event. Reusing a key for another parent,
 operation, or payload returns `409 conflict`. Expired records may be replaced.
 
+### `POST /api/v1/roots`
+
+Creates one disconnected top-level catalog root without a placement parent.
+Requires an active catalog-owner principal and an `Idempotency-Key` header
+containing 16..128 visible ASCII characters; platform-admin alone is not
+sufficient. API writes require an `api`-audience service token, matching the
+trusted-channel rule of the shared `create_root` command. The validated root and
+exactly one direct self-scoped owner grant for the creating principal are
+committed atomically. The response is `201`, includes `Location` and `ETag`,
+and contains the created object; the idempotent replay, duplicate-ID conflict,
+and changed-payload `409 conflict` semantics match child creation.
+
 ### `PUT /api/v1/objects/{object_id}`
 
 Requires `write` on that exact object and `If-Match` with the current strong

@@ -21,6 +21,7 @@ EXPECTED_OPERATIONS = {
     "/api/v1/admin/principals/{principal_id}": {"get", "put"},
     "/api/v1/admin/principals/{principal_id}/grants": {"post"},
     "/api/v1/admin/principals/{principal_id}/grants/{grant_id}": {"put", "delete"},
+    "/api/v1/admin/principals/{principal_id}/catalog-role": {"post"},
     "/api/v1/admin/principals/{principal_id}/password": {"post"},
     "/api/v1/admin/principals/{principal_id}/tokens": {"post"},
     "/api/v1/admin/principals/{principal_id}/tokens/rotate": {"post"},
@@ -41,6 +42,7 @@ EXPECTED_OPERATIONS = {
     "/api/v1/objects/{object_id}/relationships": {"get", "post", "delete"},
     "/api/v1/objects/{object_id}/topology": {"get"},
     "/api/v1/objects/{parent_id}/attached-devices": {"post"},
+    "/api/v1/roots": {"post"},
 }
 
 

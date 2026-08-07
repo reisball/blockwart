@@ -17,7 +17,7 @@ from blockwart.api.deps import get_session
 from blockwart.config import Settings
 from blockwart.db.migrations import BASELINE_REVISION, build_alembic_config, upgrade_database
 from blockwart.db.session import build_engine, transaction
-from blockwart.domain.auth import GrantScope, Role
+from blockwart.domain.auth import CatalogRole, GrantScope, Role
 from blockwart.main import create_app
 from blockwart.models import Principal
 from blockwart.schemas.catalog import CatalogObjectIn
@@ -30,7 +30,11 @@ def _database_url(path: Path) -> str:
     return f"sqlite:///{path}"
 
 
-def _add_complete_owner_coverage(database_url: str) -> None:
+def _add_complete_owner_coverage(
+    database_url: str,
+    *,
+    catalog_owner: bool = True,
+) -> None:
     engine = build_engine(database_url)
     try:
         with Session(engine) as session:
@@ -50,6 +54,9 @@ def _add_complete_owner_coverage(database_url: str) -> None:
                     login="ready.owner",
                     display_name="Ready Owner",
                     password="ready-owner-password",
+                    catalog_role=(
+                        CatalogRole.CATALOG_OWNER if catalog_owner else None
+                    ),
                 )
                 create_object_grant(
                     session,
@@ -139,7 +146,7 @@ def test_readiness_checks_database_revision_and_sqlite_runtime(tmp_path: Path) -
             "writable": "ok",
             "sqlite": "ok",
         },
-        "revision": "20260804_0014",
+        "revision": "20260806_0015",
         "error_code": None,
     }
     assert after == before
@@ -203,7 +210,7 @@ def test_readiness_rejects_catalog_without_owner(tmp_path: Path) -> None:
 def test_readiness_rejects_inactive_owner(tmp_path: Path) -> None:
     database_url = _database_url(tmp_path / "inactive.sqlite3")
     upgrade_database(database_url)
-    _add_complete_owner_coverage(database_url)
+    _add_complete_owner_coverage(database_url, catalog_owner=False)
     engine = build_engine(database_url)
     try:
         with Session(engine) as session:
@@ -227,7 +234,7 @@ def test_readiness_rejects_self_only_and_disconnected_partial_coverage(
 ) -> None:
     database_url = _database_url(tmp_path / "partial.sqlite3")
     upgrade_database(database_url)
-    _add_complete_owner_coverage(database_url)
+    _add_complete_owner_coverage(database_url, catalog_owner=False)
     engine = build_engine(database_url)
     try:
         with Session(engine) as session:
@@ -258,6 +265,85 @@ def test_readiness_rejects_self_only_and_disconnected_partial_coverage(
     assert response.json()["error_code"] == "owner_coverage_incomplete"
     assert "child" not in response.text
     assert "disconnected" not in response.text
+
+
+def test_readiness_rejects_complete_scoped_coverage_without_a_catalog_owner(
+    tmp_path: Path,
+) -> None:
+    database_url = _database_url(tmp_path / "no-catalog-owner.sqlite3")
+    upgrade_database(database_url)
+    _add_complete_owner_coverage(database_url, catalog_owner=False)
+
+    response = _readiness(database_url)
+
+    assert response.status_code == 503
+    assert response.json()["error_code"] == "catalog_owner_missing"
+    assert response.json()["checks"]["authorization"] == "error"
+    assert "ready.owner" not in response.text
+    assert "ready-root" not in response.text
+
+
+def test_readiness_rejects_an_inactive_catalog_owner(tmp_path: Path) -> None:
+    database_url = _database_url(tmp_path / "inactive-catalog-owner.sqlite3")
+    upgrade_database(database_url)
+    _add_complete_owner_coverage(database_url, catalog_owner=False)
+    engine = build_engine(database_url)
+    try:
+        with Session(engine) as session:
+            with transaction(session):
+                session.add(
+                    Principal(
+                        id="retired-catalog-owner",
+                        principal_type="service_account",
+                        login="retired.catalog.owner",
+                        display_name="Retired Catalog Owner",
+                        active=False,
+                        catalog_role=CatalogRole.CATALOG_OWNER,
+                        revision=1,
+                    )
+                )
+    finally:
+        engine.dispose()
+
+    response = _readiness(database_url)
+
+    assert response.status_code == 503
+    assert response.json()["error_code"] == "catalog_owner_missing"
+
+
+def test_readiness_accepts_a_catalog_owner_without_any_object_grant(
+    tmp_path: Path,
+) -> None:
+    database_url = _database_url(tmp_path / "global-owner-only.sqlite3")
+    upgrade_database(database_url)
+    engine = build_engine(database_url)
+    try:
+        with Session(engine) as session:
+            with transaction(session):
+                upsert_object(
+                    session,
+                    CatalogObjectIn(
+                        id="global-root",
+                        kind="host",
+                        label="Global Root",
+                        status="active",
+                        data={"schema_version": 1},
+                    ),
+                )
+                create_human_principal(
+                    session,
+                    login="global.owner",
+                    display_name="Global Owner",
+                    password="global-owner-password",
+                    catalog_role=CatalogRole.CATALOG_OWNER,
+                )
+    finally:
+        engine.dispose()
+
+    response = _readiness(database_url)
+
+    assert response.status_code == 200
+    assert response.json()["checks"]["authorization"] == "ok"
 
 
 def test_readiness_rejects_wrong_alembic_revision(tmp_path: Path) -> None:

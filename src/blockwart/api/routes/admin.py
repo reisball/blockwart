@@ -7,6 +7,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, Response
 from sqlalchemy.orm import Session
 
+from blockwart.api.browser_auth import require_browser_api_write_access
 from blockwart.api.deps import get_session
 from blockwart.api.errors import API_ERROR_RESPONSES
 from blockwart.api.security import require_api_read_access
@@ -16,6 +17,7 @@ from blockwart.db.session import DatabaseTransactionError, transaction
 from blockwart.domain.auth import PrincipalType
 from blockwart.domain.timestamps import format_rfc3339_utc
 from blockwart.schemas.admin import (
+    CatalogRoleMutationIn,
     PasswordResetIn,
     PrincipalAdminDetailOut,
     PrincipalAdminListOut,
@@ -32,6 +34,7 @@ from blockwart.schemas.v1 import V1GrantCommandOut
 from blockwart.services.identity import IdentityError, utc_now
 from blockwart.services.pagination import InvalidCursor
 from blockwart.services.principal_management import (
+    CatalogOwnerDenied,
     ManagedPrincipalConflict,
     ManagedPrincipalNotFound,
     ManagedPrincipalPreconditionFailed,
@@ -43,11 +46,13 @@ from blockwart.services.principal_management import (
     issue_managed_service_token,
     query_principal_detail,
     query_principal_page,
+    record_catalog_owner_denial,
     record_failed_platform_admin_reauthentication,
     require_platform_admin,
     reset_managed_human_password,
     revoke_managed_principal_grant,
     revoke_managed_service_token,
+    set_managed_catalog_role,
     update_managed_principal,
     update_managed_principal_grant,
 )
@@ -299,6 +304,36 @@ def reset_admin_principal_password(
     )
 
 
+@router.post(
+    "/{principal_id}/catalog-role",
+    response_model=PrincipalMutationOut,
+)
+def set_admin_principal_catalog_role(
+    principal_id: str,
+    payload: CatalogRoleMutationIn,
+    request: Request,
+    response: Response,
+    session: Annotated[Session, Depends(get_session)],
+    access: Annotated[ReadAccess, Depends(require_browser_api_write_access)],
+    if_match: Annotated[str | None, Header(alias="If-Match")] = None,
+) -> PrincipalMutationOut:
+    result = _execute_admin(
+        session,
+        lambda: set_managed_catalog_role(
+            session,
+            access,
+            principal_id=principal_id,
+            expected_revision=if_match,
+            catalog_role=payload.catalog_role,
+            actor_password=payload.current_admin_password,
+            channel="api",
+            request_id=_request_id(request),
+        ),
+    )
+    response.headers["ETag"] = result.principal.etag
+    return PrincipalMutationOut.model_validate(result)
+
+
 @router.post("/{principal_id}/tokens", response_model=PrincipalCredentialOut)
 def issue_admin_principal_token(
     principal_id: str,
@@ -454,6 +489,16 @@ def _execute_admin[T](
         raise HTTPException(status_code=403, detail="Platform admin permission denied") from exc
     except PlatformAdminDenied as exc:
         raise HTTPException(status_code=403, detail="Platform admin permission denied") from exc
+    except CatalogOwnerDenied as exc:
+        with transaction(session):
+            record_catalog_owner_denial(session, exc)
+        raise HTTPException(
+            status_code=403,
+            detail=(
+                "Catalog owner administration requires dual "
+                "platform-admin and catalog-owner role"
+            ),
+        ) from exc
     except ManagedPrincipalNotFound as exc:
         raise HTTPException(status_code=404, detail="Principal not found") from exc
     except ManagedPrincipalPreconditionRequired as exc:
@@ -470,6 +515,11 @@ def _execute_admin[T](
             raise HTTPException(
                 status_code=409,
                 detail="At least one active platform admin is required",
+            ) from exc
+        if "last active catalog owner" in cause:
+            raise HTTPException(
+                status_code=409,
+                detail="At least one active catalog owner is required",
             ) from exc
         raise
 

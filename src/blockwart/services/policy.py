@@ -4,15 +4,18 @@ import hashlib
 import json
 from collections import defaultdict
 from dataclasses import dataclass
+from enum import StrEnum
 
 from sqlalchemy import and_, literal, select
 from sqlalchemy.orm import Session, aliased
 
 from blockwart.domain.auth import (
+    CatalogRole,
     GrantScope,
     ObjectVisibility,
     Permission,
     Role,
+    permissions_for_catalog_role,
     permissions_for_role,
 )
 from blockwart.domain.placement import CANONICAL_PLACEMENT_RELATION_TYPE
@@ -32,17 +35,44 @@ class EffectiveGrant:
     scope: GrantScope
 
 
+class GlobalPolicySource(StrEnum):
+    """Provenance of permissions that are not backed by an object grant."""
+
+    CATALOG_OWNER = "catalog_owner"
+
+
+@dataclass(frozen=True)
+class GlobalAuthority:
+    """One catalog-wide permission set held by the principal itself."""
+
+    source: GlobalPolicySource
+    permissions: frozenset[Permission]
+
+
 @dataclass(frozen=True)
 class PolicySnapshot:
     principal_id: str
     _permissions: dict[str, frozenset[Permission]]
     _grants: dict[str, tuple[EffectiveGrant, ...]]
+    _global_authorities: tuple[GlobalAuthority, ...] = ()
 
     def permissions_for(self, object_id: str) -> frozenset[Permission]:
         return self._permissions.get(object_id, frozenset())
 
     def grants_for(self, object_id: str) -> tuple[EffectiveGrant, ...]:
+        """Return only real object grants; global authority is never a grant."""
         return self._grants.get(object_id, ())
+
+    @property
+    def global_authorities(self) -> tuple[GlobalAuthority, ...]:
+        return self._global_authorities
+
+    def has_global_authority(self, source: GlobalPolicySource | str) -> bool:
+        resolved = GlobalPolicySource(source)
+        return any(
+            authority.source == resolved
+            for authority in self._global_authorities
+        )
 
     def can(
         self,
@@ -80,22 +110,36 @@ class PolicySnapshot:
 
     def fingerprint(self) -> str:
         """Bind cursors and principal-scoped read state to this exact policy."""
-        payload = [
-            {
-                "object_id": object_id,
-                "permissions": sorted(permission.value for permission in permissions),
-                "grants": [
-                    {
-                        "anchor": grant.anchor_object_id,
-                        "grant_id": grant.grant_id,
-                        "role": grant.role.value,
-                        "scope": grant.scope.value,
-                    }
-                    for grant in self.grants_for(object_id)
-                ],
-            }
-            for object_id, permissions in sorted(self._permissions.items())
-        ]
+        payload = {
+            "global": [
+                {
+                    "source": authority.source.value,
+                    "permissions": sorted(
+                        permission.value for permission in authority.permissions
+                    ),
+                }
+                for authority in sorted(
+                    self._global_authorities,
+                    key=lambda authority: authority.source.value,
+                )
+            ],
+            "objects": [
+                {
+                    "object_id": object_id,
+                    "permissions": sorted(permission.value for permission in permissions),
+                    "grants": [
+                        {
+                            "anchor": grant.anchor_object_id,
+                            "grant_id": grant.grant_id,
+                            "role": grant.role.value,
+                            "scope": grant.scope.value,
+                        }
+                        for grant in self.grants_for(object_id)
+                    ],
+                }
+                for object_id, permissions in sorted(self._permissions.items())
+            ],
+        }
         serialized = json.dumps(
             payload,
             ensure_ascii=True,
@@ -109,6 +153,7 @@ def policy_for_principal(
     session: Session,
     principal_id: str,
 ) -> PolicySnapshot:
+    global_authorities = _global_authorities_for_principal(session, principal_id)
     child = aliased(CatalogObject)
     object_ref = CatalogObject.kind + literal(":") + CatalogObject.id
     child_ref = child.kind + literal(":") + child.id
@@ -185,6 +230,16 @@ def policy_for_principal(
 
     permissions_by_object: dict[str, set[Permission]] = defaultdict(set)
     grants_by_object: dict[str, list[EffectiveGrant]] = defaultdict(list)
+    if global_authorities:
+        # Global authority is computed per request over the current catalog
+        # instead of being materialized as wildcard or per-object grants.
+        global_permissions = frozenset(
+            permission
+            for authority in global_authorities
+            for permission in authority.permissions
+        )
+        for object_id in session.scalars(select(CatalogObject.id)).all():
+            permissions_by_object[str(object_id)].update(global_permissions)
     for row in rows:
         role = Role(str(row.role))
         scope = GrantScope(str(row.scope))
@@ -209,4 +264,24 @@ def policy_for_principal(
             object_id: tuple(grants)
             for object_id, grants in grants_by_object.items()
         },
+        _global_authorities=global_authorities,
+    )
+
+
+def _global_authorities_for_principal(
+    session: Session,
+    principal_id: str,
+) -> tuple[GlobalAuthority, ...]:
+    row = session.execute(
+        select(Principal.active, Principal.catalog_role).where(
+            Principal.id == principal_id
+        )
+    ).first()
+    if row is None or not row.active or row.catalog_role is None:
+        return ()
+    return (
+        GlobalAuthority(
+            source=GlobalPolicySource.CATALOG_OWNER,
+            permissions=permissions_for_catalog_role(CatalogRole(row.catalog_role)),
+        ),
     )

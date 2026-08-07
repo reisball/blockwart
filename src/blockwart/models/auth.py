@@ -34,6 +34,10 @@ class Principal(Base):
             name="ck_principals_platform_role",
         ),
         CheckConstraint(
+            "catalog_role IS NULL OR catalog_role = 'catalog_owner'",
+            name="ck_principals_catalog_role",
+        ),
+        CheckConstraint(
             "revision >= 1",
             name="ck_principals_revision_positive",
         ),
@@ -56,6 +60,11 @@ class Principal(Base):
         index=True,
     )
     platform_role: Mapped[str | None] = mapped_column(
+        String(32),
+        nullable=True,
+        index=True,
+    )
+    catalog_role: Mapped[str | None] = mapped_column(
         String(32),
         nullable=True,
         index=True,

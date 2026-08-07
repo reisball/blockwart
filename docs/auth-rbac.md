@@ -42,13 +42,29 @@ server-stored pre-authentication challenge. Authenticated browser sessions are
 opaque, revocable, time-limited, `Secure`, `HttpOnly`, and `SameSite=Strict`; state
 changes require the session-bound CSRF value.
 
+## Role axes
+
+Blockwart stores three independent authorization axes on a principal:
+
+| Axis | Stored as | Meaning |
+|---|---|---|
+| identity administration | `platform_role = admin` | identity and credential administration |
+| global catalog authority | `catalog_role = catalog_owner` | all six permissions on every object |
+| scoped catalog access | `object_grants` rows | one role at one object, `self` or `subtree` |
+
+The axes never imply each other. A platform admin has no catalog permission
+unless it also holds grants or the catalog-owner role, and a catalog owner
+cannot administer identities or credentials. Both role columns are nullable and
+constrained to their single allowed value, and both are guarded by SQLite
+triggers plus service checks that refuse to remove the last active holder.
+
 ## Platform administration
 
 Identity administration is a separate authorization axis. A principal may
 have the optional platform role `admin`, which permits user, service-account,
 credential-metadata, and lifecycle administration. It never grants catalog
 `discover`, `read`, `write`, `manage_access`, or `delete`; those permissions
-still come only from explicit object grants.
+still come only from explicit object grants or the global catalog-owner role.
 
 The admin-only browser UI lives at `/admin/principals`. It provides principal
 search, lifecycle changes, direct and effective assignment views, password
@@ -109,6 +125,160 @@ Other relationship types do not propagate grants. Effective authorization is
 calculated from the current graph in one recursive database query, so
 reparenting changes access without a stale application cache.
 
+## Global catalog owner
+
+An active principal with `catalog_role = catalog_owner` holds `discover`,
+`read`, `write`, `create_child`, `manage_access`, and `delete` on every object
+that currently exists, including objects created after the role was assigned.
+
+This is computed centrally in the policy service on every request. No wildcard
+grant, per-object grant, sentinel grant ID, or negative grant ID is ever
+materialized: the effective policy snapshot carries the authority as typed
+global provenance, while `grants_for()` keeps meaning real object grants only.
+Scoped grants stay additive and their direct and effective projections are
+unchanged. The provenance is part of the policy fingerprint, so assigning or
+removing the role immediately invalidates existing cursors and principal-scoped
+read state. An inactive catalog owner receives nothing.
+
+Owner-coverage computation treats any active catalog owner as covering every
+current object without creating a grant. Exclusion-based coverage checks used
+for deactivation and deletion ignore the excluded principal and then fall back
+to the remaining active catalog owners and scoped Owner grants.
+
+Normal catalog-role assignment and removal are performed through one dedicated
+application command and its REST/UI surfaces, described below. The role is never
+part of the generic principal create or update mutation. Disconnected-root
+creation is a separate catalog write available to already-authorized active
+catalog owners, described below; it never assigns or removes any role. Until a
+catalog owner exists, the protected local commands below remain the only
+first-owner and recovery path.
+
+## Catalog-owner administration
+
+The dedicated catalog-role command assigns or removes `catalog_owner` on an
+existing principal. It is separate from generic principal create/update, which
+never touches `catalog_role`.
+
+Authorization requires the actor to be simultaneously active and both a platform
+admin and a catalog owner; neither axis alone is sufficient. Human actors must
+reauthenticate with their current password, using the same safe failure-audit
+pattern as platform-admin reauthentication. Service-account actors are always
+denied this human control-plane action, including over REST where bearer
+credentials authenticate service accounts.
+
+The command requires the current principal ETag through `If-Match` (or the
+hidden UI field); a missing or stale precondition uses the established 428/412
+behavior. An unchanged requested role is an idempotent no-op: no revision bump
+and no success audit event. A real change advances the target principal revision
+exactly once and writes a redacted structured `catalog_owner_role_changed`
+security event with actor, target, before/after role, channel, request ID, and
+resulting revision. Passwords, tokens, raw request bodies, and secrets are never
+recorded.
+
+Removing or deactivating the last active catalog owner remains impossible at both
+service and SQLite-trigger levels, including concurrent writers. The command
+cannot bypass the strict zero-owner bootstrap contract: if no active catalog
+owner exists, normal REST/UI administration cannot mint the first one, because
+the dual-role gate cannot be satisfied.
+
+The role is never assigned to an inactive principal, because such a principal
+could later be activated through the generic principal update and gain global
+catalog permissions without the dual-role gate or its audit event. Assigning
+`catalog_owner` to an inactive target is rejected with the stable principal
+conflict, and — for legacy rows or raw writes that already hold that state —
+generic principal update refuses to activate a principal that currently carries
+`catalog_owner`. The safe sequence is to remove the role through catalog-role
+administration first, activate the principal, and reassign the role under the
+dual-role gate. Generic principal update still never accepts a password or a
+catalog-role field; its `principal_updated` security event now also records the
+target's non-secret `catalog_role` so the relevant state is visible in the audit
+trail.
+
+A dual-role authorization denial on either the REST or the UI path returns `403`
+and writes exactly one redacted `catalog_owner_admin_authorization` denial event
+carrying the actor, the channel, the request ID and a single stable reason. It
+mirrors the failed platform-admin reauthentication evidence and never names the
+target, the missing role axis, or any credential, so a requester cannot learn
+which of the two required roles was absent.
+
+REST exposes the action at `POST /api/v1/admin/principals/{principal_id}/catalog-role`
+with the `CatalogRoleMutationIn` body and the same `If-Match` header and stable
+error envelopes as principal administration. Unlike the other `/api/v1/admin`
+routes, which use service-account bearer tokens, this one dedicated JSON
+mutation authenticates an active human browser identity through the opaque
+`blockwart_identity_session` cookie and requires a bounded double-submit
+`X-CSRF-Token` header matched against the secure `blockwart_identity_csrf` cookie
+and verified against the browser session. A missing or invalid browser session
+returns a JSON `401`; a missing or mismatched CSRF header returns a JSON `403`
+with a redacted `browser_write_csrf` denial event. Bearer authentication is never
+accepted as a fallback, so service-account and MCP actors cannot mutate the
+catalog role. Every other `/api/v1/admin` read and write route keeps its existing
+bearer-token contract. The browser UI adds a dedicated **Catalog role** panel on
+the principal detail page, separate from the generic principal edit form, and
+shows the current catalog role in the principal list and detail views without
+implying platform-admin equivalence. The canonical principal, admin summary, and
+API schemas carry the nullable `catalog_role`, and the admin principal detail
+exposes the typed `global_authorities` effective-permission explanation for an
+active catalog owner.
+
+MCP may only read/display the catalog role and its effective authority through the
+existing read-only `list_admin_principals` and `get_admin_principal` projections.
+No MCP tool, argument, route, or generic update field assigns or removes the
+catalog role.
+
+### Credential administration of a catalog owner
+
+Issuing or rotating a service token for a catalog-owner principal, or resetting a
+human catalog owner's password, takes over that principal's global catalog
+authority, so those operations are gated exactly like catalog-role
+administration: the actor must be at that moment both an active platform admin
+and an active catalog owner, and must pass the human-only reauthentication path.
+The generic platform-admin service-account exemption on the API channel never
+applies to such a target, so a platform-admin-only service account can neither
+mint nor rotate an API or MCP token for a catalog-owner service principal nor
+reset a human catalog owner's password. Because the `/api/v1/admin` credential
+routes are bearer-only, catalog-owner credential administration is reachable
+through the browser UI, where a human dual-role administrator reauthenticates.
+
+The target's catalog role is read from current database state — never from the
+request body or the actor's access projection — and covers active and inactive
+targets and every token audience. Denial happens before the idempotency
+reservation, the revision claim, any token issuance or rotation, any password
+mutation, session revocation, and any success audit evidence, so a denied attempt
+leaves credentials, revisions, idempotency records, sessions, and the audit trail
+untouched apart from the denial event. Targets without the catalog-owner role
+keep the established platform-admin contract, including one-time secret
+disclosure, ETag preconditions, idempotent replay, and stable error envelopes.
+
+## Catalog-owner root creation
+
+An active catalog owner may create a new disconnected top-level catalog root
+through the dedicated `create_root` application command, exposed on REST
+(`POST /api/v1/roots`), the browser UI (typed **Create root** form), and MCP
+(`blockwart.create_root`). This is a catalog write, not a role mutation, and it
+is the only creation path that does not require a placement parent.
+
+Authorization is resolved from current database state inside the command
+transaction: the actor must be active and hold `catalog_owner`. Platform-admin
+alone is denied, and the catalog owner needs no platform-admin role for this
+operation. The trusted channel must also match the credential: browser UI actors
+use their browser session, REST writes require an `api`-audience service token,
+and MCP writes require an `mcp`-audience service token.
+
+The command reuses the canonical object schema, reference, provenance,
+ACL-shaped-key rejection, secret scanning, normalization, idempotency, and
+revision semantics of object creation. It atomically creates the root and
+exactly one real direct `Owner/self` grant for the creating principal in the
+same transaction; a failed object, grant, or audit write rolls the whole
+transaction back, and idempotent replay never duplicates either. The root has
+no canonical placement parent and no synthetic relationship. Global authority
+is still never represented by a wildcard, sentinel, or subtree grant. The
+generic object create/update/import paths expose no root-creation bypass.
+
+Every creation emits the normal immutable `create_root` audit event with the
+trusted actor, channel, request ID, and revisions, and never includes secrets
+or raw credentials.
+
 ## Grant management
 
 An actor needs effective `manage_access` on the anchor object to list, create,
@@ -136,7 +306,8 @@ request ID, old/new revision, and structured before/after grant state. An exact
 duplicate create or unchanged update is a revision-preserving no-op and emits
 no extra audit event.
 
-Owner coverage is evaluated over the affected canonical placement set. A
+Owner coverage is evaluated over the affected canonical placement set, plus the
+whole catalog when the affected principal is an active catalog owner. A
 revoke, role downgrade, scope shrink, principal deactivation, placement
 change, or delete that would leave any existing affected object without an
 active effective Owner fails closed. A principal also cannot use a grant
@@ -203,20 +374,27 @@ Run the schema upgrade before any auth command:
 blockwart-db upgrade
 ```
 
-Create the first human platform admin and its explicit Owner grant atomically:
+Create the first human platform admin, its explicit Owner grant, and the global
+catalog owner atomically:
 
 ```bash
 blockwart-auth bootstrap-owner \
   --login kai \
   --display-name Kai \
   --object-id fabrik \
-  --scope subtree
+  --scope subtree \
+  --catalog-owner
 ```
 
 The command prompts on a TTY. Automation may use `--password-stdin`; never put
 a password in command-line arguments. Bootstrap is idempotent only when the
-complete requested principal, password credential, and Owner grant already
-exist. Any partial or conflicting identity state fails closed.
+complete requested principal, password credential, catalog-role choice, and
+Owner grant already exist. Any partial or conflicting identity state fails
+closed.
+
+`--catalog-owner` is an explicit choice, never an implicit migration
+promotion. Omitting it produces a valid catalog whose readiness and startup
+checks fail with `catalog_owner_missing` until a catalog owner is selected.
 
 Repeat `--object-id` for each disconnected canonical component. Creation of the
 principal, password credential, and all requested Owner grants is one transaction;
@@ -232,6 +410,33 @@ blockwart-auth promote-admin --login kai
 ```
 
 The operation is idempotent and writes a redacted security event.
+
+The same rule applies to the global catalog owner. An upgraded installation
+reaches `catalog_owner_missing` until one existing active human or service
+principal is selected locally:
+
+```bash
+blockwart-auth bootstrap-catalog-owner --login kai
+```
+
+The command is a bootstrap and recovery path, not a routine way to add owners:
+it succeeds only while there is no active catalog owner, is idempotent for the
+principal that already holds the role, takes no secret in arguments, prints and
+logs no secret, advances the principal revision on change, writes a redacted
+`catalog_owner_selected` security event with a protected-CLI actor, and leaves
+every existing object grant untouched.
+
+Neither bootstrap path can remove the last active catalog owner afterwards:
+demotion, deactivation, and deletion fail with the repository's normal safe
+conflict, and concurrent writers hit the same invariant in SQLite triggers.
+
+Alembic revision `20260806_0015` only adds the nullable, indexed
+`principals.catalog_role` column, its value constraint, and the two guard
+triggers. It promotes nobody and creates no grant. Because SQLite requires a
+batch table rebuild for the new constraint, the migration also recreates the
+existing last-platform-admin triggers verbatim. Downgrading past it drops the
+column and therefore every catalog-owner assignment while leaving principals,
+credentials, and object grants intact; reselect an owner after upgrading again.
 
 Service-account tokens use a protected output file:
 
@@ -283,6 +488,8 @@ details.
 Identity sessions do not by themselves enable writes: UI, REST, and MCP commands
 also require the matching object permission. Schema settings are read-only over
 HTTP, and normal object creation requires an authorized placement parent through
-the shared `create_child` command. New top-level roots remain an explicit seed or
-import control-plane operation. Production identity bootstrap, token injection,
-and runtime rollout still require their dedicated approval.
+the shared `create_child` command. New top-level roots are created either as an
+explicit seed or import control-plane operation or by an active catalog owner
+through the dedicated `create_root` command described above. Production
+identity bootstrap, token injection, and runtime rollout still require their
+dedicated approval.

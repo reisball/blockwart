@@ -12,6 +12,7 @@ It wraps the object-authorized v1 API:
 - blockwart.add_comment -> POST /api/v1/objects/{object_id}/comments
 - blockwart.get_context -> GET /api/v1/context
 - blockwart.create_child -> POST /api/v1/objects/{parent_id}/children
+- blockwart.create_root -> POST /api/v1/roots
 - blockwart.update_object -> PUT /api/v1/objects/{object_id}
 - blockwart.delete_object -> DELETE /api/v1/objects/{object_id}
 - blockwart.create_relationship -> POST /api/v1/objects/{object_id}/relationships
@@ -77,6 +78,7 @@ means it deliberately bundles lower-level API concerns behind one agent call.
 | `add_comment` | Append an operational work note | `directly sufficient` | Keeps Markdown source and idempotency explicit without exposing audit internals. |
 | `get_context` | Find objects and read details | `directly sufficient` | Search, filters, full details, and per-object write-ready ETags already share one call. |
 | `create_child` | Create a placed child | `intent tool`, `response improved` | Resolves the parent internally and proves placement, ownership, revision, and idempotency. |
+| `create_root` | Create a disconnected catalog root | `intent tool`, `response improved` | Requires an already active catalog-owner principal; proves ownership, revision, idempotency, and the absence of a placement parent. Never mutates any catalog role. |
 | `update_object` | Update one known object | `directly sufficient` | The explicit current ETag preserves visible optimistic concurrency. |
 | `delete_object` | Delete one known object | `directly sufficient` | The destructive action and current ETag remain explicit. |
 | `create_relationship` | Link existing objects | `directly sufficient` | Its response already contains the exact relationship, metadata, revision, and ETag. |
@@ -148,6 +150,15 @@ The established `catalog_object`, `etag`, `changed`, and `replayed` fields stay
 unchanged for compatibility. The compact proof follows from the successful
 atomic API command; neither tool loads a complete device graph or retries a
 failed concurrency precondition.
+
+`blockwart.create_root` executes the same shared `create_root` command as REST
+and the browser UI. It requires an already active catalog-owner service
+principal with an `mcp`-audience token and an `idempotency_key`, and it never
+assigns or removes any catalog role. Its additive result fields are
+`parent_ref` (always `null`, proving the disconnected root), the same
+`owner_assignment` Owner/self proof, and `revision` alongside `etag`,
+`changed`, and `replayed`. The catalog role itself remains read-only in MCP
+through the admin principal projections.
 
 Grant read tools expose only minimized principal identity, separated direct
 grants and effective access, and safe canonical-scope previews. Grant write

@@ -44,6 +44,7 @@ from blockwart.services.commands import (
     CommandAuthorizationDenied,
     authorize_object_command,
     create_attached_device,
+    create_catalog_root,
     create_child_object,
     create_object_relationship,
     delete_catalog_object,
@@ -191,6 +192,7 @@ def _localized_audit_lines(
     template_key = {
         "create": "audit.create",
         "create_attached_device": "audit.create_attached_device",
+        "create_root": "audit.create_root",
         "delete": "audit.delete",
         "relationship_create": "audit.relationship_create",
         "relationship_delete": "audit.relationship_delete",
@@ -255,6 +257,7 @@ def _index_template_context(
     show_create_form: bool,
     can_write_enabled: bool,
     form_kind: str | None = None,
+    show_create_root_form: bool = False,
     selected_asset_ref_override: str = "",
     detail_mode: bool = False,
     detail_query_string: str = "",
@@ -268,6 +271,7 @@ def _index_template_context(
         str(i18n["locale"]),
         translator,
     )
+    is_catalog_owner = read_access_from_request(request).principal.is_catalog_owner
     selected_form_kind = (
         form_kind
         if form_kind in OBJECT_KINDS
@@ -373,6 +377,8 @@ def _index_template_context(
         ),
         "can_write": can_write_enabled,
         "can_create": bool(create_parents),
+        "can_create_root": is_catalog_owner,
+        "show_create_root_form": show_create_root_form and is_catalog_owner,
         "csrf_token": request.cookies.get(AUTH_CSRF_COOKIE_NAME, ""),
         **i18n,
     }
@@ -420,6 +426,7 @@ def index(
     q: str = "",
     kind: str = "",
     create: str = "",
+    create_root: str = "",
     view: str = "catalog",
     topology_mode: str = "placement",
     network_category: str = "",
@@ -461,6 +468,7 @@ def index(
             form=_empty_form(),
             error=None,
             show_create_form=create_enabled and create == "1",
+            show_create_root_form=create_root == "1",
             can_write_enabled=False,
             topology_mode=selected_topology_mode,
             network_category=selected_network_category,
@@ -1405,6 +1413,126 @@ def save_object(
             if kind == DEVICE_OBJECT_KIND
             else _detail_redirect_url(request, payload.id)
         ),
+        status_code=303,
+    )
+
+
+@router.post(
+    "/roots",
+    response_class=HTMLResponse,
+    dependencies=[Depends(require_browser_write_csrf)],
+)
+def save_root(
+    request: Request,
+    session: Annotated[Session, Depends(get_session)],
+    object_id: Annotated[str, Form()],
+    kind: Annotated[str, Form()],
+    label: Annotated[str | None, Form()] = None,
+    primary_name: Annotated[str | None, Form()] = None,
+    labels: Annotated[str, Form()] = "",
+    platform: Annotated[str, Form()] = "",
+    hostname: Annotated[str | None, Form()] = None,
+    device_category: Annotated[str | None, Form()] = None,
+    device_manufacturer: Annotated[str | None, Form()] = None,
+    device_model: Annotated[str | None, Form()] = None,
+    status: Annotated[str, Form()] = "active",
+    summary: Annotated[str, Form()] = "",
+    idempotency_key: Annotated[str, Form(max_length=128)] = "",
+):
+    access = read_access_from_request(request)
+    context = ui_write_context(request, access)
+    if not access.principal.is_catalog_owner:
+        execute_ui_command(
+            session,
+            context,
+            lambda: _raise_command_denial(
+                object_id="<catalog-root>",
+                permission=Permission.CREATE_CHILD,
+            ),
+        )
+    form = {
+        "id": object_id,
+        "kind": kind,
+        "label": label or "",
+        "primary_name": primary_name or hostname or label or "",
+        "labels": labels,
+        "platform": platform,
+        "hostname": hostname or "",
+        "device_category": device_category or "",
+        "device_manufacturer": device_manufacturer or "",
+        "device_model": device_model or "",
+        "status": status,
+        "summary": summary,
+        "idempotency_key": idempotency_key,
+    }
+    try:
+        data: dict[str, Any] = {}
+        ui_schema = get_ui_schema(kind)
+        label_values = _split_label_values(labels)
+        if label_values:
+            data["labels"] = label_values
+        if ui_schema.supports_platform:
+            if platform and platform not in PLATFORM_TYPES:
+                raise ValueError("Unsupported platform")
+            if platform:
+                data["platform"] = platform
+        primary_value = (primary_name or hostname or label or object_id).strip()
+        _apply_primary_name(data, ui_schema, primary_value)
+        if kind == DEVICE_OBJECT_KIND:
+            _apply_device_fields(
+                data,
+                category=device_category or "",
+                manufacturer=device_manufacturer,
+                model=device_model,
+            )
+        payload = CatalogObjectIn(
+            id=object_id,
+            kind=kind,
+            label=primary_value or object_id,
+            status=status or "active",
+            summary=summary or None,
+            data=data,
+        )
+        command_result = execute_ui_command(
+            session,
+            context,
+            lambda: create_catalog_root(
+                session,
+                context,
+                payload=payload,
+                idempotency_key=idempotency_key,
+                idempotency_ttl_seconds=request.app.state.settings.idempotency_ttl_seconds,
+            ),
+        )
+    except (HTTPException, ValidationError, ValueError) as exc:
+        read_model = query_catalog_browse(
+            session,
+            read_access_from_request(request),
+        )
+        return templates.TemplateResponse(
+            request,
+            "index.html",
+            context=_index_template_context(
+                request,
+                read_model,
+                q="",
+                kind="",
+                view="catalog",
+                form=form,
+                error=(
+                    str(exc.detail)
+                    if isinstance(exc, HTTPException)
+                    else _safe_error_message(exc)
+                ),
+                show_create_form=False,
+                show_create_root_form=True,
+                can_write_enabled=True,
+                form_kind=kind,
+            ),
+            status_code=exc.status_code if isinstance(exc, HTTPException) else 422,
+        )
+    return RedirectResponse(
+        url=_detail_redirect_url(request, command_result.catalog_object.id),
         status_code=303,
     )
 

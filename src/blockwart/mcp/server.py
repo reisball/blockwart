@@ -375,6 +375,31 @@ TOOLS: list[JSON] = [
         "annotations": WRITE_ANNOTATIONS,
     },
     {
+        "name": "blockwart.create_root",
+        "description": (
+            "Create one disconnected top-level catalog root without a placement parent "
+            "in a single agent call. Requires an already active catalog-owner principal "
+            "with an MCP-audience service token and an idempotency key; it never assigns "
+            "or removes any catalog role. Returns the object, Owner/self assignment, "
+            "revision, ETag, and idempotency status."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "idempotency_key": {
+                    "type": "string",
+                    "minLength": 16,
+                    "maxLength": 128,
+                    "pattern": "^[!-~]+$",
+                },
+                "object": OBJECT_WRITE_SCHEMA,
+            },
+            "required": ["idempotency_key", "object"],
+            "additionalProperties": False,
+        },
+        "annotations": WRITE_ANNOTATIONS,
+    },
+    {
         "name": "blockwart.update_object",
         "description": "Update one authorized object using its current strong ETag.",
         "inputSchema": {
@@ -752,6 +777,21 @@ def call_tool(
             requested_object=requested_object,
             relation_type="hosts",
             parent_is_source=True,
+        )
+    elif name == "blockwart.create_root":
+        requested_object = _required_object(args, "object")
+        command_payload = request(
+            "POST",
+            "/api/v1/roots",
+            requested_object,
+            {
+                "Idempotency-Key": _required_string(args, "idempotency_key"),
+                "X-Blockwart-Channel": "mcp",
+            },
+        )
+        payload = _self_contained_root_payload(
+            command_payload,
+            requested_object=requested_object,
         )
     elif name == "blockwart.update_object":
         object_id = _required_string(args, "object_id")
@@ -1305,6 +1345,48 @@ def _self_contained_create_payload(
             "to_ref": to_ref,
             "metadata": metadata,
         },
+        "owner_assignment": {
+            "principal": "authenticated_caller",
+            "role": "owner",
+            "scope": "self",
+        },
+        "revision": revision,
+    }
+
+
+def _self_contained_root_payload(
+    command_payload: JSON,
+    *,
+    requested_object: JSON,
+) -> JSON:
+    catalog_object = command_payload.get("catalog_object")
+    if not isinstance(catalog_object, dict):
+        raise _invalid_upstream_response()
+
+    requested_id = requested_object.get("id")
+    requested_kind = requested_object.get("kind")
+    object_id = catalog_object.get("id")
+    object_kind = catalog_object.get("kind")
+    revision = catalog_object.get("revision")
+    etag = command_payload.get("etag")
+    if (
+        not isinstance(requested_id, str)
+        or not isinstance(requested_kind, str)
+        or object_id != requested_id
+        or object_kind != requested_kind
+        or isinstance(revision, bool)
+        or not isinstance(revision, int)
+        or revision < 1
+        or etag != f'"rev-{revision}"'
+        or not isinstance(command_payload.get("changed"), bool)
+        or not isinstance(command_payload.get("replayed"), bool)
+        or catalog_object.get("parent_path") != []
+    ):
+        raise _invalid_upstream_response()
+
+    return {
+        **command_payload,
+        "parent_ref": None,
         "owner_assignment": {
             "principal": "authenticated_caller",
             "role": "owner",
