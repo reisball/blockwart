@@ -232,6 +232,10 @@ def test_mcp_client_completes_handshake_and_calls_every_read_only_tool() -> None
                     await session.send_ping()
                     listed = await session.list_tools()
                     results = {
+                        "blockwart.describe_schema": await session.call_tool(
+                            "blockwart.describe_schema",
+                            {"kind": "device"},
+                        ),
                         "blockwart.search": await session.call_tool(
                             "blockwart.search",
                             {"q": "brieftraeger", "kind": "system", "limit": 3},
@@ -350,6 +354,7 @@ def test_mcp_client_completes_handshake_and_calls_every_read_only_tool() -> None
     assert initialize.serverInfo.name == "blockwart-mcp"
     tools = {tool.name: tool for tool in listed.tools}
     assert set(tools) == {
+        "blockwart.describe_schema",
         "blockwart.search",
         "blockwart.get_object_context",
         "blockwart.list_comments",
@@ -377,6 +382,7 @@ def test_mcp_client_completes_handshake_and_calls_every_read_only_tool() -> None
     assert all(
         tools[name].annotations and tools[name].annotations.readOnlyHint
         for name in {
+            "blockwart.describe_schema",
             "blockwart.search",
             "blockwart.get_object_context",
             "blockwart.list_comments",
@@ -414,6 +420,11 @@ def test_mcp_client_completes_handshake_and_calls_every_read_only_tool() -> None
         content = result.content[0]
         assert isinstance(content, mcp_types.TextContent)
         result_payloads[name] = json.loads(content.text)
+    # The published schema contract is generated locally: it appears over the real
+    # stdio transport without adding any upstream request below.
+    schema_payload = result_payloads["blockwart.describe_schema"]
+    assert schema_payload["requested_kind"] == "device"
+    assert [kind["kind"] for kind in schema_payload["kinds"]] == ["device"]
     assert result_payloads["blockwart.search"]["results"][0]["path"] == ("/api/v1/objects")
     assert result_payloads["blockwart.get_object_context"]["objects"][0]["path"] == (
         "/api/v1/objects/host%2Ffabrik"
@@ -1079,6 +1090,7 @@ def test_mcp_tools_publish_explicit_read_write_and_delete_hints() -> None:
     names = {tool["name"] for tool in TOOLS}
 
     assert names == {
+        "blockwart.describe_schema",
         "blockwart.search",
         "blockwart.get_object_context",
         "blockwart.list_comments",
@@ -1107,6 +1119,7 @@ def test_mcp_tools_publish_explicit_read_write_and_delete_hints() -> None:
     assert all(
         tools[name]["annotations"]["readOnlyHint"]
         for name in {
+            "blockwart.describe_schema",
             "blockwart.search",
             "blockwart.get_object_context",
             "blockwart.list_comments",

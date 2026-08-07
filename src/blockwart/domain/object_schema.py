@@ -32,15 +32,20 @@ SchemaRule = Callable[[Mapping[str, Any]], None]
 
 SECRET_POLICY: SecretPolicy = "global_enforced"
 _UNSET = object()
-_FORBIDDEN_SCHEMA_KEYS = FORBIDDEN_SECRET_KEYS | {
-    "credential",
-    "credentials",
-    "plaintext",
-    "raw",
-    "raw_value",
-    "secret_value",
-    "value",
-}
+# Published as part of the machine-readable schema contract: these key names may
+# never appear anywhere below `data`, at any depth, for any object kind.
+FORBIDDEN_DATA_VALUE_KEYS = frozenset(
+    FORBIDDEN_SECRET_KEYS
+    | {
+        "credential",
+        "credentials",
+        "plaintext",
+        "raw",
+        "raw_value",
+        "secret_value",
+        "value",
+    }
+)
 
 CREDENTIAL_PROVIDERS = frozenset(
     {"vaultwarden", "secrets_json", "env_file", "local_file", "external"}
@@ -103,11 +108,16 @@ class FieldSpec:
     message: str | None = None
     forbidden_message: str | None = None
 
+    @property
+    def has_literal(self) -> bool:
+        """Whether this field pins one exact value, without exposing the sentinel."""
+        return self.literal is not _UNSET
+
     def __post_init__(self) -> None:
         if not self.path or any(not part for part in self.path.split(".")):
             raise ValueError("schema field paths must use non-empty dot-separated keys")
         path_keys = {part.removesuffix("[]").lower() for part in self.path.split(".")}
-        forbidden_keys = path_keys & _FORBIDDEN_SCHEMA_KEYS
+        forbidden_keys = path_keys & FORBIDDEN_DATA_VALUE_KEYS
         if forbidden_keys:
             joined = ", ".join(sorted(forbidden_keys))
             raise ValueError(f"schema fields may not declare secret value keys: {joined}")
@@ -136,7 +146,7 @@ class FieldSpec:
             self.required
             or self.enum_values
             or self.reference_kinds
-            or self.literal is not _UNSET
+            or self.has_literal
         ):
             raise ValueError(f"forbidden field {self.path} cannot define validation options")
 
@@ -309,7 +319,7 @@ def _validate_value(field: FieldSpec, path: str, value: Any) -> None:
                 path,
                 field.message or f"must contain at most {field.max_length} characters",
             )
-    if field.literal is not _UNSET and value != field.literal:
+    if field.has_literal and value != field.literal:
         raise ObjectSchemaError(path, field.message or f"must be {field.literal!r}")
 
 
@@ -588,7 +598,7 @@ def _reject_credential_value_keys(
         for key, child_value in value.items():
             key_text = str(key).lower()
             child_path = f"{path}.{key}"
-            if key_text in _FORBIDDEN_SCHEMA_KEYS:
+            if key_text in FORBIDDEN_DATA_VALUE_KEYS:
                 raise ObjectSchemaError(
                     child_path,
                     "credential references may not contain raw value fields",
@@ -608,6 +618,26 @@ def _validate_runbook_approval(data: Mapping[str, Any]) -> None:
             "data.approval_required",
             "must be true for disruptive or destructive runbooks",
         )
+
+
+# Published description for every schema-bound postcondition, keyed by the rule
+# callable's name. Rules stay executable in one place; the projection publishes
+# them instead of restating conditional validation in a second contract.
+SCHEMA_RULE_CONTRACTS: Mapping[str, str] = MappingProxyType(
+    {
+        "_reject_credential_value_keys": (
+            "No key anywhere below data may name a raw credential or secret value."
+        ),
+        "_validate_runbook_approval": (
+            "data.approval_required must be true when data.risk_level is "
+            "disruptive or destructive."
+        ),
+    }
+)
+
+
+def rule_name(rule: SchemaRule) -> str:
+    return getattr(rule, "__name__", repr(rule))
 
 
 def _schema(

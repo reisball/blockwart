@@ -5,6 +5,7 @@ are implemented by the official Python MCP SDK.
 
 It wraps the object-authorized v1 API:
 
+- blockwart.describe_schema -> local projection of the canonical domain schema (no API call)
 - blockwart.search -> GET /api/v1/objects
 - blockwart.get_object_context -> GET /api/v1/objects/{object_id}
 - blockwart.list_comments -> GET /api/v1/objects/{object_id}/comments
@@ -33,6 +34,13 @@ It wraps the object-authorized v1 API:
 
 Choose the smallest tool that directly answers the intent:
 
+- Call `blockwart.describe_schema` before any object write. It returns the
+  canonical writable kind contract (required, optional, and forbidden nested
+  data paths, JSON types, enums, reference kinds, bounds, normalization,
+  forbidden secret key names, lifecycle/health semantics, and one minimal
+  valid example per write intent) generated from the domain schema registry
+  with no catalog data or credentials, so a published contract cannot drift
+  from server-side validation.
 - Use `blockwart.get_object_context` when the exact object ID is already known.
 - Use `blockwart.get_context` to find assets or services by name, kind, parent,
   endpoint, state, or provenance and return their full authorized details in
@@ -71,6 +79,7 @@ means it deliberately bundles lower-level API concerns behind one agent call.
 
 | Tool | Primary agent intent | Assessment | Rationale |
 |---|---|---|---|
+| `describe_schema` | Read the writable object contract | `directly sufficient` | Projects the canonical domain schema registry locally with no catalog data, so the published contract cannot drift from server-side validation. |
 | `search` | Find compact candidates | `directly sufficient` | Avoids full detail payloads when selecting an object. |
 | `get_object_context` | Read one known object | `directly sufficient` | Returns full authorized catalog context and its write-ready ETag by ID. |
 | `list_comments` | Read an object's operational timeline | `directly sufficient` | Preserves the dedicated newest-first, opaque-cursor resource. |

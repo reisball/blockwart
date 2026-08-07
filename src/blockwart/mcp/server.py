@@ -21,6 +21,12 @@ from jsonschema.protocols import Validator
 from jsonschema.validators import validator_for
 from mcp.server.lowlevel import NotificationOptions, Server
 
+from blockwart.domain.asset_state import ASSET_KINDS
+from blockwart.domain.relationships import RELATIONSHIP_RULES
+from blockwart.domain.schema_projection import (
+    minimal_object_example,
+    object_schema_projection,
+)
 from blockwart.schemas.catalog import ObjectKind
 
 ALL_OBJECT_KINDS: tuple[str, ...] = get_args(ObjectKind)
@@ -63,11 +69,20 @@ class _RejectRedirectHandler(HTTPRedirectHandler):
         return None
 
 
+SCHEMA_TOOL_NAME = "blockwart.describe_schema"
 READ_ONLY_ANNOTATIONS: JSON = {
     "readOnlyHint": True,
     "destructiveHint": False,
     "idempotentHint": True,
     "openWorldHint": True,
+}
+# The published schema contract is generated locally from the domain registry and
+# reaches no external system.
+CONTRACT_ANNOTATIONS: JSON = {
+    "readOnlyHint": True,
+    "destructiveHint": False,
+    "idempotentHint": True,
+    "openWorldHint": False,
 }
 WRITE_ANNOTATIONS: JSON = {
     "readOnlyHint": False,
@@ -86,6 +101,17 @@ ETAG_SCHEMA: JSON = {
     "pattern": '^"rev-[1-9][0-9]*"$',
     "description": "Strong ETag returned by the latest full object read",
 }
+OBJECT_DATA_DESCRIPTION = (
+    "Kind-specific nested catalog data enforced by the canonical domain schema. "
+    f"Call {SCHEMA_TOOL_NAME} for the required paths, enums, reference kinds, "
+    "value bounds, normalization, forbidden secret keys, and one minimal valid "
+    "example for this kind; a shallow or empty object is rejected for kinds with "
+    "required nested paths."
+)
+ASSET_STATE_DESCRIPTION = (
+    "Asset kinds only (" + ", ".join(sorted(ASSET_KINDS)) + "). Omit or send null "
+    f"for knowledge kinds; see {SCHEMA_TOOL_NAME}."
+)
 OBJECT_WRITE_SCHEMA: JSON = {
     "type": "object",
     "required": ["id", "kind", "label"],
@@ -107,13 +133,19 @@ OBJECT_WRITE_SCHEMA: JSON = {
         "lifecycle": {
             "type": ["string", "null"],
             "enum": ["planned", "active", "retired", None],
+            "description": ASSET_STATE_DESCRIPTION,
         },
         "health": {
             "type": ["string", "null"],
             "enum": ["unknown", "healthy", "degraded", "down", "maintenance", None],
+            "description": ASSET_STATE_DESCRIPTION,
         },
         "summary": {"type": ["string", "null"]},
-        "data": {"type": "object", "default": {}},
+        "data": {
+            "type": "object",
+            "default": {},
+            "description": OBJECT_DATA_DESCRIPTION,
+        },
         "provenance": {"type": "object"},
     },
     "additionalProperties": False,
@@ -125,6 +157,22 @@ DEVICE_WRITE_SCHEMA: JSON = {
         "kind": {"type": "string", "const": "device"},
     },
 }
+# Every object write intent points at one canonical projection instead of
+# carrying its own copy of the kind-specific data rules. The accepted kinds and
+# parent kinds are derived from the same domain relationship registry the
+# commands enforce.
+_PLACEMENT_RULE = RELATIONSHIP_RULES["hosts"]
+_ATTACHMENT_RULE = RELATIONSHIP_RULES["attached_to"]
+CHILD_WRITE_KINDS: tuple[str, ...] = tuple(
+    kind for kind in ALL_OBJECT_KINDS if kind in _PLACEMENT_RULE.to_kinds
+)
+ATTACHED_DEVICE_KINDS: tuple[str, ...] = ("device",)
+WRITE_INTENT_TOOLS: tuple[str, ...] = (
+    "blockwart.create_child",
+    "blockwart.create_root",
+    "blockwart.update_object",
+    "blockwart.create_attached_device",
+)
 RELATIONSHIP_PROPERTIES: JSON = {
     "object_id": {"type": "string", "minLength": 1, "maxLength": 128},
     "if_match": ETAG_SCHEMA,
@@ -351,11 +399,34 @@ TOOLS: list[JSON] = [
         "annotations": READ_ONLY_ANNOTATIONS,
     },
     {
+        "name": SCHEMA_TOOL_NAME,
+        "description": (
+            "Describe the canonical Blockwart object schema for every writable kind: "
+            "required, optional, and forbidden nested data paths, types, enums, "
+            "reference kinds, bounds, normalization, forbidden secret keys, "
+            "lifecycle/health semantics, and one minimal valid example per write "
+            "intent. Call it before create_child, create_root, update_object, or "
+            "create_attached_device; it reads no catalog data."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "kind": {
+                    "type": "string",
+                    "enum": list(ALL_OBJECT_KINDS),
+                    "description": "Restrict the contract to exactly one object kind",
+                },
+            },
+            "additionalProperties": False,
+        },
+        "annotations": CONTRACT_ANNOTATIONS,
+    },
+    {
         "name": "blockwart.create_child",
         "description": (
             "Create one authorized placement child in a single agent call. Returns the object, "
             "typed parent, exact hosts relationship, Owner/self assignment, revision, ETag, "
-            "and idempotency status."
+            f"and idempotency status. Build object.data from {SCHEMA_TOOL_NAME}."
         ),
         "inputSchema": {
             "type": "object",
@@ -381,7 +452,7 @@ TOOLS: list[JSON] = [
             "in a single agent call. Requires an already active catalog-owner principal "
             "with an MCP-audience service token and an idempotency key; it never assigns "
             "or removes any catalog role. Returns the object, Owner/self assignment, "
-            "revision, ETag, and idempotency status."
+            f"revision, ETag, and idempotency status. Build object.data from {SCHEMA_TOOL_NAME}."
         ),
         "inputSchema": {
             "type": "object",
@@ -401,7 +472,10 @@ TOOLS: list[JSON] = [
     },
     {
         "name": "blockwart.update_object",
-        "description": "Update one authorized object using its current strong ETag.",
+        "description": (
+            "Update one authorized object using its current strong ETag. Build "
+            f"object.data from {SCHEMA_TOOL_NAME}."
+        ),
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -470,7 +544,8 @@ TOOLS: list[JSON] = [
         "description": (
             "Create a device and attach it to a parent endpoint in a single agent call. Returns "
             "the device, typed parent, exact attached_to relationship and metadata, Owner/self "
-            "assignment, revision, ETag, and idempotency status."
+            "assignment, revision, ETag, and idempotency status. Build device.data from "
+            f"{SCHEMA_TOOL_NAME}."
         ),
         "inputSchema": {
             "type": "object",
@@ -649,6 +724,99 @@ TOOLS: list[JSON] = [
 TOOL_DEFINITIONS: dict[str, JSON] = {tool["name"]: tool for tool in TOOLS}
 
 
+def describe_schema_payload(kind: str | None = None) -> JSON:
+    """Project the canonical domain object schema registry for MCP clients.
+
+    The payload is generated from `blockwart.domain.object_schema` on every call
+    and contains no catalog data, credentials, or internal paths.
+    """
+    projection = object_schema_projection()
+    if kind is not None:
+        projection["kinds"] = [
+            projected for projected in projection["kinds"] if projected["kind"] == kind
+        ]
+    return {
+        **projection,
+        "requested_kind": kind,
+        "write_intents": _write_intents(kind),
+    }
+
+
+def _write_intents(kind: str | None) -> list[JSON]:
+    intents: list[JSON] = []
+    for name, argument, kinds, arguments, relationship, parent_kinds in (
+        (
+            "blockwart.create_child",
+            "object",
+            CHILD_WRITE_KINDS,
+            ("parent_id", "idempotency_key", "object"),
+            _PLACEMENT_RULE.relation_type,
+            sorted(_PLACEMENT_RULE.from_kinds),
+        ),
+        (
+            "blockwart.create_root",
+            "object",
+            ALL_OBJECT_KINDS,
+            ("idempotency_key", "object"),
+            None,
+            [],
+        ),
+        (
+            "blockwart.update_object",
+            "object",
+            ALL_OBJECT_KINDS,
+            ("object_id", "if_match", "object"),
+            None,
+            [],
+        ),
+        (
+            "blockwart.create_attached_device",
+            "device",
+            ATTACHED_DEVICE_KINDS,
+            ("parent_id", "idempotency_key", "device"),
+            _ATTACHMENT_RULE.relation_type,
+            sorted(_ATTACHMENT_RULE.to_kinds),
+        ),
+    ):
+        supported = [supported_kind for supported_kind in kinds if kind in (None, supported_kind)]
+        if not supported:
+            continue
+        intents.append(
+            {
+                "tool": name,
+                "object_argument": argument,
+                "kinds": supported,
+                "required_arguments": list(arguments),
+                "relation_type": relationship,
+                "parent_kinds": parent_kinds,
+                "example": _write_intent_example(name, argument, supported[0]),
+            }
+        )
+    return intents
+
+
+def _write_intent_example(name: str, argument: str, kind: str) -> JSON:
+    example: JSON = {argument: minimal_object_example(kind)}
+    idempotency_key = f"example-{name.split('.')[-1].replace('_', '-')}-0001"
+    if name == "blockwart.update_object":
+        return {
+            "object_id": example[argument]["id"],
+            "if_match": '"rev-1"',
+            **example,
+        }
+    if name == "blockwart.create_root":
+        return {"idempotency_key": idempotency_key, **example}
+    parent_kind = "host" if name == "blockwart.create_child" else "system"
+    intent_example: JSON = {
+        "parent_id": f"example-{parent_kind}",
+        "idempotency_key": idempotency_key,
+        **example,
+    }
+    if name == "blockwart.create_attached_device":
+        intent_example["metadata"] = {"link_kind": "ethernet"}
+    return intent_example
+
+
 def _compile_input_validator(schema: JSON) -> Validator:
     validator_class = validator_for(schema)
     validator_class.check_schema(schema)
@@ -706,7 +874,11 @@ def call_tool(
             {**headers, "X-Correlation-ID": request_id},
         )
 
-    if name == "blockwart.search":
+    if name == SCHEMA_TOOL_NAME:
+        # The published contract is generated locally: it reaches no upstream
+        # API and therefore requires no credential.
+        payload = describe_schema_payload(args.get("kind"))
+    elif name == "blockwart.search":
         payload = _legacy_page_payload(
             fetch("/api/v1/objects", _clean_params(args, default_limit=10)),
             args=args,

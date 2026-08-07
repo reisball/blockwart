@@ -131,6 +131,7 @@ async def check_mcp(
             listed = await session.list_tools()
             tools = {tool.name: tool for tool in listed.tools}
             assert set(tools) == {
+                "blockwart.describe_schema",
                 "blockwart.search",
                 "blockwart.get_object_context",
                 "blockwart.list_comments",
@@ -161,6 +162,7 @@ async def check_mcp(
                     tool.annotations.readOnlyHint
                     if name
                     in {
+                        "blockwart.describe_schema",
                         "blockwart.search",
                         "blockwart.get_object_context",
                         "blockwart.list_comments",
@@ -178,6 +180,41 @@ async def check_mcp(
                 )
                 for name, tool in tools.items()
             )
+            schema_contract = _tool_payload(
+                await session.call_tool("blockwart.describe_schema", {})
+            )
+            schema_kinds = {kind["kind"]: kind for kind in schema_contract["kinds"]}
+            assert set(schema_kinds) == {
+                "host",
+                "system",
+                "network",
+                "device",
+                "service",
+                "credential_reference",
+                "runbook",
+                "decision",
+                "project",
+            }
+            device_category = next(
+                field
+                for field in schema_kinds["device"]["data"]["fields"]
+                if field["path"] == "device.category"
+            )
+            assert device_category["requirement"] == "required"
+            assert device_category["enum"] == [
+                "adapter",
+                "antenna",
+                "controller",
+                "other",
+                "sensor",
+                "ups",
+            ]
+            assert {intent["tool"] for intent in schema_contract["write_intents"]} == {
+                "blockwart.create_child",
+                "blockwart.create_root",
+                "blockwart.update_object",
+                "blockwart.create_attached_device",
+            }
             admin_first_page = await session.call_tool(
                 "blockwart.list_admin_principals",
                 {"query": "package-smoke", "limit": 1},
@@ -531,7 +568,7 @@ def main() -> None:
     print(
         "installed_package=ok "
         f"cwd={Path.cwd()} revision={readiness['revision']} "
-        f"openapi_paths={len(openapi['paths'])} mcp_protocol={protocol} mcp_calls=28"
+        f"openapi_paths={len(openapi['paths'])} mcp_protocol={protocol} mcp_calls=29"
     )
 
 
