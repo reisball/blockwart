@@ -21,7 +21,7 @@ from urllib.error import HTTPError
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
-from tests.test_catalog_root_creation import root_state  # noqa: F401
+from test_catalog_root_creation import root_state  # noqa: F401
 
 from blockwart.api.deps import get_session
 from blockwart.domain.object_schema import (
