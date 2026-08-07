@@ -44,6 +44,7 @@ from blockwart.services.principal_management import (
     query_principal_page,
     query_principals,
     reauthenticate_platform_admin,
+    record_catalog_owner_denial,
     record_failed_platform_admin_reauthentication,
     reset_managed_human_password,
     revoke_managed_principal_grant,
@@ -655,6 +656,8 @@ def _execute_admin_ui[T](
     except PlatformAdminDenied as exc:
         raise HTTPException(status_code=403, detail="Platform admin permission denied") from exc
     except CatalogOwnerDenied as exc:
+        with transaction(session):
+            record_catalog_owner_denial(session, exc)
         raise HTTPException(
             status_code=403,
             detail=(

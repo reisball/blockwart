@@ -181,6 +181,26 @@ cannot bypass the strict zero-owner bootstrap contract: if no active catalog
 owner exists, normal REST/UI administration cannot mint the first one, because
 the dual-role gate cannot be satisfied.
 
+The role is never assigned to an inactive principal, because such a principal
+could later be activated through the generic principal update and gain global
+catalog permissions without the dual-role gate or its audit event. Assigning
+`catalog_owner` to an inactive target is rejected with the stable principal
+conflict, and — for legacy rows or raw writes that already hold that state —
+generic principal update refuses to activate a principal that currently carries
+`catalog_owner`. The safe sequence is to remove the role through catalog-role
+administration first, activate the principal, and reassign the role under the
+dual-role gate. Generic principal update still never accepts a password or a
+catalog-role field; its `principal_updated` security event now also records the
+target's non-secret `catalog_role` so the relevant state is visible in the audit
+trail.
+
+A dual-role authorization denial on either the REST or the UI path returns `403`
+and writes exactly one redacted `catalog_owner_admin_authorization` denial event
+carrying the actor, the channel, the request ID and a single stable reason. It
+mirrors the failed platform-admin reauthentication evidence and never names the
+target, the missing role axis, or any credential, so a requester cannot learn
+which of the two required roles was absent.
+
 REST exposes the action at `POST /api/v1/admin/principals/{principal_id}/catalog-role`
 with the `CatalogRoleMutationIn` body and the same `If-Match` header and stable
 error envelopes as principal administration. Unlike the other `/api/v1/admin`
@@ -205,6 +225,30 @@ MCP may only read/display the catalog role and its effective authority through t
 existing read-only `list_admin_principals` and `get_admin_principal` projections.
 No MCP tool, argument, route, or generic update field assigns or removes the
 catalog role.
+
+### Credential administration of a catalog owner
+
+Issuing or rotating a service token for a catalog-owner principal, or resetting a
+human catalog owner's password, takes over that principal's global catalog
+authority, so those operations are gated exactly like catalog-role
+administration: the actor must be at that moment both an active platform admin
+and an active catalog owner, and must pass the human-only reauthentication path.
+The generic platform-admin service-account exemption on the API channel never
+applies to such a target, so a platform-admin-only service account can neither
+mint nor rotate an API or MCP token for a catalog-owner service principal nor
+reset a human catalog owner's password. Because the `/api/v1/admin` credential
+routes are bearer-only, catalog-owner credential administration is reachable
+through the browser UI, where a human dual-role administrator reauthenticates.
+
+The target's catalog role is read from current database state — never from the
+request body or the actor's access projection — and covers active and inactive
+targets and every token audience. Denial happens before the idempotency
+reservation, the revision claim, any token issuance or rotation, any password
+mutation, session revocation, and any success audit evidence, so a denied attempt
+leaves credentials, revisions, idempotency records, sessions, and the audit trail
+untouched apart from the denial event. Targets without the catalog-owner role
+keep the established platform-admin contract, including one-time secret
+disclosure, ETag preconditions, idempotent replay, and stable error envelopes.
 
 ## Catalog-owner root creation
 

@@ -470,6 +470,7 @@ def test_admin_ui_updates_principal_without_platform_role_across_full_lifecycle(
             {
                 "active": active,
                 "actor_principal_id": principal_admin_ui_state["admin_id"],
+                "catalog_role": "none",
                 "platform_role": "none",
                 "revision": revision,
             }
