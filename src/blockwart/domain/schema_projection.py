@@ -25,13 +25,28 @@ from blockwart.domain.asset_state import (
 from blockwart.domain.object_schema import (
     BUILTIN_SCHEMAS,
     FORBIDDEN_DATA_VALUE_KEYS,
-    SCHEMA_RULE_CONTRACTS,
+    GENERIC_SCHEMA_VIOLATION,
+    PUBLIC_SCHEMA_RULE_CONTRACTS,
+    PUBLIC_SCHEMA_RULE_VIOLATIONS,
+    SCHEMA_VIOLATION_CONTRACTS,
+    VIOLATION_FIELD_NOT_ALLOWED,
+    VIOLATION_INVALID_FORMAT,
+    VIOLATION_REFERENCE_KIND_NOT_ALLOWED,
+    VIOLATION_REQUIRED_FIELD_MISSING,
+    VIOLATION_TYPE_MISMATCH,
+    VIOLATION_VALUE_NOT_ALLOWED,
+    VIOLATION_VALUE_NOT_CONSTANT,
+    VIOLATION_VALUE_OUT_OF_RANGE,
+    VIOLATION_VALUE_TOO_LONG,
+    VIOLATION_VALUE_TOO_SHORT,
     FieldSpec,
-    rule_name,
+    public_rule_name,
 )
 from blockwart.domain.security import FORBIDDEN_ACL_DATA_KEYS, FORBIDDEN_SECRET_KEYS
 
-SCHEMA_PROJECTION_VERSION = 1
+# Version 2 additively publishes the machine-readable violation contract next to
+# the field rules that produce it.
+SCHEMA_PROJECTION_VERSION = 2
 SCHEMA_DATA_VERSION = 1
 OBJECT_STATUS_VALUES: tuple[str, ...] = get_args(LegacyObjectStatus)
 DEFAULT_OBJECT_STATUS = "active"
@@ -54,6 +69,22 @@ _JSON_TYPES: Mapping[str, tuple[str, ...]] = {
     "string_or_object": ("object", "string"),
     "text": ("string",),
     "url": ("string",),
+}
+# Violation types a field of each declarative type can raise for its own value,
+# before required/enum/bounds/reference rules add their own.
+_TYPE_VIOLATIONS: Mapping[str, frozenset[str]] = {
+    "array": frozenset({VIOLATION_TYPE_MISMATCH}),
+    "boolean": frozenset({VIOLATION_TYPE_MISMATCH}),
+    "enum": frozenset({VIOLATION_VALUE_NOT_ALLOWED}),
+    "integer": frozenset({VIOLATION_TYPE_MISMATCH}),
+    "ip": frozenset({VIOLATION_INVALID_FORMAT}),
+    "object": frozenset({VIOLATION_TYPE_MISMATCH}),
+    "port": frozenset({VIOLATION_TYPE_MISMATCH, VIOLATION_VALUE_OUT_OF_RANGE}),
+    "reference": frozenset({VIOLATION_TYPE_MISMATCH, VIOLATION_INVALID_FORMAT}),
+    "string": frozenset({VIOLATION_TYPE_MISMATCH}),
+    "string_or_object": frozenset({VIOLATION_TYPE_MISMATCH}),
+    "text": frozenset({VIOLATION_TYPE_MISMATCH}),
+    "url": frozenset({VIOLATION_INVALID_FORMAT}),
 }
 _PYTHON_JSON_TYPES: tuple[tuple[type, str], ...] = (
     (bool, "boolean"),
@@ -89,7 +120,31 @@ def object_schema_projection() -> dict[str, Any]:
         "asset_kinds": sorted(ASSET_KINDS),
         "knowledge_kinds": sorted(set(WRITABLE_KINDS) - set(ASSET_KINDS)),
         "secret_policy": secret_policy_projection(),
+        "violation_policy": violation_policy_projection(),
         "kinds": [kind_schema_projection(kind) for kind in WRITABLE_KINDS],
+    }
+
+
+def violation_policy_projection() -> dict[str, Any]:
+    """Publish the machine-readable violation contract of rejected writes.
+
+    Every rejected object write reports one of these violation types for one
+    canonical public path. The published description is the only failure text a
+    boundary returns: rejected values, inputs, and exception text stay internal.
+    """
+    return {
+        "detail_fields": ["code", "location", "message", "path", "rule"],
+        "generic_violation": GENERIC_SCHEMA_VIOLATION,
+        "unknown_violations_fall_back_to_generic": True,
+        "violations": [
+            {"code": code, "description": SCHEMA_VIOLATION_CONTRACTS[code]}
+            for code in sorted(SCHEMA_VIOLATION_CONTRACTS)
+        ],
+        "description": (
+            "A rejected write names the canonical public data path, one violation "
+            "code, and the published rule when a schema postcondition rejected it. "
+            "Rejected values are never returned."
+        ),
     }
 
 
@@ -133,8 +188,9 @@ def kind_schema_projection(kind: str) -> dict[str, Any]:
             "fields": [field_projection(field) for field in schema.fields],
             "rules": [
                 {
-                    "rule": rule_name(rule).lstrip("_"),
-                    "description": SCHEMA_RULE_CONTRACTS[rule_name(rule)],
+                    "rule": public_rule_name(rule),
+                    "description": PUBLIC_SCHEMA_RULE_CONTRACTS[public_rule_name(rule)],
+                    "violation": PUBLIC_SCHEMA_RULE_VIOLATIONS[public_rule_name(rule)],
                 }
                 for rule in schema.rules
             ],
@@ -168,7 +224,28 @@ def field_projection(field: FieldSpec) -> dict[str, Any]:
         projected["reason"] = field.forbidden_message
     elif field.message is not None:
         projected["constraint"] = field.message
+    projected["violations"] = sorted(field_violations(field))
     return projected
+
+
+def field_violations(field: FieldSpec) -> set[str]:
+    """Return every violation type this field can raise, from its own rules."""
+    if field.forbidden_message is not None:
+        return {VIOLATION_FIELD_NOT_ALLOWED}
+    violations: set[str] = set(_TYPE_VIOLATIONS[field.field_type])
+    if field.required:
+        violations.add(VIOLATION_REQUIRED_FIELD_MISSING)
+    if field.enum_values:
+        violations.add(VIOLATION_VALUE_NOT_ALLOWED)
+    if field.reference_kinds:
+        violations.add(VIOLATION_REFERENCE_KIND_NOT_ALLOWED)
+    if field.has_literal:
+        violations.add(VIOLATION_VALUE_NOT_CONSTANT)
+    if field.min_length is not None:
+        violations.add(VIOLATION_VALUE_TOO_SHORT)
+    if field.max_length is not None:
+        violations.add(VIOLATION_VALUE_TOO_LONG)
+    return violations
 
 
 def minimal_object_data(kind: str) -> dict[str, Any]:

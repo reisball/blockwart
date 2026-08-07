@@ -47,6 +47,68 @@ FORBIDDEN_DATA_VALUE_KEYS = frozenset(
     }
 )
 
+# Stable machine-readable violation types. Every ObjectSchemaError names exactly
+# one of them, and the schema projection publishes this catalog next to the field
+# rules, so a client contract cannot drift from what validation actually raises.
+# The public description is the only text a boundary is allowed to return: it
+# describes the broken rule, never the rejected value.
+VIOLATION_REQUIRED_FIELD_MISSING = "required_field_missing"
+VIOLATION_FIELD_NOT_ALLOWED = "field_not_allowed"
+VIOLATION_TYPE_MISMATCH = "type_mismatch"
+VIOLATION_VALUE_NOT_ALLOWED = "value_not_allowed"
+VIOLATION_VALUE_NOT_CONSTANT = "value_not_constant"
+VIOLATION_VALUE_TOO_SHORT = "value_too_short"
+VIOLATION_VALUE_TOO_LONG = "value_too_long"
+VIOLATION_VALUE_OUT_OF_RANGE = "value_out_of_range"
+VIOLATION_INVALID_FORMAT = "invalid_format"
+VIOLATION_REFERENCE_KIND_NOT_ALLOWED = "reference_kind_not_allowed"
+VIOLATION_FORBIDDEN_KEY = "forbidden_key"
+VIOLATION_RULE_VIOLATION = "rule_violation"
+GENERIC_SCHEMA_VIOLATION = "invalid_value"
+
+SCHEMA_VIOLATION_CONTRACTS: Mapping[str, str] = MappingProxyType(
+    {
+        VIOLATION_REQUIRED_FIELD_MISSING: "A required field is missing at this path.",
+        VIOLATION_FIELD_NOT_ALLOWED: (
+            "This path is not accepted for this object kind."
+        ),
+        VIOLATION_TYPE_MISMATCH: (
+            "The value at this path does not use the JSON type this field requires."
+        ),
+        VIOLATION_VALUE_NOT_ALLOWED: (
+            "The value at this path is not one of the values this field allows."
+        ),
+        VIOLATION_VALUE_NOT_CONSTANT: (
+            "The value at this path must equal the single constant this field pins."
+        ),
+        VIOLATION_VALUE_TOO_SHORT: (
+            "The value at this path is shorter than this field allows."
+        ),
+        VIOLATION_VALUE_TOO_LONG: (
+            "The value at this path is longer than this field allows."
+        ),
+        VIOLATION_VALUE_OUT_OF_RANGE: (
+            "The value at this path is outside the range this field allows."
+        ),
+        VIOLATION_INVALID_FORMAT: (
+            "The value at this path does not use the format this field requires."
+        ),
+        VIOLATION_REFERENCE_KIND_NOT_ALLOWED: (
+            "The reference at this path names an object kind this field does not accept."
+        ),
+        VIOLATION_FORBIDDEN_KEY: (
+            "A key at this path is globally forbidden below data."
+        ),
+        VIOLATION_RULE_VIOLATION: (
+            "A published schema rule for this object kind rejects this combination "
+            "of fields."
+        ),
+        GENERIC_SCHEMA_VIOLATION: (
+            "The value at this path is rejected by the canonical object schema."
+        ),
+    }
+)
+
 CREDENTIAL_PROVIDERS = frozenset(
     {"vaultwarden", "secrets_json", "env_file", "local_file", "external"}
 )
@@ -86,11 +148,31 @@ REFERENCE_TARGETS: Mapping[str, frozenset[str]] = MappingProxyType(
 
 
 class ObjectSchemaError(ValueError):
-    """A catalog data field violates the fixed schema for its object kind."""
+    """A catalog data field violates the fixed schema for its object kind.
 
-    def __init__(self, path: str, message: str) -> None:
+    `path` is the resolved canonical data path, `violation` one published
+    machine-readable violation type, and `rule` the published schema rule that
+    rejected the write when a postcondition raised. Unknown violation types and
+    unknown rule names fall back to the generic public view instead of
+    publishing an unreviewed contract.
+    """
+
+    def __init__(
+        self,
+        path: str,
+        message: str,
+        *,
+        violation: str = GENERIC_SCHEMA_VIOLATION,
+        rule: str | None = None,
+    ) -> None:
         self.path = path
         self.message = message
+        self.violation = (
+            violation
+            if violation in SCHEMA_VIOLATION_CONTRACTS
+            else GENERIC_SCHEMA_VIOLATION
+        )
+        self.rule = rule if rule in PUBLIC_SCHEMA_RULE_CONTRACTS else None
         super().__init__(f"{path} {message}")
 
 
@@ -226,10 +308,18 @@ def validate_fields(
     for field in fields:
         values = _resolve_values(data, field.path)
         if field.required and not values:
-            raise ObjectSchemaError(f"data.{field.path}", "is required")
+            raise ObjectSchemaError(
+                f"data.{field.path}",
+                "is required",
+                violation=VIOLATION_REQUIRED_FIELD_MISSING,
+            )
         for path, value in values:
             if field.forbidden_message is not None:
-                raise ObjectSchemaError(path, field.forbidden_message)
+                raise ObjectSchemaError(
+                    path,
+                    field.forbidden_message,
+                    violation=VIOLATION_FIELD_NOT_ALLOWED,
+                )
             _validate_value(field, path, value)
 
 
@@ -244,7 +334,11 @@ def _resolve_values(
         next_values: list[tuple[str, Any]] = []
         for parent_path, parent in resolved:
             if not isinstance(parent, Mapping):
-                raise ObjectSchemaError(parent_path, "must be an object")
+                raise ObjectSchemaError(
+                    parent_path,
+                    "must be an object",
+                    violation=VIOLATION_TYPE_MISMATCH,
+                )
             if key not in parent:
                 continue
             value = parent[key]
@@ -253,7 +347,11 @@ def _resolve_values(
                 next_values.append((value_path, value))
                 continue
             if not isinstance(value, list):
-                raise ObjectSchemaError(value_path, "must be a list")
+                raise ObjectSchemaError(
+                    value_path,
+                    "must be a list",
+                    violation=VIOLATION_TYPE_MISMATCH,
+                )
             next_values.extend(
                 (f"{value_path}[{index}]", item)
                 for index, item in enumerate(value)
@@ -264,6 +362,7 @@ def _resolve_values(
 
 def _validate_value(field: FieldSpec, path: str, value: Any) -> None:
     field_type = field.field_type
+    violation = VIOLATION_TYPE_MISMATCH
     if field_type in {"string", "text"}:
         valid = isinstance(value, str)
         default_message = "must be a string"
@@ -289,19 +388,20 @@ def _validate_value(field: FieldSpec, path: str, value: Any) -> None:
             valid = False
         allowed = ", ".join(sorted(str(item) for item in field.enum_values))
         default_message = f"must be one of: {allowed}"
+        violation = VIOLATION_VALUE_NOT_ALLOWED
     elif field_type == "ip":
         valid = _is_ip(value)
         default_message = "must be a valid IP address"
+        violation = VIOLATION_INVALID_FORMAT
     elif field_type == "url":
         valid = _is_url(value)
         default_message = "must be a valid URL"
+        violation = VIOLATION_INVALID_FORMAT
     elif field_type == "port":
-        valid = (
-            isinstance(value, int)
-            and not isinstance(value, bool)
-            and 1 <= value <= 65535
-        )
+        numeric = isinstance(value, int) and not isinstance(value, bool)
+        valid = numeric and 1 <= value <= 65535
         default_message = "must be an integer from 1 to 65535"
+        violation = VIOLATION_VALUE_OUT_OF_RANGE if numeric else VIOLATION_TYPE_MISMATCH
     elif field_type == "reference":
         _validate_reference(value, field.reference_kinds, path)
         valid = True
@@ -310,17 +410,26 @@ def _validate_value(field: FieldSpec, path: str, value: Any) -> None:
         raise AssertionError(f"unsupported schema field type: {field_type}")
 
     if not valid:
-        raise ObjectSchemaError(path, field.message or default_message)
+        raise ObjectSchemaError(path, field.message or default_message, violation=violation)
     if isinstance(value, str):
         if field.min_length is not None and len(value) < field.min_length:
-            raise ObjectSchemaError(path, field.message or "must not be empty")
+            raise ObjectSchemaError(
+                path,
+                field.message or "must not be empty",
+                violation=VIOLATION_VALUE_TOO_SHORT,
+            )
         if field.max_length is not None and len(value) > field.max_length:
             raise ObjectSchemaError(
                 path,
                 field.message or f"must contain at most {field.max_length} characters",
+                violation=VIOLATION_VALUE_TOO_LONG,
             )
     if field.has_literal and value != field.literal:
-        raise ObjectSchemaError(path, field.message or f"must be {field.literal!r}")
+        raise ObjectSchemaError(
+            path,
+            field.message or f"must be {field.literal!r}",
+            violation=VIOLATION_VALUE_NOT_CONSTANT,
+        )
 
 
 def _validate_reference(
@@ -329,14 +438,22 @@ def _validate_reference(
     path: str,
 ) -> None:
     if not isinstance(value, str):
-        raise ObjectSchemaError(path, "must be a string")
+        raise ObjectSchemaError(path, "must be a string", violation=VIOLATION_TYPE_MISMATCH)
     try:
         parsed = TypedReference.parse(value)
     except ValueError as exc:
-        raise ObjectSchemaError(path, "must use a supported kind:id reference") from exc
+        raise ObjectSchemaError(
+            path,
+            "must use a supported kind:id reference",
+            violation=VIOLATION_INVALID_FORMAT,
+        ) from exc
     if parsed.kind not in allowed_kinds:
         allowed = ", ".join(sorted(allowed_kinds))
-        raise ObjectSchemaError(path, f"must reference one of: {allowed}")
+        raise ObjectSchemaError(
+            path,
+            f"must reference one of: {allowed}",
+            violation=VIOLATION_REFERENCE_KIND_NOT_ALLOWED,
+        )
 
 
 def _is_ip(value: Any) -> bool:
@@ -602,6 +719,8 @@ def _reject_credential_value_keys(
                 raise ObjectSchemaError(
                     child_path,
                     "credential references may not contain raw value fields",
+                    violation=VIOLATION_FORBIDDEN_KEY,
+                    rule=public_rule_name(_reject_credential_value_keys),
                 )
             _reject_credential_value_keys(child_value, child_path)
     elif isinstance(value, list):
@@ -617,6 +736,8 @@ def _validate_runbook_approval(data: Mapping[str, Any]) -> None:
         raise ObjectSchemaError(
             "data.approval_required",
             "must be true for disruptive or destructive runbooks",
+            violation=VIOLATION_RULE_VIOLATION,
+            rule=public_rule_name(_validate_runbook_approval),
         )
 
 
@@ -636,8 +757,38 @@ SCHEMA_RULE_CONTRACTS: Mapping[str, str] = MappingProxyType(
 )
 
 
+# The violation type every schema-bound postcondition reports. Field rules stay
+# field-typed; a rule failure names the published rule instead.
+SCHEMA_RULE_VIOLATIONS: Mapping[str, str] = MappingProxyType(
+    {
+        "_reject_credential_value_keys": VIOLATION_FORBIDDEN_KEY,
+        "_validate_runbook_approval": VIOLATION_RULE_VIOLATION,
+    }
+)
+
+
 def rule_name(rule: SchemaRule) -> str:
     return getattr(rule, "__name__", repr(rule))
+
+
+def public_rule_name(rule: SchemaRule | str) -> str:
+    """Return the published name of one schema rule, without its private prefix."""
+    name = rule if isinstance(rule, str) else rule_name(rule)
+    return name.lstrip("_")
+
+
+PUBLIC_SCHEMA_RULE_CONTRACTS: Mapping[str, str] = MappingProxyType(
+    {
+        public_rule_name(name): description
+        for name, description in SCHEMA_RULE_CONTRACTS.items()
+    }
+)
+PUBLIC_SCHEMA_RULE_VIOLATIONS: Mapping[str, str] = MappingProxyType(
+    {
+        public_rule_name(name): violation
+        for name, violation in SCHEMA_RULE_VIOLATIONS.items()
+    }
+)
 
 
 def _schema(
