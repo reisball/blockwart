@@ -14,6 +14,10 @@ from sqlalchemy.exc import SQLAlchemyError
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from blockwart.db.session import DatabaseTransactionError
+from blockwart.domain.validation_errors import (
+    detail_from_validation_error,
+    order_public_details,
+)
 from blockwart.schemas.errors import ApiErrorResponse
 
 CORRELATION_ID_HEADER = "X-Correlation-ID"
@@ -76,14 +80,14 @@ def install_api_error_contract(app: FastAPI) -> None:
     ):
         if not _is_api_request(request):
             return await request_validation_exception_handler(request, exc)
-        details = [
-            {
-                "location": ".".join(str(part) for part in error.get("loc", ())),
-                "message": "Invalid value.",
-                "type": str(error.get("type", "validation_error")),
-            }
-            for error in exc.errors()
-        ]
+        # Every detail is projected from the canonical domain violation
+        # contract: the rejected value, its Pydantic context, the boundary
+        # validation type, and the raw exception text stay internal. A detail
+        # carries only the published fields (code, location, message, path,
+        # rule), matching the schema projection's violation contract exactly.
+        details = order_public_details(
+            detail_from_validation_error(error) for error in exc.errors()
+        )
         return _error_response(
             status_code=422,
             code="validation_error",
@@ -205,7 +209,7 @@ def _error_response(
     code: str,
     message: str,
     correlation_id: str,
-    details: list[dict[str, str]] | None = None,
+    details: list[dict[str, str | None]] | None = None,
     headers: dict[str, str] | None = None,
 ) -> JSONResponse:
     error: dict[str, object] = {

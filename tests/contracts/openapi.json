@@ -984,7 +984,12 @@
         "type": "object"
       },
       "ApiErrorDetail": {
+        "description": "One rejected field of a failed request.\n\nThe fields mirror the published `violation_policy` of the schema\nprojection exactly: `code` is a published violation type from\n`blockwart.domain.object_schema`, `path` the canonical catalog data path\nwhen the domain schema rejected the value, `rule` the published schema\nrule when a postcondition rejected it, `location` the rejected path inside\nthe request, and `message` the published description of the violation.\nNo rejected value, boundary validation type, Pydantic context, or\nexception text is ever part of a detail.",
         "properties": {
+          "code": {
+            "title": "Code",
+            "type": "string"
+          },
           "location": {
             "title": "Location",
             "type": "string"
@@ -993,15 +998,33 @@
             "title": "Message",
             "type": "string"
           },
-          "type": {
-            "title": "Type",
-            "type": "string"
+          "path": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Path"
+          },
+          "rule": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rule"
           }
         },
         "required": [
           "location",
           "message",
-          "type"
+          "code"
         ],
         "title": "ApiErrorDetail",
         "type": "object"

@@ -21,6 +21,30 @@ from jsonschema.protocols import Validator
 from jsonschema.validators import validator_for
 from mcp.server.lowlevel import NotificationOptions, Server
 
+from blockwart.domain.asset_state import ASSET_KINDS
+from blockwart.domain.object_schema import (
+    GENERIC_SCHEMA_VIOLATION,
+    VIOLATION_FIELD_NOT_ALLOWED,
+    VIOLATION_INVALID_FORMAT,
+    VIOLATION_REQUIRED_FIELD_MISSING,
+    VIOLATION_TYPE_MISMATCH,
+    VIOLATION_VALUE_NOT_ALLOWED,
+    VIOLATION_VALUE_NOT_CONSTANT,
+    VIOLATION_VALUE_OUT_OF_RANGE,
+    VIOLATION_VALUE_TOO_LONG,
+    VIOLATION_VALUE_TOO_SHORT,
+)
+from blockwart.domain.relationships import RELATIONSHIP_RULES
+from blockwart.domain.schema_projection import (
+    minimal_object_example,
+    object_schema_projection,
+)
+from blockwart.domain.validation_errors import (
+    DATA_PATH_ROOT,
+    order_public_details,
+    public_detail,
+    sanitize_public_details,
+)
 from blockwart.schemas.catalog import ObjectKind
 
 ALL_OBJECT_KINDS: tuple[str, ...] = get_args(ObjectKind)
@@ -38,7 +62,13 @@ _CORRELATION_ID_PATTERN = re.compile(r"^[A-Za-z0-9._-]{1,64}$")
 
 
 class ToolInputError(ValueError):
-    pass
+    def __init__(
+        self,
+        message: str,
+        details: list[dict[str, str | None]] | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.details = details or []
 
 
 class UnknownToolError(ToolInputError):
@@ -51,11 +81,13 @@ class UpstreamError(RuntimeError):
         code: str,
         public_message: str,
         correlation_id: str | None = None,
+        details: list[dict[str, str | None]] | None = None,
     ) -> None:
         super().__init__(public_message)
         self.code = code
         self.public_message = public_message
         self.correlation_id = correlation_id
+        self.details = details or []
 
 
 class _RejectRedirectHandler(HTTPRedirectHandler):
@@ -63,11 +95,20 @@ class _RejectRedirectHandler(HTTPRedirectHandler):
         return None
 
 
+SCHEMA_TOOL_NAME = "blockwart.describe_schema"
 READ_ONLY_ANNOTATIONS: JSON = {
     "readOnlyHint": True,
     "destructiveHint": False,
     "idempotentHint": True,
     "openWorldHint": True,
+}
+# The published schema contract is generated locally from the domain registry and
+# reaches no external system.
+CONTRACT_ANNOTATIONS: JSON = {
+    "readOnlyHint": True,
+    "destructiveHint": False,
+    "idempotentHint": True,
+    "openWorldHint": False,
 }
 WRITE_ANNOTATIONS: JSON = {
     "readOnlyHint": False,
@@ -86,6 +127,17 @@ ETAG_SCHEMA: JSON = {
     "pattern": '^"rev-[1-9][0-9]*"$',
     "description": "Strong ETag returned by the latest full object read",
 }
+OBJECT_DATA_DESCRIPTION = (
+    "Kind-specific nested catalog data enforced by the canonical domain schema. "
+    f"Call {SCHEMA_TOOL_NAME} for the required paths, enums, reference kinds, "
+    "value bounds, normalization, forbidden secret keys, and one minimal valid "
+    "example for this kind; a shallow or empty object is rejected for kinds with "
+    "required nested paths."
+)
+ASSET_STATE_DESCRIPTION = (
+    "Asset kinds only (" + ", ".join(sorted(ASSET_KINDS)) + "). Omit or send null "
+    f"for knowledge kinds; see {SCHEMA_TOOL_NAME}."
+)
 OBJECT_WRITE_SCHEMA: JSON = {
     "type": "object",
     "required": ["id", "kind", "label"],
@@ -107,13 +159,19 @@ OBJECT_WRITE_SCHEMA: JSON = {
         "lifecycle": {
             "type": ["string", "null"],
             "enum": ["planned", "active", "retired", None],
+            "description": ASSET_STATE_DESCRIPTION,
         },
         "health": {
             "type": ["string", "null"],
             "enum": ["unknown", "healthy", "degraded", "down", "maintenance", None],
+            "description": ASSET_STATE_DESCRIPTION,
         },
         "summary": {"type": ["string", "null"]},
-        "data": {"type": "object", "default": {}},
+        "data": {
+            "type": "object",
+            "default": {},
+            "description": OBJECT_DATA_DESCRIPTION,
+        },
         "provenance": {"type": "object"},
     },
     "additionalProperties": False,
@@ -125,6 +183,22 @@ DEVICE_WRITE_SCHEMA: JSON = {
         "kind": {"type": "string", "const": "device"},
     },
 }
+# Every object write intent points at one canonical projection instead of
+# carrying its own copy of the kind-specific data rules. The accepted kinds and
+# parent kinds are derived from the same domain relationship registry the
+# commands enforce.
+_PLACEMENT_RULE = RELATIONSHIP_RULES["hosts"]
+_ATTACHMENT_RULE = RELATIONSHIP_RULES["attached_to"]
+CHILD_WRITE_KINDS: tuple[str, ...] = tuple(
+    kind for kind in ALL_OBJECT_KINDS if kind in _PLACEMENT_RULE.to_kinds
+)
+ATTACHED_DEVICE_KINDS: tuple[str, ...] = ("device",)
+WRITE_INTENT_TOOLS: tuple[str, ...] = (
+    "blockwart.create_child",
+    "blockwart.create_root",
+    "blockwart.update_object",
+    "blockwart.create_attached_device",
+)
 RELATIONSHIP_PROPERTIES: JSON = {
     "object_id": {"type": "string", "minLength": 1, "maxLength": 128},
     "if_match": ETAG_SCHEMA,
@@ -351,11 +425,34 @@ TOOLS: list[JSON] = [
         "annotations": READ_ONLY_ANNOTATIONS,
     },
     {
+        "name": SCHEMA_TOOL_NAME,
+        "description": (
+            "Describe the canonical Blockwart object schema for every writable kind: "
+            "required, optional, and forbidden nested data paths, types, enums, "
+            "reference kinds, bounds, normalization, forbidden secret keys, "
+            "lifecycle/health semantics, and one minimal valid example per write "
+            "intent. Call it before create_child, create_root, update_object, or "
+            "create_attached_device; it reads no catalog data."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "kind": {
+                    "type": "string",
+                    "enum": list(ALL_OBJECT_KINDS),
+                    "description": "Restrict the contract to exactly one object kind",
+                },
+            },
+            "additionalProperties": False,
+        },
+        "annotations": CONTRACT_ANNOTATIONS,
+    },
+    {
         "name": "blockwart.create_child",
         "description": (
             "Create one authorized placement child in a single agent call. Returns the object, "
             "typed parent, exact hosts relationship, Owner/self assignment, revision, ETag, "
-            "and idempotency status."
+            f"and idempotency status. Build object.data from {SCHEMA_TOOL_NAME}."
         ),
         "inputSchema": {
             "type": "object",
@@ -381,7 +478,7 @@ TOOLS: list[JSON] = [
             "in a single agent call. Requires an already active catalog-owner principal "
             "with an MCP-audience service token and an idempotency key; it never assigns "
             "or removes any catalog role. Returns the object, Owner/self assignment, "
-            "revision, ETag, and idempotency status."
+            f"revision, ETag, and idempotency status. Build object.data from {SCHEMA_TOOL_NAME}."
         ),
         "inputSchema": {
             "type": "object",
@@ -401,7 +498,10 @@ TOOLS: list[JSON] = [
     },
     {
         "name": "blockwart.update_object",
-        "description": "Update one authorized object using its current strong ETag.",
+        "description": (
+            "Update one authorized object using its current strong ETag. Build "
+            f"object.data from {SCHEMA_TOOL_NAME}."
+        ),
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -470,7 +570,8 @@ TOOLS: list[JSON] = [
         "description": (
             "Create a device and attach it to a parent endpoint in a single agent call. Returns "
             "the device, typed parent, exact attached_to relationship and metadata, Owner/self "
-            "assignment, revision, ETag, and idempotency status."
+            "assignment, revision, ETag, and idempotency status. Build device.data from "
+            f"{SCHEMA_TOOL_NAME}."
         ),
         "inputSchema": {
             "type": "object",
@@ -649,6 +750,174 @@ TOOLS: list[JSON] = [
 TOOL_DEFINITIONS: dict[str, JSON] = {tool["name"]: tool for tool in TOOLS}
 
 
+def describe_schema_payload(kind: str | None = None) -> JSON:
+    """Project the canonical domain object schema registry for MCP clients.
+
+    The payload is generated from `blockwart.domain.object_schema` on every call
+    and contains no catalog data, credentials, or internal paths.
+    """
+    projection = object_schema_projection()
+    if kind is not None:
+        projection["kinds"] = [
+            projected for projected in projection["kinds"] if projected["kind"] == kind
+        ]
+    return {
+        **projection,
+        "requested_kind": kind,
+        "write_intents": _write_intents(kind),
+    }
+
+
+def _write_intents(kind: str | None) -> list[JSON]:
+    intents: list[JSON] = []
+    for name, argument, kinds, arguments, relationship, parent_kinds in (
+        (
+            "blockwart.create_child",
+            "object",
+            CHILD_WRITE_KINDS,
+            ("parent_id", "idempotency_key", "object"),
+            _PLACEMENT_RULE.relation_type,
+            sorted(_PLACEMENT_RULE.from_kinds),
+        ),
+        (
+            "blockwart.create_root",
+            "object",
+            ALL_OBJECT_KINDS,
+            ("idempotency_key", "object"),
+            None,
+            [],
+        ),
+        (
+            "blockwart.update_object",
+            "object",
+            ALL_OBJECT_KINDS,
+            ("object_id", "if_match", "object"),
+            None,
+            [],
+        ),
+        (
+            "blockwart.create_attached_device",
+            "device",
+            ATTACHED_DEVICE_KINDS,
+            ("parent_id", "idempotency_key", "device"),
+            _ATTACHMENT_RULE.relation_type,
+            sorted(_ATTACHMENT_RULE.to_kinds),
+        ),
+    ):
+        supported = [supported_kind for supported_kind in kinds if kind in (None, supported_kind)]
+        if not supported:
+            continue
+        intents.append(
+            {
+                "tool": name,
+                "object_argument": argument,
+                "kinds": supported,
+                "required_arguments": list(arguments),
+                "relation_type": relationship,
+                "parent_kinds": parent_kinds,
+                "example": _write_intent_example(name, argument, supported[0]),
+            }
+        )
+    return intents
+
+
+def _write_intent_example(name: str, argument: str, kind: str) -> JSON:
+    example: JSON = {argument: minimal_object_example(kind)}
+    idempotency_key = f"example-{name.split('.')[-1].replace('_', '-')}-0001"
+    if name == "blockwart.update_object":
+        return {
+            "object_id": example[argument]["id"],
+            "if_match": '"rev-1"',
+            **example,
+        }
+    if name == "blockwart.create_root":
+        return {"idempotency_key": idempotency_key, **example}
+    parent_kind = "host" if name == "blockwart.create_child" else "system"
+    intent_example: JSON = {
+        "parent_id": f"example-{parent_kind}",
+        "idempotency_key": idempotency_key,
+        **example,
+    }
+    if name == "blockwart.create_attached_device":
+        intent_example["metadata"] = {"link_kind": "ethernet"}
+    return intent_example
+
+
+WRITE_INTENT_OBJECT_ARGUMENTS: dict[str, str] = {
+    intent["tool"]: intent["object_argument"] for intent in _write_intents(None)
+}
+# Published tool-argument keywords mapped onto the same domain violation
+# catalog the API projects. An unmapped keyword stays generic instead of
+# publishing an unreviewed code.
+_ARGUMENT_VIOLATIONS: dict[str, str] = {
+    "additionalProperties": VIOLATION_FIELD_NOT_ALLOWED,
+    "const": VIOLATION_VALUE_NOT_CONSTANT,
+    "enum": VIOLATION_VALUE_NOT_ALLOWED,
+    "exclusiveMaximum": VIOLATION_VALUE_OUT_OF_RANGE,
+    "exclusiveMinimum": VIOLATION_VALUE_OUT_OF_RANGE,
+    "format": VIOLATION_INVALID_FORMAT,
+    "maxItems": VIOLATION_VALUE_TOO_LONG,
+    "maxLength": VIOLATION_VALUE_TOO_LONG,
+    "maximum": VIOLATION_VALUE_OUT_OF_RANGE,
+    "minItems": VIOLATION_VALUE_TOO_SHORT,
+    "minLength": VIOLATION_VALUE_TOO_SHORT,
+    "minimum": VIOLATION_VALUE_OUT_OF_RANGE,
+    "multipleOf": VIOLATION_VALUE_OUT_OF_RANGE,
+    "pattern": VIOLATION_INVALID_FORMAT,
+    "required": VIOLATION_REQUIRED_FIELD_MISSING,
+    "type": VIOLATION_TYPE_MISMATCH,
+}
+
+
+def _argument_details(name: str, arguments: JSON) -> list[dict[str, str | None]]:
+    """Project rejected tool arguments onto the published violation contract.
+
+    Only the argument location, the missing argument names declared by the
+    published tool schema, and one violation code are projected. Rejected
+    values and jsonschema messages are never copied.
+    """
+    details: list[dict[str, str | None]] = []
+    for error in TOOL_INPUT_VALIDATORS[name].iter_errors(arguments):
+        location = ".".join(str(part) for part in error.absolute_path)
+        code = _ARGUMENT_VIOLATIONS.get(str(error.validator), GENERIC_SCHEMA_VIOLATION)
+        missing = [
+            f"{location}.{argument}" if location else argument
+            for argument in _missing_arguments(error)
+        ]
+        for argument_location in missing or [location]:
+            details.append(
+                public_detail(
+                    location=argument_location,
+                    code=code,
+                    path=_canonical_argument_path(name, argument_location),
+                )
+            )
+    return order_public_details(details)
+
+
+def _missing_arguments(error: ValidationError) -> list[str]:
+    """Return the schema-declared argument names missing from one instance."""
+    if error.validator != "required" or not isinstance(error.validator_value, list):
+        return []
+    instance = error.instance if isinstance(error.instance, dict) else {}
+    return [
+        argument
+        for argument in error.validator_value
+        if isinstance(argument, str) and argument not in instance
+    ]
+
+
+def _canonical_argument_path(name: str, location: str) -> str | None:
+    """Return the canonical catalog data path an argument location points at."""
+    argument = WRITE_INTENT_OBJECT_ARGUMENTS.get(name)
+    parts = location.split(".")
+    if argument is None or len(parts) < 2 or parts[0] != argument:
+        return None
+    if parts[1] != DATA_PATH_ROOT:
+        return None
+    return ".".join(parts[1:])
+
+
 def _compile_input_validator(schema: JSON) -> Validator:
     validator_class = validator_for(schema)
     validator_class.check_schema(schema)
@@ -676,7 +945,14 @@ def call_tool(
     try:
         TOOL_INPUT_VALIDATORS[name].validate(args)
     except ValidationError as exc:
-        raise ToolInputError("Tool arguments are invalid") from exc
+        # Object-write tools publish field-accurate argument violations on the
+        # same contract the API projects. Read and non-object-write tools keep
+        # their existing opaque invalid_arguments shape so the public contract
+        # does not widen for tools outside this slice.
+        raise ToolInputError(
+            "Tool arguments are invalid",
+            _argument_details(name, args) if name in WRITE_INTENT_TOOLS else [],
+        ) from exc
 
     request_id = _safe_correlation_id(correlation_id)
     fetch = fetcher or (
@@ -706,7 +982,11 @@ def call_tool(
             {**headers, "X-Correlation-ID": request_id},
         )
 
-    if name == "blockwart.search":
+    if name == SCHEMA_TOOL_NAME:
+        # The published contract is generated locally: it reaches no upstream
+        # API and therefore requires no credential.
+        payload = describe_schema_payload(args.get("kind"))
+    elif name == "blockwart.search":
         payload = _legacy_page_payload(
             fetch("/api/v1/objects", _clean_params(args, default_limit=10)),
             args=args,
@@ -1158,13 +1438,18 @@ async def handle_call_tool(name: str, arguments: JSON) -> types.CallToolResult:
         return types.CallToolResult.model_validate(result)
     except UnknownToolError:
         return _tool_error_result("tool_not_found", "Unknown Blockwart tool.")
-    except ToolInputError:
-        return _tool_error_result("invalid_arguments", "Tool arguments are invalid.")
+    except ToolInputError as exc:
+        return _tool_error_result(
+            "invalid_arguments",
+            "Tool arguments are invalid.",
+            details=exc.details,
+        )
     except UpstreamError as exc:
         return _tool_error_result(
             exc.code,
             exc.public_message,
             correlation_id=exc.correlation_id,
+            details=exc.details,
         )
     except Exception:
         logger.error(
@@ -1425,11 +1710,29 @@ def _translate_http_error(exc: HTTPError) -> UpstreamError:
                 and _CORRELATION_ID_PATTERN.fullmatch(correlation_id)
                 else None
             )
-            return UpstreamError(code, message, safe_correlation_id)
+            return UpstreamError(
+                code,
+                message,
+                safe_correlation_id,
+                details=_upstream_details(error),
+            )
     return UpstreamError(
         "upstream_http_error",
         "Blockwart Agent API returned an error.",
     )
+
+
+def _upstream_details(error: JSON) -> list[dict[str, str | None]]:
+    """Re-derive publishable details from an untrusted upstream error body.
+
+    Only a published violation code, a canonical path, and a published rule
+    survive; the description is regenerated locally, so an upstream message,
+    a rejected value, or any extra field is never forwarded. Anything that is
+    not a known published violation is dropped, so a new or unknown upstream
+    detail can never reach a client.
+    """
+    raw_details = error.get("details")
+    return sanitize_public_details(raw_details)
 
 
 def _safe_correlation_id(value: str | None) -> str:
@@ -1443,10 +1746,13 @@ def _tool_error_result(
     message: str,
     *,
     correlation_id: str | None = None,
+    details: list[dict[str, str | None]] | None = None,
 ) -> types.CallToolResult:
-    error = {"code": code, "message": message}
+    error: dict[str, object] = {"code": code, "message": message}
     if correlation_id is not None:
         error["correlation_id"] = correlation_id
+    if details:
+        error["details"] = details
     payload = {"error": error}
     return types.CallToolResult(
         content=[
