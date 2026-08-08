@@ -215,6 +215,56 @@ async def check_mcp(
                 "blockwart.update_object",
                 "blockwart.create_attached_device",
             }
+            relationships = schema_contract["relationships"]
+            relationship_types = {
+                entry["relation_type"]: entry for entry in relationships["types"]
+            }
+            assert relationships["relation_types"] == [
+                "hosts",
+                "depends_on",
+                "supports",
+                "feeds",
+                "exposes",
+                "documents",
+                "uses",
+                "related_to",
+                "attached_to",
+                "uplinks_to",
+            ]
+            assert set(relationship_types) == set(relationships["relation_types"])
+            assert relationship_types["depends_on"]["metadata"]["fields"] == []
+            assert [
+                field["name"]
+                for field in relationship_types["uplinks_to"]["metadata"]["fields"]
+            ] == [
+                "source_interface",
+                "target_interface_or_port",
+                "link_kind",
+                "primary",
+                "note",
+                "mode",
+            ]
+            assert "mode" not in {
+                field["name"]
+                for field in relationship_types["attached_to"]["metadata"]["fields"]
+            }
+            rejected_relationship = await session.call_tool(
+                "blockwart.create_relationship",
+                {
+                    "object_id": "n8n-web-ui",
+                    "if_match": '"rev-1"',
+                    "from_ref": "service:n8n-web-ui",
+                    "relation_type": "depends_on",
+                    "to_ref": "service:other",
+                    "metadata": {"link_kind": "ethernet"},
+                },
+            )
+            assert rejected_relationship.isError
+            rejection = json.loads(rejected_relationship.content[0].text)["error"]
+            assert rejection["code"] == "invalid_arguments"
+            assert [detail["path"] for detail in rejection["details"]] == [
+                "metadata.link_kind"
+            ]
             admin_first_page = await session.call_tool(
                 "blockwart.list_admin_principals",
                 {"query": "package-smoke", "limit": 1},
@@ -568,7 +618,7 @@ def main() -> None:
     print(
         "installed_package=ok "
         f"cwd={Path.cwd()} revision={readiness['revision']} "
-        f"openapi_paths={len(openapi['paths'])} mcp_protocol={protocol} mcp_calls=29"
+        f"openapi_paths={len(openapi['paths'])} mcp_protocol={protocol} mcp_calls=30"
     )
 
 

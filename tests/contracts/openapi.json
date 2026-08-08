@@ -2885,12 +2885,51 @@
         "type": "object"
       },
       "V1AttachedDeviceCreateIn": {
+        "description": "One attached-device command payload.\n\nThe device is created and attached with exactly the `attached_to` metadata\ncontract; `uplinks_to`-only fields are not part of this command.",
         "properties": {
           "device": {
             "$ref": "#/components/schemas/CatalogObjectIn"
           },
           "metadata": {
-            "$ref": "#/components/schemas/V1RelationshipMetadata-Input"
+            "additionalProperties": false,
+            "properties": {
+              "link_kind": {
+                "enum": [
+                  "bluetooth",
+                  "ethernet",
+                  "gpio",
+                  "mesh",
+                  "other",
+                  "power",
+                  "serial",
+                  "usb",
+                  "virtual",
+                  "wifi",
+                  "zigbee"
+                ],
+                "type": "string"
+              },
+              "note": {
+                "maxLength": 512,
+                "minLength": 1,
+                "type": "string"
+              },
+              "primary": {
+                "type": "boolean"
+              },
+              "source_interface": {
+                "maxLength": 128,
+                "minLength": 1,
+                "type": "string"
+              },
+              "target_interface_or_port": {
+                "maxLength": 128,
+                "minLength": 1,
+                "type": "string"
+              }
+            },
+            "title": "Metadata",
+            "type": "object"
           }
         },
         "required": [
@@ -3180,7 +3219,7 @@
             "type": "string"
           },
           "metadata": {
-            "$ref": "#/components/schemas/V1RelationshipMetadata-Output"
+            "$ref": "#/components/schemas/V1RelationshipMetadata"
           },
           "relation_type": {
             "const": "attached_to",
@@ -3638,7 +3677,7 @@
             "type": "string"
           },
           "metadata": {
-            "$ref": "#/components/schemas/V1RelationshipMetadata-Output"
+            "$ref": "#/components/schemas/V1RelationshipMetadata"
           },
           "relation_type": {
             "enum": [
@@ -4037,6 +4076,300 @@
         "type": "object"
       },
       "V1RelationshipCommandIn": {
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "relation_type": {
+                  "const": "hosts"
+                }
+              },
+              "required": [
+                "relation_type"
+              ]
+            },
+            "then": {
+              "properties": {
+                "metadata": {
+                  "additionalProperties": false,
+                  "properties": {},
+                  "type": "object"
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "relation_type": {
+                  "const": "depends_on"
+                }
+              },
+              "required": [
+                "relation_type"
+              ]
+            },
+            "then": {
+              "properties": {
+                "metadata": {
+                  "additionalProperties": false,
+                  "properties": {},
+                  "type": "object"
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "relation_type": {
+                  "const": "supports"
+                }
+              },
+              "required": [
+                "relation_type"
+              ]
+            },
+            "then": {
+              "properties": {
+                "metadata": {
+                  "additionalProperties": false,
+                  "properties": {},
+                  "type": "object"
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "relation_type": {
+                  "const": "feeds"
+                }
+              },
+              "required": [
+                "relation_type"
+              ]
+            },
+            "then": {
+              "properties": {
+                "metadata": {
+                  "additionalProperties": false,
+                  "properties": {},
+                  "type": "object"
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "relation_type": {
+                  "const": "exposes"
+                }
+              },
+              "required": [
+                "relation_type"
+              ]
+            },
+            "then": {
+              "properties": {
+                "metadata": {
+                  "additionalProperties": false,
+                  "properties": {},
+                  "type": "object"
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "relation_type": {
+                  "const": "documents"
+                }
+              },
+              "required": [
+                "relation_type"
+              ]
+            },
+            "then": {
+              "properties": {
+                "metadata": {
+                  "additionalProperties": false,
+                  "properties": {},
+                  "type": "object"
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "relation_type": {
+                  "const": "uses"
+                }
+              },
+              "required": [
+                "relation_type"
+              ]
+            },
+            "then": {
+              "properties": {
+                "metadata": {
+                  "additionalProperties": false,
+                  "properties": {},
+                  "type": "object"
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "relation_type": {
+                  "const": "related_to"
+                }
+              },
+              "required": [
+                "relation_type"
+              ]
+            },
+            "then": {
+              "properties": {
+                "metadata": {
+                  "additionalProperties": false,
+                  "properties": {},
+                  "type": "object"
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "relation_type": {
+                  "const": "attached_to"
+                }
+              },
+              "required": [
+                "relation_type"
+              ]
+            },
+            "then": {
+              "properties": {
+                "metadata": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "link_kind": {
+                      "enum": [
+                        "bluetooth",
+                        "ethernet",
+                        "gpio",
+                        "mesh",
+                        "other",
+                        "power",
+                        "serial",
+                        "usb",
+                        "virtual",
+                        "wifi",
+                        "zigbee"
+                      ],
+                      "type": "string"
+                    },
+                    "note": {
+                      "maxLength": 512,
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "primary": {
+                      "type": "boolean"
+                    },
+                    "source_interface": {
+                      "maxLength": 128,
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "target_interface_or_port": {
+                      "maxLength": 128,
+                      "minLength": 1,
+                      "type": "string"
+                    }
+                  },
+                  "type": "object"
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "relation_type": {
+                  "const": "uplinks_to"
+                }
+              },
+              "required": [
+                "relation_type"
+              ]
+            },
+            "then": {
+              "properties": {
+                "metadata": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "link_kind": {
+                      "enum": [
+                        "bluetooth",
+                        "ethernet",
+                        "gpio",
+                        "mesh",
+                        "other",
+                        "power",
+                        "serial",
+                        "usb",
+                        "virtual",
+                        "wifi",
+                        "zigbee"
+                      ],
+                      "type": "string"
+                    },
+                    "mode": {
+                      "enum": [
+                        "access",
+                        "bridged",
+                        "mesh",
+                        "other",
+                        "routed",
+                        "trunk"
+                      ],
+                      "type": "string"
+                    },
+                    "note": {
+                      "maxLength": 512,
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "primary": {
+                      "type": "boolean"
+                    },
+                    "source_interface": {
+                      "maxLength": 128,
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "target_interface_or_port": {
+                      "maxLength": 128,
+                      "minLength": 1,
+                      "type": "string"
+                    }
+                  },
+                  "type": "object"
+                }
+              }
+            }
+          }
+        ],
+        "description": "One relationship command payload, validated against the domain registry.\n\n`relation_type` is the closed registered vocabulary. The accepted endpoint\nkinds and metadata fields depend on that exact value, so the published\nschema carries one condition per relationship type and the domain validator\nenforces the same contract on every command.",
         "properties": {
           "from_ref": {
             "maxLength": 192,
@@ -4045,11 +4378,70 @@
             "type": "string"
           },
           "metadata": {
-            "$ref": "#/components/schemas/V1RelationshipMetadata-Input"
+            "additionalProperties": false,
+            "properties": {
+              "link_kind": {
+                "enum": [
+                  "bluetooth",
+                  "ethernet",
+                  "gpio",
+                  "mesh",
+                  "other",
+                  "power",
+                  "serial",
+                  "usb",
+                  "virtual",
+                  "wifi",
+                  "zigbee"
+                ],
+                "type": "string"
+              },
+              "mode": {
+                "enum": [
+                  "access",
+                  "bridged",
+                  "mesh",
+                  "other",
+                  "routed",
+                  "trunk"
+                ],
+                "type": "string"
+              },
+              "note": {
+                "maxLength": 512,
+                "minLength": 1,
+                "type": "string"
+              },
+              "primary": {
+                "type": "boolean"
+              },
+              "source_interface": {
+                "maxLength": 128,
+                "minLength": 1,
+                "type": "string"
+              },
+              "target_interface_or_port": {
+                "maxLength": 128,
+                "minLength": 1,
+                "type": "string"
+              }
+            },
+            "title": "Metadata",
+            "type": "object"
           },
           "relation_type": {
-            "maxLength": 96,
-            "minLength": 1,
+            "enum": [
+              "hosts",
+              "depends_on",
+              "supports",
+              "feeds",
+              "exposes",
+              "documents",
+              "uses",
+              "related_to",
+              "attached_to",
+              "uplinks_to"
+            ],
             "title": "Relation Type",
             "type": "string"
           },
@@ -4083,7 +4475,7 @@
             "type": "string"
           },
           "metadata": {
-            "$ref": "#/components/schemas/V1RelationshipMetadata-Output"
+            "$ref": "#/components/schemas/V1RelationshipMetadata"
           },
           "object_id": {
             "title": "Object Id",
@@ -4115,108 +4507,7 @@
         "title": "V1RelationshipCommandOut",
         "type": "object"
       },
-      "V1RelationshipMetadata-Input": {
-        "additionalProperties": false,
-        "description": "Canonical optional metadata for link-shaped relationships.\n\nUnset fields are omitted so empty metadata serializes as ``{}``.",
-        "properties": {
-          "link_kind": {
-            "anyOf": [
-              {
-                "enum": [
-                  "ethernet",
-                  "wifi",
-                  "mesh",
-                  "zigbee",
-                  "bluetooth",
-                  "usb",
-                  "serial",
-                  "gpio",
-                  "power",
-                  "virtual",
-                  "other"
-                ],
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Link Kind"
-          },
-          "mode": {
-            "anyOf": [
-              {
-                "enum": [
-                  "access",
-                  "trunk",
-                  "routed",
-                  "bridged",
-                  "mesh",
-                  "other"
-                ],
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Mode"
-          },
-          "note": {
-            "anyOf": [
-              {
-                "maxLength": 512,
-                "minLength": 1,
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Note"
-          },
-          "primary": {
-            "anyOf": [
-              {
-                "type": "boolean"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Primary"
-          },
-          "source_interface": {
-            "anyOf": [
-              {
-                "maxLength": 128,
-                "minLength": 1,
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Source Interface"
-          },
-          "target_interface_or_port": {
-            "anyOf": [
-              {
-                "maxLength": 128,
-                "minLength": 1,
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Target Interface Or Port"
-          }
-        },
-        "title": "V1RelationshipMetadata",
-        "type": "object"
-      },
-      "V1RelationshipMetadata-Output": {
+      "V1RelationshipMetadata": {
         "additionalProperties": true,
         "type": "object"
       },
@@ -4227,7 +4518,7 @@
             "type": "string"
           },
           "metadata": {
-            "$ref": "#/components/schemas/V1RelationshipMetadata-Output"
+            "$ref": "#/components/schemas/V1RelationshipMetadata"
           },
           "relation_type": {
             "title": "Relation Type",

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 from collections import Counter
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass
@@ -10,6 +11,14 @@ from typing import Any, Literal
 from blockwart.domain.object_schema import (
     DEVICE_CATEGORIES,
     NETWORK_CATEGORIES,
+    VIOLATION_FIELD_NOT_ALLOWED,
+    VIOLATION_FORBIDDEN_KEY,
+    VIOLATION_INVALID_FORMAT,
+    VIOLATION_REQUIRED_FIELD_MISSING,
+    VIOLATION_TYPE_MISMATCH,
+    VIOLATION_VALUE_NOT_ALLOWED,
+    VIOLATION_VALUE_TOO_LONG,
+    VIOLATION_VALUE_TOO_SHORT,
     ObjectSchemaError,
     normalize_object_data,
     validate_object_data,
@@ -43,6 +52,57 @@ LINK_KINDS = frozenset(
 )
 UPLINK_MODES = frozenset({"access", "trunk", "routed", "bridged", "mesh", "other"})
 RelationshipMetadataJsonType = Literal["string", "boolean"]
+
+# Request paths a rejected relationship command can name. They are the closed
+# set of canonical relationship locations a boundary may publish; anything else
+# stays internal.
+RELATIONSHIP_PATH_ROOTS: tuple[str, ...] = ("from_ref", "metadata", "relation_type", "to_ref")
+REFERENCE_PATHS = frozenset({"from_ref", "to_ref"})
+_METADATA_FIELD_PATTERN = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
+
+# Endpoint predicates are published by name and description only. They describe
+# the safe general rule a client can check before a write; the concrete objects,
+# edges, and stored categories a rejection saw stay internal.
+ENDPOINT_PREDICATE_CONTRACTS: Mapping[str, str] = MappingProxyType(
+    {
+        "kind_pair_allowed": (
+            "Every endpoint pair listed under directed_pairs is accepted; the "
+            "relationship type adds no further endpoint condition."
+        ),
+        "attached_endpoint_allowed": (
+            "A device may attach to a host, a system, another device, or a "
+            "network device; a host or system may attach only to a network "
+            "device. A network endpoint qualifies as a network device only "
+            "through its published network device categories."
+        ),
+        "network_devices_only": (
+            "Both endpoints must be network objects whose category is one of "
+            "the published network device categories."
+        ),
+    }
+)
+# Predicates that additionally depend on the stored endpoint category, so a
+# client cannot decide them from the typed references alone.
+CATEGORY_SENSITIVE_PREDICATES = frozenset({"attached_endpoint_allowed", "network_devices_only"})
+
+# Graph rules hold across a set of edges instead of one command payload. They
+# are declared per relationship type and enforced by the central collection
+# validator.
+GRAPH_RULE_CONTRACTS: Mapping[str, str] = MappingProxyType(
+    {
+        "single_placement_parent": (
+            "A child object may have at most one canonical placement parent."
+        ),
+        "single_primary_per_source": (
+            "At most one edge per source object and relationship type may carry "
+            "metadata.primary = true."
+        ),
+        "acyclic_edges": (
+            "The directed edges of this relationship type must not contain a cycle."
+        ),
+    }
+)
+_COLLECTION_GRAPH_RULES = frozenset({"single_primary_per_source", "acyclic_edges"})
 
 
 @dataclass(frozen=True)
@@ -117,6 +177,7 @@ class RelationshipRule:
     endpoint_predicate_name: str = "kind_pair_allowed"
     endpoint_predicate: EndpointPredicate = _kind_pair_allowed
     metadata_fields: tuple[RelationshipMetadataFieldSpec, ...] = ()
+    graph_rules: frozenset[str] = frozenset()
 
 
 RELATIONSHIP_RULES: dict[str, RelationshipRule] = {
@@ -125,6 +186,7 @@ RELATIONSHIP_RULES: dict[str, RelationshipRule] = {
         from_kinds=frozenset({"host", "system"}),
         to_kinds=frozenset({"system", "service"}),
         description="Canonical parent-to-child asset placement.",
+        graph_rules=frozenset({"single_placement_parent"}),
     ),
     "depends_on": RelationshipRule(
         relation_type="depends_on",
@@ -176,6 +238,7 @@ RELATIONSHIP_RULES: dict[str, RelationshipRule] = {
         endpoint_predicate_name="attached_endpoint_allowed",
         endpoint_predicate=_attached_endpoint_allowed,
         metadata_fields=_COMMON_LINK_METADATA_FIELDS,
+        graph_rules=frozenset({"single_primary_per_source", "acyclic_edges"}),
     ),
     "uplinks_to": RelationshipRule(
         relation_type="uplinks_to",
@@ -188,15 +251,155 @@ RELATIONSHIP_RULES: dict[str, RelationshipRule] = {
             *_COMMON_LINK_METADATA_FIELDS,
             RelationshipMetadataFieldSpec("mode", "string", enum_values=UPLINK_MODES),
         ),
+        graph_rules=frozenset({"single_primary_per_source", "acyclic_edges"}),
     ),
 }
 RELATIONSHIP_TYPES = tuple(RELATIONSHIP_RULES)
+# Relationship types whose stored edge set is additionally validated as a graph.
+GRAPH_TRACKED_TYPES = frozenset(
+    relation_type
+    for relation_type, rule in RELATIONSHIP_RULES.items()
+    if rule.graph_rules & _COLLECTION_GRAPH_RULES
+)
+
+@dataclass(frozen=True)
+class RelationshipRejection:
+    """The published contract of one stable relationship rejection code.
+
+    `stage` says what a rejection needed to decide: `request` rejections follow
+    from the command payload alone and are attributable to one request field,
+    `catalog` rejections additionally read the stored endpoints, and `graph`
+    rejections hold across the surrounding edge set. `violation` is the
+    published violation type of a `request` rejection.
+    """
+
+    code: str
+    stage: Literal["request", "catalog", "graph"]
+    description: str
+    violation: str | None = None
+
+
+# Every field-attributable relationship rejection maps onto the same published
+# violation catalog the object write contract uses, so one client error handler
+# covers both. Catalog and graph rejections deliberately publish no field: they
+# are decided by stored state a rejected caller must not be able to probe.
+RELATIONSHIP_REJECTIONS: Mapping[str, RelationshipRejection] = MappingProxyType(
+    {
+        rejection.code: rejection
+        for rejection in (
+            RelationshipRejection(
+                "unsupported_relation_type",
+                "request",
+                "The relationship type is not part of the registered vocabulary.",
+                VIOLATION_VALUE_NOT_ALLOWED,
+            ),
+            RelationshipRejection(
+                "invalid_typed_reference",
+                "request",
+                "An endpoint is not a valid kind:id typed reference.",
+                VIOLATION_INVALID_FORMAT,
+            ),
+            RelationshipRejection(
+                "self_reference",
+                "request",
+                "Both endpoints name the same object.",
+                VIOLATION_VALUE_NOT_ALLOWED,
+            ),
+            RelationshipRejection(
+                "invalid_relationship_direction",
+                "request",
+                (
+                    "The asserted endpoint kinds are not a directed pair of this "
+                    "relationship type."
+                ),
+                VIOLATION_VALUE_NOT_ALLOWED,
+            ),
+            RelationshipRejection(
+                "invalid_relationship_metadata",
+                "request",
+                (
+                    "The metadata document violates the type-dependent metadata "
+                    "contract of this relationship type."
+                ),
+                VIOLATION_FIELD_NOT_ALLOWED,
+            ),
+            RelationshipRejection(
+                "secret_relationship_metadata",
+                "request",
+                "The metadata document carries secret-shaped keys or values.",
+                VIOLATION_FORBIDDEN_KEY,
+            ),
+            RelationshipRejection(
+                "dangling_typed_reference",
+                "catalog",
+                "An endpoint reference names no existing catalog object.",
+            ),
+            RelationshipRejection(
+                "typed_reference_kind_mismatch",
+                "catalog",
+                "An endpoint reference asserts a different kind than the stored object.",
+            ),
+            RelationshipRejection(
+                "invalid_relationship_endpoint",
+                "catalog",
+                "The stored endpoints violate the endpoint predicate of this type.",
+            ),
+            RelationshipRejection(
+                "duplicate_relationship",
+                "graph",
+                "The same from_ref, relation_type, and to_ref triplet already exists.",
+            ),
+            RelationshipRejection(
+                "multiple_placement_parents",
+                "graph",
+                "The child object would have more than one canonical placement parent.",
+            ),
+            RelationshipRejection(
+                "multiple_primary_relationships",
+                "graph",
+                "The source object would carry more than one primary edge of this type.",
+            ),
+            RelationshipRejection(
+                "relationship_cycle",
+                "graph",
+                "The edge would close a cycle in an acyclic relationship graph.",
+            ),
+        )
+    }
+)
+RELATIONSHIP_VIOLATIONS: Mapping[str, str] = MappingProxyType(
+    {
+        code: rejection.violation
+        for code, rejection in RELATIONSHIP_REJECTIONS.items()
+        if rejection.violation is not None
+    }
+)
 
 
 class RelationshipIntegrityError(ValueError):
-    def __init__(self, code: str, message: str) -> None:
+    """A relationship violates the canonical registry contract.
+
+    `code` stays the established stable domain code. `path` names the canonical
+    relationship request path when the rejection is attributable to one field,
+    and `violation` the published violation type for it. A rejection that only
+    a stored catalog state can decide carries neither, so a boundary publishes
+    it as a conflict instead of inventing a field.
+    """
+
+    def __init__(
+        self,
+        code: str,
+        message: str,
+        *,
+        path: str | None = None,
+        violation: str | None = None,
+    ) -> None:
         super().__init__(message)
         self.code = code
+        self.path = path
+        self.violation = (
+            violation if violation is not None else RELATIONSHIP_VIOLATIONS.get(code)
+        )
 
 
 @dataclass(frozen=True, order=True)
@@ -280,25 +483,17 @@ def validate_relationship(
     to_ref: str,
     endpoints: Mapping[str, EndpointDescriptor],
 ) -> tuple[TypedReference, TypedReference]:
-    rule = RELATIONSHIP_RULES.get(relation_type)
-    if rule is None:
-        raise RelationshipIntegrityError(
-            "unsupported_relation_type",
-            f"unsupported relationship type: {relation_type}",
-        )
+    rule = _require_rule(relation_type)
 
     source = resolve_reference(from_ref, endpoints, location="from_ref")
     target = resolve_reference(to_ref, endpoints, location="to_ref")
-    if source.object_id == target.object_id:
-        raise RelationshipIntegrityError(
-            "self_reference",
-            f"relationship must not reference the same object twice: {from_ref}",
-        )
-    if (source.kind, target.kind) not in _allowed_pairs(rule):
-        raise RelationshipIntegrityError(
-            "invalid_relationship_direction",
-            f"unsupported relationship direction: {from_ref} {relation_type} {to_ref}",
-        )
+    _validate_endpoint_kinds(
+        rule,
+        from_ref=from_ref,
+        source=source,
+        to_ref=to_ref,
+        target=target,
+    )
     source_endpoint = endpoints[source.object_id]
     target_endpoint = endpoints[target.object_id]
     if not rule.endpoint_predicate(source_endpoint, target_endpoint):
@@ -308,6 +503,77 @@ def validate_relationship(
             f"{from_ref} {relation_type} {to_ref}",
         )
     return source, target
+
+
+def validate_relationship_request(
+    *,
+    from_ref: str,
+    relation_type: str,
+    to_ref: str,
+    metadata: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Validate one relationship command payload against the canonical registry.
+
+    This is the catalog-free part of the contract: the registered relationship
+    type, the typed-reference grammar, the asserted endpoint kinds, and the
+    type-dependent metadata. It reads no catalog data, so a boundary can reject
+    an impossible request without disclosing whether any object exists.
+
+    Rules that depend on stored endpoint data (endpoint predicates, reference
+    existence) and on the surrounding edge set (graph rules) stay with
+    `validate_relationship` and `validate_relationship_collection`.
+    """
+    rule = _require_rule(relation_type)
+    source = parse_reference(from_ref, location="from_ref")
+    target = parse_reference(to_ref, location="to_ref")
+    _validate_endpoint_kinds(
+        rule,
+        from_ref=from_ref,
+        source=source,
+        to_ref=to_ref,
+        target=target,
+    )
+    return validate_relationship_metadata(relation_type, metadata)
+
+
+def allowed_endpoint_pairs(relation_type: str) -> frozenset[tuple[str, str]]:
+    """Return every accepted `(from_kind, to_kind)` pair of one relationship type."""
+    return _allowed_pairs(_require_rule(relation_type))
+
+
+def _require_rule(relation_type: str) -> RelationshipRule:
+    rule = RELATIONSHIP_RULES.get(relation_type)
+    if rule is None:
+        raise RelationshipIntegrityError(
+            "unsupported_relation_type",
+            f"unsupported relationship type: {relation_type}",
+            path="relation_type",
+        )
+    return rule
+
+
+def _validate_endpoint_kinds(
+    rule: RelationshipRule,
+    *,
+    from_ref: str,
+    source: TypedReference,
+    to_ref: str,
+    target: TypedReference,
+) -> None:
+    if source.object_id == target.object_id:
+        raise RelationshipIntegrityError(
+            "self_reference",
+            f"relationship must not reference the same object twice: {from_ref}",
+            path="to_ref",
+        )
+    pairs = _allowed_pairs(rule)
+    if (source.kind, target.kind) in pairs:
+        return
+    raise RelationshipIntegrityError(
+        "invalid_relationship_direction",
+        f"unsupported relationship direction: {from_ref} {rule.relation_type} {to_ref}",
+        path="from_ref" if source.kind not in {pair[0] for pair in pairs} else "to_ref",
+    )
 
 
 def validate_relationship_collection(
@@ -365,23 +631,21 @@ def validate_relationship_metadata(
     relation_type: str,
     metadata: Mapping[str, Any] | None,
 ) -> dict[str, Any]:
-    rule = RELATIONSHIP_RULES.get(relation_type)
-    if rule is None:
-        raise RelationshipIntegrityError(
-            "unsupported_relation_type",
-            f"unsupported relationship type: {relation_type}",
-        )
+    rule = _require_rule(relation_type)
     raw_metadata: Any = {} if metadata is None else metadata
     if not isinstance(raw_metadata, Mapping):
         raise RelationshipIntegrityError(
             "invalid_relationship_metadata",
             "relationship metadata must be an object",
+            path="metadata",
+            violation=VIOLATION_TYPE_MISMATCH,
         )
     secret_violations = find_secret_violations(raw_metadata, path="metadata")
     if secret_violations:
         raise RelationshipIntegrityError(
             "secret_relationship_metadata",
             "; ".join(secret_violations),
+            path="metadata",
         )
 
     specs = {spec.name: spec for spec in rule.metadata_fields}
@@ -394,15 +658,19 @@ def validate_relationship_metadata(
         raise RelationshipIntegrityError(
             "invalid_relationship_metadata",
             f"unsupported metadata fields for {relation_type}: {', '.join(unknown_fields)}",
+            path=_metadata_path(unknown_fields[0]),
         )
 
     canonical: dict[str, Any] = {}
     for spec in rule.metadata_fields:
+        path = f"metadata.{spec.name}"
         if spec.name not in raw_metadata:
             if spec.required:
                 raise RelationshipIntegrityError(
                     "invalid_relationship_metadata",
                     f"metadata.{spec.name} is required",
+                    path=path,
+                    violation=VIOLATION_REQUIRED_FIELD_MISSING,
                 )
             continue
         value = raw_metadata[spec.name]
@@ -411,6 +679,8 @@ def validate_relationship_metadata(
                 raise RelationshipIntegrityError(
                     "invalid_relationship_metadata",
                     f"metadata.{spec.name} must be a boolean",
+                    path=path,
+                    violation=VIOLATION_TYPE_MISMATCH,
                 )
             canonical[spec.name] = value
             continue
@@ -418,23 +688,31 @@ def validate_relationship_metadata(
             raise RelationshipIntegrityError(
                 "invalid_relationship_metadata",
                 f"metadata.{spec.name} must be a string",
+                path=path,
+                violation=VIOLATION_TYPE_MISMATCH,
             )
         normalized = value.strip()
         if not normalized:
             raise RelationshipIntegrityError(
                 "invalid_relationship_metadata",
                 f"metadata.{spec.name} must not be empty",
+                path=path,
+                violation=VIOLATION_VALUE_TOO_SHORT,
             )
         if spec.max_length is not None and len(normalized) > spec.max_length:
             raise RelationshipIntegrityError(
                 "invalid_relationship_metadata",
                 f"metadata.{spec.name} must contain at most {spec.max_length} characters",
+                path=path,
+                violation=VIOLATION_VALUE_TOO_LONG,
             )
         if spec.enum_values and normalized not in spec.enum_values:
             allowed = ", ".join(sorted(spec.enum_values))
             raise RelationshipIntegrityError(
                 "invalid_relationship_metadata",
                 f"metadata.{spec.name} must be one of: {allowed}",
+                path=path,
+                violation=VIOLATION_VALUE_NOT_ALLOWED,
             )
         if spec.reject_secrets:
             violations = find_secret_violations(normalized, path=f"metadata.{spec.name}")
@@ -442,9 +720,22 @@ def validate_relationship_metadata(
                 raise RelationshipIntegrityError(
                     "secret_relationship_metadata",
                     "; ".join(violations),
+                    path=path,
                 )
         canonical[spec.name] = normalized
     return canonical
+
+
+def _metadata_path(field_name: str) -> str:
+    """Return the canonical path of one rejected metadata field.
+
+    A rejected field name is republished only when it uses the canonical
+    segment grammar, so an unknown caller-supplied key can never be echoed back
+    inside a published path.
+    """
+    if _METADATA_FIELD_PATTERN.fullmatch(field_name):
+        return f"metadata.{field_name}"
+    return "metadata"
 
 
 def canonical_relationship_metadata_json(
@@ -498,7 +789,7 @@ def relationship_graph_diagnostics(
 
     for relationship in rows:
         relation_type = str(_record_value(relationship, "relation_type"))
-        if relation_type not in {"attached_to", "uplinks_to"}:
+        if relation_type not in GRAPH_TRACKED_TYPES:
             continue
         from_ref = str(_record_value(relationship, "from_ref"))
         to_ref = str(_record_value(relationship, "to_ref"))
@@ -573,19 +864,25 @@ def _first_cycle(edges: Mapping[str, set[str]]) -> tuple[str, ...] | None:
     return None
 
 
+def parse_reference(value: str, *, location: str) -> TypedReference:
+    """Parse one typed reference without resolving it against the catalog."""
+    try:
+        return TypedReference.parse(value)
+    except ValueError as exc:
+        raise RelationshipIntegrityError(
+            "invalid_typed_reference",
+            f"{location} is not a valid typed reference: {value}",
+            path=location if location in REFERENCE_PATHS else None,
+        ) from exc
+
+
 def resolve_reference(
     value: str,
     endpoints: Mapping[str, EndpointDescriptor],
     *,
     location: str,
 ) -> TypedReference:
-    try:
-        parsed = TypedReference.parse(value)
-    except ValueError as exc:
-        raise RelationshipIntegrityError(
-            "invalid_typed_reference",
-            f"{location} is not a valid typed reference: {value}",
-        ) from exc
+    parsed = parse_reference(value, location=location)
     endpoint = endpoints.get(parsed.object_id)
     if endpoint is None:
         raise RelationshipIntegrityError(

@@ -70,7 +70,7 @@ SCHEMA_VIOLATION_CONTRACTS: Mapping[str, str] = MappingProxyType(
     {
         VIOLATION_REQUIRED_FIELD_MISSING: "A required field is missing at this path.",
         VIOLATION_FIELD_NOT_ALLOWED: (
-            "This path is not accepted for this object kind."
+            "This path is not part of the published contract that applies here."
         ),
         VIOLATION_TYPE_MISMATCH: (
             "The value at this path does not use the JSON type this field requires."
@@ -97,7 +97,7 @@ SCHEMA_VIOLATION_CONTRACTS: Mapping[str, str] = MappingProxyType(
             "The reference at this path names an object kind this field does not accept."
         ),
         VIOLATION_FORBIDDEN_KEY: (
-            "A key at this path is globally forbidden below data."
+            "A key or value at this path is globally forbidden as secret-shaped."
         ),
         VIOLATION_RULE_VIOLATION: (
             "A published schema rule for this object kind rejects this combination "

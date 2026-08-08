@@ -18,6 +18,31 @@ Blockwart stores every cross-object graph edge as one directed relationship. The
 
 `provides` is obsolete placement storage and is not an allowed type.
 
+## Machine-readable contract
+
+`blockwart.domain.relationship_projection` projects this registry as a
+JSON-safe contract. It is generated from the same rules that validate every
+write, so no boundary keeps a second relationship list. The projection
+publishes:
+
+- the closed `relation_types` vocabulary, exactly the registry;
+- per type the accepted `directed_pairs` of endpoint kinds — for `hosts` those
+  are narrower than the endpoint kind sets, so the pairs are the contract;
+- the endpoint predicate by name and description, with
+  `decidable_from_request: false` and the published network-device category
+  vocabulary where a predicate additionally reads stored endpoint data;
+- the type-dependent metadata fields, their JSON types, bounds, enums, and the
+  JSON Schema of each type's metadata document;
+- the declared graph rules of each type;
+- the revision, replacement, and no-op semantics of the commands; and
+- the rejection catalog with the stage that decides each code.
+
+It never contains a stored object, edge, metadata value, or category of a
+concrete record. `blockwart.describe_schema` publishes it under
+`relationships`, `/api/v1` publishes the same generated shape in its OpenAPI
+document for `V1RelationshipCommandIn` and `V1AttachedDeviceCreateIn`, and
+`docs/mcp.md` and `docs/api-v1.md` describe the boundary behavior.
+
 ## Dependency storage
 
 `depends_on` is the only storage for the generic upstream/downstream dependency graph. If
@@ -39,7 +64,7 @@ validated object data, so category-sensitive rules reject services, Network segm
 without a device category fail-closed.
 
 Each relationship stores canonical JSON metadata in `metadata_json`; the database default is `{}`.
-Existing relationship types accept only `{}`. `attached_to` and `uplinks_to` accept optional,
+Every other relationship type accepts only `{}`. `attached_to` and `uplinks_to` accept optional,
 trimmed `source_interface` and `target_interface_or_port` values (maximum 128 characters),
 `link_kind`, boolean `primary`, and a maximum-512-character `note`. `uplinks_to` alone also accepts
 `mode`. Unknown fields, empty or excessive strings, invalid enum values, non-boolean primary values,
@@ -57,6 +82,29 @@ The Network read resolver consumes only the policy-projected `hosts`,
 existing discover-safe stubs, while every Network edge requires `read` on both
 endpoints. Alternative uplinks remain visible; `primary` changes deterministic
 ordering but never discards a route.
+
+## Rejection stages
+
+Every rejection publishes one stable code and the stage that decided it:
+
+| Stage | Decided by | Boundary result |
+|---|---|---|
+| `request` | the command payload alone | `422 validation_error` with `code` and `path` |
+| `catalog` | the stored endpoints | `409 conflict` without a field |
+| `graph` | the surrounding edge set | `409 conflict` without a field |
+
+Request-stage rejections are `unsupported_relation_type`,
+`invalid_typed_reference`, `self_reference`, `invalid_relationship_direction`,
+`invalid_relationship_metadata`, and `secret_relationship_metadata`. Their
+canonical paths are `relation_type`, `from_ref`, `to_ref`, `metadata`, and
+`metadata.<field>`, so a client can bind a rejection to the exact request
+field. Direction is decided from the kinds the typed references assert, which
+is why it is a request-stage rule; whether an endpoint is a network device is
+decided from stored data and stays a conflict.
+
+Catalog- and graph-stage rejections deliberately publish no field and no
+detail. They depend on state the caller may not be able to read, so they are
+never turned into a probe for concealed objects or edges.
 
 The database independently enforces:
 

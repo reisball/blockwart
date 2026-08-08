@@ -34,7 +34,14 @@ from blockwart.domain.object_schema import (
     VIOLATION_VALUE_TOO_LONG,
     VIOLATION_VALUE_TOO_SHORT,
 )
-from blockwart.domain.relationships import RELATIONSHIP_RULES
+from blockwart.domain.relationship_projection import (
+    metadata_json_schema,
+    metadata_union_json_schema,
+    relation_type_json_schema,
+    relationship_metadata_conditions,
+    relationship_projection,
+)
+from blockwart.domain.relationships import RELATIONSHIP_PATH_ROOTS, RELATIONSHIP_RULES
 from blockwart.domain.schema_projection import (
     minimal_object_example,
     object_schema_projection,
@@ -199,50 +206,47 @@ WRITE_INTENT_TOOLS: tuple[str, ...] = (
     "blockwart.update_object",
     "blockwart.create_attached_device",
 )
+RELATIONSHIP_TOOLS: tuple[str, ...] = (
+    "blockwart.create_relationship",
+    "blockwart.delete_relationship",
+)
+# Tools whose rejected arguments are published as field-accurate details on the
+# canonical violation contract.
+FIELD_ACCURATE_TOOLS: tuple[str, ...] = (*WRITE_INTENT_TOOLS, *RELATIONSHIP_TOOLS)
+# Tools whose arguments carry canonical relationship paths.
+RELATIONSHIP_ARGUMENT_TOOLS: tuple[str, ...] = (
+    *RELATIONSHIP_TOOLS,
+    "blockwart.create_attached_device",
+)
+RELATIONSHIP_METADATA_DESCRIPTION = (
+    "Type-dependent relationship metadata. Which fields are accepted follows "
+    f"from relation_type; call {SCHEMA_TOOL_NAME} for the exact fields, enums, "
+    "and bounds of each relationship type. A type without metadata fields "
+    "accepts an empty object only."
+)
+# Both the accepted relationship vocabulary and the type-dependent metadata
+# contract are generated from the domain relationship registry, so the
+# published tool schema cannot carry a second, drifting copy of either.
 RELATIONSHIP_PROPERTIES: JSON = {
     "object_id": {"type": "string", "minLength": 1, "maxLength": 128},
     "if_match": ETAG_SCHEMA,
     "from_ref": {"type": "string", "minLength": 3, "maxLength": 192},
-    "relation_type": {"type": "string", "minLength": 1, "maxLength": 96},
+    "relation_type": relation_type_json_schema(),
     "to_ref": {"type": "string", "minLength": 3, "maxLength": 192},
     "metadata": {
-        "type": "object",
+        **metadata_union_json_schema(),
         "default": {},
-        "additionalProperties": False,
-        "properties": {
-            "source_interface": {"type": "string", "minLength": 1, "maxLength": 128},
-            "target_interface_or_port": {"type": "string", "minLength": 1, "maxLength": 128},
-            "link_kind": {
-                "type": "string",
-                "enum": [
-                    "ethernet",
-                    "wifi",
-                    "mesh",
-                    "zigbee",
-                    "bluetooth",
-                    "usb",
-                    "serial",
-                    "gpio",
-                    "power",
-                    "virtual",
-                    "other",
-                ],
-            },
-            "primary": {"type": "boolean"},
-            "note": {"type": "string", "minLength": 1, "maxLength": 512},
-            "mode": {
-                "type": "string",
-                "enum": [
-                    "access",
-                    "trunk",
-                    "routed",
-                    "bridged",
-                    "mesh",
-                    "other",
-                ],
-            },
-        },
+        "description": RELATIONSHIP_METADATA_DESCRIPTION,
     },
+}
+RELATIONSHIP_METADATA_CONDITIONS: list[JSON] = relationship_metadata_conditions()
+ATTACHED_DEVICE_METADATA_SCHEMA: JSON = {
+    **metadata_json_schema("attached_to"),
+    "default": {},
+    "description": (
+        "Metadata of the created attached_to edge. It publishes exactly the "
+        f"attached_to fields; see {SCHEMA_TOOL_NAME}."
+    ),
 }
 DEVICE_GRAPH_PROPERTIES: JSON = {
     "object_id": {"type": "string", "minLength": 1, "maxLength": 128},
@@ -427,12 +431,15 @@ TOOLS: list[JSON] = [
     {
         "name": SCHEMA_TOOL_NAME,
         "description": (
-            "Describe the canonical Blockwart object schema for every writable kind: "
-            "required, optional, and forbidden nested data paths, types, enums, "
+            "Describe the canonical Blockwart write contract: for every writable kind "
+            "the required, optional, and forbidden nested data paths, types, enums, "
             "reference kinds, bounds, normalization, forbidden secret keys, "
             "lifecycle/health semantics, and one minimal valid example per write "
-            "intent. Call it before create_child, create_root, update_object, or "
-            "create_attached_device; it reads no catalog data."
+            "intent; and for every registered relationship type its directed endpoint "
+            "kinds, endpoint predicates, type-dependent metadata fields, graph rules, "
+            "revision/no-op semantics, and rejection catalog. Call it before "
+            "create_child, create_root, update_object, create_attached_device, "
+            "create_relationship, or delete_relationship; it reads no catalog data."
         ),
         "inputSchema": {
             "type": "object",
@@ -440,7 +447,10 @@ TOOLS: list[JSON] = [
                 "kind": {
                     "type": "string",
                     "enum": list(ALL_OBJECT_KINDS),
-                    "description": "Restrict the contract to exactly one object kind",
+                    "description": (
+                        "Restrict the contract to exactly one object kind and the "
+                        "relationship types that accept it as an endpoint"
+                    ),
                 },
             },
             "additionalProperties": False,
@@ -532,7 +542,10 @@ TOOLS: list[JSON] = [
         "name": "blockwart.create_relationship",
         "description": (
             "Create or idempotently replace an authorized relationship between existing "
-            "objects and return the exact relationship plus its new revision."
+            "objects and return the exact relationship plus its new revision. Replaying "
+            "the same canonical metadata is a no-op that reports changed = false. Call "
+            f"{SCHEMA_TOOL_NAME} for the accepted relationship types, their directed "
+            "endpoint kinds, endpoint predicates, and type-dependent metadata."
         ),
         "inputSchema": {
             "type": "object",
@@ -545,12 +558,18 @@ TOOLS: list[JSON] = [
                 "to_ref",
             ],
             "additionalProperties": False,
+            "allOf": RELATIONSHIP_METADATA_CONDITIONS,
         },
         "annotations": WRITE_ANNOTATIONS,
     },
     {
         "name": "blockwart.delete_relationship",
-        "description": "Delete an authorized relationship from the current object revision.",
+        "description": (
+            "Delete an authorized relationship from the current object revision. It "
+            "matches the exact from_ref, relation_type, and to_ref triplet and never "
+            f"depends on stored metadata. Call {SCHEMA_TOOL_NAME} for the accepted "
+            "relationship types."
+        ),
         "inputSchema": {
             "type": "object",
             "properties": RELATIONSHIP_PROPERTIES,
@@ -562,6 +581,7 @@ TOOLS: list[JSON] = [
                 "to_ref",
             ],
             "additionalProperties": False,
+            "allOf": RELATIONSHIP_METADATA_CONDITIONS,
         },
         "annotations": DELETE_ANNOTATIONS,
     },
@@ -584,7 +604,7 @@ TOOLS: list[JSON] = [
                     "pattern": "^[!-~]+$",
                 },
                 "device": DEVICE_WRITE_SCHEMA,
-                "metadata": RELATIONSHIP_PROPERTIES["metadata"],
+                "metadata": ATTACHED_DEVICE_METADATA_SCHEMA,
             },
             "required": ["parent_id", "idempotency_key", "device"],
             "additionalProperties": False,
@@ -751,10 +771,11 @@ TOOL_DEFINITIONS: dict[str, JSON] = {tool["name"]: tool for tool in TOOLS}
 
 
 def describe_schema_payload(kind: str | None = None) -> JSON:
-    """Project the canonical domain object schema registry for MCP clients.
+    """Project the canonical domain object and relationship registries for MCP clients.
 
-    The payload is generated from `blockwart.domain.object_schema` on every call
-    and contains no catalog data, credentials, or internal paths.
+    The payload is generated from `blockwart.domain.object_schema` and
+    `blockwart.domain.relationships` on every call and contains no catalog data,
+    credentials, or internal paths.
     """
     projection = object_schema_projection()
     if kind is not None:
@@ -765,6 +786,7 @@ def describe_schema_payload(kind: str | None = None) -> JSON:
         **projection,
         "requested_kind": kind,
         "write_intents": _write_intents(kind),
+        "relationships": relationship_projection(kind),
     }
 
 
@@ -880,11 +902,11 @@ def _argument_details(name: str, arguments: JSON) -> list[dict[str, str | None]]
     for error in TOOL_INPUT_VALIDATORS[name].iter_errors(arguments):
         location = ".".join(str(part) for part in error.absolute_path)
         code = _ARGUMENT_VIOLATIONS.get(str(error.validator), GENERIC_SCHEMA_VIOLATION)
-        missing = [
+        rejected = [
             f"{location}.{argument}" if location else argument
-            for argument in _missing_arguments(error)
+            for argument in (*_missing_arguments(error), *_unexpected_arguments(error))
         ]
-        for argument_location in missing or [location]:
+        for argument_location in rejected or [location]:
             details.append(
                 public_detail(
                     location=argument_location,
@@ -907,10 +929,27 @@ def _missing_arguments(error: ValidationError) -> list[str]:
     ]
 
 
+def _unexpected_arguments(error: ValidationError) -> list[str]:
+    """Return the argument names one instance carries beyond its published schema."""
+    if error.validator != "additionalProperties" or error.validator_value is not False:
+        return []
+    instance = error.instance if isinstance(error.instance, dict) else {}
+    published = error.schema.get("properties", {}) if isinstance(error.schema, dict) else {}
+    return sorted(
+        argument
+        for argument in instance
+        if isinstance(argument, str) and argument not in published
+    )
+
+
 def _canonical_argument_path(name: str, location: str) -> str | None:
-    """Return the canonical catalog data path an argument location points at."""
-    argument = WRITE_INTENT_OBJECT_ARGUMENTS.get(name)
+    """Return the canonical catalog or relationship path an argument points at."""
     parts = location.split(".")
+    if not parts or not parts[0]:
+        return None
+    if name in RELATIONSHIP_ARGUMENT_TOOLS and parts[0] in RELATIONSHIP_PATH_ROOTS:
+        return location
+    argument = WRITE_INTENT_OBJECT_ARGUMENTS.get(name)
     if argument is None or len(parts) < 2 or parts[0] != argument:
         return None
     if parts[1] != DATA_PATH_ROOT:
@@ -945,13 +984,13 @@ def call_tool(
     try:
         TOOL_INPUT_VALIDATORS[name].validate(args)
     except ValidationError as exc:
-        # Object-write tools publish field-accurate argument violations on the
-        # same contract the API projects. Read and non-object-write tools keep
+        # Object-write and relationship tools publish field-accurate argument
+        # violations on the same contract the API projects. Read tools keep
         # their existing opaque invalid_arguments shape so the public contract
         # does not widen for tools outside this slice.
         raise ToolInputError(
             "Tool arguments are invalid",
-            _argument_details(name, args) if name in WRITE_INTENT_TOOLS else [],
+            _argument_details(name, args) if name in FIELD_ACCURATE_TOOLS else [],
         ) from exc
 
     request_id = _safe_correlation_id(correlation_id)

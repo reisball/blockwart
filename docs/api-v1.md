@@ -168,8 +168,31 @@ transaction.
 ### `POST|DELETE /api/v1/objects/{object_id}/relationships`
 
 Requires `write` on the path object, discoverability of the peer, and current
-`If-Match`. The JSON body is `from_ref`, `relation_type`, and `to_ref`. Shared
-relationship, canonical-placement, last-owner, and rollback checks apply.
+`If-Match`. The JSON body is `from_ref`, `relation_type`, `to_ref`, and
+optional `metadata`. Shared relationship, canonical-placement, last-owner, and
+rollback checks apply.
+
+`relation_type` is the closed registered vocabulary, and the accepted endpoint
+kinds and metadata fields depend on that exact value. The request schema is
+generated from the domain relationship registry: it publishes the closed
+`relation_type` enum, the union of every metadata field, and one `allOf`
+condition per relationship type that binds the accepted metadata document to
+its type. `depends_on` and the other non-link types accept an empty metadata
+document only; `attached_to` publishes exactly its five link fields and
+`uplinks_to` those plus `mode`. `POST /attached-devices` publishes exactly the
+`attached_to` metadata contract.
+
+A rejection the payload alone decides — unknown type, invalid typed reference,
+self-reference, an endpoint-kind pair the type does not accept, an unsupported
+or invalid metadata field, or secret-shaped metadata — returns
+`422 validation_error` with the canonical `code` and `path` described in
+`api-boundary-contract.md`. Rejections that depend on stored endpoints or on
+the surrounding edge set (endpoint predicates, duplicates, second placement
+parent, second primary edge, cycles) remain `409 conflict` without a field.
+Creating an existing triplet replaces its canonical metadata; an identical
+canonical document returns `changed: false` without advancing a revision.
+Delete matches the triplet only and ignores metadata. See
+`relationship-integrity.md` for the published contract itself.
 
 ## Platform-admin resources
 
