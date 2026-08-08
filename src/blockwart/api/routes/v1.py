@@ -394,7 +394,7 @@ def create_v1_attached_device(
         raise HTTPException(status_code=400, detail="Idempotency-Key is required")
     context = api_write_context(request, access)
     settings: Settings = request.app.state.settings
-    metadata_payload = payload.metadata.model_dump(exclude_none=True) or None
+    metadata_payload = payload.metadata or None
     result = execute_api_command(
         session,
         context,
@@ -543,7 +543,7 @@ def create_v1_relationship(
             relation_type=payload.relation_type,
             to_ref=payload.to_ref,
             expected_revision=if_match,
-            metadata=payload.metadata.model_dump() or None,
+            metadata=payload.metadata or None,
         ),
     )
     response.headers["ETag"] = result.etag

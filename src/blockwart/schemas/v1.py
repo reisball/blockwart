@@ -1,8 +1,20 @@
 from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, model_serializer
+from pydantic import BaseModel, ConfigDict, Field, model_serializer, model_validator
 
 from blockwart.domain.auth import GrantScope, Permission, Role
+from blockwart.domain.relationship_projection import (
+    metadata_json_schema,
+    metadata_union_json_schema,
+    relationship_metadata_conditions,
+)
+from blockwart.domain.relationships import (
+    LINK_KINDS,
+    RELATIONSHIP_TYPES,
+    UPLINK_MODES,
+    validate_relationship_metadata,
+    validate_relationship_request,
+)
 from blockwart.schemas.agent import (
     AgentCatalogContextRead,
     AgentCatalogObjectRead,
@@ -11,6 +23,12 @@ from blockwart.schemas.catalog import CatalogObjectIn, CatalogObjectOut, ObjectK
 
 ObjectSortField = Literal["id", "label", "kind", "updated_at"]
 SortDirection = Literal["asc", "desc"]
+# The relationship vocabulary and its link enums are projected from the domain
+# registry, so the published REST contract cannot carry a second, drifting copy.
+RelationType = Literal[RELATIONSHIP_TYPES]
+LinkKind = Literal[tuple(sorted(LINK_KINDS))]
+UplinkMode = Literal[tuple(sorted(UPLINK_MODES))]
+ATTACHED_TO_RELATION_TYPE = "attached_to"
 
 
 class V1ObjectPageOut(BaseModel):
@@ -30,8 +48,12 @@ class V1ContextPageOut(BaseModel):
 
 
 class V1RelationshipMetadata(BaseModel):
-    """Canonical optional metadata for link-shaped relationships.
+    """Canonical stored metadata of a link-shaped relationship.
 
+    This is the returned union of every published metadata field, with the link
+    and uplink vocabularies projected from the domain registry. Which fields a
+    relationship may actually carry depends on its exact type and is published
+    by the relationship projection; the domain enforces it on every write.
     Unset fields are omitted so empty metadata serializes as ``{}``.
     """
 
@@ -39,35 +61,10 @@ class V1RelationshipMetadata(BaseModel):
 
     source_interface: str | None = Field(default=None, min_length=1, max_length=128)
     target_interface_or_port: str | None = Field(default=None, min_length=1, max_length=128)
-    link_kind: (
-        Literal[
-            "ethernet",
-            "wifi",
-            "mesh",
-            "zigbee",
-            "bluetooth",
-            "usb",
-            "serial",
-            "gpio",
-            "power",
-            "virtual",
-            "other",
-        ]
-        | None
-    ) = None
+    link_kind: LinkKind | None = None
     primary: bool | None = None
     note: str | None = Field(default=None, min_length=1, max_length=512)
-    mode: (
-        Literal[
-            "access",
-            "trunk",
-            "routed",
-            "bridged",
-            "mesh",
-            "other",
-        ]
-        | None
-    ) = None
+    mode: UplinkMode | None = None
 
     @model_serializer(mode="wrap")
     def _serialize_without_nulls(self, handler) -> dict[str, Any]:
@@ -95,19 +92,57 @@ class V1DeleteCommandOut(BaseModel):
 
 
 class V1RelationshipCommandIn(BaseModel):
-    from_ref: str = Field(min_length=3, max_length=192)
-    relation_type: str = Field(min_length=1, max_length=96)
-    to_ref: str = Field(min_length=3, max_length=192)
-    metadata: V1RelationshipMetadata = Field(
-        default_factory=V1RelationshipMetadata,
+    """One relationship command payload, validated against the domain registry.
+
+    `relation_type` is the closed registered vocabulary. The accepted endpoint
+    kinds and metadata fields depend on that exact value, so the published
+    schema carries one condition per relationship type and the domain validator
+    enforces the same contract on every command.
+    """
+
+    model_config = ConfigDict(
+        json_schema_extra={"allOf": relationship_metadata_conditions()},
     )
+
+    from_ref: str = Field(min_length=3, max_length=192)
+    relation_type: RelationType
+    to_ref: str = Field(min_length=3, max_length=192)
+    metadata: dict[str, Any] = Field(
+        default_factory=dict,
+        json_schema_extra=metadata_union_json_schema(),
+    )
+
+    @model_validator(mode="after")
+    def validate_against_relationship_registry(self) -> "V1RelationshipCommandIn":
+        self.metadata = validate_relationship_request(
+            from_ref=self.from_ref,
+            relation_type=self.relation_type,
+            to_ref=self.to_ref,
+            metadata=self.metadata,
+        )
+        return self
 
 
 class V1AttachedDeviceCreateIn(BaseModel):
+    """One attached-device command payload.
+
+    The device is created and attached with exactly the `attached_to` metadata
+    contract; `uplinks_to`-only fields are not part of this command.
+    """
+
     device: CatalogObjectIn
-    metadata: V1RelationshipMetadata = Field(
-        default_factory=V1RelationshipMetadata,
+    metadata: dict[str, Any] = Field(
+        default_factory=dict,
+        json_schema_extra=metadata_json_schema(ATTACHED_TO_RELATION_TYPE),
     )
+
+    @model_validator(mode="after")
+    def validate_attachment_metadata(self) -> "V1AttachedDeviceCreateIn":
+        self.metadata = validate_relationship_metadata(
+            ATTACHED_TO_RELATION_TYPE,
+            self.metadata,
+        )
+        return self
 
 
 class V1RelationshipCommandOut(BaseModel):

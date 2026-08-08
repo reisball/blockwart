@@ -4,9 +4,10 @@ Every boundary publishes the same detail structure for a rejected object write:
 the canonical public data path, one machine-readable violation code from
 `blockwart.domain.object_schema`, the published schema rule when a
 postcondition rejected the write, and the published description of that
-violation. The domain stays the single source of both the field rules and the
-violation catalog, so a client can react to a rejected write without parsing
-any message.
+violation. Rejected relationship commands use the same structure with the
+canonical relationship paths of `blockwart.domain.relationships`. The domain
+stays the single source of both the field rules and the violation catalog, so a
+client can react to a rejected write without parsing any message.
 
 Nothing else is projected. Rejected values, request inputs, Pydantic context,
 exception text, internal types, and file paths never reach a client: an unknown
@@ -34,10 +35,18 @@ from blockwart.domain.object_schema import (
     VIOLATION_VALUE_TOO_SHORT,
     ObjectSchemaError,
 )
+from blockwart.domain.relationships import (
+    RELATIONSHIP_PATH_ROOTS,
+    RelationshipIntegrityError,
+)
 
 PUBLIC_DETAIL_FIELDS: tuple[str, ...] = ("code", "location", "message", "path", "rule")
 _DETAIL_SORT_FIELDS: tuple[str, ...] = ("location", "path", "code", "rule")
 DATA_PATH_ROOT = "data"
+_BODY_LOCATION_ROOT = "body"
+# The closed set of canonical roots a published path may start with: the
+# catalog data document of an object write and the relationship command fields.
+PUBLIC_PATH_ROOTS: tuple[str, ...] = (DATA_PATH_ROOT, *RELATIONSHIP_PATH_ROOTS)
 UNKNOWN_LOCATION = "unknown"
 MAX_PUBLIC_DETAILS = 20
 _MAX_PATH_SEGMENTS = 12
@@ -96,12 +105,26 @@ def public_data_path(path: object) -> str | None:
     optional array indices below `data`. A path that starts elsewhere, or a
     segment carrying anything else, is dropped instead of being echoed back.
     """
+    return public_path(path, roots=(DATA_PATH_ROOT,))
+
+
+def public_path(
+    path: object,
+    *,
+    roots: tuple[str, ...] = PUBLIC_PATH_ROOTS,
+) -> str | None:
+    """Return one canonical public path, truncated at the first odd segment.
+
+    A path is published only when it starts at one of the closed published
+    roots and every following segment uses the canonical grammar. Anything else
+    is dropped instead of being echoed back.
+    """
     if not isinstance(path, str):
         return None
     segments = path.split(".")
-    if not segments or segments[0] != DATA_PATH_ROOT:
+    if not segments or segments[0] not in roots:
         return None
-    published = [DATA_PATH_ROOT]
+    published = [segments[0]]
     for segment in segments[1:_MAX_PATH_SEGMENTS]:
         if not _SEGMENT_PATTERN.fullmatch(segment):
             break
@@ -134,9 +157,30 @@ def public_detail(
         "code": violation,
         "location": public_location(location),
         "message": violation_description(violation),
-        "path": public_data_path(path),
+        "path": public_path(path),
         "rule": public_rule(rule),
     }
+
+
+def detail_from_relationship_error(
+    error: RelationshipIntegrityError,
+    *,
+    location: str,
+) -> dict[str, str | None]:
+    """Project one field-attributable relationship rejection onto its public detail.
+
+    Only a rejection the command payload alone decides carries a canonical
+    relationship path and a published violation. A rejection that needed the
+    stored catalog or the surrounding edge set has neither and stays a
+    conflict, so it cannot become a probe for concealed state.
+    """
+    path = public_path(error.path, roots=RELATIONSHIP_PATH_ROOTS)
+    root = public_location(location)
+    return public_detail(
+        location=root if path is None or root == UNKNOWN_LOCATION else f"{root}.{path}",
+        code=error.violation,
+        path=path,
+    )
 
 
 def detail_from_object_schema_error(
@@ -171,10 +215,31 @@ def detail_from_validation_error(error: Mapping[str, Any]) -> dict[str, str | No
     cause = error.get("ctx", {}).get("error") if isinstance(error.get("ctx"), Mapping) else None
     if isinstance(cause, ObjectSchemaError):
         return detail_from_object_schema_error(cause, location=location)
+    if isinstance(cause, RelationshipIntegrityError):
+        return detail_from_relationship_error(cause, location=location)
     return public_detail(
         location=location,
         code=violation_for_validation_type(error.get("type")),
+        path=relationship_path_from_location(location),
     )
+
+
+def relationship_path_from_location(location: object) -> str | None:
+    """Return the canonical relationship path a rejected request location names.
+
+    A relationship command carries its canonical paths as request fields, so a
+    boundary rejection inside `from_ref`, `relation_type`, `to_ref`, or
+    `metadata` is published with the same path a domain rejection would use.
+    Any other location keeps no path.
+    """
+    if not isinstance(location, str):
+        return None
+    segments = location.split(".")
+    if segments and segments[0] == _BODY_LOCATION_ROOT:
+        segments = segments[1:]
+    if not segments or segments[0] not in RELATIONSHIP_PATH_ROOTS:
+        return None
+    return public_path(".".join(segments), roots=RELATIONSHIP_PATH_ROOTS)
 
 
 def violation_for_validation_type(validation_type: object) -> str:
