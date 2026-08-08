@@ -158,6 +158,15 @@ are not part of the payload. Missing `If-Match` returns
 `428 precondition_required`; a stale or malformed value returns
 `412 precondition_failed`.
 
+Host and system payloads may include the ordered manual
+`data.installed_software` list documented in `object-validation.md`. REST uses
+the same canonical registry as MCP and the UI; the generated OpenAPI document
+publishes that registry once in its top-level `x-blockwart-object-schema`
+extension. Rejected kinds, list/entry types, required fields, extra entry
+fields, and URL formats use the standard field-accurate validation details.
+The URL field combines `format: uri` with a JSON Schema `pattern` restricted to
+case-insensitive `http://` and `https://` prefixes.
+
 ### `DELETE /api/v1/objects/{object_id}`
 
 Requires the separate `delete` permission plus current `If-Match`. Referenced

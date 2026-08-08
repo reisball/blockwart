@@ -216,6 +216,87 @@
           </section>
         {% endif %}
 
+        {% if supports_installed_software %}
+          <section class="panel" aria-labelledby="installed-software-title">
+            <div class="panel-head">
+              <h2 class="section-title" id="installed-software-title">{{ t("software.title") }}</h2>
+              {% if can_write %}
+                {% if edit_section == "installed-software" %}
+                  <a class="button button-small button-muted" href="{{ detail_href }}">{{ t("detail.cancel") }}</a>
+                {% else %}
+                  <a class="button button-small button-muted" href="{{ detail_edit_hrefs['installed-software'] }}">{{ t("detail.edit") if installed_software else t("detail.add") }}</a>
+                {% endif %}
+              {% endif %}
+            </div>
+            {% if edit_section == "installed-software" %}
+              {% if error %}<div class="error" role="alert">{{ error }}</div>{% endif %}
+              <p class="meta">{{ t("software.editor_help") }}</p>
+              <form class="form-grid" method="post" action="{{ detail_post_urls.installed_software }}">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+                <input type="hidden" name="if_match" value="{{ object_etag }}" />
+                <div class="table-wrap">
+                  <table class="table edit-table">
+                    <thead>
+                      <tr>
+                        <th>{{ t("software.name") }} <span class="required-marker" aria-hidden="true">*</span><span class="visually-hidden">{{ t("form.required") }}</span></th>
+                        <th>{{ t("software.version") }} <span class="required-marker" aria-hidden="true">*</span><span class="visually-hidden">{{ t("form.required") }}</span></th>
+                        <th>{{ t("software.url") }} <span class="field-optional">{{ t("form.optional") }}</span></th>
+                        <th><span class="visually-hidden">{{ t("software.actions") }}</span></th>
+                      </tr>
+                    </thead>
+                    <tbody data-row-list="installed-software">
+                      {% for software in installed_software_rows %}
+                        <tr>
+                          <td><input name="software_name" value="{{ software.name or '' }}" autocomplete="off" data-required-when-row-filled /></td>
+                          <td><input name="software_version" value="{{ software.version or '' }}" autocomplete="off" data-required-when-row-filled /></td>
+                          <td><input name="software_url" value="{{ software.url or '' }}" type="url" inputmode="url" autocomplete="off" placeholder="https://example.invalid/releases" /></td>
+                          <td><button class="button button-small button-muted" type="button" data-remove-row aria-label="{{ t('software.remove') }}">{{ t("software.remove") }}</button></td>
+                        </tr>
+                      {% endfor %}
+                    </tbody>
+                  </table>
+                </div>
+                <template data-row-template="installed-software">
+                  <tr>
+                    <td><input name="software_name" value="" autocomplete="off" data-required-when-row-filled /></td>
+                    <td><input name="software_version" value="" autocomplete="off" data-required-when-row-filled /></td>
+                    <td><input name="software_url" value="" type="url" inputmode="url" autocomplete="off" placeholder="https://example.invalid/releases" /></td>
+                    <td><button class="button button-small button-muted" type="button" data-remove-row aria-label="{{ t('software.remove') }}">{{ t("software.remove") }}</button></td>
+                  </tr>
+                </template>
+                <button class="button button-small button-muted row-add-button" type="button" data-add-row="installed-software">{{ t("software.add") }}</button>
+                <div class="button-row">
+                  <button type="submit">{{ t("detail.save") }}</button>
+                  <a class="button button-muted" href="{{ detail_href }}">{{ t("detail.cancel") }}</a>
+                </div>
+              </form>
+            {% elif installed_software %}
+              <div class="table-wrap">
+                <table class="table">
+                  <thead><tr><th>{{ t("software.name") }}</th><th>{{ t("software.version") }}</th><th>{{ t("software.link") }}</th></tr></thead>
+                  <tbody>
+                    {% for software in installed_software %}
+                      <tr>
+                        <td>{{ software.name }}</td>
+                        <td>{{ software.version }}</td>
+                        <td>
+                          {% if software.safe_url %}
+                            <a href="{{ software.safe_url }}" target="_blank" rel="noopener noreferrer">{{ t("software.open_link") }}</a>
+                          {% else %}
+                            {{ t("asset.no_value") }}
+                          {% endif %}
+                        </td>
+                      </tr>
+                    {% endfor %}
+                  </tbody>
+                </table>
+              </div>
+            {% else %}
+              <p class="meta" data-installed-software-empty>{{ t("software.empty") }}</p>
+            {% endif %}
+          </section>
+        {% endif %}
+
         {% if supports_service_information %}
           <section class="panel">
             <div class="panel-head">

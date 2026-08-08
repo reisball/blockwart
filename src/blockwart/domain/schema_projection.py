@@ -105,6 +105,7 @@ _EXAMPLE_IP = "192.0.2.1"
 _EXAMPLE_URL = "https://service.example.invalid/"
 _EXAMPLE_PORT = 8443
 _EXAMPLE_TEXT = "example"
+_HTTP_URL_PATTERN = r"^[Hh][Tt][Tt][Pp][Ss]?://"
 
 
 def object_schema_projection() -> dict[str, Any]:
@@ -210,6 +211,10 @@ def field_projection(field: FieldSpec) -> dict[str, Any]:
     }
     if field.field_type in _FORMATS:
         projected["format"] = _FORMATS[field.field_type]
+    if field.field_type == "url":
+        projected["pattern"] = _HTTP_URL_PATTERN
+    if field.required_in_item:
+        projected["required_scope"] = "containing_array_item"
     if field.enum_values:
         projected["enum"] = sorted(field.enum_values, key=_enum_sort_key)
     if field.reference_kinds:
@@ -233,7 +238,7 @@ def field_violations(field: FieldSpec) -> set[str]:
     if field.forbidden_message is not None:
         return {VIOLATION_FIELD_NOT_ALLOWED}
     violations: set[str] = set(_TYPE_VIOLATIONS[field.field_type])
-    if field.required:
+    if field.required or field.required_in_item:
         violations.add(VIOLATION_REQUIRED_FIELD_MISSING)
     if field.enum_values:
         violations.add(VIOLATION_VALUE_NOT_ALLOWED)
@@ -286,7 +291,7 @@ def _state_projection(asset: bool, values: tuple[str, ...]) -> dict[str, Any]:
 def _requirement(field: FieldSpec) -> str:
     if field.forbidden_message is not None:
         return FORBIDDEN
-    return REQUIRED if field.required else OPTIONAL
+    return REQUIRED if field.required or field.required_in_item else OPTIONAL
 
 
 def _json_types(field: FieldSpec) -> tuple[str, ...]:

@@ -53,13 +53,44 @@ The Network exception is read-only and transitional. Any write through `CatalogO
 including an otherwise unrelated update to a legacy row, fails until the caller provides an
 explicit valid category. Blockwart does not infer or backfill one.
 
+### Installed software
+
+`host` and `system` objects may carry an ordered `data.installed_software`
+list. Every entry is a closed object with required, non-empty string fields
+`name` and `version` plus an optional absolute HTTP(S) `url`:
+
+```json
+{
+  "installed_software": [
+    {
+      "name": "Docker Engine",
+      "version": "1:27.5.1-1~ubuntu.24.04",
+      "url": "https://docs.docker.com/engine/release-notes/27/"
+    }
+  ]
+}
+```
+
+Versions are opaque and are stored exactly as supplied. Validation never
+interprets, normalizes, sorts, deduplicates, or merges entries, and URL
+validation only parses the string locally; it never retrieves the URL. The
+field is explicitly forbidden on every other object kind. This inventory is
+manual catalog data, not discovery, release monitoring, download, upgrade, or
+deployment automation.
+
+The canonical machine projection publishes the URL as `format: uri` together
+with the JSON Schema pattern `^[Hh][Tt][Tt][Pp][Ss]?://`. The format retains
+the general absolute-URI contract while the pattern exposes the narrower,
+case-insensitive HTTP(S)-only scheme rule enforced by runtime validation.
+
 Unknown additional data remains allowed to preserve the current flexible
 catalog contract. Tightening unknown-field handling requires a separate
 compatibility decision.
 
 Complex conditional rules remain explicit schema-bound postconditions. Current
-examples are the credential-reference raw-value rejection and the mandatory
-approval rule for disruptive/destructive runbooks.
+examples are the installed-software entry closure and required-field rules,
+the credential-reference raw-value rejection, and the mandatory approval rule
+for disruptive/destructive runbooks.
 
 ## Secret Policy
 

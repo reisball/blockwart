@@ -51,7 +51,14 @@ class CatalogObjectIn(BaseModel):
     lifecycle: AssetLifecycle | None = None
     health: AssetHealth | None = None
     summary: str | None = None
-    data: dict[str, Any] = Field(default_factory=dict)
+    data: dict[str, Any] = Field(
+        default_factory=dict,
+        description=(
+            "Kind-specific catalog data. The top-level x-blockwart-object-schema "
+            "OpenAPI extension is generated from the same domain registry that "
+            "validates writes."
+        ),
+    )
     provenance: CatalogProvenance = Field(default_factory=manual_provenance)
 
     @model_validator(mode="after")

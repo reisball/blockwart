@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any, Literal
 
 from blockwart.config import get_settings
+from blockwart.domain.object_schema import INSTALLED_SOFTWARE_KINDS
 
 PrimaryNameStorage = Literal["label", "network_hostname"]
 
@@ -103,6 +104,20 @@ STORAGE_CONVENTIONS: dict[str, str] = {
 
 BASE_UI_PANELS = (
     UiPanel("overview", "panel.overview", "overview"),
+    UiPanel("network", "panel.network", "network"),
+    UiPanel("access", "panel.access", "access"),
+    UiPanel("relationships", "panel.relationships", "relationship-add"),
+    UiPanel("comment", "panel.comment", "comment"),
+    UiPanel("audit", "panel.audit", "audit"),
+)
+
+INSTALLED_SOFTWARE_UI_PANELS = (
+    UiPanel("overview", "panel.overview", "overview"),
+    UiPanel(
+        "installed_software",
+        "panel.installed_software",
+        "installed-software",
+    ),
     UiPanel("network", "panel.network", "network"),
     UiPanel("access", "panel.access", "access"),
     UiPanel("relationships", "panel.relationships", "relationship-add"),
@@ -381,7 +396,7 @@ UI_SCHEMAS: dict[str, UiTypeSchema] = {
         supports_platform=False,
         fields=COMMON_SCHEMA_FIELDS + HARDWARE_SCHEMA_FIELDS + ENDPOINT_SCHEMA_FIELDS,
         create_fields=COMMON_CREATE_FIELDS,
-        panels=BASE_UI_PANELS,
+        panels=INSTALLED_SOFTWARE_UI_PANELS,
     ),
     "system": UiTypeSchema(
         kind="system",
@@ -390,7 +405,7 @@ UI_SCHEMAS: dict[str, UiTypeSchema] = {
         supports_platform=True,
         fields=PLATFORM_SCHEMA_FIELDS + SYSTEM_HARDWARE_SCHEMA_FIELDS + ENDPOINT_SCHEMA_FIELDS,
         create_fields=PLATFORM_CREATE_FIELDS,
-        panels=BASE_UI_PANELS,
+        panels=INSTALLED_SOFTWARE_UI_PANELS,
     ),
     "network": UiTypeSchema(
         kind="network",
@@ -420,6 +435,13 @@ UI_SCHEMAS: dict[str, UiTypeSchema] = {
         panels=SERVICE_UI_PANELS,
     ),
 }
+
+if {
+    kind
+    for kind, schema in UI_SCHEMAS.items()
+    if any(panel.key == "installed_software" for panel in schema.panels)
+} != set(INSTALLED_SOFTWARE_KINDS):  # pragma: no cover - import-time parity guard
+    raise RuntimeError("installed-software UI kinds drift from the domain schema")
 
 
 def get_ui_schema(kind: str) -> UiTypeSchema:

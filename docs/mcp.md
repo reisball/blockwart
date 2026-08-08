@@ -78,6 +78,15 @@ deletion leaves no object or successor ETag to read. Discover-only stubs
 contain neither field, so they cannot be used to infer or attempt a write
 precondition.
 
+For `host` and `system`, the generic object read/write tools preserve the
+ordered manual `data.installed_software` list byte-for-byte, including opaque
+version strings. `blockwart.describe_schema` publishes its closed entry shape,
+required fields, HTTP(S)-only URL format, kind restrictions, and field-accurate
+violations directly from the domain registry. Its URL field retains
+`format: uri` and adds the same JSON Schema HTTP(S)-prefix `pattern` published
+through OpenAPI. MCP performs no URL retrieval, software discovery, release
+monitoring, or update operation.
+
 ## Tool assessment
 
 The current surface is intentionally small. `directly sufficient` means the

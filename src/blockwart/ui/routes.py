@@ -16,7 +16,12 @@ from sqlalchemy.orm import Session
 from blockwart.api.deps import get_session
 from blockwart.domain.auth import GrantScope, Permission, Role
 from blockwart.domain.comment_markdown import render_comment_source
-from blockwart.domain.object_schema import DEVICE_CATEGORIES, NETWORK_CATEGORIES
+from blockwart.domain.object_schema import (
+    DEVICE_CATEGORIES,
+    INSTALLED_SOFTWARE_KINDS,
+    NETWORK_CATEGORIES,
+    is_absolute_http_url,
+)
 from blockwart.domain.placement import PlacementError
 from blockwart.domain.relationships import (
     LINK_KINDS,
@@ -585,11 +590,16 @@ def _detail_template_context(
         schema_fields,
         service_information,
     )
+    installed_software = _installed_software_summary(object_data)
     can_edit_network_addresses = catalog_object.kind in NETWORK_ADDRESS_EDIT_KINDS
     can_edit_network_ports = catalog_object.kind in NETWORK_PORT_EDIT_KINDS
     can_edit_network_endpoints = catalog_object.kind in NETWORK_ENDPOINT_EDIT_KINDS
     can_edit_device = catalog_object.kind == DEVICE_OBJECT_KIND
     submitted_rows = form_rows or {}
+    installed_software_rows = _mapping_rows_override(
+        submitted_rows.get("installed_software"),
+        installed_software or [{"name": "", "version": "", "url": ""}],
+    )
     submitted_device_rows = submitted_rows.get("device_fields") or []
     if submitted_device_rows:
         submitted_device = submitted_device_rows[0]
@@ -661,6 +671,11 @@ def _detail_template_context(
         "supports_service_information": (
             catalog_object.kind in SERVICE_INFORMATION_OBJECT_KINDS
         ),
+        "supports_installed_software": (
+            catalog_object.kind in INSTALLED_SOFTWARE_KINDS
+        ),
+        "installed_software": installed_software,
+        "installed_software_rows": installed_software_rows,
         "ports": ports,
         "endpoints": endpoints,
         "device": device,
@@ -821,6 +836,7 @@ def _detail_navigation_context(
         "overview",
         "hardware",
         "service-information",
+        "installed-software",
         "device",
         "network",
         "access",
@@ -844,6 +860,9 @@ def _detail_navigation_context(
         "detail_post_urls": {
             "overview": detail_href,
             "network": f"/objects/{object_id}/network?{detail_query_string}",
+            "installed_software": (
+                f"/objects/{object_id}/installed-software?{detail_query_string}"
+            ),
             "access": f"/objects/{object_id}/access?{detail_query_string}",
             "grants": (
                 f"/objects/{object_id}/permissions/grants?{detail_query_string}"
@@ -2063,6 +2082,108 @@ def update_object(
 
 
 @router.post(
+    "/objects/{object_id}/installed-software",
+    response_class=HTMLResponse,
+    dependencies=[Depends(require_browser_write_csrf)],
+)
+async def update_installed_software(
+    request: Request,
+    object_id: str,
+    session: Annotated[Session, Depends(get_session)],
+):
+    access = read_access_from_request(request)
+    context = ui_write_context(request, access)
+    execute_ui_command(
+        session,
+        context,
+        lambda: authorize_object_command(
+            session,
+            context,
+            object_id=object_id,
+            permission=Permission.WRITE,
+        ),
+    )
+    existing_object = get_object(session, object_id)
+    if existing_object is None:
+        raise HTTPException(status_code=404, detail="Catalog object not found")
+    if existing_object.kind not in INSTALLED_SOFTWARE_KINDS:
+        raise HTTPException(
+            status_code=422,
+            detail="Installed software is supported only for hosts and systems",
+        )
+    form = await request.form()
+    if_match = str(form.get("if_match") or "")
+    submitted_rows = _submitted_form_rows(
+        form,
+        {
+            "name": "software_name",
+            "version": "software_version",
+            "url": "software_url",
+        },
+    )
+    try:
+        entries: list[dict[str, str]] = []
+        for row in submitted_rows:
+            name = str(row.get("name") or "")
+            version = str(row.get("version") or "")
+            url = str(row.get("url") or "")
+            if not name and not version and not url:
+                continue
+            entry: dict[str, str] = {}
+            if name:
+                entry["name"] = name
+            if version:
+                entry["version"] = version
+            if url:
+                entry["url"] = url
+            entries.append(entry)
+        data = _editable_data_copy(existing_object.data)
+        if entries:
+            data["installed_software"] = entries
+        else:
+            data.pop("installed_software", None)
+        _reject_secret_shaped_form_data(data)
+        payload = CatalogObjectIn(
+            id=existing_object.id,
+            kind=existing_object.kind,
+            label=existing_object.label,
+            status=existing_object.status,
+            lifecycle=existing_object.lifecycle,
+            health=existing_object.health,
+            summary=existing_object.summary,
+            data=data,
+        )
+    except (ValidationError, ValueError) as exc:
+        return _detail_form_error_response(
+            request,
+            session,
+            object_id,
+            error=_safe_error_message(exc),
+            edit_section="installed-software",
+            form_rows={"installed_software": submitted_rows},
+        )
+    execute_ui_command(
+        session,
+        context,
+        lambda: update_catalog_object(
+            session,
+            context,
+            object_id=object_id,
+            payload=payload,
+            expected_revision=_ui_expected_revision(
+                request,
+                if_match,
+                existing_object.revision,
+            ),
+        ),
+    )
+    return RedirectResponse(
+        url=_detail_redirect_url(request, object_id),
+        status_code=303,
+    )
+
+
+@router.post(
     "/objects/{object_id}/network",
     response_class=HTMLResponse,
     dependencies=[Depends(require_browser_write_csrf)],
@@ -2869,6 +2990,31 @@ def _service_information_schema_fields(
         for field in schema_fields
         if str(field["key"]).startswith("service_")
     ]
+
+
+def _installed_software_summary(data: Mapping[str, Any]) -> list[dict[str, str]]:
+    entries = data.get("installed_software")
+    if not isinstance(entries, list):
+        return []
+    summarized: list[dict[str, str]] = []
+    for entry in entries:
+        if not isinstance(entry, Mapping):
+            continue
+        url = entry.get("url")
+        url_text = url if isinstance(url, str) else ""
+        summarized.append(
+            {
+                "name": entry.get("name") if isinstance(entry.get("name"), str) else "",
+                "version": (
+                    entry.get("version")
+                    if isinstance(entry.get("version"), str)
+                    else ""
+                ),
+                "url": url_text,
+                "safe_url": url_text if is_absolute_http_url(url_text) else "",
+            }
+        )
+    return summarized
 
 
 def _apply_hardware_fields(

@@ -133,6 +133,8 @@ NETWORK_CATEGORIES = frozenset(
         "other_device",
     }
 )
+INSTALLED_SOFTWARE_KINDS = frozenset({"host", "system"})
+INSTALLED_SOFTWARE_ENTRY_FIELDS = frozenset({"name", "version", "url"})
 
 REFERENCE_TARGETS: Mapping[str, frozenset[str]] = MappingProxyType(
     {
@@ -181,6 +183,7 @@ class FieldSpec:
     path: str
     field_type: FieldType
     required: bool = False
+    required_in_item: bool = False
     enum_values: frozenset[Any] = frozenset()
     reference_kinds: frozenset[str] = frozenset()
     literal: Any = _UNSET
@@ -226,11 +229,16 @@ class FieldSpec:
             raise ValueError(f"minimum length exceeds maximum length: {self.path}")
         if self.forbidden_message is not None and (
             self.required
+            or self.required_in_item
             or self.enum_values
             or self.reference_kinds
             or self.has_literal
         ):
             raise ValueError(f"forbidden field {self.path} cannot define validation options")
+        if self.required_in_item and "[]" not in self.path:
+            raise ValueError(
+                f"item-required field must be nested below an array: {self.path}"
+            )
 
 
 @dataclass(frozen=True)
@@ -394,7 +402,7 @@ def _validate_value(field: FieldSpec, path: str, value: Any) -> None:
         default_message = "must be a valid IP address"
         violation = VIOLATION_INVALID_FORMAT
     elif field_type == "url":
-        valid = _is_url(value)
+        valid = is_absolute_http_url(value)
         default_message = "must be a valid URL"
         violation = VIOLATION_INVALID_FORMAT
     elif field_type == "port":
@@ -466,11 +474,20 @@ def _is_ip(value: Any) -> bool:
     return True
 
 
-def _is_url(value: Any) -> bool:
+def is_absolute_http_url(value: Any) -> bool:
     if not isinstance(value, str):
         return False
-    parsed = urlsplit(value)
-    return bool(parsed.scheme and (parsed.netloc or parsed.path))
+    try:
+        parsed = urlsplit(value)
+        port = parsed.port
+        port_is_valid = port is None or isinstance(port, int)
+        return (
+            parsed.scheme.casefold() in {"http", "https"}
+            and bool(parsed.hostname)
+            and port_is_valid
+        )
+    except ValueError:
+        return False
 
 
 def _field(
@@ -560,6 +577,32 @@ NETWORK_FIELDS = (
     _field("network.addresses", "array"),
     _field("network.addresses[]", "object"),
     _field("network.addresses[].ip", "ip"),
+)
+
+INSTALLED_SOFTWARE_FIELDS = (
+    _field("installed_software", "array"),
+    _field("installed_software[]", "object"),
+    _field(
+        "installed_software[].name",
+        "string",
+        required_in_item=True,
+        min_length=1,
+    ),
+    _field(
+        "installed_software[].version",
+        "string",
+        required_in_item=True,
+        min_length=1,
+    ),
+    _field("installed_software[].url", "url"),
+)
+
+INSTALLED_SOFTWARE_FORBIDDEN_FIELDS = (
+    _field(
+        "installed_software",
+        "array",
+        forbidden_message="is supported only for host and system objects",
+    ),
 )
 
 NETWORK_OBJECT_FIELDS = (
@@ -741,6 +784,58 @@ def _validate_runbook_approval(data: Mapping[str, Any]) -> None:
         )
 
 
+def _require_installed_software_fields(data: Mapping[str, Any]) -> None:
+    entries = data.get("installed_software")
+    if not isinstance(entries, list):
+        return
+    for index, entry in enumerate(entries):
+        if not isinstance(entry, Mapping):
+            continue
+        for field_name in ("name", "version"):
+            if field_name not in entry:
+                raise ObjectSchemaError(
+                    f"data.installed_software[{index}].{field_name}",
+                    "is required",
+                    violation=VIOLATION_REQUIRED_FIELD_MISSING,
+                    rule=public_rule_name(_require_installed_software_fields),
+                )
+
+
+def _reject_empty_installed_software_fields(data: Mapping[str, Any]) -> None:
+    entries = data.get("installed_software")
+    if not isinstance(entries, list):
+        return
+    for index, entry in enumerate(entries):
+        if not isinstance(entry, Mapping):
+            continue
+        for field_name in ("name", "version"):
+            value = entry.get(field_name)
+            if isinstance(value, str) and not value.strip():
+                raise ObjectSchemaError(
+                    f"data.installed_software[{index}].{field_name}",
+                    "must not be empty",
+                    violation=VIOLATION_VALUE_TOO_SHORT,
+                    rule=public_rule_name(_reject_empty_installed_software_fields),
+                )
+
+
+def _reject_installed_software_extra_fields(data: Mapping[str, Any]) -> None:
+    entries = data.get("installed_software")
+    if not isinstance(entries, list):
+        return
+    for index, entry in enumerate(entries):
+        if not isinstance(entry, Mapping):
+            continue
+        additional_fields = sorted(set(entry) - INSTALLED_SOFTWARE_ENTRY_FIELDS)
+        if additional_fields:
+            raise ObjectSchemaError(
+                f"data.installed_software[{index}].{additional_fields[0]}",
+                "is not allowed",
+                violation=VIOLATION_FIELD_NOT_ALLOWED,
+                rule=public_rule_name(_reject_installed_software_extra_fields),
+            )
+
+
 # Published description for every schema-bound postcondition, keyed by the rule
 # callable's name. Rules stay executable in one place; the projection publishes
 # them instead of restating conditional validation in a second contract.
@@ -753,6 +848,15 @@ SCHEMA_RULE_CONTRACTS: Mapping[str, str] = MappingProxyType(
             "data.approval_required must be true when data.risk_level is "
             "disruptive or destructive."
         ),
+        "_require_installed_software_fields": (
+            "Every installed-software entry must contain name and version fields."
+        ),
+        "_reject_empty_installed_software_fields": (
+            "Installed-software names and versions must not be empty or whitespace-only."
+        ),
+        "_reject_installed_software_extra_fields": (
+            "Installed-software entries may contain only name, version, and url."
+        ),
     }
 )
 
@@ -763,6 +867,9 @@ SCHEMA_RULE_VIOLATIONS: Mapping[str, str] = MappingProxyType(
     {
         "_reject_credential_value_keys": VIOLATION_FORBIDDEN_KEY,
         "_validate_runbook_approval": VIOLATION_RULE_VIOLATION,
+        "_require_installed_software_fields": VIOLATION_REQUIRED_FIELD_MISSING,
+        "_reject_empty_installed_software_fields": VIOLATION_VALUE_TOO_SHORT,
+        "_reject_installed_software_extra_fields": VIOLATION_FIELD_NOT_ALLOWED,
     }
 )
 
@@ -809,22 +916,36 @@ BUILTIN_SCHEMAS: Mapping[str, TypeSchema] = MappingProxyType(
             "host",
             *INTERFACE_FIELDS,
             *NETWORK_FIELDS,
+            *INSTALLED_SOFTWARE_FIELDS,
             *REFERENCE_FIELDS,
+            rules=(
+                _require_installed_software_fields,
+                _reject_empty_installed_software_fields,
+                _reject_installed_software_extra_fields,
+            ),
         ),
         "system": _schema(
             "system",
             *INTERFACE_FIELDS,
             *NETWORK_FIELDS,
+            *INSTALLED_SOFTWARE_FIELDS,
             *REFERENCE_FIELDS,
+            rules=(
+                _require_installed_software_fields,
+                _reject_empty_installed_software_fields,
+                _reject_installed_software_extra_fields,
+            ),
         ),
         "network": _schema(
             "network",
+            *INSTALLED_SOFTWARE_FORBIDDEN_FIELDS,
             *INTERFACE_FIELDS,
             *NETWORK_FIELDS,
             *NETWORK_OBJECT_FIELDS,
         ),
         "device": _schema(
             "device",
+            *INSTALLED_SOFTWARE_FORBIDDEN_FIELDS,
             *INTERFACE_FIELDS,
             *DEVICE_FIELDS,
             *REFERENCE_FIELDS,
@@ -834,18 +955,21 @@ BUILTIN_SCHEMAS: Mapping[str, TypeSchema] = MappingProxyType(
             *INTERFACE_FIELDS,
             *SERVICE_FIELDS,
             *REFERENCE_FIELDS,
+            *INSTALLED_SOFTWARE_FORBIDDEN_FIELDS,
         ),
         "credential_reference": _schema(
             "credential_reference",
             *CREDENTIAL_REFERENCE_FIELDS,
+            *INSTALLED_SOFTWARE_FORBIDDEN_FIELDS,
             rules=(_reject_credential_value_keys,),
         ),
         "runbook": _schema(
             "runbook",
             *RUNBOOK_FIELDS,
+            *INSTALLED_SOFTWARE_FORBIDDEN_FIELDS,
             rules=(_validate_runbook_approval,),
         ),
-        "decision": _schema("decision"),
-        "project": _schema("project"),
+        "decision": _schema("decision", *INSTALLED_SOFTWARE_FORBIDDEN_FIELDS),
+        "project": _schema("project", *INSTALLED_SOFTWARE_FORBIDDEN_FIELDS),
     }
 )
