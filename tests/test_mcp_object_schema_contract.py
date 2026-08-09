@@ -91,11 +91,15 @@ def test_projected_fields_match_the_domain_registry_exactly() -> None:
             expected_requirement = "optional"
             if field.forbidden_message is not None:
                 expected_requirement = "forbidden"
-            elif field.required:
+            elif field.required or field.required_in_item:
                 expected_requirement = "required"
 
             assert entry["type"] == field.field_type
             assert entry["requirement"] == expected_requirement
+            if field.required_in_item:
+                assert entry["required_scope"] == "containing_array_item"
+            else:
+                assert "required_scope" not in entry
             assert entry["json_types"]
             assert set(entry["json_types"]) <= JSON_TYPES
             assert entry.get("enum", []) == sorted(field.enum_values)
@@ -160,6 +164,7 @@ def test_required_nested_paths_are_published_and_enforced() -> None:
             field["path"]
             for field in kinds[kind]["data"]["fields"]
             if field["requirement"] == "required"
+            and "required_scope" not in field
         ]
         empty_data_write = {
             "id": f"empty-{kind.replace('_', '-')}",
@@ -299,7 +304,10 @@ def test_minimal_examples_validate_against_the_canonical_domain_model() -> None:
         assert validated.kind == kind["kind"]
         assert validated.lifecycle is None and validated.health is None
         for field in kind["data"]["fields"]:
-            if field["requirement"] == "required":
+            if (
+                field["requirement"] == "required"
+                and "required_scope" not in field
+            ):
                 assert _resolve(example["data"], field["path"]) is not None
 
 

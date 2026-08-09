@@ -4,6 +4,7 @@ from fastapi.staticfiles import StaticFiles
 from blockwart.api.errors import install_api_error_contract, install_request_context
 from blockwart.api.routes import admin, agent, auth, catalog, health, v1
 from blockwart.config import Settings, get_settings
+from blockwart.domain.schema_projection import object_schema_projection
 from blockwart.services.login_protection import LoginProtector
 from blockwart.ui.admin import router as admin_ui_router
 from blockwart.ui.auth import router as auth_router
@@ -41,6 +42,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(admin_ui_router)
     app.include_router(ui_router)
     install_request_context(app)
+    default_openapi = app.openapi
+
+    def canonical_openapi():
+        schema = default_openapi()
+        schema["x-blockwart-object-schema"] = object_schema_projection()
+        return schema
+
+    app.openapi = canonical_openapi
     return app
 
 

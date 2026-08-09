@@ -1154,6 +1154,7 @@
         "properties": {
           "data": {
             "additionalProperties": true,
+            "description": "Kind-specific catalog data. The top-level x-blockwart-object-schema OpenAPI extension is generated from the same domain registry that validates writes.",
             "title": "Data",
             "type": "object"
           },
@@ -1270,6 +1271,7 @@
           },
           "data": {
             "additionalProperties": true,
+            "description": "Kind-specific catalog data. The top-level x-blockwart-object-schema OpenAPI extension is generated from the same domain registry that validates writes.",
             "title": "Data",
             "type": "object"
           },
@@ -12696,6 +12698,4604 @@
           "api-v1-readonly"
         ]
       }
+    }
+  },
+  "x-blockwart-object-schema": {
+    "asset_kinds": [
+      "device",
+      "host",
+      "network",
+      "service",
+      "system"
+    ],
+    "kinds": [
+      {
+        "data": {
+          "fields": [
+            {
+              "const": 1,
+              "constraint": "must be 1",
+              "json_types": [
+                "integer"
+              ],
+              "normalization": [],
+              "path": "schema_version",
+              "requirement": "optional",
+              "type": "integer",
+              "violations": [
+                "type_mismatch",
+                "value_not_constant"
+              ]
+            },
+            {
+              "json_types": [
+                "string"
+              ],
+              "normalization": [],
+              "path": "lifecycle",
+              "reason": "is obsolete; use top-level fields",
+              "requirement": "forbidden",
+              "type": "string",
+              "violations": [
+                "field_not_allowed"
+              ]
+            },
+            {
+              "json_types": [
+                "string"
+              ],
+              "normalization": [],
+              "path": "health",
+              "reason": "is obsolete; use top-level fields",
+              "requirement": "forbidden",
+              "type": "string",
+              "violations": [
+                "field_not_allowed"
+              ]
+            },
+            {
+              "json_types": [
+                "object"
+              ],
+              "normalization": [],
+              "path": "dependencies",
+              "reason": "is obsolete; use depends_on relationships",
+              "requirement": "forbidden",
+              "type": "object",
+              "violations": [
+                "field_not_allowed"
+              ]
+            },
+            {
+              "json_types": [
+                "array"
+              ],
+              "normalization": [],
+              "path": "endpoints",
+              "requirement": "optional",
+              "type": "array",
+              "violations": [
+                "type_mismatch"
+              ]
+            },
+            {
+              "json_types": [
+                "object"
+              ],
+              "normalization": [],
+              "path": "endpoints[]",
+              "requirement": "optional",
+              "type": "object",
+              "violations": [
+                "type_mismatch"
+              ]
+            },
+            {
+              "json_types": [
+                "string"
+              ],
+              "normalization": [],
+              "path": "endpoints[].type",
+              "requirement": "optional",
+              "type": "string",
+              "violations": [
+                "type_mismatch"
+              ]
+            },
+            {
+              "json_types": [
+                "string"
+              ],
+              "normalization": [],
+              "path": "endpoints[].url",
+              "requirement": "optional",
+              "type": "string",
+              "violations": [
+                "type_mismatch"
+              ]
+            },
+            {
+              "json_types": [
+                "string"
+              ],
+              "normalization": [],
+              "path": "endpoints[].host",
+              "requirement": "optional",
+              "type": "string",
+              "violations": [
+                "type_mismatch"
+              ]
+            },
+            {
+              "format": "tcp-udp-port",
+              "json_types": [
+                "integer"
+              ],
+              "normalization": [],
+              "path": "endpoints[].port",
+              "requirement": "optional",
+              "type": "port",
+              "violations": [
+                "type_mismatch",
+                "value_out_of_range"
+              ]
+            },
+            {
+              "enum": [
+                "tcp",
+                "udp"
+              ],
+              "json_types": [
+                "string"
+              ],
+              "normalization": [],
+              "path": "endpoints[].transport",
+              "requirement": "optional",
+              "type": "enum",
+              "violations": [
+                "value_not_allowed"
+              ]
+            },
+            {
+              "enum": [
+                "internal",
+                "lan",
+                "loopback",
+                "public",
+                "unknown",
+                "vpn"
+              ],
+              "json_types": [
+                "string"
+              ],
+              "normalization": [],
+              "path": "endpoints[].exposure",
+              "requirement": "optional",
+              "type": "enum",
+              "violations": [
+                "value_not_allowed"
+              ]
+            },
+            {
+              "json_types": [
+                "array"
+              ],
+              "normalization": [],
+              "path": "ports",
+              "requirement": "optional",
+              "type": "array",
+              "violations": [
+                "type_mismatch"
+              ]
+            },
+            {
+              "json_types": [
+                "object"
+              ],
+              "normalization": [],
+              "path": "ports[]",
+              "requirement": "optional",
+              "type": "object",
+              "violations": [
+                "type_mismatch"
+              ]
+            },
+            {
+              "format": "tcp-udp-port",
+              "json_types": [
+                "integer"
+              ],
+              "normalization": [],
+              "path": "ports[].port",
+              "requirement": "optional",
+              "type": "port",
+              "violations": [
+                "type_mismatch",
+                "value_out_of_range"
+              ]
+            },
+            {
+              "constraint": "must be tcp or udp",
+              "enum": [
+                "tcp",
+                "udp"
+              ],
+              "json_types": [
+                "string"
+              ],
+              "normalization": [],
+              "path": "ports[].protocol",
+              "requirement": "optional",
+              "type": "enum",
+              "violations": [
+                "value_not_allowed"
+              ]
+            },
+            {
+              "constraint": "must be tcp or udp",
+              "enum": [
+                "tcp",
+                "udp"
+              ],
+              "json_types": [
+                "string"
+              ],
+              "normalization": [],
+              "path": "ports[].transport",
+              "requirement": "optional",
+              "type": "enum",
+              "violations": [
+                "value_not_allowed"
+              ]
+            },
+            {
+              "json_types": [
+                "array"
+              ],
+              "normalization": [],
+              "path": "access_methods",
+              "requirement": "optional",
+              "type": "array",
+              "violations": [
+                "type_mismatch"
+              ]
+            },
+            {
+              "json_types": [
+                "object"
+              ],
+              "normalization": [],
+              "path": "access_methods[]",
+              "requirement": "optional",
+              "type": "object",
+              "violations": [
+                "type_mismatch"
+              ]
+            },
+            {
+              "json_types": [
+                "string"
+              ],
+              "normalization": [],
+              "path": "access_methods[].type",
+              "requirement": "optional",
+              "type": "string",
+              "violations": [
+                "type_mismatch"
+              ]
+            },
+            {
+              "json_types": [
+                "string"
+              ],
+              "normalization": [],
+              "path": "access_methods[].endpoint",
+              "requirement": "optional",
+              "type": "string",
+              "violations": [
+                "type_mismatch"
+              ]
+            },
+            {
+              "json_types": [
+                "string"
+              ],
+              "normalization": [],
+              "path": "access_methods[].endpoint_id",
+              "requirement": "optional",
+              "type": "string",
+              "violations": [
+                "type_mismatch"
+              ]
+            },
+            {
+              "json_types": [
+                "array"
+              ],
+              "normalization": [],
+              "path": "access_methods[].credential_references",
+              "requirement": "optional",
+              "type": "array",
+              "violations": [
+                "type_mismatch"
+              ]
+            },
+            {
+              "format": "kind:id",
+              "json_types": [
+                "string"
+              ],
+              "normalization": [],
+              "path": "access_methods[].credential_references[]",
+              "reference_kinds": [
+                "credential_reference"
+              ],
+              "requirement": "optional",
+              "type": "reference",
+              "violations": [
+                "invalid_format",
+                "reference_kind_not_allowed",
+                "type_mismatch"
+              ]
+            },
+            {
+              "json_types": [
+                "object"
+              ],
+              "normalization": [],
+              "path": "network",
+              "requirement": "optional",
+              "type": "object",
+              "violations": [
+                "type_mismatch"
+              ]
+            },
+            {
+              "json_types": [
+                "array"
+              ],
+              "normalization": [],
+              "path": "network.hostnames",
+              "requirement": "optional",
+              "type": "array",
+              "violations": [
+                "type_mismatch"
+              ]
+            },
+            {
+              "json_types": [
+                "string"
+              ],
+              "normalization": [],
+              "path": "network.hostnames[]",
+              "requirement": "optional",
+              "type": "string",
+              "violations": [
+                "type_mismatch"
+              ]
+            },
+            {
+              "json_types": [
+                "array"
+              ],
+              "normalization": [],
+              "path": "network.addresses",
+              "requirement": "optional",
+              "type": "array",
+              "violations": [
+                "type_mismatch"
+              ]
+            },
+            {
+              "json_types": [
+                "object"
+              ],
+              "normalization": [],
+              "path": "network.addresses[]",
+              "requirement": "optional",
+              "type": "object",
+              "violations": [
+                "type_mismatch"
+              ]
+            },
+            {
+              "format": "ip-address",
+              "json_types": [
+                "string"
+              ],
+              "normalization": [],
+              "path": "network.addresses[].ip",
+              "requirement": "optional",
+              "type": "ip",
+              "violations": [
+                "invalid_format"
+              ]
+            },
+            {
+              "json_types": [
+                "array"
+              ],
+              "normalization": [],
+              "path": "installed_software",
+              "requirement": "optional",
+              "type": "array",
+              "violations": [
+                "type_mismatch"
+              ]
+            },
+            {
+              "json_types": [
+                "object"
+              ],
+              "normalization": [],
+              "path": "installed_software[]",
+              "requirement": "optional",
+              "type": "object",
+              "violations": [
+                "type_mismatch"
+              ]
+            },
+            {
+              "json_types": [
+                "string"
+              ],
+              "min_length": 1,
+              "normalization": [],
+              "path": "installed_software[].name",
+              "required_scope": "containing_array_item",
+              "requirement": "required",
+              "type": "string",
+              "violations": [
+                "required_field_missing",
+                "type_mismatch",
+                "value_too_short"
+              ]
+            },
+            {
+              "json_types": [
+                "string"
+              ],
+              "min_length": 1,
+              "normalization": [],
+              "path": "installed_software[].version",
+              "required_scope": "containing_array_item",
+              "requirement": "required",
+              "type": "string",
+              "violations": [
+                "required_field_missing",
+                "type_mismatch",
+                "value_too_short"
+              ]
+            },
+            {
+              "format": "uri",
+              "json_types": [
+                "string"
+              ],
+              "normalization": [],
+              "path": "installed_software[].url",
+              "pattern": "^[Hh][Tt][Tt][Pp][Ss]?://",
+              "requirement": "optional",
+              "type": "url",
+              "violations": [
+                "invalid_format"
+              ]
+            },
+            {
+              "json_types": [
+                "array"
+              ],
+              "normalization": [],
+              "path": "credential_references",
+              "requirement": "optional",
+              "type": "array",
+              "violations": [
+                "type_mismatch"
+              ]
+            },
+            {
+              "format": "kind:id",
+              "json_types": [
+                "string"
+              ],
+              "normalization": [],
+              "path": "credential_references[]",
+              "reference_kinds": [
+                "credential_reference"
+              ],
+              "requirement": "optional",
+              "type": "reference",
+              "violations": [
+                "invalid_format",
+                "reference_kind_not_allowed",
+                "type_mismatch"
+              ]
+            },
+            {
+              "json_types": [
+                "array"
+              ],
+              "normalization": [],
+              "path": "related_services",
+              "requirement": "optional",
+              "type": "array",
+              "violations": [
+                "type_mismatch"
+              ]
+            },
+            {
+              "format": "kind:id",
+              "json_types": [
+                "string"
+              ],
+              "normalization": [],
+              "path": "related_services[]",
+              "reference_kinds": [
+                "service"
+              ],
+              "requirement": "optional",
+              "type": "reference",
+              "violations": [
+                "invalid_format",
+                "reference_kind_not_allowed",
+                "type_mismatch"
+              ]
+            },
+            {
+              "json_types": [
+                "array"
+              ],
+              "normalization": [],
+              "path": "runbooks",
+              "requirement": "optional",
+              "type": "array",
+              "violations": [
+                "type_mismatch"
+              ]
+            },
+            {
+              "format": "kind:id",
+              "json_types": [
+                "string"
+              ],
+              "normalization": [],
+              "path": "runbooks[]",
+              "reference_kinds": [
+                "runbook"
+              ],
+              "requirement": "optional",
+              "type": "reference",
+              "violations": [
+                "invalid_format",
+                "reference_kind_not_allowed",
+                "type_mismatch"
+              ]
+            },
+            {
+              "json_types": [
+                "array"
+              ],
+              "normalization": [],
+              "path": "related_projects",
+              "requirement": "optional",
+              "type": "array",
+              "violations": [
+                "type_mismatch"
+              ]
+            },
+            {
+              "format": "kind:id",
+              "json_types": [
+                "string"
+              ],
+              "normalization": [],
+              "path": "related_projects[]",
+              "reference_kinds": [
+                "project"
+              ],
+              "requirement": "optional",
+              "type": "reference",
+              "violations": [
+                "invalid_format",
+                "reference_kind_not_allowed",
+                "type_mismatch"
+              ]
+            },
+            {
+              "json_types": [
+                "array"
+              ],
+              "normalization": [],
+              "path": "related_decisions",
+              "requirement": "optional",
+              "type": "array",
+              "violations": [
+                "type_mismatch"
+              ]
+            },
+            {
+              "format": "kind:id",
+              "json_types": [
+                "string"
+              ],
+              "normalization": [],
+              "path": "related_decisions[]",
+              "reference_kinds": [
+                "decision"
+              ],
+              "requirement": "optional",
+              "type": "reference",
+              "violations": [
+                "invalid_format",
+                "reference_kind_not_allowed",
+                "type_mismatch"
+              ]
+            },
+            {
+              "json_types": [
+                "array"
+              ],
+              "normalization": [],
+              "path": "related_systems",
+              "requirement": "optional",
+              "type": "array",
+              "violations": [
+                "type_mismatch"
+              ]
+            },
+            {
+              "format": "kind:id",
+              "json_types": [
+                "string"
+              ],
+              "normalization": [],
+              "path": "related_systems[]",
+              "reference_kinds": [
+                "system"
+              ],
+              "requirement": "optional",
+              "type": "reference",
+              "violations": [
+                "invalid_format",
+                "reference_kind_not_allowed",
+                "type_mismatch"
+              ]
+            },
+            {
+              "json_types": [
+                "array"
+              ],
+              "normalization": [],
+              "path": "related_runbooks",
+              "requirement": "optional",
+              "type": "array",
+              "violations": [
+                "type_mismatch"
+              ]
+            },
+            {
+              "format": "kind:id",
+              "json_types": [
+                "string"
+              ],
+              "normalization": [],
+              "path": "related_runbooks[]",
+              "reference_kinds": [
+                "runbook"
+              ],
+              "requirement": "optional",
+              "type": "reference",
+              "violations": [
+                "invalid_format",
+                "reference_kind_not_allowed",
+                "type_mismatch"
+              ]
+            }
+          ],
+          "rules": [
+            {
+              "description": "Every installed-software entry must contain name and version fields.",
+              "rule": "require_installed_software_fields",
+              "violation": "required_field_missing"
+            },
+            {
+              "description": "Installed-software names and versions must not be empty or whitespace-only.",
+              "rule": "reject_empty_installed_software_fields",
+              "violation": "value_too_short"
+            },
+            {
+              "description": "Installed-software entries may contain only name, version, and url.",
+              "rule": "reject_installed_software_extra_fields",
+              "violation": "field_not_allowed"
+            }
+          ],
+          "secret_policy": "global_enforced",
+          "unknown_properties": "allow"
+        },
+        "health": {
+          "default": null,
+          "nullable": true,
+          "reason": null,
+          "requirement": "optional",
+          "supported": true,
+          "values": [
+            "unknown",
+            "healthy",
+            "degraded",
+            "down",
+            "maintenance"
+          ]
+        },
+        "kind": "host",
+        "kind_class": "asset",
+        "lifecycle": {
+          "default": null,
+          "nullable": true,
+          "reason": null,
+          "requirement": "optional",
+          "supported": true,
+          "values": [
+            "planned",
+            "active",
+            "retired"
+          ]
+        },
+        "minimal_example": {
+          "data": {
+            "schema_version": 1
+          },
+          "id": "example-host",
+          "kind": "host",
+          "label": "Example host",
+          "status": "active"
+        },
+        "status": {
+          "default": "active",
+          "values": [
+            "active",
+            "inactive",
+            "deleted"
+          ]
+        }
+      },
+      {
+        "data": {
+          "fields": [
+            {
+              "const": 1,
+              "constraint": "must be 1",
+              "json_types": [
+                "integer"
+              ],
+              "normalization": [],
+              "path": "schema_version",
+              "requirement": "optional",
+              "type": "integer",
+              "violations": [
+                "type_mismatch",
+                "value_not_constant"
+              ]
+            },
+            {
+              "json_types": [
+                "string"
+              ],
+              "normalization": [],
+              "path": "lifecycle",
+              "reason": "is obsolete; use top-level fields",
+              "requirement": "forbidden",
+              "type": "string",
+              "violations": [
+                "field_not_allowed"
+              ]
+            },
+            {
+              "json_types": [
+                "string"
+              ],
+              "normalization": [],
+              "path": "health",
+              "reason": "is obsolete; use top-level fields",
+              "requirement": "forbidden",
+              "type": "string",
+              "violations": [
+                "field_not_allowed"
+              ]
+            },
+            {
+              "json_types": [
+                "object"
+              ],
+              "normalization": [],
+              "path": "dependencies",
+              "reason": "is obsolete; use depends_on relationships",
+              "requirement": "forbidden",
+              "type": "object",
+              "violations": [
+                "field_not_allowed"
+              ]
+            },
+            {
+              "json_types": [
+                "array"
+              ],
+              "normalization": [],
+              "path": "endpoints",
+              "requirement": "optional",
+              "type": "array",
+              "violations": [
+                "type_mismatch"
+              ]
+            },
+            {
+              "json_types": [
+                "object"
+              ],
+              "normalization": [],
+              "path": "endpoints[]",
+              "requirement": "optional",
+              "type": "object",
+              "violations": [
+                "type_mismatch"
+              ]
+            },
+            {
+              "json_types": [
+                "string"
+              ],
+              "normalization": [],
+              "path": "endpoints[].type",
+              "requirement": "optional",
+              "type": "string",
+              "violations": [
+                "type_mismatch"
+              ]
+            },
+            {
+              "json_types": [
+                "string"
+              ],
+              "normalization": [],
+              "path": "endpoints[].url",
+              "requirement": "optional",
+              "type": "string",
+              "violations": [
+                "type_mismatch"
+              ]
+            },
+            {
+              "json_types": [
+                "string"
+              ],
+              "normalization": [],
+              "path": "endpoints[].host",
+              "requirement": "optional",
+              "type": "string",
+              "violations": [
+                "type_mismatch"
+              ]
+            },
+            {
+              "format": "tcp-udp-port",
+              "json_types": [
+                "integer"
+              ],
+              "normalization": [],
+              "path": "endpoints[].port",
+              "requirement": "optional",
+              "type": "port",
+              "violations": [
+                "type_mismatch",
+                "value_out_of_range"
+              ]
+            },
+            {
+              "enum": [
+                "tcp",
+                "udp"
+              ],
+              "json_types": [
+                "string"
+              ],
+              "normalization": [],
+              "path": "endpoints[].transport",
+              "requirement": "optional",
+              "type": "enum",
+              "violations": [
+                "value_not_allowed"
+              ]
+            },
+            {
+              "enum": [
+                "internal",
+                "lan",
+                "loopback",
+                "public",
+                "unknown",
+                "vpn"
+              ],
+              "json_types": [
+                "string"
+              ],
+              "normalization": [],
+              "path": "endpoints[].exposure",
+              "requirement": "optional",
+              "type": "enum",
+              "violations": [
+                "value_not_allowed"
+              ]
+            },
+            {
+              "json_types": [
+                "array"
+              ],
+              "normalization": [],
+              "path": "ports",
+              "requirement": "optional",
+              "type": "array",
+              "violations": [
+                "type_mismatch"
+              ]
+            },
+            {
+              "json_types": [
+                "object"
+              ],
+              "normalization": [],
+              "path": "ports[]",
+              "requirement": "optional",
+              "type": "object",
+              "violations": [
+                "type_mismatch"
+              ]
+            },
+            {
+              "format": "tcp-udp-port",
+              "json_types": [
+                "integer"
+              ],
+              "normalization": [],
+              "path": "ports[].port",
+              "requirement": "optional",
+              "type": "port",
+              "violations": [
+                "type_mismatch",
+                "value_out_of_range"
+              ]
+            },
+            {
+              "constraint": "must be tcp or udp",
+              "enum": [
+                "tcp",
+                "udp"
+              ],
+              "json_types": [
+                "string"
+              ],
+              "normalization": [],
+              "path": "ports[].protocol",
+              "requirement": "optional",
+              "type": "enum",
+              "violations": [
+                "value_not_allowed"
+              ]
+            },
+            {
+              "constraint": "must be tcp or udp",
+              "enum": [
+                "tcp",
+                "udp"
+              ],
+              "json_types": [
+                "string"
+              ],
+              "normalization": [],
+              "path": "ports[].transport",
+              "requirement": "optional",
+              "type": "enum",
+              "violations": [
+                "value_not_allowed"
+              ]
+            },
+            {
+              "json_types": [
+                "array"
+              ],
+              "normalization": [],
+              "path": "access_methods",
+              "requirement": "optional",
+              "type": "array",
+              "violations": [
+                "type_mismatch"
+              ]
+            },
+            {
+              "json_types": [
+                "object"
+              ],
+              "normalization": [],
+              "path": "access_methods[]",
+              "requirement": "optional",
+              "type": "object",
+              "violations": [
+                "type_mismatch"
+              ]
+            },
+            {
+              "json_types": [
+                "string"
+              ],
+              "normalization": [],
+              "path": "access_methods[].type",
+              "requirement": "optional",
+              "type": "string",
+              "violations": [
+                "type_mismatch"
+              ]
+            },
+            {
+              "json_types": [
+                "string"
+              ],
+              "normalization": [],
+              "path": "access_methods[].endpoint",
+              "requirement": "optional",
+              "type": "string",
+              "violations": [
+                "type_mismatch"
+              ]
+            },
+            {
+              "json_types": [
+                "string"
+              ],
+              "normalization": [],
+              "path": "access_methods[].endpoint_id",
+              "requirement": "optional",
+              "type": "string",
+              "violations": [
+                "type_mismatch"
+              ]
+            },
+            {
+              "json_types": [
+                "array"
+              ],
+              "normalization": [],
+              "path": "access_methods[].credential_references",
+              "requirement": "optional",
+              "type": "array",
+              "violations": [
+                "type_mismatch"
+              ]
+            },
+            {
+              "format": "kind:id",
+              "json_types": [
+                "string"
+              ],
+              "normalization": [],
+              "path": "access_methods[].credential_references[]",
+              "reference_kinds": [
+                "credential_reference"
+              ],
+              "requirement": "optional",
+              "type": "reference",
+              "violations": [
+                "invalid_format",
+                "reference_kind_not_allowed",
+                "type_mismatch"
+              ]
+            },
+            {
+              "json_types": [
+                "object"
+              ],
+              "normalization": [],
+              "path": "network",
+              "requirement": "optional",
+              "type": "object",
+              "violations": [
+                "type_mismatch"
+              ]
+            },
+            {
+              "json_types": [
+                "array"
+              ],
+              "normalization": [],
+              "path": "network.hostnames",
+              "requirement": "optional",
+              "type": "array",
+              "violations": [
+                "type_mismatch"
+              ]
+            },
+            {
+              "json_types": [
+                "string"
+              ],
+              "normalization": [],
+              "path": "network.hostnames[]",
+              "requirement": "optional",
+              "type": "string",
+              "violations": [
+                "type_mismatch"
+              ]
+            },
+            {
+              "json_types": [
+                "array"
+              ],
+              "normalization": [],
+              "path": "network.addresses",
+              "requirement": "optional",
+              "type": "array",
+              "violations": [
+                "type_mismatch"
+              ]
+            },
+            {
+              "json_types": [
+                "object"
+              ],
+              "normalization": [],
+              "path": "network.addresses[]",
+              "requirement": "optional",
+              "type": "object",
+              "violations": [
+                "type_mismatch"
+              ]
+            },
+            {
+              "format": "ip-address",
+              "json_types": [
+                "string"
+              ],
+              "normalization": [],
+              "path": "network.addresses[].ip",
+              "requirement": "optional",
+              "type": "ip",
+              "violations": [
+                "invalid_format"
+              ]
+            },
+            {
+              "json_types": [
+                "array"
+              ],
+              "normalization": [],
+              "path": "installed_software",
+              "requirement": "optional",
+              "type": "array",
+              "violations": [
+                "type_mismatch"
+              ]
+            },
+            {
+              "json_types": [
+                "object"
+              ],
+              "normalization": [],
+              "path": "installed_software[]",
+              "requirement": "optional",
+              "type": "object",
+              "violations": [
+                "type_mismatch"
+              ]
+            },
+            {
+              "json_types": [
+                "string"
+              ],
+              "min_length": 1,
+              "normalization": [],
+              "path": "installed_software[].name",
+              "required_scope": "containing_array_item",
+              "requirement": "required",
+              "type": "string",
+              "violations": [
+                "required_field_missing",
+                "type_mismatch",
+                "value_too_short"
+              ]
+            },
+            {
+              "json_types": [
+                "string"
+              ],
+              "min_length": 1,
+              "normalization": [],
+              "path": "installed_software[].version",
+              "required_scope": "containing_array_item",
+              "requirement": "required",
+              "type": "string",
+              "violations": [
+                "required_field_missing",
+                "type_mismatch",
+                "value_too_short"
+              ]
+            },
+            {
+              "format": "uri",
+              "json_types": [
+                "string"
+              ],
+              "normalization": [],
+              "path": "installed_software[].url",
+              "pattern": "^[Hh][Tt][Tt][Pp][Ss]?://",
+              "requirement": "optional",
+              "type": "url",
+              "violations": [
+                "invalid_format"
+              ]
+            },
+            {
+              "json_types": [
+                "array"
+              ],
+              "normalization": [],
+              "path": "credential_references",
+              "requirement": "optional",
+              "type": "array",
+              "violations": [
+                "type_mismatch"
+              ]
+            },
+            {
+              "format": "kind:id",
+              "json_types": [
+                "string"
+              ],
+              "normalization": [],
+              "path": "credential_references[]",
+              "reference_kinds": [
+                "credential_reference"
+              ],
+              "requirement": "optional",
+              "type": "reference",
+              "violations": [
+                "invalid_format",
+                "reference_kind_not_allowed",
+                "type_mismatch"
+              ]
+            },
+            {
+              "json_types": [
+                "array"
+              ],
+              "normalization": [],
+              "path": "related_services",
+              "requirement": "optional",
+              "type": "array",
+              "violations": [
+                "type_mismatch"
+              ]
+            },
+            {
+              "format": "kind:id",
+              "json_types": [
+                "string"
+              ],
+              "normalization": [],
+              "path": "related_services[]",
+              "reference_kinds": [
+                "service"
+              ],
+              "requirement": "optional",
+              "type": "reference",
+              "violations": [
+                "invalid_format",
+                "reference_kind_not_allowed",
+                "type_mismatch"
+              ]
+            },
+            {
+              "json_types": [
+                "array"
+              ],
+              "normalization": [],
+              "path": "runbooks",
+              "requirement": "optional",
+              "type": "array",
+              "violations": [
+                "type_mismatch"
+              ]
+            },
+            {
+              "format": "kind:id",
+              "json_types": [
+                "string"
+              ],
+              "normalization": [],
+              "path": "runbooks[]",
+              "reference_kinds": [
+                "runbook"
+              ],
+              "requirement": "optional",
+              "type": "reference",
+              "violations": [
+                "invalid_format",
+                "reference_kind_not_allowed",
+                "type_mismatch"
+              ]
+            },
+            {
+              "json_types": [
+                "array"
+              ],
+              "normalization": [],
+              "path": "related_projects",
+              "requirement": "optional",
+              "type": "array",
+              "violations": [
+                "type_mismatch"
+              ]
+            },
+            {
+              "format": "kind:id",
+              "json_types": [
+                "string"
+              ],
+              "normalization": [],
+              "path": "related_projects[]",
+              "reference_kinds": [
+                "project"
+              ],
+              "requirement": "optional",
+              "type": "reference",
+              "violations": [
+                "invalid_format",
+                "reference_kind_not_allowed",
+                "type_mismatch"
+              ]
+            },
+            {
+              "json_types": [
+                "array"
+              ],
+              "normalization": [],
+              "path": "related_decisions",
+              "requirement": "optional",
+              "type": "array",
+              "violations": [
+                "type_mismatch"
+              ]
+            },
+            {
+              "format": "kind:id",
+              "json_types": [
+                "string"
+              ],
+              "normalization": [],
+              "path": "related_decisions[]",
+              "reference_kinds": [
+                "decision"
+              ],
+              "requirement": "optional",
+              "type": "reference",
+              "violations": [
+                "invalid_format",
+                "reference_kind_not_allowed",
+                "type_mismatch"
+              ]
+            },
+            {
+              "json_types": [
+                "array"
+              ],
+              "normalization": [],
+              "path": "related_systems",
+              "requirement": "optional",
+              "type": "array",
+              "violations": [
+                "type_mismatch"
+              ]
+            },
+            {
+              "format": "kind:id",
+              "json_types": [
+                "string"
+              ],
+              "normalization": [],
+              "path": "related_systems[]",
+              "reference_kinds": [
+                "system"
+              ],
+              "requirement": "optional",
+              "type": "reference",
+              "violations": [
+                "invalid_format",
+                "reference_kind_not_allowed",
+                "type_mismatch"
+              ]
+            },
+            {
+              "json_types": [
+                "array"
+              ],
+              "normalization": [],
+              "path": "related_runbooks",
+              "requirement": "optional",
+              "type": "array",
+              "violations": [
+                "type_mismatch"
+              ]
+            },
+            {
+              "format": "kind:id",
+              "json_types": [
+                "string"
+              ],
+              "normalization": [],
+              "path": "related_runbooks[]",
+              "reference_kinds": [
+                "runbook"
+              ],
+              "requirement": "optional",
+              "type": "reference",
+              "violations": [
+                "invalid_format",
+                "reference_kind_not_allowed",
+                "type_mismatch"
+              ]
+            }
+          ],
+          "rules": [
+            {
+              "description": "Every installed-software entry must contain name and version fields.",
+              "rule": "require_installed_software_fields",
+              "violation": "required_field_missing"
+            },
+            {
+              "description": "Installed-software names and versions must not be empty or whitespace-only.",
+              "rule": "reject_empty_installed_software_fields",
+              "violation": "value_too_short"
+            },
+            {
+              "description": "Installed-software entries may contain only name, version, and url.",
+              "rule": "reject_installed_software_extra_fields",
+              "violation": "field_not_allowed"
+            }
+          ],
+          "secret_policy": "global_enforced",
+          "unknown_properties": "allow"
+        },
+        "health": {
+          "default": null,
+          "nullable": true,
+          "reason": null,
+          "requirement": "optional",
+          "supported": true,
+          "values": [
+            "unknown",
+            "healthy",
+            "degraded",
+            "down",
+            "maintenance"
+          ]
+        },
+        "kind": "system",
+        "kind_class": "asset",
+        "lifecycle": {
+          "default": null,
+          "nullable": true,
+          "reason": null,
+          "requirement": "optional",
+          "supported": true,
+          "values": [
+            "planned",
+            "active",
+            "retired"
+          ]
+        },
+        "minimal_example": {
+          "data": {
+            "schema_version": 1
+          },
+          "id": "example-system",
+          "kind": "system",
+          "label": "Example system",
+          "status": "active"
+        },
+        "status": {
+          "default": "active",
+          "values": [
+            "active",
+            "inactive",
+            "deleted"
+          ]
+        }
+      },
+      {
+        "data": {
+          "fields": [
+            {
+              "const": 1,
+              "constraint": "must be 1",
+              "json_types": [
+                "integer"
+              ],
+              "normalization": [],
+              "path": "schema_version",
+              "requirement": "optional",
+              "type": "integer",
+              "violations": [
+                "type_mismatch",
+                "value_not_constant"
+              ]
+            },
+            {
+              "json_types": [
+                "string"
+              ],
+              "normalization": [],
+              "path": "lifecycle",
+              "reason": "is obsolete; use top-level fields",
+              "requirement": "forbidden",
+              "type": "string",
+              "violations": [
+                "field_not_allowed"
+              ]
+            },
+            {
+              "json_types": [
+                "string"
+              ],
+              "normalization": [],
+              "path": "health",
+              "reason": "is obsolete; use top-level fields",
+              "requirement": "forbidden",
+              "type": "string",
+              "violations": [
+                "field_not_allowed"
+              ]
+            },
+            {
+              "json_types": [
+                "object"
+              ],
+              "normalization": [],
+              "path": "dependencies",
+              "reason": "is obsolete; use depends_on relationships",
+              "requirement": "forbidden",
+              "type": "object",
+              "violations": [
+                "field_not_allowed"
+              ]
+            },
+            {
+              "json_types": [
+                "array"
+              ],
+              "normalization": [],
+              "path": "installed_software",
+              "reason": "is supported only for host and system objects",
+              "requirement": "forbidden",
+              "type": "array",
+              "violations": [
+                "field_not_allowed"
+              ]
+            },
+            {
+              "json_types": [
+                "array"
+              ],
+              "normalization": [],
+              "path": "endpoints",
+              "requirement": "optional",
+              "type": "array",
+              "violations": [
+                "type_mismatch"
+              ]
+            },
+            {
+              "json_types": [
+                "object"
+              ],
+              "normalization": [],
+              "path": "endpoints[]",
+              "requirement": "optional",
+              "type": "object",
+              "violations": [
+                "type_mismatch"
+              ]
+            },
+            {
+              "json_types": [
+                "string"
+              ],
+              "normalization": [],
+              "path": "endpoints[].type",
+              "requirement": "optional",
+              "type": "string",
+              "violations": [
+                "type_mismatch"
+              ]
+            },
+            {
+              "json_types": [
+                "string"
+              ],
+              "normalization": [],
+              "path": "endpoints[].url",
+              "requirement": "optional",
+              "type": "string",
+              "violations": [
+                "type_mismatch"
+              ]
+            },
+            {
+              "json_types": [
+                "string"
+              ],
+              "normalization": [],
+              "path": "endpoints[].host",
+              "requirement": "optional",
+              "type": "string",
+              "violations": [
+                "type_mismatch"
+              ]
+            },
+            {
+              "format": "tcp-udp-port",
+              "json_types": [
+                "integer"
+              ],
+              "normalization": [],
+              "path": "endpoints[].port",
+              "requirement": "optional",
+              "type": "port",
+              "violations": [
+                "type_mismatch",
+                "value_out_of_range"
+              ]
+            },
+            {
+              "enum": [
+                "tcp",
+                "udp"
+              ],
+              "json_types": [
+                "string"
+              ],
+              "normalization": [],
+              "path": "endpoints[].transport",
+              "requirement": "optional",
+              "type": "enum",
+              "violations": [
+                "value_not_allowed"
+              ]
+            },
+            {
+              "enum": [
+                "internal",
+                "lan",
+                "loopback",
+                "public",
+                "unknown",
+                "vpn"
+              ],
+              "json_types": [
+                "string"
+              ],
+              "normalization": [],
+              "path": "endpoints[].exposure",
+              "requirement": "optional",
+              "type": "enum",
+              "violations": [
+                "value_not_allowed"
+              ]
+            },
+            {
+              "json_types": [
+                "array"
+              ],
+              "normalization": [],
+              "path": "ports",
+              "requirement": "optional",
+              "type": "array",
+              "violations": [
+                "type_mismatch"
+              ]
+            },
+            {
+              "json_types": [
+                "object"
+              ],
+              "normalization": [],
+              "path": "ports[]",
+              "requirement": "optional",
+              "type": "object",
+              "violations": [
+                "type_mismatch"
+              ]
+            },
+            {
+              "format": "tcp-udp-port",
+              "json_types": [
+                "integer"
+              ],
+              "normalization": [],
+              "path": "ports[].port",
+              "requirement": "optional",
+              "type": "port",
+              "violations": [
+                "type_mismatch",
+                "value_out_of_range"
+              ]
+            },
+            {
+              "constraint": "must be tcp or udp",
+              "enum": [
+                "tcp",
+                "udp"
+              ],
+              "json_types": [
+                "string"
+              ],
+              "normalization": [],
+              "path": "ports[].protocol",
+              "requirement": "optional",
+              "type": "enum",
+              "violations": [
+                "value_not_allowed"
+              ]
+            },
+            {
+              "constraint": "must be tcp or udp",
+              "enum": [
+                "tcp",
+                "udp"
+              ],
+              "json_types": [
+                "string"
+              ],
+              "normalization": [],
+              "path": "ports[].transport",
+              "requirement": "optional",
+              "type": "enum",
+              "violations": [
+                "value_not_allowed"
+              ]
+            },
+            {
+              "json_types": [
+                "array"
+              ],
+              "normalization": [],
+              "path": "access_methods",
+              "requirement": "optional",
+              "type": "array",
+              "violations": [
+                "type_mismatch"
+              ]
+            },
+            {
+              "json_types": [
+                "object"
+              ],
+              "normalization": [],
+              "path": "access_methods[]",
+              "requirement": "optional",
+              "type": "object",
+              "violations": [
+                "type_mismatch"
+              ]
+            },
+            {
+              "json_types": [
+                "string"
+              ],
+              "normalization": [],
+              "path": "access_methods[].type",
+              "requirement": "optional",
+              "type": "string",
+              "violations": [
+                "type_mismatch"
+              ]
+            },
+            {
+              "json_types": [
+                "string"
+              ],
+              "normalization": [],
+              "path": "access_methods[].endpoint",
+              "requirement": "optional",
+              "type": "string",
+              "violations": [
+                "type_mismatch"
+              ]
+            },
+            {
+              "json_types": [
+                "string"
+              ],
+              "normalization": [],
+              "path": "access_methods[].endpoint_id",
+              "requirement": "optional",
+              "type": "string",
+              "violations": [
+                "type_mismatch"
+              ]
+            },
+            {
+              "json_types": [
+                "array"
+              ],
+              "normalization": [],
+              "path": "access_methods[].credential_references",
+              "requirement": "optional",
+              "type": "array",
+              "violations": [
+                "type_mismatch"
+              ]
+            },
+            {
+              "format": "kind:id",
+              "json_types": [
+                "string"
+              ],
+              "normalization": [],
+              "path": "access_methods[].credential_references[]",
+              "reference_kinds": [
+                "credential_reference"
+              ],
+              "requirement": "optional",
+              "type": "reference",
+              "violations": [
+                "invalid_format",
+                "reference_kind_not_allowed",
+                "type_mismatch"
+              ]
+            },
+            {
+              "json_types": [
+                "object"
+              ],
+              "normalization": [],
+              "path": "network",
+              "requirement": "optional",
+              "type": "object",
+              "violations": [
+                "type_mismatch"
+              ]
+            },
+            {
+              "json_types": [
+                "array"
+              ],
+              "normalization": [],
+              "path": "network.hostnames",
+              "requirement": "optional",
+              "type": "array",
+              "violations": [
+                "type_mismatch"
+              ]
+            },
+            {
+              "json_types": [
+                "string"
+              ],
+              "normalization": [],
+              "path": "network.hostnames[]",
+              "requirement": "optional",
+              "type": "string",
+              "violations": [
+                "type_mismatch"
+              ]
+            },
+            {
+              "json_types": [
+                "array"
+              ],
+              "normalization": [],
+              "path": "network.addresses",
+              "requirement": "optional",
+              "type": "array",
+              "violations": [
+                "type_mismatch"
+              ]
+            },
+            {
+              "json_types": [
+                "object"
+              ],
+              "normalization": [],
+              "path": "network.addresses[]",
+              "requirement": "optional",
+              "type": "object",
+              "violations": [
+                "type_mismatch"
+              ]
+            },
+            {
+              "format": "ip-address",
+              "json_types": [
+                "string"
+              ],
+              "normalization": [],
+              "path": "network.addresses[].ip",
+              "requirement": "optional",
+              "type": "ip",
+              "violations": [
+                "invalid_format"
+              ]
+            },
+            {
+              "enum": [
+                "access_point",
+                "firewall",
+                "gateway",
+                "mesh",
+                "other_device",
+                "router",
+                "segment",
+                "switch"
+              ],
+              "json_types": [
+                "string"
+              ],
+              "normalization": [],
+              "path": "network.category",
+              "requirement": "required",
+              "type": "enum",
+              "violations": [
+                "required_field_missing",
+                "value_not_allowed"
+              ]
+            },
+            {
+              "json_types": [
+                "string"
+              ],
+              "max_length": 128,
+              "min_length": 1,
+              "normalization": [
+                "strip_whitespace"
+              ],
+              "path": "network.manufacturer",
+              "requirement": "optional",
+              "type": "string",
+              "violations": [
+                "type_mismatch",
+                "value_too_long",
+                "value_too_short"
+              ]
+            },
+            {
+              "json_types": [
+                "string"
+              ],
+              "max_length": 128,
+              "min_length": 1,
+              "normalization": [
+                "strip_whitespace"
+              ],
+              "path": "network.model",
+              "requirement": "optional",
+              "type": "string",
+              "violations": [
+                "type_mismatch",
+                "value_too_long",
+                "value_too_short"
+              ]
+            },
+            {
+              "json_types": [
+                "string"
+              ],
+              "max_length": 255,
+              "normalization": [],
+              "path": "network.location",
+              "requirement": "optional",
+              "type": "string",
+              "violations": [
+                "type_mismatch",
+                "value_too_long"
+              ]
+            }
+          ],
+          "rules": [],
+          "secret_policy": "global_enforced",
+          "unknown_properties": "allow"
+        },
+        "health": {
+          "default": null,
+          "nullable": true,
+          "reason": null,
+          "requirement": "optional",
+          "supported": true,
+          "values": [
+            "unknown",
+            "healthy",
+            "degraded",
+            "down",
+            "maintenance"
+          ]
+        },
+        "kind": "network",
+        "kind_class": "asset",
+        "lifecycle": {
+          "default": null,
+          "nullable": true,
+          "reason": null,
+          "requirement": "optional",
+          "supported": true,
+          "values": [
+            "planned",
+            "active",
+            "retired"
+          ]
+        },
+        "minimal_example": {
+          "data": {
+            "network": {
+              "category": "access_point"
+            },
+            "schema_version": 1
+          },
+          "id": "example-network",
+          "kind": "network",
+          "label": "Example network",
+          "status": "active"
+        },
+        "status": {
+          "default": "active",
+          "values": [
+            "active",
+            "inactive",
+            "deleted"
+          ]
+        }
+      },
+      {
+        "data": {
+          "fields": [
+            {
+              "const": 1,
+              "constraint": "must be 1",
+              "json_types": [
+                "integer"
+              ],
+              "normalization": [],
+              "path": "schema_version",
+              "requirement": "optional",
+              "type": "integer",
+              "violations": [
+                "type_mismatch",
+                "value_not_constant"
+              ]
+            },
+            {
+              "json_types": [
+                "string"
+              ],
+              "normalization": [],
+              "path": "lifecycle",
+              "reason": "is obsolete; use top-level fields",
+              "requirement": "forbidden",
+              "type": "string",
+              "violations": [
+                "field_not_allowed"
+              ]
+            },
+            {
+              "json_types": [
+                "string"
+              ],
+              "normalization": [],
+              "path": "health",
+              "reason": "is obsolete; use top-level fields",
+              "requirement": "forbidden",
+              "type": "string",
+              "violations": [
+                "field_not_allowed"
+              ]
+            },
+            {
+              "json_types": [
+                "object"
+              ],
+              "normalization": [],
+              "path": "dependencies",
+              "reason": "is obsolete; use depends_on relationships",
+              "requirement": "forbidden",
+              "type": "object",
+              "violations": [
+                "field_not_allowed"
+              ]
+            },
+            {
+              "json_types": [
+                "array"
+              ],
+              "normalization": [],
+              "path": "installed_software",
+              "reason": "is supported only for host and system objects",
+              "requirement": "forbidden",
+              "type": "array",
+              "violations": [
+                "field_not_allowed"
+              ]
+            },
+            {
+              "json_types": [
+                "array"
+              ],
+              "normalization": [],
+              "path": "endpoints",
+              "requirement": "optional",
+              "type": "array",
+              "violations": [
+                "type_mismatch"
+              ]
+            },
+            {
+              "json_types": [
+                "object"
+              ],
+              "normalization": [],
+              "path": "endpoints[]",
+              "requirement": "optional",
+              "type": "object",
+              "violations": [
+                "type_mismatch"
+              ]
+            },
+            {
+              "json_types": [
+                "string"
+              ],
+              "normalization": [],
+              "path": "endpoints[].type",
+              "requirement": "optional",
+              "type": "string",
+              "violations": [
+                "type_mismatch"
+              ]
+            },
+            {
+              "json_types": [
+                "string"
+              ],
+              "normalization": [],
+              "path": "endpoints[].url",
+              "requirement": "optional",
+              "type": "string",
+              "violations": [
+                "type_mismatch"
+              ]
+            },
+            {
+              "json_types": [
+                "string"
+              ],
+              "normalization": [],
+              "path": "endpoints[].host",
+              "requirement": "optional",
+              "type": "string",
+              "violations": [
+                "type_mismatch"
+              ]
+            },
+            {
+              "format": "tcp-udp-port",
+              "json_types": [
+                "integer"
+              ],
+              "normalization": [],
+              "path": "endpoints[].port",
+              "requirement": "optional",
+              "type": "port",
+              "violations": [
+                "type_mismatch",
+                "value_out_of_range"
+              ]
+            },
+            {
+              "enum": [
+                "tcp",
+                "udp"
+              ],
+              "json_types": [
+                "string"
+              ],
+              "normalization": [],
+              "path": "endpoints[].transport",
+              "requirement": "optional",
+              "type": "enum",
+              "violations": [
+                "value_not_allowed"
+              ]
+            },
+            {
+              "enum": [
+                "internal",
+                "lan",
+                "loopback",
+                "public",
+                "unknown",
+                "vpn"
+              ],
+              "json_types": [
+                "string"
+              ],
+              "normalization": [],
+              "path": "endpoints[].exposure",
+              "requirement": "optional",
+              "type": "enum",
+              "violations": [
+                "value_not_allowed"
+              ]
+            },
+            {
+              "json_types": [
+                "array"
+              ],
+              "normalization": [],
+              "path": "ports",
+              "requirement": "optional",
+              "type": "array",
+              "violations": [
+                "type_mismatch"
+              ]
+            },
+            {
+              "json_types": [
+                "object"
+              ],
+              "normalization": [],
+              "path": "ports[]",
+              "requirement": "optional",
+              "type": "object",
+              "violations": [
+                "type_mismatch"
+              ]
+            },
+            {
+              "format": "tcp-udp-port",
+              "json_types": [
+                "integer"
+              ],
+              "normalization": [],
+              "path": "ports[].port",
+              "requirement": "optional",
+              "type": "port",
+              "violations": [
+                "type_mismatch",
+                "value_out_of_range"
+              ]
+            },
+            {
+              "constraint": "must be tcp or udp",
+              "enum": [
+                "tcp",
+                "udp"
+              ],
+              "json_types": [
+                "string"
+              ],
+              "normalization": [],
+              "path": "ports[].protocol",
+              "requirement": "optional",
+              "type": "enum",
+              "violations": [
+                "value_not_allowed"
+              ]
+            },
+            {
+              "constraint": "must be tcp or udp",
+              "enum": [
+                "tcp",
+                "udp"
+              ],
+              "json_types": [
+                "string"
+              ],
+              "normalization": [],
+              "path": "ports[].transport",
+              "requirement": "optional",
+              "type": "enum",
+              "violations": [
+                "value_not_allowed"
+              ]
+            },
+            {
+              "json_types": [
+                "array"
+              ],
+              "normalization": [],
+              "path": "access_methods",
+              "requirement": "optional",
+              "type": "array",
+              "violations": [
+                "type_mismatch"
+              ]
+            },
+            {
+              "json_types": [
+                "object"
+              ],
+              "normalization": [],
+              "path": "access_methods[]",
+              "requirement": "optional",
+              "type": "object",
+              "violations": [
+                "type_mismatch"
+              ]
+            },
+            {
+              "json_types": [
+                "string"
+              ],
+              "normalization": [],
+              "path": "access_methods[].type",
+              "requirement": "optional",
+              "type": "string",
+              "violations": [
+                "type_mismatch"
+              ]
+            },
+            {
+              "json_types": [
+                "string"
+              ],
+              "normalization": [],
+              "path": "access_methods[].endpoint",
+              "requirement": "optional",
+              "type": "string",
+              "violations": [
+                "type_mismatch"
+              ]
+            },
+            {
+              "json_types": [
+                "string"
+              ],
+              "normalization": [],
+              "path": "access_methods[].endpoint_id",
+              "requirement": "optional",
+              "type": "string",
+              "violations": [
+                "type_mismatch"
+              ]
+            },
+            {
+              "json_types": [
+                "array"
+              ],
+              "normalization": [],
+              "path": "access_methods[].credential_references",
+              "requirement": "optional",
+              "type": "array",
+              "violations": [
+                "type_mismatch"
+              ]
+            },
+            {
+              "format": "kind:id",
+              "json_types": [
+                "string"
+              ],
+              "normalization": [],
+              "path": "access_methods[].credential_references[]",
+              "reference_kinds": [
+                "credential_reference"
+              ],
+              "requirement": "optional",
+              "type": "reference",
+              "violations": [
+                "invalid_format",
+                "reference_kind_not_allowed",
+                "type_mismatch"
+              ]
+            },
+            {
+              "json_types": [
+                "object"
+              ],
+              "normalization": [],
+              "path": "device",
+              "requirement": "required",
+              "type": "object",
+              "violations": [
+                "required_field_missing",
+                "type_mismatch"
+              ]
+            },
+            {
+              "enum": [
+                "adapter",
+                "antenna",
+                "controller",
+                "other",
+                "sensor",
+                "ups"
+              ],
+              "json_types": [
+                "string"
+              ],
+              "normalization": [],
+              "path": "device.category",
+              "requirement": "required",
+              "type": "enum",
+              "violations": [
+                "required_field_missing",
+                "value_not_allowed"
+              ]
+            },
+            {
+              "json_types": [
+                "string"
+              ],
+              "max_length": 128,
+              "min_length": 1,
+              "normalization": [
+                "strip_whitespace"
+              ],
+              "path": "device.manufacturer",
+              "requirement": "optional",
+              "type": "string",
+              "violations": [
+                "type_mismatch",
+                "value_too_long",
+                "value_too_short"
+              ]
+            },
+            {
+              "json_types": [
+                "string"
+              ],
+              "max_length": 128,
+              "min_length": 1,
+              "normalization": [
+                "strip_whitespace"
+              ],
+              "path": "device.model",
+              "requirement": "optional",
+              "type": "string",
+              "violations": [
+                "type_mismatch",
+                "value_too_long",
+                "value_too_short"
+              ]
+            },
+            {
+              "json_types": [
+                "array"
+              ],
+              "normalization": [],
+              "path": "credential_references",
+              "requirement": "optional",
+              "type": "array",
+              "violations": [
+                "type_mismatch"
+              ]
+            },
+            {
+              "format": "kind:id",
+              "json_types": [
+                "string"
+              ],
+              "normalization": [],
+              "path": "credential_references[]",
+              "reference_kinds": [
+                "credential_reference"
+              ],
+              "requirement": "optional",
+              "type": "reference",
+              "violations": [
+                "invalid_format",
+                "reference_kind_not_allowed",
+                "type_mismatch"
+              ]
+            },
+            {
+              "json_types": [
+                "array"
+              ],
+              "normalization": [],
+              "path": "related_services",
+              "requirement": "optional",
+              "type": "array",
+              "violations": [
+                "type_mismatch"
+              ]
+            },
+            {
+              "format": "kind:id",
+              "json_types": [
+                "string"
+              ],
+              "normalization": [],
+              "path": "related_services[]",
+              "reference_kinds": [
+                "service"
+              ],
+              "requirement": "optional",
+              "type": "reference",
+              "violations": [
+                "invalid_format",
+                "reference_kind_not_allowed",
+                "type_mismatch"
+              ]
+            },
+            {
+              "json_types": [
+                "array"
+              ],
+              "normalization": [],
+              "path": "runbooks",
+              "requirement": "optional",
+              "type": "array",
+              "violations": [
+                "type_mismatch"
+              ]
+            },
+            {
+              "format": "kind:id",
+              "json_types": [
+                "string"
+              ],
+              "normalization": [],
+              "path": "runbooks[]",
+              "reference_kinds": [
+                "runbook"
+              ],
+              "requirement": "optional",
+              "type": "reference",
+              "violations": [
+                "invalid_format",
+                "reference_kind_not_allowed",
+                "type_mismatch"
+              ]
+            },
+            {
+              "json_types": [
+                "array"
+              ],
+              "normalization": [],
+              "path": "related_projects",
+              "requirement": "optional",
+              "type": "array",
+              "violations": [
+                "type_mismatch"
+              ]
+            },
+            {
+              "format": "kind:id",
+              "json_types": [
+                "string"
+              ],
+              "normalization": [],
+              "path": "related_projects[]",
+              "reference_kinds": [
+                "project"
+              ],
+              "requirement": "optional",
+              "type": "reference",
+              "violations": [
+                "invalid_format",
+                "reference_kind_not_allowed",
+                "type_mismatch"
+              ]
+            },
+            {
+              "json_types": [
+                "array"
+              ],
+              "normalization": [],
+              "path": "related_decisions",
+              "requirement": "optional",
+              "type": "array",
+              "violations": [
+                "type_mismatch"
+              ]
+            },
+            {
+              "format": "kind:id",
+              "json_types": [
+                "string"
+              ],
+              "normalization": [],
+              "path": "related_decisions[]",
+              "reference_kinds": [
+                "decision"
+              ],
+              "requirement": "optional",
+              "type": "reference",
+              "violations": [
+                "invalid_format",
+                "reference_kind_not_allowed",
+                "type_mismatch"
+              ]
+            },
+            {
+              "json_types": [
+                "array"
+              ],
+              "normalization": [],
+              "path": "related_systems",
+              "requirement": "optional",
+              "type": "array",
+              "violations": [
+                "type_mismatch"
+              ]
+            },
+            {
+              "format": "kind:id",
+              "json_types": [
+                "string"
+              ],
+              "normalization": [],
+              "path": "related_systems[]",
+              "reference_kinds": [
+                "system"
+              ],
+              "requirement": "optional",
+              "type": "reference",
+              "violations": [
+                "invalid_format",
+                "reference_kind_not_allowed",
+                "type_mismatch"
+              ]
+            },
+            {
+              "json_types": [
+                "array"
+              ],
+              "normalization": [],
+              "path": "related_runbooks",
+              "requirement": "optional",
+              "type": "array",
+              "violations": [
+                "type_mismatch"
+              ]
+            },
+            {
+              "format": "kind:id",
+              "json_types": [
+                "string"
+              ],
+              "normalization": [],
+              "path": "related_runbooks[]",
+              "reference_kinds": [
+                "runbook"
+              ],
+              "requirement": "optional",
+              "type": "reference",
+              "violations": [
+                "invalid_format",
+                "reference_kind_not_allowed",
+                "type_mismatch"
+              ]
+            }
+          ],
+          "rules": [],
+          "secret_policy": "global_enforced",
+          "unknown_properties": "allow"
+        },
+        "health": {
+          "default": null,
+          "nullable": true,
+          "reason": null,
+          "requirement": "optional",
+          "supported": true,
+          "values": [
+            "unknown",
+            "healthy",
+            "degraded",
+            "down",
+            "maintenance"
+          ]
+        },
+        "kind": "device",
+        "kind_class": "asset",
+        "lifecycle": {
+          "default": null,
+          "nullable": true,
+          "reason": null,
+          "requirement": "optional",
+          "supported": true,
+          "values": [
+            "planned",
+            "active",
+            "retired"
+          ]
+        },
+        "minimal_example": {
+          "data": {
+            "device": {
+              "category": "adapter"
+            },
+            "schema_version": 1
+          },
+          "id": "example-device",
+          "kind": "device",
+          "label": "Example device",
+          "status": "active"
+        },
+        "status": {
+          "default": "active",
+          "values": [
+            "active",
+            "inactive",
+            "deleted"
+          ]
+        }
+      },
+      {
+        "data": {
+          "fields": [
+            {
+              "const": 1,
+              "constraint": "must be 1",
+              "json_types": [
+                "integer"
+              ],
+              "normalization": [],
+              "path": "schema_version",
+              "requirement": "optional",
+              "type": "integer",
+              "violations": [
+                "type_mismatch",
+                "value_not_constant"
+              ]
+            },
+            {
+              "json_types": [
+                "string"
+              ],
+              "normalization": [],
+              "path": "lifecycle",
+              "reason": "is obsolete; use top-level fields",
+              "requirement": "forbidden",
+              "type": "string",
+              "violations": [
+                "field_not_allowed"
+              ]
+            },
+            {
+              "json_types": [
+                "string"
+              ],
+              "normalization": [],
+              "path": "health",
+              "reason": "is obsolete; use top-level fields",
+              "requirement": "forbidden",
+              "type": "string",
+              "violations": [
+                "field_not_allowed"
+              ]
+            },
+            {
+              "json_types": [
+                "object"
+              ],
+              "normalization": [],
+              "path": "dependencies",
+              "reason": "is obsolete; use depends_on relationships",
+              "requirement": "forbidden",
+              "type": "object",
+              "violations": [
+                "field_not_allowed"
+              ]
+            },
+            {
+              "json_types": [
+                "array"
+              ],
+              "normalization": [],
+              "path": "endpoints",
+              "requirement": "optional",
+              "type": "array",
+              "violations": [
+                "type_mismatch"
+              ]
+            },
+            {
+              "json_types": [
+                "object"
+              ],
+              "normalization": [],
+              "path": "endpoints[]",
+              "requirement": "optional",
+              "type": "object",
+              "violations": [
+                "type_mismatch"
+              ]
+            },
+            {
+              "json_types": [
+                "string"
+              ],
+              "normalization": [],
+              "path": "endpoints[].type",
+              "requirement": "optional",
+              "type": "string",
+              "violations": [
+                "type_mismatch"
+              ]
+            },
+            {
+              "json_types": [
+                "string"
+              ],
+              "normalization": [],
+              "path": "endpoints[].url",
+              "requirement": "optional",
+              "type": "string",
+              "violations": [
+                "type_mismatch"
+              ]
+            },
+            {
+              "json_types": [
+                "string"
+              ],
+              "normalization": [],
+              "path": "endpoints[].host",
+              "requirement": "optional",
+              "type": "string",
+              "violations": [
+                "type_mismatch"
+              ]
+            },
+            {
+              "format": "tcp-udp-port",
+              "json_types": [
+                "integer"
+              ],
+              "normalization": [],
+              "path": "endpoints[].port",
+              "requirement": "optional",
+              "type": "port",
+              "violations": [
+                "type_mismatch",
+                "value_out_of_range"
+              ]
+            },
+            {
+              "enum": [
+                "tcp",
+                "udp"
+              ],
+              "json_types": [
+                "string"
+              ],
+              "normalization": [],
+              "path": "endpoints[].transport",
+              "requirement": "optional",
+              "type": "enum",
+              "violations": [
+                "value_not_allowed"
+              ]
+            },
+            {
+              "enum": [
+                "internal",
+                "lan",
+                "loopback",
+                "public",
+                "unknown",
+                "vpn"
+              ],
+              "json_types": [
+                "string"
+              ],
+              "normalization": [],
+              "path": "endpoints[].exposure",
+              "requirement": "optional",
+              "type": "enum",
+              "violations": [
+                "value_not_allowed"
+              ]
+            },
+            {
+              "json_types": [
+                "array"
+              ],
+              "normalization": [],
+              "path": "ports",
+              "requirement": "optional",
+              "type": "array",
+              "violations": [
+                "type_mismatch"
+              ]
+            },
+            {
+              "json_types": [
+                "object"
+              ],
+              "normalization": [],
+              "path": "ports[]",
+              "requirement": "optional",
+              "type": "object",
+              "violations": [
+                "type_mismatch"
+              ]
+            },
+            {
+              "format": "tcp-udp-port",
+              "json_types": [
+                "integer"
+              ],
+              "normalization": [],
+              "path": "ports[].port",
+              "requirement": "optional",
+              "type": "port",
+              "violations": [
+                "type_mismatch",
+                "value_out_of_range"
+              ]
+            },
+            {
+              "constraint": "must be tcp or udp",
+              "enum": [
+                "tcp",
+                "udp"
+              ],
+              "json_types": [
+                "string"
+              ],
+              "normalization": [],
+              "path": "ports[].protocol",
+              "requirement": "optional",
+              "type": "enum",
+              "violations": [
+                "value_not_allowed"
+              ]
+            },
+            {
+              "constraint": "must be tcp or udp",
+              "enum": [
+                "tcp",
+                "udp"
+              ],
+              "json_types": [
+                "string"
+              ],
+              "normalization": [],
+              "path": "ports[].transport",
+              "requirement": "optional",
+              "type": "enum",
+              "violations": [
+                "value_not_allowed"
+              ]
+            },
+            {
+              "json_types": [
+                "array"
+              ],
+              "normalization": [],
+              "path": "access_methods",
+              "requirement": "optional",
+              "type": "array",
+              "violations": [
+                "type_mismatch"
+              ]
+            },
+            {
+              "json_types": [
+                "object"
+              ],
+              "normalization": [],
+              "path": "access_methods[]",
+              "requirement": "optional",
+              "type": "object",
+              "violations": [
+                "type_mismatch"
+              ]
+            },
+            {
+              "json_types": [
+                "string"
+              ],
+              "normalization": [],
+              "path": "access_methods[].type",
+              "requirement": "optional",
+              "type": "string",
+              "violations": [
+                "type_mismatch"
+              ]
+            },
+            {
+              "json_types": [
+                "string"
+              ],
+              "normalization": [],
+              "path": "access_methods[].endpoint",
+              "requirement": "optional",
+              "type": "string",
+              "violations": [
+                "type_mismatch"
+              ]
+            },
+            {
+              "json_types": [
+                "string"
+              ],
+              "normalization": [],
+              "path": "access_methods[].endpoint_id",
+              "requirement": "optional",
+              "type": "string",
+              "violations": [
+                "type_mismatch"
+              ]
+            },
+            {
+              "json_types": [
+                "array"
+              ],
+              "normalization": [],
+              "path": "access_methods[].credential_references",
+              "requirement": "optional",
+              "type": "array",
+              "violations": [
+                "type_mismatch"
+              ]
+            },
+            {
+              "format": "kind:id",
+              "json_types": [
+                "string"
+              ],
+              "normalization": [],
+              "path": "access_methods[].credential_references[]",
+              "reference_kinds": [
+                "credential_reference"
+              ],
+              "requirement": "optional",
+              "type": "reference",
+              "violations": [
+                "invalid_format",
+                "reference_kind_not_allowed",
+                "type_mismatch"
+              ]
+            },
+            {
+              "json_types": [
+                "string"
+              ],
+              "normalization": [],
+              "path": "system_id",
+              "reason": "is obsolete; use a hosts relationship",
+              "requirement": "forbidden",
+              "type": "string",
+              "violations": [
+                "field_not_allowed"
+              ]
+            },
+            {
+              "json_types": [
+                "string"
+              ],
+              "normalization": [],
+              "path": "owner",
+              "requirement": "optional",
+              "type": "string",
+              "violations": [
+                "type_mismatch"
+              ]
+            },
+            {
+              "json_types": [
+                "object"
+              ],
+              "normalization": [],
+              "path": "auth",
+              "requirement": "optional",
+              "type": "object",
+              "violations": [
+                "type_mismatch"
+              ]
+            },
+            {
+              "json_types": [
+                "array"
+              ],
+              "normalization": [],
+              "path": "auth.credential_references",
+              "requirement": "optional",
+              "type": "array",
+              "violations": [
+                "type_mismatch"
+              ]
+            },
+            {
+              "format": "kind:id",
+              "json_types": [
+                "string"
+              ],
+              "normalization": [],
+              "path": "auth.credential_references[]",
+              "reference_kinds": [
+                "credential_reference"
+              ],
+              "requirement": "optional",
+              "type": "reference",
+              "violations": [
+                "invalid_format",
+                "reference_kind_not_allowed",
+                "type_mismatch"
+              ]
+            },
+            {
+              "json_types": [
+                "array"
+              ],
+              "normalization": [],
+              "path": "credential_references",
+              "requirement": "optional",
+              "type": "array",
+              "violations": [
+                "type_mismatch"
+              ]
+            },
+            {
+              "format": "kind:id",
+              "json_types": [
+                "string"
+              ],
+              "normalization": [],
+              "path": "credential_references[]",
+              "reference_kinds": [
+                "credential_reference"
+              ],
+              "requirement": "optional",
+              "type": "reference",
+              "violations": [
+                "invalid_format",
+                "reference_kind_not_allowed",
+                "type_mismatch"
+              ]
+            },
+            {
+              "json_types": [
+                "array"
+              ],
+              "normalization": [],
+              "path": "related_services",
+              "requirement": "optional",
+              "type": "array",
+              "violations": [
+                "type_mismatch"
+              ]
+            },
+            {
+              "format": "kind:id",
+              "json_types": [
+                "string"
+              ],
+              "normalization": [],
+              "path": "related_services[]",
+              "reference_kinds": [
+                "service"
+              ],
+              "requirement": "optional",
+              "type": "reference",
+              "violations": [
+                "invalid_format",
+                "reference_kind_not_allowed",
+                "type_mismatch"
+              ]
+            },
+            {
+              "json_types": [
+                "array"
+              ],
+              "normalization": [],
+              "path": "runbooks",
+              "requirement": "optional",
+              "type": "array",
+              "violations": [
+                "type_mismatch"
+              ]
+            },
+            {
+              "format": "kind:id",
+              "json_types": [
+                "string"
+              ],
+              "normalization": [],
+              "path": "runbooks[]",
+              "reference_kinds": [
+                "runbook"
+              ],
+              "requirement": "optional",
+              "type": "reference",
+              "violations": [
+                "invalid_format",
+                "reference_kind_not_allowed",
+                "type_mismatch"
+              ]
+            },
+            {
+              "json_types": [
+                "array"
+              ],
+              "normalization": [],
+              "path": "related_projects",
+              "requirement": "optional",
+              "type": "array",
+              "violations": [
+                "type_mismatch"
+              ]
+            },
+            {
+              "format": "kind:id",
+              "json_types": [
+                "string"
+              ],
+              "normalization": [],
+              "path": "related_projects[]",
+              "reference_kinds": [
+                "project"
+              ],
+              "requirement": "optional",
+              "type": "reference",
+              "violations": [
+                "invalid_format",
+                "reference_kind_not_allowed",
+                "type_mismatch"
+              ]
+            },
+            {
+              "json_types": [
+                "array"
+              ],
+              "normalization": [],
+              "path": "related_decisions",
+              "requirement": "optional",
+              "type": "array",
+              "violations": [
+                "type_mismatch"
+              ]
+            },
+            {
+              "format": "kind:id",
+              "json_types": [
+                "string"
+              ],
+              "normalization": [],
+              "path": "related_decisions[]",
+              "reference_kinds": [
+                "decision"
+              ],
+              "requirement": "optional",
+              "type": "reference",
+              "violations": [
+                "invalid_format",
+                "reference_kind_not_allowed",
+                "type_mismatch"
+              ]
+            },
+            {
+              "json_types": [
+                "array"
+              ],
+              "normalization": [],
+              "path": "related_systems",
+              "requirement": "optional",
+              "type": "array",
+              "violations": [
+                "type_mismatch"
+              ]
+            },
+            {
+              "format": "kind:id",
+              "json_types": [
+                "string"
+              ],
+              "normalization": [],
+              "path": "related_systems[]",
+              "reference_kinds": [
+                "system"
+              ],
+              "requirement": "optional",
+              "type": "reference",
+              "violations": [
+                "invalid_format",
+                "reference_kind_not_allowed",
+                "type_mismatch"
+              ]
+            },
+            {
+              "json_types": [
+                "array"
+              ],
+              "normalization": [],
+              "path": "related_runbooks",
+              "requirement": "optional",
+              "type": "array",
+              "violations": [
+                "type_mismatch"
+              ]
+            },
+            {
+              "format": "kind:id",
+              "json_types": [
+                "string"
+              ],
+              "normalization": [],
+              "path": "related_runbooks[]",
+              "reference_kinds": [
+                "runbook"
+              ],
+              "requirement": "optional",
+              "type": "reference",
+              "violations": [
+                "invalid_format",
+                "reference_kind_not_allowed",
+                "type_mismatch"
+              ]
+            },
+            {
+              "json_types": [
+                "array"
+              ],
+              "normalization": [],
+              "path": "installed_software",
+              "reason": "is supported only for host and system objects",
+              "requirement": "forbidden",
+              "type": "array",
+              "violations": [
+                "field_not_allowed"
+              ]
+            }
+          ],
+          "rules": [],
+          "secret_policy": "global_enforced",
+          "unknown_properties": "allow"
+        },
+        "health": {
+          "default": null,
+          "nullable": true,
+          "reason": null,
+          "requirement": "optional",
+          "supported": true,
+          "values": [
+            "unknown",
+            "healthy",
+            "degraded",
+            "down",
+            "maintenance"
+          ]
+        },
+        "kind": "service",
+        "kind_class": "asset",
+        "lifecycle": {
+          "default": null,
+          "nullable": true,
+          "reason": null,
+          "requirement": "optional",
+          "supported": true,
+          "values": [
+            "planned",
+            "active",
+            "retired"
+          ]
+        },
+        "minimal_example": {
+          "data": {
+            "schema_version": 1
+          },
+          "id": "example-service",
+          "kind": "service",
+          "label": "Example service",
+          "status": "active"
+        },
+        "status": {
+          "default": "active",
+          "values": [
+            "active",
+            "inactive",
+            "deleted"
+          ]
+        }
+      },
+      {
+        "data": {
+          "fields": [
+            {
+              "const": 1,
+              "constraint": "must be 1",
+              "json_types": [
+                "integer"
+              ],
+              "normalization": [],
+              "path": "schema_version",
+              "requirement": "optional",
+              "type": "integer",
+              "violations": [
+                "type_mismatch",
+                "value_not_constant"
+              ]
+            },
+            {
+              "json_types": [
+                "string"
+              ],
+              "normalization": [],
+              "path": "lifecycle",
+              "reason": "is obsolete; use top-level fields",
+              "requirement": "forbidden",
+              "type": "string",
+              "violations": [
+                "field_not_allowed"
+              ]
+            },
+            {
+              "json_types": [
+                "string"
+              ],
+              "normalization": [],
+              "path": "health",
+              "reason": "is obsolete; use top-level fields",
+              "requirement": "forbidden",
+              "type": "string",
+              "violations": [
+                "field_not_allowed"
+              ]
+            },
+            {
+              "json_types": [
+                "object"
+              ],
+              "normalization": [],
+              "path": "dependencies",
+              "reason": "is obsolete; use depends_on relationships",
+              "requirement": "forbidden",
+              "type": "object",
+              "violations": [
+                "field_not_allowed"
+              ]
+            },
+            {
+              "constraint": "must be a supported credential reference provider",
+              "enum": [
+                "env_file",
+                "external",
+                "local_file",
+                "secrets_json",
+                "vaultwarden"
+              ],
+              "json_types": [
+                "string"
+              ],
+              "normalization": [],
+              "path": "provider",
+              "requirement": "optional",
+              "type": "enum",
+              "violations": [
+                "value_not_allowed"
+              ]
+            },
+            {
+              "json_types": [
+                "object"
+              ],
+              "normalization": [],
+              "path": "reference",
+              "requirement": "optional",
+              "type": "object",
+              "violations": [
+                "type_mismatch"
+              ]
+            },
+            {
+              "json_types": [
+                "string"
+              ],
+              "normalization": [],
+              "path": "reference.name",
+              "requirement": "optional",
+              "type": "string",
+              "violations": [
+                "type_mismatch"
+              ]
+            },
+            {
+              "json_types": [
+                "string"
+              ],
+              "normalization": [],
+              "path": "reference.path",
+              "requirement": "optional",
+              "type": "string",
+              "violations": [
+                "type_mismatch"
+              ]
+            },
+            {
+              "json_types": [
+                "string"
+              ],
+              "normalization": [],
+              "path": "reference.key",
+              "requirement": "optional",
+              "type": "string",
+              "violations": [
+                "type_mismatch"
+              ]
+            },
+            {
+              "json_types": [
+                "string"
+              ],
+              "normalization": [],
+              "path": "reference.item_hint",
+              "requirement": "optional",
+              "type": "string",
+              "violations": [
+                "type_mismatch"
+              ]
+            },
+            {
+              "json_types": [
+                "object"
+              ],
+              "normalization": [],
+              "path": "scope",
+              "requirement": "optional",
+              "type": "object",
+              "violations": [
+                "type_mismatch"
+              ]
+            },
+            {
+              "constraint": "must be a supported access type",
+              "enum": [
+                "api",
+                "database",
+                "other",
+                "smb",
+                "ssh",
+                "sudo",
+                "token",
+                "web"
+              ],
+              "json_types": [
+                "string"
+              ],
+              "normalization": [],
+              "path": "scope.access_type",
+              "requirement": "optional",
+              "type": "enum",
+              "violations": [
+                "value_not_allowed"
+              ]
+            },
+            {
+              "json_types": [
+                "array"
+              ],
+              "normalization": [],
+              "path": "scope.systems",
+              "requirement": "optional",
+              "type": "array",
+              "violations": [
+                "type_mismatch"
+              ]
+            },
+            {
+              "format": "kind:id",
+              "json_types": [
+                "string"
+              ],
+              "normalization": [],
+              "path": "scope.systems[]",
+              "reference_kinds": [
+                "system"
+              ],
+              "requirement": "optional",
+              "type": "reference",
+              "violations": [
+                "invalid_format",
+                "reference_kind_not_allowed",
+                "type_mismatch"
+              ]
+            },
+            {
+              "json_types": [
+                "array"
+              ],
+              "normalization": [],
+              "path": "scope.services",
+              "requirement": "optional",
+              "type": "array",
+              "violations": [
+                "type_mismatch"
+              ]
+            },
+            {
+              "format": "kind:id",
+              "json_types": [
+                "string"
+              ],
+              "normalization": [],
+              "path": "scope.services[]",
+              "reference_kinds": [
+                "service"
+              ],
+              "requirement": "optional",
+              "type": "reference",
+              "violations": [
+                "invalid_format",
+                "reference_kind_not_allowed",
+                "type_mismatch"
+              ]
+            },
+            {
+              "json_types": [
+                "object"
+              ],
+              "normalization": [],
+              "path": "used_by",
+              "requirement": "optional",
+              "type": "object",
+              "violations": [
+                "type_mismatch"
+              ]
+            },
+            {
+              "json_types": [
+                "array"
+              ],
+              "normalization": [],
+              "path": "used_by.systems",
+              "requirement": "optional",
+              "type": "array",
+              "violations": [
+                "type_mismatch"
+              ]
+            },
+            {
+              "format": "kind:id",
+              "json_types": [
+                "string"
+              ],
+              "normalization": [],
+              "path": "used_by.systems[]",
+              "reference_kinds": [
+                "system"
+              ],
+              "requirement": "optional",
+              "type": "reference",
+              "violations": [
+                "invalid_format",
+                "reference_kind_not_allowed",
+                "type_mismatch"
+              ]
+            },
+            {
+              "json_types": [
+                "array"
+              ],
+              "normalization": [],
+              "path": "used_by.services",
+              "requirement": "optional",
+              "type": "array",
+              "violations": [
+                "type_mismatch"
+              ]
+            },
+            {
+              "format": "kind:id",
+              "json_types": [
+                "string"
+              ],
+              "normalization": [],
+              "path": "used_by.services[]",
+              "reference_kinds": [
+                "service"
+              ],
+              "requirement": "optional",
+              "type": "reference",
+              "violations": [
+                "invalid_format",
+                "reference_kind_not_allowed",
+                "type_mismatch"
+              ]
+            },
+            {
+              "json_types": [
+                "array"
+              ],
+              "normalization": [],
+              "path": "used_by.runbooks",
+              "requirement": "optional",
+              "type": "array",
+              "violations": [
+                "type_mismatch"
+              ]
+            },
+            {
+              "format": "kind:id",
+              "json_types": [
+                "string"
+              ],
+              "normalization": [],
+              "path": "used_by.runbooks[]",
+              "reference_kinds": [
+                "runbook"
+              ],
+              "requirement": "optional",
+              "type": "reference",
+              "violations": [
+                "invalid_format",
+                "reference_kind_not_allowed",
+                "type_mismatch"
+              ]
+            },
+            {
+              "json_types": [
+                "object"
+              ],
+              "normalization": [],
+              "path": "handling_rules",
+              "requirement": "optional",
+              "type": "object",
+              "violations": [
+                "type_mismatch"
+              ]
+            },
+            {
+              "const": false,
+              "constraint": "must be false",
+              "json_types": [
+                "boolean"
+              ],
+              "normalization": [],
+              "path": "handling_rules.telegram_allowed",
+              "requirement": "optional",
+              "type": "boolean",
+              "violations": [
+                "type_mismatch",
+                "value_not_constant"
+              ]
+            },
+            {
+              "const": false,
+              "constraint": "must be false",
+              "json_types": [
+                "boolean"
+              ],
+              "normalization": [],
+              "path": "handling_rules.markdown_secret_allowed",
+              "requirement": "optional",
+              "type": "boolean",
+              "violations": [
+                "type_mismatch",
+                "value_not_constant"
+              ]
+            },
+            {
+              "const": false,
+              "constraint": "must be false",
+              "json_types": [
+                "boolean"
+              ],
+              "normalization": [],
+              "path": "handling_rules.agents_may_read_value",
+              "requirement": "optional",
+              "type": "boolean",
+              "violations": [
+                "type_mismatch",
+                "value_not_constant"
+              ]
+            },
+            {
+              "const": false,
+              "constraint": "must be false",
+              "json_types": [
+                "boolean"
+              ],
+              "normalization": [],
+              "path": "secret_value_stored",
+              "requirement": "optional",
+              "type": "boolean",
+              "violations": [
+                "type_mismatch",
+                "value_not_constant"
+              ]
+            },
+            {
+              "json_types": [
+                "array"
+              ],
+              "normalization": [],
+              "path": "installed_software",
+              "reason": "is supported only for host and system objects",
+              "requirement": "forbidden",
+              "type": "array",
+              "violations": [
+                "field_not_allowed"
+              ]
+            }
+          ],
+          "rules": [
+            {
+              "description": "No key anywhere below data may name a raw credential or secret value.",
+              "rule": "reject_credential_value_keys",
+              "violation": "forbidden_key"
+            }
+          ],
+          "secret_policy": "global_enforced",
+          "unknown_properties": "allow"
+        },
+        "health": {
+          "default": null,
+          "nullable": true,
+          "reason": "lifecycle and health are only valid for asset kinds",
+          "requirement": "forbidden",
+          "supported": false,
+          "values": []
+        },
+        "kind": "credential_reference",
+        "kind_class": "knowledge",
+        "lifecycle": {
+          "default": null,
+          "nullable": true,
+          "reason": "lifecycle and health are only valid for asset kinds",
+          "requirement": "forbidden",
+          "supported": false,
+          "values": []
+        },
+        "minimal_example": {
+          "data": {
+            "schema_version": 1
+          },
+          "id": "example-credential-reference",
+          "kind": "credential_reference",
+          "label": "Example credential reference",
+          "status": "active"
+        },
+        "status": {
+          "default": "active",
+          "values": [
+            "active",
+            "inactive",
+            "deleted"
+          ]
+        }
+      },
+      {
+        "data": {
+          "fields": [
+            {
+              "const": 1,
+              "constraint": "must be 1",
+              "json_types": [
+                "integer"
+              ],
+              "normalization": [],
+              "path": "schema_version",
+              "requirement": "optional",
+              "type": "integer",
+              "violations": [
+                "type_mismatch",
+                "value_not_constant"
+              ]
+            },
+            {
+              "json_types": [
+                "string"
+              ],
+              "normalization": [],
+              "path": "lifecycle",
+              "reason": "is obsolete; use top-level fields",
+              "requirement": "forbidden",
+              "type": "string",
+              "violations": [
+                "field_not_allowed"
+              ]
+            },
+            {
+              "json_types": [
+                "string"
+              ],
+              "normalization": [],
+              "path": "health",
+              "reason": "is obsolete; use top-level fields",
+              "requirement": "forbidden",
+              "type": "string",
+              "violations": [
+                "field_not_allowed"
+              ]
+            },
+            {
+              "json_types": [
+                "object"
+              ],
+              "normalization": [],
+              "path": "dependencies",
+              "reason": "is obsolete; use depends_on relationships",
+              "requirement": "forbidden",
+              "type": "object",
+              "violations": [
+                "field_not_allowed"
+              ]
+            },
+            {
+              "constraint": "must be a supported runbook risk level",
+              "enum": [
+                "destructive",
+                "disruptive",
+                "read-only",
+                "safe-change"
+              ],
+              "json_types": [
+                "string"
+              ],
+              "normalization": [],
+              "path": "risk_level",
+              "requirement": "optional",
+              "type": "enum",
+              "violations": [
+                "value_not_allowed"
+              ]
+            },
+            {
+              "json_types": [
+                "boolean"
+              ],
+              "normalization": [],
+              "path": "approval_required",
+              "requirement": "optional",
+              "type": "boolean",
+              "violations": [
+                "type_mismatch"
+              ]
+            },
+            {
+              "json_types": [
+                "array"
+              ],
+              "normalization": [],
+              "path": "steps",
+              "requirement": "optional",
+              "type": "array",
+              "violations": [
+                "type_mismatch"
+              ]
+            },
+            {
+              "json_types": [
+                "object",
+                "string"
+              ],
+              "normalization": [],
+              "path": "steps[]",
+              "requirement": "optional",
+              "type": "string_or_object",
+              "violations": [
+                "type_mismatch"
+              ]
+            },
+            {
+              "json_types": [
+                "array"
+              ],
+              "normalization": [],
+              "path": "verification",
+              "requirement": "optional",
+              "type": "array",
+              "violations": [
+                "type_mismatch"
+              ]
+            },
+            {
+              "json_types": [
+                "object",
+                "string"
+              ],
+              "normalization": [],
+              "path": "verification[]",
+              "requirement": "optional",
+              "type": "string_or_object",
+              "violations": [
+                "type_mismatch"
+              ]
+            },
+            {
+              "json_types": [
+                "array"
+              ],
+              "normalization": [],
+              "path": "prerequisites",
+              "requirement": "optional",
+              "type": "array",
+              "violations": [
+                "type_mismatch"
+              ]
+            },
+            {
+              "json_types": [
+                "object",
+                "string"
+              ],
+              "normalization": [],
+              "path": "prerequisites[]",
+              "requirement": "optional",
+              "type": "string_or_object",
+              "violations": [
+                "type_mismatch"
+              ]
+            },
+            {
+              "json_types": [
+                "array"
+              ],
+              "normalization": [],
+              "path": "docs",
+              "requirement": "optional",
+              "type": "array",
+              "violations": [
+                "type_mismatch"
+              ]
+            },
+            {
+              "json_types": [
+                "object",
+                "string"
+              ],
+              "normalization": [],
+              "path": "docs[]",
+              "requirement": "optional",
+              "type": "string_or_object",
+              "violations": [
+                "type_mismatch"
+              ]
+            },
+            {
+              "json_types": [
+                "object"
+              ],
+              "normalization": [],
+              "path": "applies_to",
+              "requirement": "optional",
+              "type": "object",
+              "violations": [
+                "type_mismatch"
+              ]
+            },
+            {
+              "json_types": [
+                "array"
+              ],
+              "normalization": [],
+              "path": "applies_to.systems",
+              "requirement": "optional",
+              "type": "array",
+              "violations": [
+                "type_mismatch"
+              ]
+            },
+            {
+              "format": "kind:id",
+              "json_types": [
+                "string"
+              ],
+              "normalization": [],
+              "path": "applies_to.systems[]",
+              "reference_kinds": [
+                "system"
+              ],
+              "requirement": "optional",
+              "type": "reference",
+              "violations": [
+                "invalid_format",
+                "reference_kind_not_allowed",
+                "type_mismatch"
+              ]
+            },
+            {
+              "json_types": [
+                "array"
+              ],
+              "normalization": [],
+              "path": "applies_to.services",
+              "requirement": "optional",
+              "type": "array",
+              "violations": [
+                "type_mismatch"
+              ]
+            },
+            {
+              "format": "kind:id",
+              "json_types": [
+                "string"
+              ],
+              "normalization": [],
+              "path": "applies_to.services[]",
+              "reference_kinds": [
+                "service"
+              ],
+              "requirement": "optional",
+              "type": "reference",
+              "violations": [
+                "invalid_format",
+                "reference_kind_not_allowed",
+                "type_mismatch"
+              ]
+            },
+            {
+              "json_types": [
+                "array"
+              ],
+              "normalization": [],
+              "path": "credential_references",
+              "requirement": "optional",
+              "type": "array",
+              "violations": [
+                "type_mismatch"
+              ]
+            },
+            {
+              "format": "kind:id",
+              "json_types": [
+                "string"
+              ],
+              "normalization": [],
+              "path": "credential_references[]",
+              "reference_kinds": [
+                "credential_reference"
+              ],
+              "requirement": "optional",
+              "type": "reference",
+              "violations": [
+                "invalid_format",
+                "reference_kind_not_allowed",
+                "type_mismatch"
+              ]
+            },
+            {
+              "json_types": [
+                "array"
+              ],
+              "normalization": [],
+              "path": "related_decisions",
+              "requirement": "optional",
+              "type": "array",
+              "violations": [
+                "type_mismatch"
+              ]
+            },
+            {
+              "format": "kind:id",
+              "json_types": [
+                "string"
+              ],
+              "normalization": [],
+              "path": "related_decisions[]",
+              "reference_kinds": [
+                "decision"
+              ],
+              "requirement": "optional",
+              "type": "reference",
+              "violations": [
+                "invalid_format",
+                "reference_kind_not_allowed",
+                "type_mismatch"
+              ]
+            },
+            {
+              "json_types": [
+                "array"
+              ],
+              "normalization": [],
+              "path": "installed_software",
+              "reason": "is supported only for host and system objects",
+              "requirement": "forbidden",
+              "type": "array",
+              "violations": [
+                "field_not_allowed"
+              ]
+            }
+          ],
+          "rules": [
+            {
+              "description": "data.approval_required must be true when data.risk_level is disruptive or destructive.",
+              "rule": "validate_runbook_approval",
+              "violation": "rule_violation"
+            }
+          ],
+          "secret_policy": "global_enforced",
+          "unknown_properties": "allow"
+        },
+        "health": {
+          "default": null,
+          "nullable": true,
+          "reason": "lifecycle and health are only valid for asset kinds",
+          "requirement": "forbidden",
+          "supported": false,
+          "values": []
+        },
+        "kind": "runbook",
+        "kind_class": "knowledge",
+        "lifecycle": {
+          "default": null,
+          "nullable": true,
+          "reason": "lifecycle and health are only valid for asset kinds",
+          "requirement": "forbidden",
+          "supported": false,
+          "values": []
+        },
+        "minimal_example": {
+          "data": {
+            "schema_version": 1
+          },
+          "id": "example-runbook",
+          "kind": "runbook",
+          "label": "Example runbook",
+          "status": "active"
+        },
+        "status": {
+          "default": "active",
+          "values": [
+            "active",
+            "inactive",
+            "deleted"
+          ]
+        }
+      },
+      {
+        "data": {
+          "fields": [
+            {
+              "const": 1,
+              "constraint": "must be 1",
+              "json_types": [
+                "integer"
+              ],
+              "normalization": [],
+              "path": "schema_version",
+              "requirement": "optional",
+              "type": "integer",
+              "violations": [
+                "type_mismatch",
+                "value_not_constant"
+              ]
+            },
+            {
+              "json_types": [
+                "string"
+              ],
+              "normalization": [],
+              "path": "lifecycle",
+              "reason": "is obsolete; use top-level fields",
+              "requirement": "forbidden",
+              "type": "string",
+              "violations": [
+                "field_not_allowed"
+              ]
+            },
+            {
+              "json_types": [
+                "string"
+              ],
+              "normalization": [],
+              "path": "health",
+              "reason": "is obsolete; use top-level fields",
+              "requirement": "forbidden",
+              "type": "string",
+              "violations": [
+                "field_not_allowed"
+              ]
+            },
+            {
+              "json_types": [
+                "object"
+              ],
+              "normalization": [],
+              "path": "dependencies",
+              "reason": "is obsolete; use depends_on relationships",
+              "requirement": "forbidden",
+              "type": "object",
+              "violations": [
+                "field_not_allowed"
+              ]
+            },
+            {
+              "json_types": [
+                "array"
+              ],
+              "normalization": [],
+              "path": "installed_software",
+              "reason": "is supported only for host and system objects",
+              "requirement": "forbidden",
+              "type": "array",
+              "violations": [
+                "field_not_allowed"
+              ]
+            }
+          ],
+          "rules": [],
+          "secret_policy": "global_enforced",
+          "unknown_properties": "allow"
+        },
+        "health": {
+          "default": null,
+          "nullable": true,
+          "reason": "lifecycle and health are only valid for asset kinds",
+          "requirement": "forbidden",
+          "supported": false,
+          "values": []
+        },
+        "kind": "decision",
+        "kind_class": "knowledge",
+        "lifecycle": {
+          "default": null,
+          "nullable": true,
+          "reason": "lifecycle and health are only valid for asset kinds",
+          "requirement": "forbidden",
+          "supported": false,
+          "values": []
+        },
+        "minimal_example": {
+          "data": {
+            "schema_version": 1
+          },
+          "id": "example-decision",
+          "kind": "decision",
+          "label": "Example decision",
+          "status": "active"
+        },
+        "status": {
+          "default": "active",
+          "values": [
+            "active",
+            "inactive",
+            "deleted"
+          ]
+        }
+      },
+      {
+        "data": {
+          "fields": [
+            {
+              "const": 1,
+              "constraint": "must be 1",
+              "json_types": [
+                "integer"
+              ],
+              "normalization": [],
+              "path": "schema_version",
+              "requirement": "optional",
+              "type": "integer",
+              "violations": [
+                "type_mismatch",
+                "value_not_constant"
+              ]
+            },
+            {
+              "json_types": [
+                "string"
+              ],
+              "normalization": [],
+              "path": "lifecycle",
+              "reason": "is obsolete; use top-level fields",
+              "requirement": "forbidden",
+              "type": "string",
+              "violations": [
+                "field_not_allowed"
+              ]
+            },
+            {
+              "json_types": [
+                "string"
+              ],
+              "normalization": [],
+              "path": "health",
+              "reason": "is obsolete; use top-level fields",
+              "requirement": "forbidden",
+              "type": "string",
+              "violations": [
+                "field_not_allowed"
+              ]
+            },
+            {
+              "json_types": [
+                "object"
+              ],
+              "normalization": [],
+              "path": "dependencies",
+              "reason": "is obsolete; use depends_on relationships",
+              "requirement": "forbidden",
+              "type": "object",
+              "violations": [
+                "field_not_allowed"
+              ]
+            },
+            {
+              "json_types": [
+                "array"
+              ],
+              "normalization": [],
+              "path": "installed_software",
+              "reason": "is supported only for host and system objects",
+              "requirement": "forbidden",
+              "type": "array",
+              "violations": [
+                "field_not_allowed"
+              ]
+            }
+          ],
+          "rules": [],
+          "secret_policy": "global_enforced",
+          "unknown_properties": "allow"
+        },
+        "health": {
+          "default": null,
+          "nullable": true,
+          "reason": "lifecycle and health are only valid for asset kinds",
+          "requirement": "forbidden",
+          "supported": false,
+          "values": []
+        },
+        "kind": "project",
+        "kind_class": "knowledge",
+        "lifecycle": {
+          "default": null,
+          "nullable": true,
+          "reason": "lifecycle and health are only valid for asset kinds",
+          "requirement": "forbidden",
+          "supported": false,
+          "values": []
+        },
+        "minimal_example": {
+          "data": {
+            "schema_version": 1
+          },
+          "id": "example-project",
+          "kind": "project",
+          "label": "Example project",
+          "status": "active"
+        },
+        "status": {
+          "default": "active",
+          "values": [
+            "active",
+            "inactive",
+            "deleted"
+          ]
+        }
+      }
+    ],
+    "knowledge_kinds": [
+      "credential_reference",
+      "decision",
+      "project",
+      "runbook"
+    ],
+    "object_status": {
+      "default": "active",
+      "values": [
+        "active",
+        "inactive",
+        "deleted"
+      ]
+    },
+    "requirement_values": [
+      "required",
+      "optional",
+      "forbidden"
+    ],
+    "secret_policy": {
+      "applies_to": "every key below data, at any nesting depth, for every kind",
+      "can_be_disabled_by_a_kind_schema": false,
+      "description": "Writes are rejected when any nested key uses a secret-like or raw credential-value name, when a string looks like a raw secret, or when a key describes access control. Credential-reference metadata such as a provider, a protected storage path, or a credential-reference id stays allowed. Blockwart never stores or returns credential values.",
+      "enforced_before_kind_schema": true,
+      "forbidden_access_control_key_names": [
+        "access_control",
+        "access_grants",
+        "acl",
+        "object_grants",
+        "permissions"
+      ],
+      "forbidden_key_names": [
+        "api_key",
+        "apikey",
+        "bearer",
+        "client_secret",
+        "cookie",
+        "password",
+        "private_key",
+        "secret",
+        "session",
+        "token"
+      ],
+      "forbidden_value_key_names": [
+        "api_key",
+        "apikey",
+        "bearer",
+        "client_secret",
+        "cookie",
+        "credential",
+        "credentials",
+        "password",
+        "plaintext",
+        "private_key",
+        "raw",
+        "raw_value",
+        "secret",
+        "secret_value",
+        "session",
+        "token",
+        "value"
+      ],
+      "mode": "global_enforced",
+      "raw_secret_values_rejected": true
+    },
+    "source": "blockwart.domain.object_schema",
+    "version": 2,
+    "violation_policy": {
+      "description": "A rejected write names the canonical public data path, one violation code, and the published rule when a schema postcondition rejected it. Rejected values are never returned.",
+      "detail_fields": [
+        "code",
+        "location",
+        "message",
+        "path",
+        "rule"
+      ],
+      "generic_violation": "invalid_value",
+      "unknown_violations_fall_back_to_generic": true,
+      "violations": [
+        {
+          "code": "field_not_allowed",
+          "description": "This path is not part of the published contract that applies here."
+        },
+        {
+          "code": "forbidden_key",
+          "description": "A key or value at this path is globally forbidden as secret-shaped."
+        },
+        {
+          "code": "invalid_format",
+          "description": "The value at this path does not use the format this field requires."
+        },
+        {
+          "code": "invalid_value",
+          "description": "The value at this path is rejected by the canonical object schema."
+        },
+        {
+          "code": "reference_kind_not_allowed",
+          "description": "The reference at this path names an object kind this field does not accept."
+        },
+        {
+          "code": "required_field_missing",
+          "description": "A required field is missing at this path."
+        },
+        {
+          "code": "rule_violation",
+          "description": "A published schema rule for this object kind rejects this combination of fields."
+        },
+        {
+          "code": "type_mismatch",
+          "description": "The value at this path does not use the JSON type this field requires."
+        },
+        {
+          "code": "value_not_allowed",
+          "description": "The value at this path is not one of the values this field allows."
+        },
+        {
+          "code": "value_not_constant",
+          "description": "The value at this path must equal the single constant this field pins."
+        },
+        {
+          "code": "value_out_of_range",
+          "description": "The value at this path is outside the range this field allows."
+        },
+        {
+          "code": "value_too_long",
+          "description": "The value at this path is longer than this field allows."
+        },
+        {
+          "code": "value_too_short",
+          "description": "The value at this path is shorter than this field allows."
+        }
+      ]
     }
   }
 }

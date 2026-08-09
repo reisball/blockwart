@@ -63,4 +63,12 @@
     });
   });
 
+  document.addEventListener("click", (event) => {
+    const button = event.target.closest("[data-remove-row]");
+    if (!button) {
+      return;
+    }
+    button.closest("tr")?.remove();
+  });
+
 })();

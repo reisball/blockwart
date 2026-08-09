@@ -294,6 +294,214 @@ def test_settings_page_bundles_configuration_controls(client: TestClient) -> Non
     assert 'data-theme-value="light"' not in schema.text
 
 
+def test_installed_software_detail_editor_is_localized_ordered_and_safe(
+    client: TestClient,
+    session_factory,
+) -> None:
+    with session_factory() as session:
+        upsert_object(
+            session,
+            CatalogObjectIn(
+                id="ui-installed-software",
+                kind="host",
+                label="Software host",
+                data={
+                    "installed_software": [
+                        {"name": "First", "version": "2026.08"},
+                        {
+                            "name": "Docker Engine",
+                            "version": "1:27.5.1-1~ubuntu.24.04",
+                            "url": "https://docs.docker.com/engine/release-notes/27/",
+                        },
+                    ]
+                },
+            ),
+        )
+
+    detail = client.get("/objects/ui-installed-software?lang=en")
+    assert detail.status_code == 200
+    html = integrated_detail_html(detail.text)
+    assert "Installed software" in html
+    assert html.find("First") < html.find("Docker Engine")
+    assert "1:27.5.1-1~ubuntu.24.04" in html
+    assert (
+        'href="https://docs.docker.com/engine/release-notes/27/" '
+        'target="_blank" rel="noopener noreferrer"'
+    ) in html
+
+    editor = client.get("/objects/ui-installed-software?lang=en&edit=installed-software")
+    assert editor.status_code == 200
+    assert 'data-row-list="installed-software"' in editor.text
+    assert 'data-row-template="installed-software"' in editor.text
+    assert 'name="software_name" value="Docker Engine"' in editor.text
+    assert 'name="software_version" value="1:27.5.1-1~ubuntu.24.04"' in editor.text
+    assert "Entries stay in the order shown" in editor.text
+    assert "Add software" in editor.text
+    assert "Remove" in editor.text
+
+    german = client.get("/objects/ui-installed-software?lang=de")
+    assert german.status_code == 200
+    assert "Installierte Software" in german.text
+    assert "Release-Informationen öffnen" in german.text
+
+
+def test_installed_software_ui_empty_state_write_etag_revision_and_audit(
+    client: TestClient,
+    session_factory,
+) -> None:
+    with session_factory() as session:
+        upsert_object(
+            session,
+            CatalogObjectIn(
+                id="ui-empty-software",
+                kind="system",
+                label="Empty software system",
+            ),
+        )
+
+    empty = client.get("/objects/ui-empty-software?lang=en")
+    assert empty.status_code == 200
+    assert "No installed software recorded." in empty.text
+    assert "edit=installed-software" in empty.text
+
+    updated = client.post(
+        "/objects/ui-empty-software/installed-software?lang=en",
+        data={
+            "software_name": ["Second", "First"],
+            "software_version": ["vendor build+rev_7 / exact", "2026.08"],
+            "software_url": ["", "https://example.invalid/releases?q=%3Cscript%3E"],
+        },
+        follow_redirects=False,
+    )
+    assert updated.status_code == 303
+
+    with session_factory() as session:
+        stored = get_object(session, "ui-empty-software")
+        assert stored is not None
+        assert stored.revision == 2
+        assert stored.data["installed_software"] == [
+            {"name": "Second", "version": "vendor build+rev_7 / exact"},
+            {
+                "name": "First",
+                "version": "2026.08",
+                "url": "https://example.invalid/releases?q=%3Cscript%3E",
+            },
+        ]
+        audits = list(
+            session.scalars(
+                select(AuditEvent)
+                .where(AuditEvent.object_id == "ui-empty-software")
+                .order_by(AuditEvent.id.desc())
+            )
+        )
+        assert audits[0].action == "update"
+        details = json.loads(audits[0].details_json)
+        assert details["old_revision"] == 1
+        assert details["new_revision"] == 2
+        assert details["channel"] == "ui"
+
+    rendered = client.get("/objects/ui-empty-software?lang=en")
+    assert rendered.text.find("Second") < rendered.text.find("First")
+    assert 'href="https://example.invalid/releases?q=%3Cscript%3E"' in rendered.text
+    assert "q=<script>" not in rendered.text
+    assert 'rel="noopener noreferrer"' in rendered.text
+
+    conflict = client.post(
+        "/objects/ui-empty-software/installed-software?lang=en",
+        data={
+            "if_match": '"rev-1"',
+            "software_name": "Stale",
+            "software_version": "1",
+            "software_url": "",
+        },
+        follow_redirects=False,
+    )
+    assert conflict.status_code == 412
+
+    removed = client.post(
+        "/objects/ui-empty-software/installed-software?lang=en",
+        data={"if_match": '"rev-2"'},
+        follow_redirects=False,
+    )
+    assert removed.status_code == 303
+    with session_factory() as session:
+        stored = get_object(session, "ui-empty-software")
+        assert stored is not None
+        assert stored.revision == 3
+        assert "installed_software" not in stored.data
+
+
+def test_installed_software_ui_edit_marks_discovered_object_manual_and_audits(
+    client: TestClient,
+    session_factory,
+) -> None:
+    with session_factory() as session:
+        upsert_object(
+            session,
+            CatalogObjectIn(
+                id="ui-discovered-software",
+                kind="host",
+                label="Discovered software host",
+                provenance={
+                    "source_type": "discovery",
+                    "source_ref": "agent:inventory-fixture",
+                    "managed_by": "test-agent",
+                    "observed_at": "2026-08-08T12:00:00Z",
+                    "manual_override": False,
+                },
+            ),
+        )
+
+    updated = client.post(
+        "/objects/ui-discovered-software/installed-software?lang=en",
+        data={
+            "if_match": '"rev-1"',
+            "software_name": "Docker Engine",
+            "software_version": "27.5.1",
+            "software_url": "https://example.invalid/releases",
+        },
+        follow_redirects=False,
+    )
+    assert updated.status_code == 303
+
+    with session_factory() as session:
+        stored = get_object(session, "ui-discovered-software")
+        assert stored is not None
+        assert stored.revision == 2
+        assert stored.provenance.source_type == "manual"
+        assert stored.provenance.manual_override is True
+        assert stored.provenance.source_ref is None
+        assert stored.provenance.managed_by is None
+        assert stored.provenance.observed_at is None
+        audit = session.scalars(
+            select(AuditEvent)
+            .where(AuditEvent.object_id == "ui-discovered-software")
+            .order_by(AuditEvent.id.desc())
+        ).first()
+        assert audit is not None
+        details = json.loads(audit.details_json)
+        assert audit.action == "update"
+        assert details["channel"] == "ui"
+        assert details["old_revision"] == 1
+        assert details["new_revision"] == 2
+        assert details["changes"] == [
+            {
+                "field": "installed_software",
+                "before": None,
+                "after": [
+                    {
+                        "name": "Docker Engine",
+                        "version": "27.5.1",
+                        "url": "https://example.invalid/releases",
+                    }
+                ],
+                "old": "",
+                "new": "",
+                "value_change": False,
+            }
+        ]
+
+
 def test_create_object_form_is_hidden_behind_button(client: TestClient) -> None:
     response = client.get("/")
     create_response = client.get("/?create=1")
