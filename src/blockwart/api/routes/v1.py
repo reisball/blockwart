@@ -18,7 +18,9 @@ from blockwart.schemas.comments import (
     CommentCreateIn,
     CommentPageOut,
 )
+from blockwart.schemas.errors import ApiErrorResponse
 from blockwart.schemas.v1 import (
+    MAX_BATCH_RESPONSE_BYTES,
     ObjectSortField,
     SortDirection,
     V1AttachedDeviceCreateIn,
@@ -33,6 +35,8 @@ from blockwart.schemas.v1 import (
     V1NetworkTopologyOut,
     V1ObjectAccessOut,
     V1ObjectCommandOut,
+    V1ObjectContextBatchIn,
+    V1ObjectContextBatchOut,
     V1ObjectPageOut,
     V1PrincipalSearchOut,
     V1PrincipalSummaryOut,
@@ -44,6 +48,7 @@ from blockwart.schemas.v1 import (
 from blockwart.services.agent import (
     get_agent_object_context,
     query_agent_context_page,
+    query_agent_object_contexts,
     query_agent_objects_page,
 )
 from blockwart.services.commands import (
@@ -258,6 +263,36 @@ def get_v1_object(
     if isinstance(revision, int):
         response.headers["ETag"] = revision_etag(revision)
     return context
+
+
+_BATCH_RESPONSES = {
+    **API_ERROR_RESPONSES,
+    413: {"model": ApiErrorResponse, "description": "Request or response payload too large"},
+}
+
+
+@router.post(
+    "/object-contexts",
+    response_model=V1ObjectContextBatchOut,
+    responses=_BATCH_RESPONSES,
+)
+def post_v1_object_contexts(
+    payload: V1ObjectContextBatchIn,
+    session: Annotated[Session, Depends(get_session)],
+    access: Annotated[ReadAccess, Depends(require_api_read_access)],
+) -> V1ObjectContextBatchOut:
+    batch = query_agent_object_contexts(session, access, payload.object_ids)
+    response = V1ObjectContextBatchOut(
+        objects=batch.items,
+        count=len(batch.items),
+    )
+    encoded = response.model_dump_json(by_alias=True, exclude_none=True)
+    if len(encoded.encode("utf-8")) > MAX_BATCH_RESPONSE_BYTES:
+        raise HTTPException(
+            status_code=413,
+            detail="Batch response payload exceeds the maximum allowed size.",
+        )
+    return response
 
 
 @router.get(

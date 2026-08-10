@@ -19,6 +19,7 @@ from blockwart.domain.validation_errors import (
     order_public_details,
 )
 from blockwart.schemas.errors import ApiErrorResponse
+from blockwart.schemas.v1 import MAX_BATCH_REQUEST_BODY_BYTES
 
 CORRELATION_ID_HEADER = "X-Correlation-ID"
 API_ERROR_RESPONSES = {
@@ -35,7 +36,114 @@ API_ERROR_RESPONSES = {
 }
 
 _CORRELATION_ID_PATTERN = re.compile(r"^[A-Za-z0-9._-]{1,64}$")
+_BATCH_OBJECT_CONTEXTS_PATH = "/api/v1/object-contexts"
 logger = logging.getLogger(__name__)
+
+
+def install_batch_request_bound(app: FastAPI) -> None:
+    """Install an endpoint-local receive-time body bound for the batch route.
+
+    Uses a raw ASGI middleware (not ``BaseHTTPMiddleware``) so the ASGI
+    ``receive`` callable itself is wrapped — the inner app reads the body
+    through the counting wrapper, not through a framework-cached request object.
+    A ``Content-Length`` header that honestly declares an oversized body is
+    rejected without reading any bytes; an absent, misleading, or
+    chunked/streamed body is bounded while receiving. The middleware runs
+    inside the API error contract so the 413 response preserves the stable
+    error envelope and correlation ID.
+    """
+    app.add_middleware(_BatchRequestBodyBoundMiddleware)
+
+
+class _BatchRequestBodyBoundMiddleware:
+    """Raw ASGI middleware: bounds the receive stream for the batch endpoint.
+
+    Reads the request body with a byte cap before the inner app starts. If the
+    body fits, a replay ``receive`` returns the cached body so FastAPI/Pydantic
+    parsing proceeds normally. If the body exceeds the cap, a stable 413
+    response is sent without invoking the route. A ``Content-Length`` header
+    that honestly declares an oversized body is rejected without reading any
+    bytes; an absent, misleading, or chunked/streamed body is bounded while
+    receiving.
+    """
+
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if (
+            scope.get("type") != "http"
+            or scope.get("method") != "POST"
+            or scope.get("path") != _BATCH_OBJECT_CONTEXTS_PATH
+        ):
+            await self.app(scope, receive, send)
+            return
+
+        content_length = None
+        for key, value in scope.get("headers", []):
+            if key == b"content-length":
+                try:
+                    content_length = int(value)
+                except ValueError:
+                    content_length = None
+                break
+
+        if content_length is not None and content_length > MAX_BATCH_REQUEST_BODY_BYTES:
+            await _send_batch_too_large(scope, send)
+            return
+
+        chunks: list[bytes] = []
+        total = 0
+        too_large = False
+        while True:
+            message = await receive()
+            if message["type"] == "http.request":
+                body = message.get("body", b"")
+                total += len(body)
+                if total > MAX_BATCH_REQUEST_BODY_BYTES:
+                    too_large = True
+                    break
+                chunks.append(body)
+                if not message.get("more_body", False):
+                    break
+            else:
+                break
+
+        if too_large:
+            await _send_batch_too_large(scope, send)
+            return
+
+        cached_body = b"".join(chunks)
+        body_sent = False
+        original_receive = receive
+
+        async def replay_receive():
+            nonlocal body_sent
+            if not body_sent:
+                body_sent = True
+                return {
+                    "type": "http.request",
+                    "body": cached_body,
+                    "more_body": False,
+                }
+            return await original_receive()
+
+        await self.app(scope, replay_receive, send)
+
+
+async def _send_batch_too_large(scope, send):
+    correlation_id = _correlation_id_from_scope(scope)
+    response = _error_response(
+        status_code=413,
+        code="payload_too_large",
+        message="Batch request payload exceeds the maximum allowed size.",
+        correlation_id=correlation_id,
+    )
+
+    async def _empty_receive():
+        return {"type": "http.disconnect"}
+
+    await response(scope, _empty_receive, send)
 
 
 def install_api_error_contract(app: FastAPI) -> None:
@@ -110,6 +218,7 @@ def install_api_error_contract(app: FastAPI) -> None:
             405: "method_not_allowed",
             409: "conflict",
             412: "precondition_failed",
+            413: "payload_too_large",
             428: "precondition_required",
             503: "service_unavailable",
         }.get(exc.status_code, "http_error")
@@ -200,6 +309,21 @@ def _correlation_id(request: Request) -> str:
     supplied = request.headers.get(CORRELATION_ID_HEADER)
     if supplied and _CORRELATION_ID_PATTERN.fullmatch(supplied):
         return supplied
+    return str(uuid4())
+
+
+def _correlation_id_from_scope(scope) -> str:
+    """Extract the correlation ID from a raw ASGI scope."""
+    state = scope.get("state") or {}
+    existing = state.get("correlation_id")
+    if isinstance(existing, str):
+        return existing
+    for key, value in scope.get("headers", []):
+        if key == b"x-correlation-id":
+            decoded = value.decode("utf-8", errors="replace")
+            if _CORRELATION_ID_PATTERN.fullmatch(decoded):
+                return decoded
+            break
     return str(uuid4())
 
 

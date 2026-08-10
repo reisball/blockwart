@@ -350,6 +350,36 @@ TOOLS: list[JSON] = [
         "annotations": READ_ONLY_ANNOTATIONS,
     },
     {
+        "name": "blockwart.get_object_contexts",
+        "description": (
+            "Retrieve full sanitized contexts for up to 20 already-known Blockwart object ids in "
+            "one bounded read-only roundtrip, preserving input order. Each readable item is "
+            "field-equivalent to get_object_context including its write-ready strong ETag; "
+            "discover-only items are strict stubs; concealed and missing ids are indistinguishable "
+            "concealed placeholders. Use get_object_context for one id and get_context to search "
+            "by attribute instead of by known id."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "object_ids": {
+                    "type": "array",
+                    "minItems": 1,
+                    "maxItems": 20,
+                    "items": {
+                        "type": "string",
+                        "pattern": "^[a-z0-9](?:[a-z0-9_-]*[a-z0-9])?$",
+                        "maxLength": 128,
+                    },
+                    "description": "Known object ids, deduplicated by first occurrence",
+                }
+            },
+            "required": ["object_ids"],
+            "additionalProperties": False,
+        },
+        "annotations": READ_ONLY_ANNOTATIONS,
+    },
+    {
         "name": "blockwart.list_comments",
         "description": (
             "List the authorized append-only comment timeline for one known object. "
@@ -1039,6 +1069,14 @@ def call_tool(
             "count": 1,
             "objects": [context],
         }
+    elif name == "blockwart.get_object_contexts":
+        object_ids = _required_object_ids(args, "object_ids")
+        payload = request(
+            "POST",
+            "/api/v1/object-contexts",
+            {"object_ids": object_ids},
+            {},
+        )
     elif name == "blockwart.list_comments":
         object_id = _required_string(args, "object_id")
         payload = fetch(
@@ -1608,6 +1646,22 @@ def _required_integer(args: JSON, key: str) -> int:
     if not isinstance(value, int) or isinstance(value, bool) or value < 1:
         raise ToolInputError(f"{key} is required")
     return value
+
+
+def _required_object_ids(args: JSON, key: str) -> list[str]:
+    value = args.get(key)
+    if not isinstance(value, list) or not value:
+        raise ToolInputError(f"{key} is required")
+    if len(value) > 20:
+        raise ToolInputError(f"{key} must contain at most 20 ids")
+    object_ids: list[str] = []
+    for item in value:
+        if not isinstance(item, str) or not item:
+            raise ToolInputError(f"{key} must contain non-empty strings")
+        if len(item) > 128:
+            raise ToolInputError(f"{key} must not exceed the canonical id length")
+        object_ids.append(item)
+    return object_ids
 
 
 def _self_contained_create_payload(

@@ -155,6 +155,7 @@ preserving its established `results` and `objects` payload fields:
 
 - blockwart.search
 - blockwart.get_object_context
+- blockwart.get_object_contexts
 - blockwart.get_context
 
 The MCP server also exposes authorized create, update, relationship, and delete

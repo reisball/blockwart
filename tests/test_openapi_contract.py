@@ -42,6 +42,7 @@ EXPECTED_OPERATIONS = {
     "/api/v1/objects/{object_id}/relationships": {"get", "post", "delete"},
     "/api/v1/objects/{object_id}/topology": {"get"},
     "/api/v1/objects/{parent_id}/attached-devices": {"post"},
+    "/api/v1/object-contexts": {"post"},
     "/api/v1/roots": {"post"},
 }
 

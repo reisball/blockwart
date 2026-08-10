@@ -35,6 +35,7 @@ from blockwart.schemas.agent import (
     AgentAssetNode,
     AgentAssetReadNode,
     AgentAssetStubNode,
+    AgentCatalogConcealed,
     AgentCatalogContextRead,
     AgentCatalogObjectContext,
     AgentCatalogObjectRead,
@@ -43,9 +44,13 @@ from blockwart.schemas.agent import (
     AgentRelationshipOut,
 )
 from blockwart.schemas.catalog import CatalogRecordDiagnostic, ObjectKind
+from blockwart.schemas.comments import CommentOut
 from blockwart.schemas.v1 import ObjectSortField, SortDirection
 from blockwart.services.commands import revision_etag
-from blockwart.services.comments import recent_comments_for_object
+from blockwart.services.comments import (
+    recent_comments_for_object,
+    recent_comments_for_objects,
+)
 from blockwart.services.pagination import CursorPage, paginate_items
 from blockwart.services.read_access import ReadAccess
 from blockwart.services.record_integrity import read_catalog_record_data
@@ -225,6 +230,11 @@ def search_agent_objects(
     ).items
 
 
+@dataclass(frozen=True, slots=True)
+class AgentObjectContextBatch:
+    items: list[AgentCatalogContextRead | AgentCatalogConcealed]
+
+
 def get_agent_object_context(
     session: Session,
     object_id: str,
@@ -238,6 +248,55 @@ def get_agent_object_context(
     ):
         return None
     return resolver.context(catalog_object)
+
+
+def query_agent_object_contexts(
+    session: Session,
+    access: ReadAccess,
+    object_ids: list[str],
+) -> AgentObjectContextBatch:
+    """Return authorized contexts for a bounded list of known object ids.
+
+    Duplicate ids keep their first input position. Each unique id resolves to
+    exactly one result item in input order: a full detail context (with
+    write-ready etag and prefetched recent comments) when the caller can read
+    it, a strict stub when the caller can only discover it, or a concealed
+    placeholder when the caller cannot discover it or the id does not exist.
+    Concealed and missing ids stay indistinguishable: the placeholder carries
+    only the requested id. Objects, relationships, and the five newest comments
+    for every authorized detail object are loaded in bounded snapshots so
+    database access does not grow per requested id.
+
+    Missing and existing-but-concealed ids receive equivalent bounded
+    policy-shaped work: ``visibility_for`` is called for every requested id
+    regardless of whether the object row exists, so the two cases do not take
+    observably different shortcuts.
+    """
+    resolver = _AgentCatalogResolver(session, access)
+    ordered_unique_ids: list[str] = []
+    seen: set[str] = set()
+    for object_id in object_ids:
+        if object_id not in seen:
+            seen.add(object_id)
+            ordered_unique_ids.append(object_id)
+    detail_objects: list[CatalogObject] = []
+    by_id: dict[str, AgentCatalogContextRead | AgentCatalogConcealed] = {}
+    for object_id in ordered_unique_ids:
+        catalog_object = resolver.object_by_id.get(object_id)
+        visibility = access.policy.visibility_for(object_id)
+        if catalog_object is None or visibility == ObjectVisibility.NONE:
+            by_id[object_id] = AgentCatalogConcealed(id=object_id)
+        elif visibility == ObjectVisibility.STUB:
+            by_id[object_id] = resolver.stub(catalog_object)
+        else:
+            detail_objects.append(catalog_object)
+    recent_comments = resolver.prefetch_recent_comments(detail_objects)
+    for catalog_object in detail_objects:
+        by_id[catalog_object.id] = resolver.context_with_comments(
+            catalog_object, recent_comments
+        )
+    ordered_items = [by_id[object_id] for object_id in ordered_unique_ids]
+    return AgentObjectContextBatch(items=ordered_items)
 
 
 def build_agent_context(
@@ -548,6 +607,16 @@ class _AgentCatalogResolver:
     def context(self, obj: CatalogObject) -> AgentCatalogContextRead:
         if self.access.policy.visibility_for(obj.id) == ObjectVisibility.STUB:
             return self.stub(obj)
+        return self.context_with_comments(
+            obj,
+            {obj.id: recent_comments_for_object(self.session, obj, limit=5)},
+        )
+
+    def context_with_comments(
+        self,
+        obj: CatalogObject,
+        recent_comments: dict[str, list[CommentOut]],
+    ) -> AgentCatalogObjectContext:
         data = _safe_object_data(obj)
         object_ref = _object_ref(obj)
         relationships = [
@@ -584,8 +653,16 @@ class _AgentCatalogResolver:
             updated_at=format_rfc3339_utc(obj.updated_at),
             dependencies=self.dependencies(object_ref),
             credential_references=sorted(_collect_credential_references(data)),
-            recent_comments=recent_comments_for_object(self.session, obj, limit=5),
+            recent_comments=recent_comments.get(obj.id, []),
         )
+
+    def prefetch_recent_comments(
+        self,
+        objects: list[CatalogObject],
+    ) -> dict[str, list[CommentOut]]:
+        if not objects:
+            return {}
+        return recent_comments_for_objects(self.session, objects, limit=5)
 
     def stub(self, obj: CatalogObject) -> AgentCatalogObjectStub:
         object_ref = _object_ref(obj)

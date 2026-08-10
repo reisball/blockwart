@@ -47,6 +47,19 @@ rendered HTML is a browser-only projection. Discover-only stubs never contain
 comments. The exhaustive newest-first timeline is a separate opaque-cursor
 resource; see `object-comments.md`.
 
+The known-ID batch context surface (`POST /api/v1/object-contexts` and
+`blockwart.get_object_contexts`) reuses the same Agent resolver, visibility
+decision, strict stub fields, and `recent_comments` projection. It loads
+objects, relationships, and the five newest comments for every authorized
+detail object in bounded snapshots, so database access does not grow per
+requested ID. Concealed and missing IDs both return a concealed placeholder
+that carries only the requested ID; the batch never becomes an existence
+oracle through status, text, counts, order, or metadata. Missing and
+existing-but-concealed IDs receive equivalent bounded policy-shaped work:
+``visibility_for`` is called for every requested ID regardless of whether the
+object row exists, so the two cases do not take observably different
+shortcuts.
+
 Catalog topology and Agent context both resolve placement through
 `blockwart.domain.placement.PlacementGraph`. This keeps placement semantics in
 one domain implementation without forcing the two public response shapes to be
