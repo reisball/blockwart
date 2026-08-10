@@ -17,7 +17,7 @@ branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
 
-_LAST_ADMIN_UPDATE_TRIGGER = """
+_LAST_ADMIN_UPDATE_TRIGGER_SQLITE = """
 CREATE TRIGGER ck_principals_last_active_admin_update
 BEFORE UPDATE OF active, platform_role ON principals
 WHEN OLD.active = 1
@@ -32,7 +32,7 @@ BEGIN
 END
 """
 
-_LAST_ADMIN_DELETE_TRIGGER = """
+_LAST_ADMIN_DELETE_TRIGGER_SQLITE = """
 CREATE TRIGGER ck_principals_last_active_admin_delete
 BEFORE DELETE ON principals
 WHEN OLD.active = 1
@@ -44,6 +44,23 @@ WHEN OLD.active = 1
 BEGIN
   SELECT RAISE(ABORT, 'last active platform admin');
 END
+"""
+
+_LAST_ADMIN_UPDATE_TRIGGER_PG = """
+CREATE TRIGGER ck_principals_last_active_admin_update
+BEFORE UPDATE OF active, platform_role ON principals
+FOR EACH ROW
+WHEN (OLD.active = true AND OLD.platform_role = 'admin'
+  AND (NEW.active = false OR NEW.platform_role IS NULL OR NEW.platform_role <> 'admin'))
+EXECUTE FUNCTION blockwart_check_last_active_admin()
+"""
+
+_LAST_ADMIN_DELETE_TRIGGER_PG = """
+CREATE TRIGGER ck_principals_last_active_admin_delete
+BEFORE DELETE ON principals
+FOR EACH ROW
+WHEN (OLD.active = true AND OLD.platform_role = 'admin')
+EXECUTE FUNCTION blockwart_check_last_active_admin()
 """
 
 
@@ -70,13 +87,24 @@ def upgrade() -> None:
             "ix_principals_platform_role",
             ["platform_role"],
         )
-    op.execute(_LAST_ADMIN_UPDATE_TRIGGER)
-    op.execute(_LAST_ADMIN_DELETE_TRIGGER)
+    _bind = op.get_bind()
+    if _bind.dialect.name == "sqlite":
+        op.execute(_LAST_ADMIN_UPDATE_TRIGGER_SQLITE)
+        op.execute(_LAST_ADMIN_DELETE_TRIGGER_SQLITE)
+    else:
+        op.execute("CREATE OR REPLACE FUNCTION blockwart_check_last_active_admin() RETURNS TRIGGER AS $$ BEGIN IF NOT EXISTS (SELECT 1 FROM principals WHERE id <> OLD.id AND active = true AND platform_role = 'admin') THEN RAISE EXCEPTION 'last active platform admin'; END IF; RETURN NEW; END; $$ LANGUAGE plpgsql")
+        op.execute(_LAST_ADMIN_UPDATE_TRIGGER_PG)
+        op.execute(_LAST_ADMIN_DELETE_TRIGGER_PG)
 
 
 def downgrade() -> None:
-    op.execute("DROP TRIGGER IF EXISTS ck_principals_last_active_admin_delete")
-    op.execute("DROP TRIGGER IF EXISTS ck_principals_last_active_admin_update")
+    _bind = op.get_bind()
+    if _bind.dialect.name == "sqlite":
+        op.execute("DROP TRIGGER IF EXISTS ck_principals_last_active_admin_delete")
+        op.execute("DROP TRIGGER IF EXISTS ck_principals_last_active_admin_update")
+    else:
+        op.execute("DROP TRIGGER IF EXISTS ck_principals_last_active_admin_delete ON principals")
+        op.execute("DROP TRIGGER IF EXISTS ck_principals_last_active_admin_update ON principals")
     with op.batch_alter_table("principals") as batch:
         batch.drop_index("ix_principals_platform_role")
         batch.drop_constraint("ck_principals_revision_positive", type_="check")

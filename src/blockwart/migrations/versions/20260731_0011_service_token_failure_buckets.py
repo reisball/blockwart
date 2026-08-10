@@ -25,7 +25,7 @@ def upgrade() -> None:
         sa.Column("key_hash", sa.String(length=64), nullable=False),
         sa.Column("window_start", sa.DateTime(), nullable=False),
         sa.Column("failure_count", sa.Integer(), server_default="1", nullable=False),
-        sa.Column("event_emitted", sa.Boolean(), server_default=sa.text("0"), nullable=False),
+        sa.Column("event_emitted", sa.Boolean(), server_default=sa.text("false"), nullable=False),
         sa.Column("expires_at", sa.DateTime(), nullable=False),
         sa.CheckConstraint(
             "dimension IN ('global','source','token')",
@@ -36,7 +36,7 @@ def upgrade() -> None:
             name="ck_service_token_failure_buckets_count",
         ),
         sa.CheckConstraint(
-            "event_emitted IN (0,1)",
+            "event_emitted IN (true, false)",
             name="ck_service_token_failure_buckets_event_boolean",
         ),
         sa.PrimaryKeyConstraint("id"),

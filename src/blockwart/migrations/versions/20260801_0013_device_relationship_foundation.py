@@ -66,8 +66,7 @@ COMPATIBILITY_STATUS_SQL = (
 
 def upgrade() -> None:
     bind = op.get_bind()
-    if bind.dialect.name != "sqlite":
-        raise RuntimeError("device foundation migration requires SQLite")
+    _is_sqlite = bind.dialect.name == "sqlite"
 
     object_rows = list(
         bind.execute(
@@ -360,6 +359,10 @@ def _json_object(raw_value: Any, *, location: str) -> dict[str, Any]:
 
 
 def _rebuild_catalog_objects() -> None:
+    _bind = op.get_bind()
+    if _bind.dialect.name != "sqlite":
+        for _constraint in ["ck_catalog_objects_revision_positive", "ck_catalog_objects_lifecycle", "ck_catalog_objects_health", "ck_catalog_objects_asset_state", "ck_catalog_objects_compatibility_status"]:
+            op.execute(f"ALTER TABLE catalog_objects DROP CONSTRAINT IF EXISTS {_constraint}")
     op.get_bind().exec_driver_sql(
         f"""
             CREATE TABLE _bw_0013_catalog_objects (
@@ -369,8 +372,8 @@ def _rebuild_catalog_objects() -> None:
                 status VARCHAR(64) NOT NULL,
                 summary TEXT,
                 data_json TEXT NOT NULL,
-                created_at DATETIME DEFAULT CURRENT_TIMESTAMP NOT NULL,
-                updated_at DATETIME DEFAULT CURRENT_TIMESTAMP NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL,
                 lifecycle VARCHAR(32),
                 health VARCHAR(32),
                 provenance_json TEXT DEFAULT '{{"manual_override":false,"source_type":"unknown"}}'
@@ -398,13 +401,18 @@ def _rebuild_catalog_objects() -> None:
         "SELECT id, kind, label, status, summary, data_json, created_at, updated_at, lifecycle, "
         "health, provenance_json, revision FROM catalog_objects"
     )
-    op.execute("DROP TABLE catalog_objects")
+    op.execute("DROP TABLE catalog_objects CASCADE")
     op.execute("ALTER TABLE _bw_0013_catalog_objects RENAME TO catalog_objects")
     op.create_index("ix_catalog_objects_kind", "catalog_objects", ["kind"])
     op.create_index("ix_catalog_objects_label", "catalog_objects", ["label"])
 
 
 def _rebuild_relationships() -> None:
+    _bind = op.get_bind()
+    if _bind.dialect.name != "sqlite":
+        op.execute("ALTER TABLE relationships DROP CONSTRAINT IF EXISTS uq_relationships_triplet")
+        op.execute("ALTER TABLE relationships DROP CONSTRAINT IF EXISTS ck_relationships_no_self_reference")
+        op.execute("ALTER TABLE relationships DROP CONSTRAINT IF EXISTS ck_relationships_known_type")
     op.execute(
         f"""
         CREATE TABLE _bw_0013_relationships (
@@ -429,7 +437,7 @@ def _rebuild_relationships() -> None:
         "(id, from_ref, relation_type, to_ref, metadata_json) "
         "SELECT id, from_ref, relation_type, to_ref, '{}' FROM relationships"
     )
-    op.execute("DROP TABLE relationships")
+    op.execute("DROP TABLE relationships CASCADE")
     op.execute("ALTER TABLE _bw_0013_relationships RENAME TO relationships")
     op.create_index("ix_relationships_from_ref", "relationships", ["from_ref"])
     op.create_index("ix_relationships_relation_type", "relationships", ["relation_type"])
@@ -440,4 +448,5 @@ def _rebuild_relationships() -> None:
         ["to_ref"],
         unique=True,
         sqlite_where=sa.text("relation_type = 'hosts'"),
+        postgresql_where=sa.text("relation_type = 'hosts'"),
     )

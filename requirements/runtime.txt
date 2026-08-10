@@ -152,3 +152,4 @@ watchfiles==1.2.0
     # via uvicorn
 websockets==17.0.1
     # via uvicorn
+psycopg2-binary>=2.9,<3

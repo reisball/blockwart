@@ -23,8 +23,7 @@ _LEGACY_NAMESPACE = UUID("ab7a2da4-b30f-4a4c-9bbb-c37f418ba9e7")
 
 def upgrade() -> None:
     bind = op.get_bind()
-    if bind.dialect.name != "sqlite":
-        raise RuntimeError("object-comment migration requires SQLite")
+    _is_sqlite = bind.dialect.name == "sqlite"
 
     preflight_rows = _legacy_comment_rows(bind, include_instance_id=False)
     # Validate every row before the first schema or data mutation.
@@ -51,7 +50,7 @@ def upgrade() -> None:
                 "instance_id",
                 sa.String(length=32),
                 nullable=False,
-                server_default=sa.text("(lower(hex(randomblob(16))))"),
+                server_default=sa.text("(lower(hex(randomblob(16))))") if _is_sqlite else sa.text("md5(random()::text)"),
             )
         )
         batch.create_unique_constraint(
@@ -171,22 +170,34 @@ def upgrade() -> None:
             },
         )
 
-    op.execute(
-        "CREATE TRIGGER object_comments_no_update "
-        "BEFORE UPDATE ON object_comments BEGIN "
-        "SELECT RAISE(ABORT, 'object comments are append-only'); END"
-    )
-    op.execute(
-        "CREATE TRIGGER object_comments_no_delete "
-        "BEFORE DELETE ON object_comments BEGIN "
-        "SELECT RAISE(ABORT, 'object comments are append-only'); END"
-    )
+    if bind.dialect.name == "sqlite":
+        op.execute(
+            "CREATE TRIGGER object_comments_no_update "
+            "BEFORE UPDATE ON object_comments BEGIN "
+            "SELECT RAISE(ABORT, 'object comments are append-only'); END"
+        )
+        op.execute(
+            "CREATE TRIGGER object_comments_no_delete "
+            "BEFORE DELETE ON object_comments BEGIN "
+            "SELECT RAISE(ABORT, 'object comments are append-only'); END"
+        )
+    else:
+        op.execute("CREATE OR REPLACE FUNCTION blockwart_raise_exception() RETURNS TRIGGER AS $$ BEGIN RAISE EXCEPTION 'operation blocked by trigger'; END; $$ LANGUAGE plpgsql")
+        op.execute(
+            "CREATE TRIGGER object_comments_no_update "
+            "BEFORE UPDATE ON object_comments "
+            "FOR EACH ROW EXECUTE FUNCTION blockwart_raise_exception()"
+        )
+        op.execute(
+            "CREATE TRIGGER object_comments_no_delete "
+            "BEFORE DELETE ON object_comments "
+            "FOR EACH ROW EXECUTE FUNCTION blockwart_raise_exception()"
+        )
 
 
 def downgrade() -> None:
     bind = op.get_bind()
-    if bind.dialect.name != "sqlite":
-        raise RuntimeError("object-comment migration requires SQLite")
+    _is_sqlite = bind.dialect.name == "sqlite"
     count = bind.scalar(sa.text("SELECT COUNT(*) FROM object_comments"))
     if int(count or 0) != 0:
         raise RuntimeError(

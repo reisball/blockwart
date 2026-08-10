@@ -215,3 +215,29 @@ event.listen(
         "SELECT RAISE(ABORT, 'object comments are append-only'); END"
     ).execute_if(dialect="sqlite"),
 )
+event.listen(
+    ObjectComment.__table__,
+    "after_create",
+    DDL(
+        "CREATE OR REPLACE FUNCTION blockwart_raise_exception(msg TEXT) "
+        "RETURNS TRIGGER AS $$ BEGIN RAISE EXCEPTION '%', msg; END; $$ LANGUAGE plpgsql"
+    ).execute_if(dialect="postgresql"),
+)
+event.listen(
+    ObjectComment.__table__,
+    "after_create",
+    DDL(
+        "CREATE TRIGGER object_comments_no_update "
+        "BEFORE UPDATE ON object_comments "
+        "FOR EACH ROW EXECUTE FUNCTION blockwart_raise_exception()"
+    ).execute_if(dialect="postgresql"),
+)
+event.listen(
+    ObjectComment.__table__,
+    "after_create",
+    DDL(
+        "CREATE TRIGGER object_comments_no_delete "
+        "BEFORE DELETE ON object_comments "
+        "FOR EACH ROW EXECUTE FUNCTION blockwart_raise_exception()"
+    ).execute_if(dialect="postgresql"),
+)
