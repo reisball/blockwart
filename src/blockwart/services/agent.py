@@ -266,6 +266,11 @@ def query_agent_object_contexts(
     only the requested id. Objects, relationships, and the five newest comments
     for every authorized detail object are loaded in bounded snapshots so
     database access does not grow per requested id.
+
+    Missing and existing-but-concealed ids receive equivalent bounded
+    policy-shaped work: ``visibility_for`` is called for every requested id
+    regardless of whether the object row exists, so the two cases do not take
+    observably different shortcuts.
     """
     resolver = _AgentCatalogResolver(session, access)
     ordered_unique_ids: list[str] = []
@@ -278,11 +283,8 @@ def query_agent_object_contexts(
     by_id: dict[str, AgentCatalogContextRead | AgentCatalogConcealed] = {}
     for object_id in ordered_unique_ids:
         catalog_object = resolver.object_by_id.get(object_id)
-        if catalog_object is None:
-            by_id[object_id] = AgentCatalogConcealed(id=object_id)
-            continue
         visibility = access.policy.visibility_for(object_id)
-        if visibility == ObjectVisibility.NONE:
+        if catalog_object is None or visibility == ObjectVisibility.NONE:
             by_id[object_id] = AgentCatalogConcealed(id=object_id)
         elif visibility == ObjectVisibility.STUB:
             by_id[object_id] = resolver.stub(catalog_object)

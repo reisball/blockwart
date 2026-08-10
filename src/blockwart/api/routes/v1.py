@@ -18,6 +18,7 @@ from blockwart.schemas.comments import (
     CommentCreateIn,
     CommentPageOut,
 )
+from blockwart.schemas.errors import ApiErrorResponse
 from blockwart.schemas.v1 import (
     MAX_BATCH_RESPONSE_BYTES,
     ObjectSortField,
@@ -264,9 +265,16 @@ def get_v1_object(
     return context
 
 
+_BATCH_RESPONSES = {
+    **API_ERROR_RESPONSES,
+    413: {"model": ApiErrorResponse, "description": "Request or response payload too large"},
+}
+
+
 @router.post(
     "/object-contexts",
     response_model=V1ObjectContextBatchOut,
+    responses=_BATCH_RESPONSES,
 )
 def post_v1_object_contexts(
     payload: V1ObjectContextBatchIn,

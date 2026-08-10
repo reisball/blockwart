@@ -1,7 +1,11 @@
 from fastapi import FastAPI, Request
 from fastapi.staticfiles import StaticFiles
 
-from blockwart.api.errors import install_api_error_contract, install_request_context
+from blockwart.api.errors import (
+    install_api_error_contract,
+    install_batch_request_bound,
+    install_request_context,
+)
 from blockwart.api.routes import admin, agent, auth, catalog, health, v1
 from blockwart.config import Settings, get_settings
 from blockwart.domain.schema_projection import object_schema_projection
@@ -27,6 +31,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         global_challenge_limit=resolved_settings.auth_login_global_challenge_limit,
         max_password_concurrency=resolved_settings.auth_password_max_concurrency,
     )
+    install_batch_request_bound(app)
     install_api_error_contract(app)
     app.middleware("http")(persist_locale_cookie)
     app.middleware("http")(principal_scoped_cache_control)

@@ -600,3 +600,369 @@ def test_mcp_batch_translates_upstream_not_found_without_leak(client: TestClient
         )
     assert exc.value.code == "not_found"
     assert PRIVATE_MARKER not in exc.value.public_message
+
+
+# ---------------------------------------------------------------------------
+# Finding 1a regressions: 128-character id boundary
+# ---------------------------------------------------------------------------
+
+
+def test_128_character_id_is_accepted_at_rest_and_mcp(client: TestClient) -> None:
+    valid_id = "a" * 128
+    response = client.post(
+        "/api/v1/object-contexts", json={"object_ids": [valid_id]}
+    )
+    assert response.status_code == 200
+    assert response.json()["objects"][0] == {
+        "id": valid_id,
+        "visibility": "concealed",
+    }
+
+
+def test_129_character_id_is_rejected_with_validation_error(client: TestClient) -> None:
+    too_long = "a" * 129
+    response = client.post(
+        "/api/v1/object-contexts", json={"object_ids": [too_long]}
+    )
+    assert response.status_code == 422
+    assert response.json()["error"]["code"] == "validation_error"
+    assert too_long not in json.dumps(response.json())
+
+
+def test_mcp_schema_publishes_max_length_128() -> None:
+    from blockwart.mcp.server import TOOL_DEFINITIONS
+
+    schema = TOOL_DEFINITIONS["blockwart.get_object_contexts"]["inputSchema"]
+    items = schema["properties"]["object_ids"]["items"]
+    assert items["maxLength"] == 128
+    assert items["pattern"] == "^[a-z0-9](?:[a-z0-9_-]*[a-z0-9])?$"
+    assert schema["properties"]["object_ids"]["maxItems"] == 20
+
+
+def test_mcp_rejects_129_character_id_before_fetch() -> None:
+    def fake_fetch(path, params):
+        raise AssertionError("fetcher should not be called")
+
+    with pytest.raises(ToolInputError):
+        call_tool(
+            "blockwart.get_object_contexts",
+            {"object_ids": ["a" * 129]},
+            fetcher=fake_fetch,
+        )
+
+
+def test_openapi_publishes_max_length_128_and_endpoint_local_413(
+    client: TestClient,
+) -> None:
+    op = client.app.openapi()
+    batch_spec = op["paths"]["/api/v1/object-contexts"]["post"]
+    ref = batch_spec["requestBody"]["content"]["application/json"]["schema"]["$ref"]
+    component_name = ref.split("/")[-1]
+    component = op["components"]["schemas"][component_name]
+    items = component["properties"]["object_ids"]["items"]
+    assert items["maxLength"] == 128
+    # 413 must be endpoint-local
+    assert "413" in batch_spec["responses"]
+    for path, methods in op["paths"].items():
+        if path == "/api/v1/object-contexts":
+            continue
+        for method_spec in methods.values():
+            if isinstance(method_spec, dict):
+                assert "413" not in method_spec.get("responses", {}), (
+                    f"413 leaked to {path}"
+                )
+
+
+# ---------------------------------------------------------------------------
+# Finding 1b regressions: receive-time request-body byte bound
+# ---------------------------------------------------------------------------
+
+_MAX_REQUEST_BYTES = 8192
+
+
+def test_honest_oversized_content_length_is_rejected_before_body_read(
+    client: TestClient,
+) -> None:
+    body = b"B" * (_MAX_REQUEST_BYTES + 1)
+    response = client.post(
+        "/api/v1/object-contexts",
+        content=body,
+        headers={"Content-Type": "application/json"},
+    )
+    assert response.status_code == 413
+    assert response.json()["error"]["code"] == "payload_too_large"
+    assert "BBB" not in json.dumps(response.json())
+
+
+def test_valid_small_request_succeeds(client: TestClient) -> None:
+    response = client.post(
+        "/api/v1/object-contexts", json={"object_ids": ["alpha"]}
+    )
+    assert response.status_code == 200
+
+
+def test_exact_byte_boundary_accepted(client: TestClient) -> None:
+    body = json.dumps({"object_ids": ["alpha"]}).encode("utf-8")
+    assert len(body) < _MAX_REQUEST_BYTES
+    response = client.post(
+        "/api/v1/object-contexts",
+        content=body,
+        headers={"Content-Type": "application/json"},
+    )
+    assert response.status_code == 200
+
+
+async def _asgi_call(
+    app,
+    *,
+    method: str,
+    path: str,
+    body_chunks: list[bytes],
+    content_length: str | None,
+    content_type: str = "application/json",
+) -> tuple[int, dict[str, str], bytes]:
+    """Call the ASGI app directly with full control over the receive stream."""
+    scope = {
+        "type": "http",
+        "http_version": "1.1",
+        "method": method,
+        "path": path,
+        "raw_path": path.encode("utf-8"),
+        "query_string": b"",
+        "headers": [
+            (b"content-type", content_type.encode("utf-8")),
+        ],
+        "client": ("127.0.0.1", 12345),
+        "server": ("127.0.0.1", 8000),
+        "scheme": "http",
+    }
+    if content_length is not None:
+        scope["headers"].append((b"content-length", content_length.encode("utf-8")))
+
+    chunk_index = 0
+
+    async def receive():
+        nonlocal chunk_index
+        if chunk_index < len(body_chunks):
+            chunk = body_chunks[chunk_index]
+            chunk_index += 1
+            return {
+                "type": "http.request",
+                "body": chunk,
+                "more_body": chunk_index < len(body_chunks),
+            }
+        return {"type": "http.request", "body": b"", "more_body": False}
+
+    response_status = 0
+    response_headers: dict[str, str] = {}
+    response_body = b""
+
+    async def send(message):
+        nonlocal response_status, response_headers, response_body
+        if message["type"] == "http.response.start":
+            response_status = message["status"]
+            for key, value in message.get("headers", []):
+                response_headers[key.decode("utf-8")] = value.decode("utf-8")
+        elif message["type"] == "http.response.body":
+            response_body += message.get("body", b"")
+
+    await app(scope, receive, send)
+    return response_status, response_headers, response_body
+
+
+def test_misleading_content_length_small_header_big_body_rejected(
+    client: TestClient,
+) -> None:
+    import asyncio
+
+    big_body = b"B" * (_MAX_REQUEST_BYTES + 1000)
+    status, _, body = asyncio.run(
+        _asgi_call(
+            client.app,
+            method="POST",
+            path="/api/v1/object-contexts",
+            body_chunks=[big_body],
+            content_length="10",
+        )
+    )
+    assert status == 413
+    import json as _json
+
+    error = _json.loads(body.decode("utf-8"))["error"]
+    assert error["code"] == "payload_too_large"
+    assert b"BBB" not in body
+
+
+def test_absent_content_length_oversized_body_rejected(client: TestClient) -> None:
+    import asyncio
+
+    big_body = b"B" * (_MAX_REQUEST_BYTES + 1)
+    status, _, body = asyncio.run(
+        _asgi_call(
+            client.app,
+            method="POST",
+            path="/api/v1/object-contexts",
+            body_chunks=[big_body],
+            content_length=None,
+        )
+    )
+    assert status == 413
+    import json as _json
+
+    error = _json.loads(body.decode("utf-8"))["error"]
+    assert error["code"] == "payload_too_large"
+    assert b"BBB" not in body
+
+
+def test_chunked_body_within_limit_accepted(client: TestClient) -> None:
+    import asyncio
+
+    full_body = json.dumps({"object_ids": ["alpha"]}).encode("utf-8")
+    midpoint = len(full_body) // 2
+    chunks = [full_body[:midpoint], full_body[midpoint:]]
+    status, _, body = asyncio.run(
+        _asgi_call(
+            client.app,
+            method="POST",
+            path="/api/v1/object-contexts",
+            body_chunks=chunks,
+            content_length=None,
+        )
+    )
+    assert status == 200
+    import json as _json
+
+    assert _json.loads(body.decode("utf-8"))["count"] == 1
+
+
+def test_chunked_oversized_body_rejected(client: TestClient) -> None:
+    import asyncio
+
+    chunks = [b"B" * 4096, b"B" * 4097]
+    status, _, body = asyncio.run(
+        _asgi_call(
+            client.app,
+            method="POST",
+            path="/api/v1/object-contexts",
+            body_chunks=chunks,
+            content_length=None,
+        )
+    )
+    assert status == 413
+    import json as _json
+
+    error = _json.loads(body.decode("utf-8"))["error"]
+    assert error["code"] == "payload_too_large"
+
+
+def test_non_batch_endpoint_not_bounded(client: TestClient) -> None:
+    response = client.post(
+        "/api/v1/objects/alpha/children",
+        json={"id": "test-child", "kind": "service", "label": "Test"},
+        headers={"Idempotency-Key": "test-key-1234567890123456"},
+    )
+    assert response.status_code != 413
+
+
+# ---------------------------------------------------------------------------
+# Finding 2 regressions: missing and concealed IDs receive equivalent
+# policy-shaped work
+# ---------------------------------------------------------------------------
+
+
+def test_visibility_for_is_called_for_missing_and_concealed_ids(
+    session_factory,
+) -> None:
+    with session_factory() as session:
+        state = _RestrictedState(
+            detail_ids=frozenset({"alpha"}),
+            stub_ids=frozenset({"gamma"}),
+        )
+        access = _restricted_access(session, state)
+        visibility_calls: list[str] = []
+        original_visibility_for = access.policy.visibility_for
+
+        def tracking_visibility_for(object_id: str):
+            visibility_calls.append(object_id)
+            return original_visibility_for(object_id)
+
+        # PolicySnapshot is frozen but the instance attribute can be replaced
+        # via __dict__ because it is not slotted.
+        object.__setattr__(
+            access.policy,
+            "visibility_for",
+            tracking_visibility_for,
+        )
+        batch = query_agent_object_contexts(
+            session, access, ["alpha", "delta", "missing-id"]
+        )
+
+    assert "delta" in visibility_calls
+    assert "missing-id" in visibility_calls
+    assert "alpha" in visibility_calls
+    assert batch.items[1].visibility == "concealed"
+    assert batch.items[2].visibility == "concealed"
+
+
+def test_missing_and_concealed_produce_identical_result_shape(
+    session_factory,
+) -> None:
+    with session_factory() as session:
+        state = _RestrictedState(
+            detail_ids=frozenset({"alpha"}),
+            stub_ids=frozenset({"gamma"}),
+        )
+        access = _restricted_access(session, state)
+        batch = query_agent_object_contexts(
+            session, access, ["delta", "missing-id"]
+        )
+
+    existing_concealed = batch.items[0].model_dump()
+    missing = batch.items[1].model_dump()
+    assert set(existing_concealed) == set(missing) == {"id", "visibility"}
+    assert existing_concealed["visibility"] == missing["visibility"] == "concealed"
+
+
+def test_missing_and_concealed_have_identical_query_count(
+    session_factory,
+    alembic_database,
+) -> None:
+    with session_factory() as session:
+        state = _RestrictedState(
+            detail_ids=frozenset({"alpha"}),
+            stub_ids=frozenset({"gamma"}),
+        )
+        access = _restricted_access(session, state)
+
+    select_counts: list[int] = []
+
+    def count_selects(
+        _connection,
+        _cursor,
+        statement: str,
+        _parameters,
+        _context,
+        _executemany,
+    ) -> None:
+        if statement.lstrip().upper().startswith("SELECT"):
+            select_counts.append(1)
+
+    event.listen(alembic_database.engine, "before_cursor_execute", count_selects)
+    try:
+        with alembic_database.sessions() as session:
+            access = _restricted_access(session, state)
+            select_counts.clear()
+            query_agent_object_contexts(session, access, ["missing-only"])
+            missing_selects = len(select_counts)
+            select_counts.clear()
+            query_agent_object_contexts(session, access, ["delta"])
+            concealed_selects = len(select_counts)
+            select_counts.clear()
+            query_agent_object_contexts(session, access, ["missing-only", "delta"])
+            mixed_selects = len(select_counts)
+    finally:
+        event.remove(alembic_database.engine, "before_cursor_execute", count_selects)
+
+    assert missing_selects == concealed_selects
+    assert mixed_selects == missing_selects
+    assert missing_selects <= 5

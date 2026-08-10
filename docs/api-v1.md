@@ -309,9 +309,17 @@ filters and sort fields, with a smaller limit of 1..20.
 
 Retrieves full authorized contexts for a bounded list of already-known object
 IDs in one read-only roundtrip. The JSON body is `{"object_ids": ["id", ...]}`
-with 1..20 entries; each entry must match the canonical object ID pattern.
-Duplicate IDs keep their first input position; the response preserves input
-order and returns exactly one item per unique ID.
+with 1..20 entries; each entry must match the canonical object ID pattern and
+must not exceed the canonical 128-character maximum. Duplicate IDs keep their
+first input position; the response preserves input order and returns exactly
+one item per unique ID.
+
+The request body is bounded at the ASGI receive level before Pydantic parsing:
+a `Content-Length` header that honestly declares an oversized body is rejected
+without reading any bytes, and an absent, misleading, or chunked/streamed body
+is bounded while receiving. An oversized request returns one stable
+`413 payload_too_large` error without echoing input; this response is
+endpoint-local and does not appear on other operations.
 
 Each readable item is field-equivalent to `GET /api/v1/objects/{object_id}`:
 the same detail context, the same `revision` and body `etag`, the same five
@@ -327,8 +335,11 @@ detail object are loaded in bounded snapshots, so database access does not grow
 per requested ID. When the serialized response exceeds the maximum payload
 size, the request fails with one whole `413 payload_too_large` error rather
 than truncating an item, because every returned detail item must remain
-equivalent to a single read. Malformed, empty, and over-limit requests return
-`422 validation_error`.
+equivalent to a single read. Malformed, empty, over-limit, and over-length
+requests return `422 validation_error`. Missing and existing-but-concealed IDs
+receive equivalent bounded policy-shaped work before producing the exact same
+concealed placeholder, so the two cases do not take observably different
+shortcuts.
 
 ## Object resources
 

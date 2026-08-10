@@ -369,6 +369,7 @@ TOOLS: list[JSON] = [
                     "items": {
                         "type": "string",
                         "pattern": "^[a-z0-9](?:[a-z0-9_-]*[a-z0-9])?$",
+                        "maxLength": 128,
                     },
                     "description": "Known object ids, deduplicated by first occurrence",
                 }
@@ -1657,6 +1658,8 @@ def _required_object_ids(args: JSON, key: str) -> list[str]:
     for item in value:
         if not isinstance(item, str) or not item:
             raise ToolInputError(f"{key} must contain non-empty strings")
+        if len(item) > 128:
+            raise ToolInputError(f"{key} must not exceed the canonical id length")
         object_ids.append(item)
     return object_ids
 

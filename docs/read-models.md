@@ -54,7 +54,11 @@ objects, relationships, and the five newest comments for every authorized
 detail object in bounded snapshots, so database access does not grow per
 requested ID. Concealed and missing IDs both return a concealed placeholder
 that carries only the requested ID; the batch never becomes an existence
-oracle through status, text, counts, order, or metadata.
+oracle through status, text, counts, order, or metadata. Missing and
+existing-but-concealed IDs receive equivalent bounded policy-shaped work:
+``visibility_for`` is called for every requested ID regardless of whether the
+object row exists, so the two cases do not take observably different
+shortcuts.
 
 Catalog topology and Agent context both resolve placement through
 `blockwart.domain.placement.PlacementGraph`. This keeps placement semantics in

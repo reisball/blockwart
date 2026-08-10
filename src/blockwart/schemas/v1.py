@@ -64,11 +64,22 @@ class V1ContextPageOut(BaseModel):
 OBJECT_ID_PATTERN = r"^[a-z0-9](?:[a-z0-9_-]*[a-z0-9])?$"
 _OBJECT_ID_RE = re.compile(OBJECT_ID_PATTERN)
 MAX_BATCH_OBJECT_IDS = 20
+# The canonical catalog object-id maximum length, applied to every requested
+# id so a single 1,000,000-character id is rejected at the shared REST/Pydantic
+# contract and MCP JSON input schema before any authorization lookup.
+MAX_OBJECT_ID_LENGTH = 128
 # A bounded whole-response size guard. When the serialized batch exceeds this
 # many bytes the route returns one stable 413 payload_too_large error instead
 # of truncating an item, because every returned detail item must remain
 # field-equivalent to a single-object read.
 MAX_BATCH_RESPONSE_BYTES = 262144
+# A receive-time request-body byte bound for the known-id batch endpoint. At
+# most twenty 128-character ids plus normal JSON overhead fit well below this
+# constant. It is enforced before unbounded body materialization and before
+# normal Pydantic parsing, so an oversized Content-Length, an absent or
+# misleading length, or a chunked/streamed body are all bounded while
+# receiving.
+MAX_BATCH_REQUEST_BODY_BYTES = 8192
 
 
 class V1ObjectContextBatchIn(BaseModel):
@@ -76,7 +87,11 @@ class V1ObjectContextBatchIn(BaseModel):
         min_length=1,
         max_length=MAX_BATCH_OBJECT_IDS,
         json_schema_extra={
-            "items": {"type": "string", "pattern": OBJECT_ID_PATTERN},
+            "items": {
+                "type": "string",
+                "pattern": OBJECT_ID_PATTERN,
+                "maxLength": MAX_OBJECT_ID_LENGTH,
+            },
         },
     )
 
@@ -86,6 +101,8 @@ class V1ObjectContextBatchIn(BaseModel):
         for object_id in value:
             if not isinstance(object_id, str) or not _OBJECT_ID_RE.fullmatch(object_id):
                 raise ValueError("object_ids must match the canonical id pattern")
+            if len(object_id) > MAX_OBJECT_ID_LENGTH:
+                raise ValueError("object_ids must not exceed the canonical id length")
         return value
 
 
