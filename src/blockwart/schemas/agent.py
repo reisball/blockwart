@@ -100,8 +100,23 @@ class AgentCatalogObjectStub(BaseModel):
     placement_state: PlacementState | None = None
 
 
+# A concealed placeholder carries only the requested id and a marker. It is
+# returned by the known-id batch surface for objects the caller cannot discover
+# and for ids that do not exist; the two cases must stay indistinguishable, so
+# no kind, label, ref, capability, etag, comment, relationship, or other
+# detail-only field is ever attached.
+class AgentCatalogConcealed(BaseModel):
+    visibility: Literal["concealed"] = "concealed"
+    id: str
+
+
 AgentCatalogObjectRead = AgentCatalogObjectSummary | AgentCatalogObjectStub
 AgentCatalogContextRead = AgentCatalogObjectContext | AgentCatalogObjectStub
+# The batch item union adds the concealed marker. Single-object reads keep
+# returning 404 for concealed ids, so AgentCatalogContextRead stays unchanged.
+AgentCatalogBatchItem = (
+    AgentCatalogObjectContext | AgentCatalogObjectStub | AgentCatalogConcealed
+)
 
 
 class AgentSearchOut(BaseModel):
@@ -118,3 +133,8 @@ class AgentContextOut(BaseModel):
     filters: dict[str, str | int | bool] = Field(default_factory=dict)
     count: int
     objects: list[AgentCatalogContextRead]
+
+
+class AgentObjectContextBatchOut(BaseModel):
+    count: int
+    objects: list[AgentCatalogBatchItem]

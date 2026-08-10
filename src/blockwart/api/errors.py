@@ -29,6 +29,7 @@ API_ERROR_RESPONSES = {
     404: {"model": ApiErrorResponse, "description": "Resource not found"},
     409: {"model": ApiErrorResponse, "description": "Conflict"},
     412: {"model": ApiErrorResponse, "description": "Precondition failed"},
+    413: {"model": ApiErrorResponse, "description": "Response payload too large"},
     422: {"model": ApiErrorResponse, "description": "Request validation failed"},
     428: {"model": ApiErrorResponse, "description": "Precondition required"},
     503: {"model": ApiErrorResponse, "description": "Service unavailable"},
@@ -110,6 +111,7 @@ def install_api_error_contract(app: FastAPI) -> None:
             405: "method_not_allowed",
             409: "conflict",
             412: "precondition_failed",
+            413: "payload_too_large",
             428: "precondition_required",
             503: "service_unavailable",
         }.get(exc.status_code, "http_error")

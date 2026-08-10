@@ -106,10 +106,11 @@ def _agent_api_server():
         def _write_response(self, method: str) -> None:
             content_length = int(self.headers.get("Content-Length", "0"))
             raw_body = self.rfile.read(content_length)
+            parsed_path = urlsplit(self.path).path
             requests.append(
                 {
                     "method": method,
-                    "path": urlsplit(self.path).path,
+                    "path": parsed_path,
                     "authorization": self.headers.get("Authorization"),
                     "channel": self.headers.get("X-Blockwart-Channel"),
                     "if_match": self.headers.get("If-Match"),
@@ -118,7 +119,12 @@ def _agent_api_server():
                     "body": json.loads(raw_body or b"{}"),
                 }
             )
-            body = b'{"changed":true}'
+            if parsed_path == "/api/v1/object-contexts":
+                body = json.dumps(
+                    {"objects": [{"id": "fabrik", "visibility": "concealed"}], "count": 1}
+                ).encode()
+            else:
+                body = b'{"changed":true}'
             self.send_response(200)
             self.send_header("Content-Type", "application/json")
             self.send_header("Content-Length", str(len(body)))
@@ -244,6 +250,10 @@ def test_mcp_client_completes_handshake_and_calls_every_read_only_tool() -> None
                             "blockwart.get_object_context",
                             {"object_id": "host/fabrik"},
                         ),
+                        "blockwart.get_object_contexts": await session.call_tool(
+                            "blockwart.get_object_contexts",
+                            {"object_ids": ["fabrik", "missing"]},
+                        ),
                         "blockwart.list_comments": await session.call_tool(
                             "blockwart.list_comments",
                             {"object_id": "host/fabrik", "limit": 3},
@@ -357,6 +367,7 @@ def test_mcp_client_completes_handshake_and_calls_every_read_only_tool() -> None
         "blockwart.describe_schema",
         "blockwart.search",
         "blockwart.get_object_context",
+        "blockwart.get_object_contexts",
         "blockwart.list_comments",
         "blockwart.list_audit_events",
         "blockwart.add_comment",
@@ -385,6 +396,7 @@ def test_mcp_client_completes_handshake_and_calls_every_read_only_tool() -> None
             "blockwart.describe_schema",
             "blockwart.search",
             "blockwart.get_object_context",
+            "blockwart.get_object_contexts",
             "blockwart.list_comments",
             "blockwart.list_audit_events",
             "blockwart.get_context",
@@ -429,6 +441,9 @@ def test_mcp_client_completes_handshake_and_calls_every_read_only_tool() -> None
     assert result_payloads["blockwart.get_object_context"]["objects"][0]["path"] == (
         "/api/v1/objects/host%2Ffabrik"
     )
+    batch_payload = result_payloads["blockwart.get_object_contexts"]
+    assert batch_payload["count"] == 1
+    assert batch_payload["objects"][0]["visibility"] == "concealed"
     assert result_payloads["blockwart.list_audit_events"]["path"] == (
         "/api/v1/objects/host%2Ffabrik/audit-events"
     )
@@ -495,10 +510,16 @@ def test_mcp_client_completes_handshake_and_calls_every_read_only_tool() -> None
     assert unknown_tool.isError is True
     assert json.loads(unknown_content.text)["error"]["code"] == "tool_not_found"
 
-    assert [request["method"] for request in requests] == ["GET"] * 13
+    assert [request["method"] for request in requests] == [
+        "GET",
+        "GET",
+        "POST",
+        *["GET"] * 11,
+    ]
     assert [request["path"] for request in requests] == [
         "/api/v1/objects",
         "/api/v1/objects/host%2Ffabrik",
+        "/api/v1/object-contexts",
         "/api/v1/objects/host%2Ffabrik/comments",
         "/api/v1/objects/host%2Ffabrik/audit-events",
         "/api/v1/context",
@@ -511,6 +532,10 @@ def test_mcp_client_completes_handshake_and_calls_every_read_only_tool() -> None
         "/api/v1/objects/host%2Ffabrik/network-topology",
         "/api/v1/objects",
     ]
+    batch_request = next(
+        request for request in requests if request["path"] == "/api/v1/object-contexts"
+    )
+    assert batch_request["body"] == {"object_ids": ["fabrik", "missing"]}
     assert all(request["channel"] == "mcp" for request in requests)
     assert all(
         isinstance(request["correlation_id"], str)
@@ -1093,6 +1118,7 @@ def test_mcp_tools_publish_explicit_read_write_and_delete_hints() -> None:
         "blockwart.describe_schema",
         "blockwart.search",
         "blockwart.get_object_context",
+        "blockwart.get_object_contexts",
         "blockwart.list_comments",
         "blockwart.list_audit_events",
         "blockwart.add_comment",
@@ -1122,6 +1148,7 @@ def test_mcp_tools_publish_explicit_read_write_and_delete_hints() -> None:
             "blockwart.describe_schema",
             "blockwart.search",
             "blockwart.get_object_context",
+            "blockwart.get_object_contexts",
             "blockwart.list_comments",
             "blockwart.list_audit_events",
             "blockwart.get_context",

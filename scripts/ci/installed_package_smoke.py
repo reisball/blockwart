@@ -134,6 +134,7 @@ async def check_mcp(
                 "blockwart.describe_schema",
                 "blockwart.search",
                 "blockwart.get_object_context",
+                "blockwart.get_object_contexts",
                 "blockwart.list_comments",
                 "blockwart.list_audit_events",
                 "blockwart.add_comment",
@@ -165,6 +166,7 @@ async def check_mcp(
                         "blockwart.describe_schema",
                         "blockwart.search",
                         "blockwart.get_object_context",
+                        "blockwart.get_object_contexts",
                         "blockwart.list_comments",
                         "blockwart.list_audit_events",
                         "blockwart.get_context",
@@ -290,6 +292,10 @@ async def check_mcp(
                     "blockwart.get_object_context",
                     {"object_id": object_id},
                 ),
+                await session.call_tool(
+                    "blockwart.get_object_contexts",
+                    {"object_ids": [object_id]},
+                ),
                 await session.call_tool("blockwart.get_context", {"limit": 1}),
                 admin_first_page,
                 admin_second_page,
@@ -299,6 +305,9 @@ async def check_mcp(
                 ),
             ]
             assert all(not result.isError for result in read_results)
+            batch_payload = _tool_payload(read_results[2])
+            assert batch_payload["count"] == 1
+            assert batch_payload["objects"][0]["id"] == object_id
             comment_created = await session.call_tool(
                 "blockwart.add_comment",
                 {
@@ -618,7 +627,7 @@ def main() -> None:
     print(
         "installed_package=ok "
         f"cwd={Path.cwd()} revision={readiness['revision']} "
-        f"openapi_paths={len(openapi['paths'])} mcp_protocol={protocol} mcp_calls=30"
+        f"openapi_paths={len(openapi['paths'])} mcp_protocol={protocol} mcp_calls=31"
     )
 
 

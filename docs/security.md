@@ -25,6 +25,13 @@ rows, command-line arguments, or generated documentation. See
 Catalog reads are authenticated and object-authorized across UI, REST, Agent
 API, and MCP. No-discover objects are concealed and discover-only objects use
 a strict safe stub. Catalog and grant commands are also object-authorized.
+The known-ID batch context read (`POST /api/v1/object-contexts` and
+`blockwart.get_object_contexts`) applies the same policy per requested ID:
+readable objects return the full detail, discover-only objects return the
+strict stub, and concealed or missing IDs return an indistinguishable
+concealed placeholder carrying only the requested ID. The batch is bounded to
+20 IDs, never becomes an existence oracle through status, text, counts, order,
+or metadata, and performs no batch write or recursive graph expansion.
 Production identity bootstrap, persistent services, and infrastructure exposure
 require their dedicated rollout and approval. Browser identity, challenge, CSRF,
 and clearing cookies are always `Secure`; deploy the browser surface only behind

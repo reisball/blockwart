@@ -9,6 +9,7 @@ It wraps the object-authorized v1 API:
   relationship contracts (no API call)
 - blockwart.search -> GET /api/v1/objects
 - blockwart.get_object_context -> GET /api/v1/objects/{object_id}
+- blockwart.get_object_contexts -> POST /api/v1/object-contexts
 - blockwart.list_comments -> GET /api/v1/objects/{object_id}/comments
 - blockwart.list_audit_events -> GET /api/v1/objects/{object_id}/audit-events
 - blockwart.add_comment -> POST /api/v1/objects/{object_id}/comments
@@ -50,9 +51,19 @@ Choose the smallest tool that directly answers the intent:
   that accept that kind as an endpoint; the published relationship vocabulary
   stays complete.
 - Use `blockwart.get_object_context` when the exact object ID is already known.
+- Use `blockwart.get_object_contexts` when several exact object IDs are already
+  known and their authorized contexts must be retrieved in one bounded
+  read-only roundtrip. It accepts up to 20 IDs, preserves input order after
+  deduplicating by first occurrence, and returns one result item per unique ID:
+  a full detail context (field-equivalent to `get_object_context`, including the
+  write-ready ETag and the five newest comments) for readable objects, a strict
+  stub for discover-only objects, and a concealed placeholder for objects the
+  caller cannot discover or IDs that do not exist. Concealed and missing IDs are
+  indistinguishable; the placeholder carries only the requested ID. Use
+  `get_object_context` for a single ID and `get_context` to search by attribute.
 - Use `blockwart.get_context` to find assets or services by name, kind, parent,
-  endpoint, state, or provenance and return their full authorized details in
-  the same call.
+  endpoint, state, or provenance and return their full authorized details in the
+  same call.
 - Use `blockwart.search` when a compact candidate list is preferable to full
   detail payloads.
 - Use `blockwart.get_device_graph` or `blockwart.get_network_topology` when
@@ -99,6 +110,7 @@ means it deliberately bundles lower-level API concerns behind one agent call.
 | `describe_schema` | Read the writable object and relationship contract | `directly sufficient` | Projects the canonical domain schema and relationship registries locally with no catalog data, so the published contract cannot drift from server-side validation. |
 | `search` | Find compact candidates | `directly sufficient` | Avoids full detail payloads when selecting an object. |
 | `get_object_context` | Read one known object | `directly sufficient` | Returns full authorized catalog context and its write-ready ETag by ID. |
+| `get_object_contexts` | Read several known objects | `directly sufficient` | One bounded roundtrip for up to 20 known IDs; each detail item is field-equivalent to `get_object_context`, stubs and concealed/missing IDs keep the exact single-read concealment rules, and comments/objects/relationships are loaded in bounded snapshots. |
 | `list_comments` | Read an object's operational timeline | `directly sufficient` | Preserves the dedicated newest-first, opaque-cursor resource. |
 | `list_audit_events` | Read an object's system audit timeline | `directly sufficient` | Projects the existing redacted newest-first audit page without mixing in comment content. |
 | `add_comment` | Append an operational work note | `directly sufficient` | Keeps Markdown source and idempotency explicit without exposing audit internals. |

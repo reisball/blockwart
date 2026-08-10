@@ -5,8 +5,8 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from uuid import uuid4
 
-from sqlalchemy import and_, func, or_, select, update
-from sqlalchemy.orm import Session
+from sqlalchemy import and_, func, or_, select, tuple_, update
+from sqlalchemy.orm import Session, aliased
 
 from blockwart.domain.auth import ObjectVisibility, Permission
 from blockwart.domain.provenance import parse_rfc3339_utc
@@ -144,6 +144,62 @@ def recent_comments_for_object(
         .limit(limit)
     ).all()
     return [comment_out(row) for row in rows]
+
+
+def recent_comments_for_objects(
+    session: Session,
+    catalog_objects: list[CatalogObject],
+    *,
+    limit: int = 5,
+) -> dict[str, list[CommentOut]]:
+    """Prefetch the newest comments for several objects in one bounded query.
+
+    Each catalog object is matched by its (object_id, object_instance_id,
+    object_created_at) identity triple, so stale comments from a previous
+    instance of a reused id are excluded. A ``row_number`` window partitions
+    by object_id and keeps only the ``limit`` newest rows per object, bounding
+    the result to at most ``limit * len(catalog_objects)`` rows. The query
+    count is independent of the number of requested objects.
+    """
+    if not catalog_objects:
+        return {}
+    keys = [
+        (obj.id, obj.instance_id, obj.created_at)
+        for obj in catalog_objects
+    ]
+    row_number = func.row_number().over(
+        partition_by=ObjectComment.object_id,
+        order_by=[
+            ObjectComment.created_at.desc(),
+            ObjectComment.id.desc(),
+        ],
+    ).label("rn")
+    inner = (
+        select(ObjectComment, row_number)
+        .where(
+            tuple_(
+                ObjectComment.object_id,
+                ObjectComment.object_instance_id,
+                ObjectComment.object_created_at,
+            ).in_(keys)
+        )
+        .subquery()
+    )
+    comment_alias = aliased(ObjectComment, inner)
+    rows = session.scalars(
+        select(comment_alias).where(inner.c.rn <= limit)
+    ).all()
+    comments_by_object: dict[str, list[CommentOut]] = {
+        obj.id: [] for obj in catalog_objects
+    }
+    for row in rows:
+        bucket = comments_by_object.get(row.object_id)
+        if bucket is None:
+            continue
+        bucket.append(comment_out(row))
+    for bucket in comments_by_object.values():
+        bucket.sort(key=lambda c: (c.created_at, c.id), reverse=True)
+    return comments_by_object
 
 
 def add_object_comment(

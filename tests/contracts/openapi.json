@@ -110,6 +110,25 @@
         "title": "AgentAssetStubNode",
         "type": "object"
       },
+      "AgentCatalogConcealed": {
+        "properties": {
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "visibility": {
+            "const": "concealed",
+            "default": "concealed",
+            "title": "Visibility",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id"
+        ],
+        "title": "AgentCatalogConcealed",
+        "type": "object"
+      },
       "AgentCatalogObjectContext": {
         "properties": {
           "capabilities": {
@@ -3959,6 +3978,56 @@
         "title": "V1ObjectCommandOut",
         "type": "object"
       },
+      "V1ObjectContextBatchIn": {
+        "properties": {
+          "object_ids": {
+            "items": {
+              "pattern": "^[a-z0-9](?:[a-z0-9_-]*[a-z0-9])?$",
+              "type": "string"
+            },
+            "maxItems": 20,
+            "minItems": 1,
+            "title": "Object Ids",
+            "type": "array"
+          }
+        },
+        "required": [
+          "object_ids"
+        ],
+        "title": "V1ObjectContextBatchIn",
+        "type": "object"
+      },
+      "V1ObjectContextBatchOut": {
+        "properties": {
+          "count": {
+            "title": "Count",
+            "type": "integer"
+          },
+          "objects": {
+            "items": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/AgentCatalogObjectContext"
+                },
+                {
+                  "$ref": "#/components/schemas/AgentCatalogObjectStub"
+                },
+                {
+                  "$ref": "#/components/schemas/AgentCatalogConcealed"
+                }
+              ]
+            },
+            "title": "Objects",
+            "type": "array"
+          }
+        },
+        "required": [
+          "objects",
+          "count"
+        ],
+        "title": "V1ObjectContextBatchOut",
+        "type": "object"
+      },
       "V1ObjectPageOut": {
         "properties": {
           "direction": {
@@ -5181,6 +5250,16 @@
             },
             "description": "Precondition failed"
           },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Response payload too large"
+          },
           "422": {
             "content": {
               "application/json": {
@@ -5318,6 +5397,16 @@
             },
             "description": "Precondition failed"
           },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Response payload too large"
+          },
           "422": {
             "content": {
               "application/json": {
@@ -5454,6 +5543,16 @@
               }
             },
             "description": "Precondition failed"
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Response payload too large"
           },
           "422": {
             "content": {
@@ -5842,6 +5941,16 @@
             },
             "description": "Precondition failed"
           },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Response payload too large"
+          },
           "422": {
             "content": {
               "application/json": {
@@ -6102,6 +6211,16 @@
             },
             "description": "Precondition failed"
           },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Response payload too large"
+          },
           "422": {
             "content": {
               "application/json": {
@@ -6246,6 +6365,16 @@
               }
             },
             "description": "Precondition failed"
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Response payload too large"
           },
           "422": {
             "content": {
@@ -6455,6 +6584,16 @@
             },
             "description": "Precondition failed"
           },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Response payload too large"
+          },
           "422": {
             "content": {
               "application/json": {
@@ -6588,6 +6727,16 @@
               }
             },
             "description": "Precondition failed"
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Response payload too large"
           },
           "422": {
             "content": {
@@ -6725,6 +6874,16 @@
               }
             },
             "description": "Precondition failed"
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Response payload too large"
           },
           "422": {
             "content": {
@@ -6886,6 +7045,16 @@
               }
             },
             "description": "Precondition failed"
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Response payload too large"
           },
           "422": {
             "content": {
@@ -7067,6 +7236,16 @@
             },
             "description": "Precondition failed"
           },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Response payload too large"
+          },
           "422": {
             "content": {
               "application/json": {
@@ -7229,6 +7408,16 @@
               }
             },
             "description": "Precondition failed"
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Response payload too large"
           },
           "422": {
             "content": {
@@ -7403,6 +7592,16 @@
             },
             "description": "Precondition failed"
           },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Response payload too large"
+          },
           "422": {
             "content": {
               "application/json": {
@@ -7573,6 +7772,16 @@
             },
             "description": "Precondition failed"
           },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Response payload too large"
+          },
           "422": {
             "content": {
               "application/json": {
@@ -7735,6 +7944,16 @@
               }
             },
             "description": "Precondition failed"
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Response payload too large"
           },
           "422": {
             "content": {
@@ -7915,6 +8134,16 @@
             },
             "description": "Precondition failed"
           },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Response payload too large"
+          },
           "422": {
             "content": {
               "application/json": {
@@ -8094,6 +8323,16 @@
             },
             "description": "Precondition failed"
           },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Response payload too large"
+          },
           "422": {
             "content": {
               "application/json": {
@@ -8256,6 +8495,16 @@
             },
             "description": "Precondition failed"
           },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Response payload too large"
+          },
           "422": {
             "content": {
               "application/json": {
@@ -8381,6 +8630,16 @@
               }
             },
             "description": "Precondition failed"
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Response payload too large"
           },
           "422": {
             "content": {
@@ -8847,6 +9106,16 @@
             },
             "description": "Precondition failed"
           },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Response payload too large"
+          },
           "422": {
             "content": {
               "application/json": {
@@ -8894,6 +9163,152 @@
           }
         ],
         "summary": "Get V1 Context",
+        "tags": [
+          "api-v1-readonly"
+        ]
+      }
+    },
+    "/api/v1/object-contexts": {
+      "post": {
+        "operationId": "post_v1_object_contexts_api_v1_object_contexts_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/V1ObjectContextBatchIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ObjectContextBatchOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Authentication required"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Permission denied"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Resource not found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "412": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Precondition failed"
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Response payload too large"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Request validation failed"
+          },
+          "428": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Precondition required"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Internal server error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Service unavailable"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Post V1 Object Contexts",
         "tags": [
           "api-v1-readonly"
         ]
@@ -9312,6 +9727,16 @@
             },
             "description": "Precondition failed"
           },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Response payload too large"
+          },
           "422": {
             "content": {
               "application/json": {
@@ -9465,6 +9890,16 @@
             },
             "description": "Precondition failed"
           },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Response payload too large"
+          },
           "422": {
             "content": {
               "application/json": {
@@ -9607,6 +10042,16 @@
               }
             },
             "description": "Precondition failed"
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Response payload too large"
           },
           "422": {
             "content": {
@@ -9769,6 +10214,16 @@
             },
             "description": "Precondition failed"
           },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Response payload too large"
+          },
           "422": {
             "content": {
               "application/json": {
@@ -9905,6 +10360,16 @@
               }
             },
             "description": "Precondition failed"
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Response payload too large"
           },
           "422": {
             "content": {
@@ -10069,6 +10534,16 @@
             },
             "description": "Precondition failed"
           },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Response payload too large"
+          },
           "422": {
             "content": {
               "application/json": {
@@ -10230,6 +10705,16 @@
               }
             },
             "description": "Precondition failed"
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Response payload too large"
           },
           "422": {
             "content": {
@@ -10401,6 +10886,16 @@
             },
             "description": "Precondition failed"
           },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Response payload too large"
+          },
           "422": {
             "content": {
               "application/json": {
@@ -10546,6 +11041,16 @@
               }
             },
             "description": "Precondition failed"
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Response payload too large"
           },
           "422": {
             "content": {
@@ -10706,6 +11211,16 @@
               }
             },
             "description": "Precondition failed"
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Response payload too large"
           },
           "422": {
             "content": {
@@ -10901,6 +11416,16 @@
             },
             "description": "Precondition failed"
           },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Response payload too large"
+          },
           "422": {
             "content": {
               "application/json": {
@@ -11079,6 +11604,16 @@
             },
             "description": "Precondition failed"
           },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Response payload too large"
+          },
           "422": {
             "content": {
               "application/json": {
@@ -11240,6 +11775,16 @@
             },
             "description": "Precondition failed"
           },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Response payload too large"
+          },
           "422": {
             "content": {
               "application/json": {
@@ -11377,6 +11922,16 @@
             },
             "description": "Precondition failed"
           },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Response payload too large"
+          },
           "422": {
             "content": {
               "application/json": {
@@ -11513,6 +12068,16 @@
               }
             },
             "description": "Precondition failed"
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Response payload too large"
           },
           "422": {
             "content": {
@@ -11676,6 +12241,16 @@
               }
             },
             "description": "Precondition failed"
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Response payload too large"
           },
           "422": {
             "content": {
@@ -11869,6 +12444,16 @@
             },
             "description": "Precondition failed"
           },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Response payload too large"
+          },
           "422": {
             "content": {
               "application/json": {
@@ -12030,6 +12615,16 @@
             },
             "description": "Precondition failed"
           },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Response payload too large"
+          },
           "422": {
             "content": {
               "application/json": {
@@ -12166,6 +12761,16 @@
               }
             },
             "description": "Precondition failed"
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Response payload too large"
           },
           "422": {
             "content": {
@@ -12330,6 +12935,16 @@
             },
             "description": "Precondition failed"
           },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Response payload too large"
+          },
           "422": {
             "content": {
               "application/json": {
@@ -12493,6 +13108,16 @@
             },
             "description": "Precondition failed"
           },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Response payload too large"
+          },
           "422": {
             "content": {
               "application/json": {
@@ -12646,6 +13271,16 @@
               }
             },
             "description": "Precondition failed"
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Response payload too large"
           },
           "422": {
             "content": {
