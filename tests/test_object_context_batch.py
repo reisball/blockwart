@@ -701,15 +701,29 @@ def test_valid_small_request_succeeds(client: TestClient) -> None:
     assert response.status_code == 200
 
 
-def test_exact_byte_boundary_accepted(client: TestClient) -> None:
-    body = json.dumps({"object_ids": ["alpha"]}).encode("utf-8")
-    assert len(body) < _MAX_REQUEST_BYTES
-    response = client.post(
+def test_exact_byte_boundary_accepted_and_next_byte_rejected(
+    client: TestClient,
+) -> None:
+    minimal_body = json.dumps({"object_ids": ["alpha"]}).encode("utf-8")
+    body_at_limit = minimal_body + (b" " * (_MAX_REQUEST_BYTES - len(minimal_body)))
+    assert len(body_at_limit) == _MAX_REQUEST_BYTES
+
+    accepted = client.post(
         "/api/v1/object-contexts",
-        content=body,
+        content=body_at_limit,
         headers={"Content-Type": "application/json"},
     )
-    assert response.status_code == 200
+    assert accepted.status_code == 200
+
+    body_over_limit = body_at_limit + b" "
+    assert len(body_over_limit) == _MAX_REQUEST_BYTES + 1
+    rejected = client.post(
+        "/api/v1/object-contexts",
+        content=body_over_limit,
+        headers={"Content-Type": "application/json"},
+    )
+    assert rejected.status_code == 413
+    assert rejected.json()["error"]["code"] == "payload_too_large"
 
 
 async def _asgi_call(
