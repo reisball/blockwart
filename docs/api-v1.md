@@ -34,6 +34,51 @@ skipped equal-sort rows.
 count. Set `include_total=true` when an exact authorized matching count is
 needed.
 
+## Source coverage
+
+### `GET /api/v1/source-coverage`
+
+Returns the latest sanitized snapshot recorded by the explicit Markdown
+collector. The HTTP request reads only the coverage tables and the already
+referenced catalog rows: it never opens a workspace file, follows a source URI,
+crawls OpenClaw, or writes catalog/snapshot state.
+
+The response contains snapshot metadata, a compact `summary`, and paginated
+`items` ordered by `source_uri`, then stable entry ID. Filters are exact
+`source`, `classification`, `state`, and `target_kind`; `direction` is `asc` or
+`desc`, and `limit` is 1..100. The controlled classifications are
+`operational`, `retired`, `historical`, `research`, `migration`, `generated`,
+and `ignored`. Coverage states are `mapped_current`, `mapped_stale`,
+`unmapped_operational`, `intentionally_unmapped`,
+`orphaned_catalog_reference`, `missing_source`, `ambiguous_mapping`,
+`duplicate_mapping`, and `source_changed_since_import`.
+
+The default `scope=mapped` first removes every mapping whose object the caller
+cannot read, then resolves and counts only the remaining visible mapping set.
+Entries without a visible mapped object are absent. A concealed mapping cannot
+change an ordinary caller's detail, state, count, response digest, cursor, or
+error behavior. `scope=all` additionally includes source-only gaps and missing
+targets and therefore requires the existing explicit platform `admin` role;
+ordinary callers receive the stable `403 forbidden` envelope. Platform
+administration does not bypass object ACLs: existing concealed mappings remain
+absent even in this scope, while missing targets can be shown because the
+source-only authority supplies the otherwise absent authorization boundary.
+
+`summary.total`, every state/classification count, optional `total`, snapshot
+entry/mapping counts, and the paginated rows are derived from exactly the same
+authorized, filtered detail set. The returned digest identifies that authorized
+projection. Coverage cursors are bound to the principal and effective-policy
+fingerprint, normalized filters, scope, ordering, page size, and projection
+digest. Unlike the general object page, changing coverage `limit` invalidates a
+coverage cursor. A visible snapshot change also invalidates it; a hidden-only
+mapping change does not alter an ordinary projection or its cursor.
+
+Coverage records inventory accounting, not full reference storage. Returned
+fields are limited to stable identifiers/URIs, controlled decisions and state,
+opaque fingerprints, timestamps, target kinds, and authorized mapping IDs. No
+source excerpt, arbitrary private file content, credential, or secret value is
+part of this contract.
+
 ## Objects
 
 ### `GET /api/v1/objects`

@@ -14,6 +14,7 @@ It wraps the object-authorized v1 API:
 - blockwart.list_audit_events -> GET /api/v1/objects/{object_id}/audit-events
 - blockwart.add_comment -> POST /api/v1/objects/{object_id}/comments
 - blockwart.get_context -> GET /api/v1/context
+- blockwart.get_source_coverage -> GET /api/v1/source-coverage
 - blockwart.create_child -> POST /api/v1/objects/{parent_id}/children
 - blockwart.create_root -> POST /api/v1/roots
 - blockwart.update_object -> PUT /api/v1/objects/{object_id}
@@ -66,6 +67,9 @@ Choose the smallest tool that directly answers the intent:
   same call.
 - Use `blockwart.search` when a compact candidate list is preferable to full
   detail payloads.
+- Use `blockwart.get_source_coverage` to inspect the latest recorded inventory
+  coverage/drift snapshot. Its default mapped scope follows object visibility;
+  the full source-only scope requires platform-admin authority.
 - Use `blockwart.get_device_graph` or `blockwart.get_network_topology` when
   relationship metadata or resolved paths are the requested detail.
 - Use `blockwart.get_object_access` only for grants and effective permissions;
@@ -115,6 +119,7 @@ means it deliberately bundles lower-level API concerns behind one agent call.
 | `list_audit_events` | Read an object's system audit timeline | `directly sufficient` | Projects the existing redacted newest-first audit page without mixing in comment content. |
 | `add_comment` | Append an operational work note | `directly sufficient` | Keeps Markdown source and idempotency explicit without exposing audit internals. |
 | `get_context` | Find objects and read details | `directly sufficient` | Search, filters, full details, and per-object write-ready ETags already share one call. |
+| `get_source_coverage` | Inspect source inventory coverage and drift | `directly sufficient` | Projects the authorized REST snapshot with identical filters, state vocabulary, digest-bound cursor, and no workspace access. |
 | `create_child` | Create a placed child | `intent tool`, `response improved` | Resolves the parent internally and proves placement, ownership, revision, and idempotency. |
 | `create_root` | Create a disconnected catalog root | `intent tool`, `response improved` | Requires an already active catalog-owner principal; proves ownership, revision, idempotency, and the absence of a placement parent. Never mutates any catalog role. |
 | `update_object` | Update one known object | `directly sufficient` | The explicit current ETag preserves visible optimistic concurrency. |
@@ -144,6 +149,25 @@ inherited paths, completion states, relationship metadata, and truncation signal
 as API v1; it does not reconstruct topology in the MCP wrapper.
 All tools require a service-account token and receive exactly that
 principal's authorized detail/stub projection.
+
+`blockwart.get_source_coverage` accepts exact `source`, `classification`,
+`state`, and `target_kind` filters plus `scope`, `limit`, `cursor`, `direction`,
+and `include_total`. It directly returns REST's compact summary and detail page.
+The default `mapped` scope contains only mappings to objects the principal may
+read. `scope=all` includes unmapped, intentionally excluded, missing, and
+orphaned source facts and requires the explicit platform `admin` role. Counts
+are computed after that authorization from the same filtered rows as the page.
+The platform role does not bypass object ACLs; concealed existing mappings stay
+absent in both scopes.
+Cursors bind the principal/policy, normalized filters, ordering, page size, and
+authorized snapshot digest.
+
+The MCP process does not read source files for this tool. It only performs the
+authenticated API GET; the API in turn projects an already-recorded sanitized
+snapshot. Coverage means an inventory entry is accounted for, not that the
+linked reference content has been stored. Neither the tool schema nor its
+output contains source excerpts, arbitrary private file content, or credential
+values.
 
 Each tool call validates an upstream correlation ID or generates one, then sends
 `X-Correlation-ID` on every outgoing API request. API security events and object

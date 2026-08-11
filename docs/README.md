@@ -31,6 +31,7 @@ deleted by this classification.
   integrity](relationship-integrity.md)
 - [Application read models](read-models.md) and [service
   interfaces](service-interfaces.md)
+- [Source coverage and import drift](source-coverage.md)
 - [Append-only object comments](object-comments.md)
 - [Catalog provenance and freshness](provenance.md)
 

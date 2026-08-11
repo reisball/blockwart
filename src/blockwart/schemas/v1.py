@@ -23,6 +23,14 @@ from blockwart.domain.relationships import (
     validate_relationship_metadata,
     validate_relationship_request,
 )
+from blockwart.domain.source_coverage import (
+    COVERAGE_STATES,
+    DECISION_REASONS,
+    ENTRY_PRESENCES,
+    MAPPING_INTENTS,
+    MAPPING_ROLES,
+    SOURCE_CLASSIFICATIONS,
+)
 from blockwart.schemas.agent import (
     AgentCatalogBatchItem,
     AgentCatalogContextRead,
@@ -32,6 +40,13 @@ from blockwart.schemas.catalog import CatalogObjectIn, CatalogObjectOut, ObjectK
 
 ObjectSortField = Literal["id", "label", "kind", "updated_at"]
 SortDirection = Literal["asc", "desc"]
+SourceClassificationValue = Literal[SOURCE_CLASSIFICATIONS]
+CoverageStateValue = Literal[COVERAGE_STATES]
+MappingIntentValue = Literal[MAPPING_INTENTS]
+MappingRoleValue = Literal[MAPPING_ROLES]
+EntryPresenceValue = Literal[ENTRY_PRESENCES]
+DecisionReasonValue = Literal[DECISION_REASONS]
+CoverageScopeValue = Literal["mapped", "all"]
 # The relationship vocabulary and its link enums are projected from the domain
 # registry, so the published REST contract cannot carry a second, drifting copy.
 RelationType = Literal[RELATIONSHIP_TYPES]
@@ -53,6 +68,66 @@ class V1ContextPageOut(BaseModel):
     next_cursor: str | None = None
     total: int | None = None
     sort: ObjectSortField
+    direction: SortDirection
+
+
+class V1SourceCoverageMappingOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    object_id: str
+    target_kind: ObjectKind | None = None
+    role: MappingRoleValue
+    exists: bool
+    source_changed: bool
+    imported_at: str | None = None
+    verified_at: str | None = None
+
+
+class V1SourceCoverageDetailOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    source_uri: str
+    entry_id: str | None = None
+    classification: SourceClassificationValue
+    intent: MappingIntentValue
+    decision_reason: DecisionReasonValue
+    state: CoverageStateValue
+    presence: EntryPresenceValue
+    entry_fingerprint: str
+    source_fingerprint: str
+    observed_at: str
+    mappings: list[V1SourceCoverageMappingOut] = Field(default_factory=list)
+
+
+class V1SourceCoverageSummaryOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    total: int = Field(ge=0)
+    by_state: dict[str, int]
+    by_classification: dict[str, int]
+
+
+class V1SourceCoverageSnapshotOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    digest: str = Field(min_length=64, max_length=64)
+    collector: str
+    collected_at: str
+    source_count: int = Field(ge=0)
+    entry_count: int = Field(ge=0)
+    mapping_count: int = Field(ge=0)
+
+
+class V1SourceCoveragePageOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    snapshot: V1SourceCoverageSnapshotOut | None = None
+    summary: V1SourceCoverageSummaryOut
+    items: list[V1SourceCoverageDetailOut]
+    next_cursor: str | None = None
+    total: int | None = None
+    scope: CoverageScopeValue
+    sort: Literal["source_uri"] = "source_uri"
     direction: SortDirection
 
 

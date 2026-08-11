@@ -66,3 +66,23 @@ write is not proof of an observation or verification.
 Invalid or secret-shaped stored provenance is treated as a safe
 `corrupt_record`: read surfaces fall back to an unknown header and never return
 the raw invalid JSON.
+
+## Source coverage is a separate registry
+
+`CatalogProvenance.source_ref` remains provenance for one catalog object. It is
+not overloaded as source inventory identity or as a mapping registry. Source
+coverage uses separate immutable `source_snapshots`, `source_entries`, and
+`source_entry_mappings` records so one entry may map to several objects and one
+object may be covered by several entries without changing object provenance.
+
+The coverage edge records the imported entry fingerprint and import/verification
+times. Runtime resolution compares that fingerprint with the current entry,
+checks whether the target still exists, and uses the object's canonical
+provenance only for `mapped_stale`. Deletion, rename/missing entry, duplicate or
+ambiguous edges, and source changes therefore remain distinct states.
+
+The explicit Markdown dry run is the trust boundary that reads source files
+and records a sanitized snapshot. REST and MCP never collect, follow, or store
+the underlying source content. Inventory coverage says the configured entry is
+mapped or intentionally excluded; it does not say its reference prose is stored
+as a Blockwart object.
