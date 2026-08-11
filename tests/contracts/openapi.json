@@ -131,6 +131,13 @@
       },
       "AgentCatalogObjectContext": {
         "properties": {
+          "applies_to": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Applies To",
+            "type": "array"
+          },
           "capabilities": {
             "items": {
               "$ref": "#/components/schemas/Permission"
@@ -163,6 +170,24 @@
             "additionalProperties": true,
             "title": "Data",
             "type": "object"
+          },
+          "decision_status": {
+            "anyOf": [
+              {
+                "enum": [
+                  "proposed",
+                  "accepted",
+                  "superseded",
+                  "deprecated",
+                  "rejected"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Decision Status"
           },
           "dependencies": {
             "additionalProperties": {
@@ -506,12 +531,37 @@
       },
       "AgentCatalogObjectSummary": {
         "properties": {
+          "applies_to": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Applies To",
+            "type": "array"
+          },
           "capabilities": {
             "items": {
               "$ref": "#/components/schemas/Permission"
             },
             "title": "Capabilities",
             "type": "array"
+          },
+          "decision_status": {
+            "anyOf": [
+              {
+                "enum": [
+                  "proposed",
+                  "accepted",
+                  "superseded",
+                  "deprecated",
+                  "rejected"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Decision Status"
           },
           "diagnostics": {
             "items": {
@@ -5420,6 +5470,49 @@
           },
           {
             "in": "query",
+            "name": "decision_status",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "proposed",
+                    "accepted",
+                    "superseded",
+                    "deprecated",
+                    "rejected"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Decision Status"
+            }
+          },
+          {
+            "description": "Exact authorized asset kind:id Decision scope",
+            "in": "query",
+            "name": "applies_to",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 192,
+                  "pattern": "^(host|system|network|device|service):[^:]+$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Exact authorized asset kind:id Decision scope",
+              "title": "Applies To"
+            }
+          },
+          {
+            "in": "query",
             "name": "lifecycle",
             "required": false,
             "schema": {
@@ -6077,6 +6170,49 @@
                 }
               ],
               "title": "Status"
+            }
+          },
+          {
+            "in": "query",
+            "name": "decision_status",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "proposed",
+                    "accepted",
+                    "superseded",
+                    "deprecated",
+                    "rejected"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Decision Status"
+            }
+          },
+          {
+            "description": "Exact authorized asset kind:id Decision scope",
+            "in": "query",
+            "name": "applies_to",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 192,
+                  "pattern": "^(host|system|network|device|service):[^:]+$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Exact authorized asset kind:id Decision scope",
+              "title": "Applies To"
             }
           },
           {
@@ -9025,6 +9161,49 @@
           },
           {
             "in": "query",
+            "name": "decision_status",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "proposed",
+                    "accepted",
+                    "superseded",
+                    "deprecated",
+                    "rejected"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Decision Status"
+            }
+          },
+          {
+            "description": "Exact authorized asset kind:id Decision scope",
+            "in": "query",
+            "name": "applies_to",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 192,
+                  "pattern": "^(host|system|network|device|service):[^:]+$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Exact authorized asset kind:id Decision scope",
+              "title": "Applies To"
+            }
+          },
+          {
+            "in": "query",
             "name": "lifecycle",
             "required": false,
             "schema": {
@@ -9632,6 +9811,49 @@
                 }
               ],
               "title": "Status"
+            }
+          },
+          {
+            "in": "query",
+            "name": "decision_status",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "proposed",
+                    "accepted",
+                    "superseded",
+                    "deprecated",
+                    "rejected"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Decision Status"
+            }
+          },
+          {
+            "description": "Exact authorized asset kind:id Decision scope",
+            "in": "query",
+            "name": "applies_to",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 192,
+                  "pattern": "^(host|system|network|device|service):[^:]+$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Exact authorized asset kind:id Decision scope",
+              "title": "Applies To"
             }
           },
           {
@@ -13989,6 +14211,7 @@
               "min_length": 1,
               "normalization": [],
               "path": "installed_software[].name",
+              "required_rule": "require_installed_software_fields",
               "required_scope": "containing_array_item",
               "requirement": "required",
               "type": "string",
@@ -14005,6 +14228,7 @@
               "min_length": 1,
               "normalization": [],
               "path": "installed_software[].version",
+              "required_rule": "require_installed_software_fields",
               "required_scope": "containing_array_item",
               "requirement": "required",
               "type": "string",
@@ -14738,6 +14962,7 @@
               "min_length": 1,
               "normalization": [],
               "path": "installed_software[].name",
+              "required_rule": "require_installed_software_fields",
               "required_scope": "containing_array_item",
               "requirement": "required",
               "type": "string",
@@ -14754,6 +14979,7 @@
               "min_length": 1,
               "normalization": [],
               "path": "installed_software[].version",
+              "required_rule": "require_installed_software_fields",
               "required_scope": "containing_array_item",
               "requirement": "required",
               "type": "string",
@@ -17857,11 +18083,509 @@
               "violations": [
                 "field_not_allowed"
               ]
+            },
+            {
+              "constraint": "must be a supported decision status",
+              "enum": [
+                "accepted",
+                "deprecated",
+                "proposed",
+                "rejected",
+                "superseded"
+              ],
+              "json_types": [
+                "string"
+              ],
+              "normalization": [],
+              "path": "decision_status",
+              "requirement": "required",
+              "type": "enum",
+              "violations": [
+                "required_field_missing",
+                "value_not_allowed"
+              ]
+            },
+            {
+              "format": "multiline-text",
+              "json_types": [
+                "string"
+              ],
+              "normalization": [
+                "strip_whitespace"
+              ],
+              "path": "context",
+              "requirement": "optional",
+              "type": "text",
+              "violations": [
+                "type_mismatch"
+              ]
+            },
+            {
+              "format": "multiline-text",
+              "json_types": [
+                "string"
+              ],
+              "normalization": [
+                "strip_whitespace"
+              ],
+              "path": "decision",
+              "requirement": "optional",
+              "type": "text",
+              "violations": [
+                "type_mismatch"
+              ]
+            },
+            {
+              "format": "multiline-text",
+              "json_types": [
+                "string"
+              ],
+              "normalization": [
+                "strip_whitespace"
+              ],
+              "path": "rationale",
+              "requirement": "optional",
+              "type": "text",
+              "violations": [
+                "type_mismatch"
+              ]
+            },
+            {
+              "json_types": [
+                "array"
+              ],
+              "max_items": 50,
+              "normalization": [],
+              "path": "alternatives",
+              "requirement": "optional",
+              "type": "array",
+              "violations": [
+                "type_mismatch",
+                "value_out_of_range"
+              ]
+            },
+            {
+              "format": "multiline-text",
+              "json_types": [
+                "string"
+              ],
+              "max_length": 2000,
+              "min_length": 1,
+              "normalization": [
+                "strip_whitespace"
+              ],
+              "path": "alternatives[]",
+              "requirement": "optional",
+              "type": "text",
+              "violations": [
+                "type_mismatch",
+                "value_too_long",
+                "value_too_short"
+              ]
+            },
+            {
+              "json_types": [
+                "array"
+              ],
+              "max_items": 50,
+              "normalization": [],
+              "path": "consequences",
+              "requirement": "optional",
+              "type": "array",
+              "violations": [
+                "type_mismatch",
+                "value_out_of_range"
+              ]
+            },
+            {
+              "format": "multiline-text",
+              "json_types": [
+                "string"
+              ],
+              "max_length": 2000,
+              "min_length": 1,
+              "normalization": [
+                "strip_whitespace"
+              ],
+              "path": "consequences[]",
+              "requirement": "optional",
+              "type": "text",
+              "violations": [
+                "type_mismatch",
+                "value_too_long",
+                "value_too_short"
+              ]
+            },
+            {
+              "format": "date-time",
+              "json_types": [
+                "string"
+              ],
+              "normalization": [],
+              "path": "decided_at",
+              "requirement": "optional",
+              "type": "datetime",
+              "violations": [
+                "invalid_format"
+              ]
+            },
+            {
+              "format": "date-time",
+              "json_types": [
+                "string"
+              ],
+              "normalization": [],
+              "path": "effective_at",
+              "requirement": "optional",
+              "type": "datetime",
+              "violations": [
+                "invalid_format"
+              ]
+            },
+            {
+              "format": "date-time",
+              "json_types": [
+                "string"
+              ],
+              "normalization": [],
+              "path": "review_after",
+              "requirement": "optional",
+              "type": "datetime",
+              "violations": [
+                "invalid_format"
+              ]
+            },
+            {
+              "json_types": [
+                "array"
+              ],
+              "normalization": [],
+              "path": "applies_to",
+              "requirement": "optional",
+              "type": "array",
+              "violations": [
+                "type_mismatch"
+              ]
+            },
+            {
+              "format": "kind:id",
+              "json_types": [
+                "string"
+              ],
+              "normalization": [],
+              "path": "applies_to[]",
+              "reference_kinds": [
+                "device",
+                "host",
+                "network",
+                "service",
+                "system"
+              ],
+              "requirement": "optional",
+              "type": "reference",
+              "violations": [
+                "invalid_format",
+                "reference_kind_not_allowed",
+                "type_mismatch"
+              ]
+            },
+            {
+              "json_types": [
+                "array"
+              ],
+              "normalization": [],
+              "path": "related_projects",
+              "requirement": "optional",
+              "type": "array",
+              "violations": [
+                "type_mismatch"
+              ]
+            },
+            {
+              "format": "kind:id",
+              "json_types": [
+                "string"
+              ],
+              "normalization": [],
+              "path": "related_projects[]",
+              "reference_kinds": [
+                "project"
+              ],
+              "requirement": "optional",
+              "type": "reference",
+              "violations": [
+                "invalid_format",
+                "reference_kind_not_allowed",
+                "type_mismatch"
+              ]
+            },
+            {
+              "json_types": [
+                "array"
+              ],
+              "normalization": [],
+              "path": "related_runbooks",
+              "requirement": "optional",
+              "type": "array",
+              "violations": [
+                "type_mismatch"
+              ]
+            },
+            {
+              "format": "kind:id",
+              "json_types": [
+                "string"
+              ],
+              "normalization": [],
+              "path": "related_runbooks[]",
+              "reference_kinds": [
+                "runbook"
+              ],
+              "requirement": "optional",
+              "type": "reference",
+              "violations": [
+                "invalid_format",
+                "reference_kind_not_allowed",
+                "type_mismatch"
+              ]
+            },
+            {
+              "json_types": [
+                "array"
+              ],
+              "normalization": [],
+              "path": "related_decisions",
+              "requirement": "optional",
+              "type": "array",
+              "violations": [
+                "type_mismatch"
+              ]
+            },
+            {
+              "format": "kind:id",
+              "json_types": [
+                "string"
+              ],
+              "normalization": [],
+              "path": "related_decisions[]",
+              "reference_kinds": [
+                "decision"
+              ],
+              "requirement": "optional",
+              "type": "reference",
+              "violations": [
+                "invalid_format",
+                "reference_kind_not_allowed",
+                "type_mismatch"
+              ]
+            },
+            {
+              "json_types": [
+                "array"
+              ],
+              "normalization": [],
+              "path": "supersedes",
+              "requirement": "optional",
+              "type": "array",
+              "violations": [
+                "type_mismatch"
+              ]
+            },
+            {
+              "format": "kind:id",
+              "json_types": [
+                "string"
+              ],
+              "normalization": [],
+              "path": "supersedes[]",
+              "reference_kinds": [
+                "decision"
+              ],
+              "requirement": "optional",
+              "type": "reference",
+              "violations": [
+                "invalid_format",
+                "reference_kind_not_allowed",
+                "type_mismatch"
+              ]
+            },
+            {
+              "format": "kind:id",
+              "json_types": [
+                "string"
+              ],
+              "normalization": [],
+              "path": "superseded_by",
+              "reference_kinds": [
+                "decision"
+              ],
+              "requirement": "optional",
+              "type": "reference",
+              "violations": [
+                "invalid_format",
+                "reference_kind_not_allowed",
+                "type_mismatch"
+              ]
+            },
+            {
+              "json_types": [
+                "array"
+              ],
+              "max_items": 25,
+              "normalization": [],
+              "path": "docs",
+              "requirement": "optional",
+              "type": "array",
+              "violations": [
+                "type_mismatch",
+                "value_out_of_range"
+              ]
+            },
+            {
+              "additional_properties": false,
+              "allowed_keys": [
+                "published_at",
+                "source_type",
+                "title",
+                "url"
+              ],
+              "json_types": [
+                "object"
+              ],
+              "normalization": [],
+              "path": "docs[]",
+              "requirement": "optional",
+              "type": "object",
+              "violations": [
+                "field_not_allowed",
+                "type_mismatch"
+              ]
+            },
+            {
+              "enum": [
+                "documentation",
+                "original",
+                "reference"
+              ],
+              "json_types": [
+                "string"
+              ],
+              "normalization": [],
+              "path": "docs[].source_type",
+              "required_scope": "containing_array_item",
+              "requirement": "required",
+              "type": "enum",
+              "violations": [
+                "required_field_missing",
+                "value_not_allowed"
+              ]
+            },
+            {
+              "format": "multiline-text",
+              "json_types": [
+                "string"
+              ],
+              "max_length": 200,
+              "min_length": 1,
+              "normalization": [
+                "strip_whitespace"
+              ],
+              "path": "docs[].title",
+              "required_scope": "containing_array_item",
+              "requirement": "required",
+              "type": "text",
+              "violations": [
+                "required_field_missing",
+                "type_mismatch",
+                "value_too_long",
+                "value_too_short"
+              ]
+            },
+            {
+              "constraint": "must be an HTTP(S) URL without embedded credentials",
+              "embedded_credentials_allowed": false,
+              "format": "uri",
+              "json_types": [
+                "string"
+              ],
+              "max_length": 2048,
+              "normalization": [],
+              "path": "docs[].url",
+              "pattern": "^[Hh][Tt][Tt][Pp][Ss]?://",
+              "required_scope": "containing_array_item",
+              "requirement": "required",
+              "secret_query_parameters_allowed": false,
+              "type": "url",
+              "violations": [
+                "invalid_format",
+                "required_field_missing",
+                "value_too_long"
+              ]
+            },
+            {
+              "format": "date-time",
+              "json_types": [
+                "string"
+              ],
+              "normalization": [],
+              "path": "docs[].published_at",
+              "requirement": "optional",
+              "type": "datetime",
+              "violations": [
+                "invalid_format"
+              ]
             }
           ],
-          "rules": [],
+          "rules": [
+            {
+              "description": "Accepted decisions require nonblank context, decision, rationale, and decided_at; superseded decisions require superseded_by.",
+              "rule": "validate_decision_lifecycle",
+              "violation": "required_field_missing"
+            }
+          ],
           "secret_policy": "global_enforced",
           "unknown_properties": "allow"
+        },
+        "decision": {
+          "decision_status": {
+            "values": [
+              "proposed",
+              "accepted",
+              "superseded",
+              "deprecated",
+              "rejected"
+            ]
+          },
+          "external_sources": {
+            "embedded_credentials_allowed": false,
+            "http_only": true,
+            "live_fetch": false,
+            "path": "data.docs[]",
+            "secret_query_parameters_allowed": false,
+            "source_type_values": [
+              "documentation",
+              "original",
+              "reference"
+            ]
+          },
+          "legacy_reads": {
+            "missing_decision_status": "readable",
+            "writes": "must satisfy the canonical schema"
+          },
+          "reference_paths": [
+            "applies_to[]",
+            "related_projects[]",
+            "related_runbooks[]",
+            "related_decisions[]",
+            "supersedes[]",
+            "superseded_by"
+          ],
+          "supersession": {
+            "cycles_allowed": false,
+            "direction": "superseded decision to successor",
+            "self_reference_allowed": false,
+            "superseded_requires": "data.superseded_by"
+          }
         },
         "health": {
           "default": null,
@@ -17883,6 +18607,7 @@
         },
         "minimal_example": {
           "data": {
+            "decision_status": "proposed",
             "schema_version": 1
           },
           "id": "example-decision",
@@ -18077,7 +18802,7 @@
       "raw_secret_values_rejected": true
     },
     "source": "blockwart.domain.object_schema",
-    "version": 2,
+    "version": 3,
     "violation_policy": {
       "description": "A rejected write names the canonical public data path, one violation code, and the published rule when a schema postcondition rejected it. Rejected values are never returned.",
       "detail_fields": [

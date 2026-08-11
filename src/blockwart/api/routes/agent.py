@@ -7,6 +7,11 @@ from blockwart.api.deps import get_session
 from blockwart.api.errors import API_ERROR_RESPONSES
 from blockwart.api.security import require_api_read_access
 from blockwart.domain.asset_state import AssetHealth, AssetLifecycle
+from blockwart.domain.decisions import (
+    APPLIES_TO_MAX_LENGTH,
+    APPLIES_TO_PATTERN,
+    DecisionStatus,
+)
 from blockwart.domain.provenance import SourceType
 from blockwart.schemas.agent import AgentContextOut, AgentSearchOut
 from blockwart.schemas.catalog import ObjectKind
@@ -43,6 +48,15 @@ def agent_search(
     protocol: str | None = None,
     exposure: str | None = None,
     status: str | None = None,
+    decision_status: DecisionStatus | None = None,
+    applies_to: Annotated[
+        str | None,
+        Query(
+            max_length=APPLIES_TO_MAX_LENGTH,
+            pattern=APPLIES_TO_PATTERN,
+            description="Exact authorized asset kind:id Decision scope",
+        ),
+    ] = None,
     lifecycle: AssetLifecycle | None = None,
     health: AssetHealth | None = None,
     source_type: SourceType | None = None,
@@ -60,6 +74,8 @@ def agent_search(
         protocol=protocol,
         exposure=exposure,
         status=status,
+        decision_status=decision_status,
+        applies_to=applies_to,
         lifecycle=lifecycle,
         health=health,
         source_type=source_type,
@@ -127,6 +143,15 @@ def agent_context(
     protocol: str | None = None,
     exposure: str | None = None,
     status: str | None = None,
+    decision_status: DecisionStatus | None = None,
+    applies_to: Annotated[
+        str | None,
+        Query(
+            max_length=APPLIES_TO_MAX_LENGTH,
+            pattern=APPLIES_TO_PATTERN,
+            description="Exact authorized asset kind:id Decision scope",
+        ),
+    ] = None,
     lifecycle: AssetLifecycle | None = None,
     health: AssetHealth | None = None,
     source_type: SourceType | None = None,
@@ -144,6 +169,8 @@ def agent_context(
         protocol=protocol,
         exposure=exposure,
         status=status,
+        decision_status=decision_status,
+        applies_to=applies_to,
         lifecycle=lifecycle,
         health=health,
         source_type=source_type,
@@ -175,6 +202,8 @@ def _active_filters(
     protocol: str | None,
     exposure: str | None,
     status: str | None,
+    decision_status: DecisionStatus | None,
+    applies_to: str | None,
     lifecycle: AssetLifecycle | None,
     health: AssetHealth | None,
     source_type: SourceType | None,
@@ -188,6 +217,8 @@ def _active_filters(
         "protocol": protocol,
         "exposure": exposure,
         "status": status,
+        "decision_status": decision_status,
+        "applies_to": applies_to,
         "lifecycle": lifecycle,
         "health": health,
         "source_type": source_type,

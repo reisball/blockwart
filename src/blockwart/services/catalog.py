@@ -12,6 +12,7 @@ from blockwart.domain.asset_state import (
     resolve_asset_state,
     state_from_record,
 )
+from blockwart.domain.decisions import validate_decision_integrity
 from blockwart.domain.placement import (
     CANONICAL_PLACEMENT_RELATION_TYPE,
     PlacementError,
@@ -509,6 +510,14 @@ def upsert_object(
         object_kinds,
         object_id=payload.id,
     )
+    if payload.kind == "decision":
+        validate_decision_integrity(
+            session.scalars(
+                select(CatalogObject).where(CatalogObject.kind == "decision")
+            ).all(),
+            object_id=payload.id,
+            data=payload.data,
+        )
     if row is not None and row.kind != payload.kind:
         ensure_kind_change_allowed(session, row, payload.kind)
     if row is not None:

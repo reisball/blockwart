@@ -259,7 +259,7 @@ def test_index_shows_kind_counts(client: TestClient) -> None:
     assert "network" in response.text
     assert "service" in response.text
     assert "host" in response.text
-    assert 'value="decision"' not in response.text
+    assert "kind=decision" in response.text
     assert 'value="project"' not in response.text
     assert 'value="runbook"' not in response.text
     assert "credential_reference" not in response.text
@@ -549,7 +549,14 @@ def test_create_form_schema_gates_fields_by_type(client: TestClient) -> None:
     assert 'data-create-field="kind"' in response.text
     assert 'data-create-field="platform"' in response.text
     assert 'data-create-field="relationship"' in response.text
-    assert set(UI_SCHEMAS) == {"host", "system", "network", "device", "service"}
+    assert set(UI_SCHEMAS) == {
+        "host",
+        "system",
+        "network",
+        "device",
+        "service",
+        "decision",
+    }
     assert "platform" in UI_SCHEMAS["system"].create_fields
     assert "platform" not in UI_SCHEMAS["service"].create_fields
     assert "platform" not in UI_SCHEMAS["host"].create_fields
@@ -632,9 +639,10 @@ def test_schema_settings_type_matrix(
     assert ("<code>platform</code>" in response.text) is platform_label
 
 
-def test_ui_schema_payload_matches_public_object_kinds() -> None:
-    assert set(UI_SCHEMAS) == set(PUBLIC_OBJECT_KINDS)
-    assert set(ui_schema_payload()) == set(PUBLIC_OBJECT_KINDS)
+def test_ui_schema_payload_matches_ui_object_kinds() -> None:
+    ui_kinds = {*PUBLIC_OBJECT_KINDS, "decision"}
+    assert set(UI_SCHEMAS) == ui_kinds
+    assert set(ui_schema_payload()) == ui_kinds
     for schema in UI_SCHEMAS.values():
         assert all(field_key in FIELD_DEFINITIONS for field_key in schema.create_fields)
         assert all(field_key in FIELD_DEFINITIONS for field_key in schema.fields)

@@ -16,6 +16,8 @@ class _StoredCatalogObjectIn(CatalogObjectIn):
     """Validate legacy-readable rows without weakening the canonical write model."""
 
     allow_legacy_network_without_category: ClassVar[bool] = True
+    allow_legacy_decision_without_status: ClassVar[bool] = True
+    allow_legacy_decision_data: ClassVar[bool] = True
 
 
 def read_catalog_record_data(

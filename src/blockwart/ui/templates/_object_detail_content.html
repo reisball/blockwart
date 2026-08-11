@@ -1,3 +1,17 @@
+{% macro decision_reference_list(items) -%}
+  {% if items %}
+    <ul class="plain-list">
+      {% for item in items %}
+        <li>{% if item.id %}<a href="/objects/{{ item.id }}?{{ detail_query_string }}">{{ item.label }}</a> <code>{{ item.ref }}</code>{% else %}<code>{{ item.ref }}</code>{% endif %}</li>
+      {% endfor %}
+    </ul>
+  {% else %}<p class="meta">{{ t("decision.empty.references") }}</p>{% endif %}
+{%- endmacro %}
+
+{% macro decision_text_list(items) -%}
+  {% if items %}<ul>{% for item in items %}<li>{{ item }}</li>{% endfor %}</ul>{% else %}<p class="meta">{{ t("decision.empty.collection") }}</p>{% endif %}
+{%- endmacro %}
+
 <section
   class="integrated-detail"
   aria-labelledby="asset-detail-title"
@@ -172,6 +186,121 @@
             </form>
           {% endif %}
         </section>
+
+        {% if supports_decision %}
+          {% if edit_section == "decision" %}
+            <section class="panel" aria-labelledby="decision-editor-title">
+              <div class="panel-head">
+                <h2 class="section-title" id="decision-editor-title">{{ t("decision.editor.title") }}</h2>
+                <a class="button button-small button-muted" href="{{ detail_href }}">{{ t("detail.cancel") }}</a>
+              </div>
+              {% if error %}<div class="error" role="alert">{{ error }}</div>{% endif %}
+              {% if decision_detail.legacy_docs_blocked %}<div class="error" role="alert">{{ t("decision.validation.legacy_docs") }}</div>{% endif %}
+              <p class="meta">{{ t("decision.editor.help") }}</p>
+              <form class="form-grid" method="post" action="{{ detail_post_urls.overview }}">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+                <input type="hidden" name="if_match" value="{{ object_etag }}" />
+                <label>{{ schema_fields_by_key.decision_status.label }}
+                  <select name="decision_status" required>{% for decision_status in decision_statuses %}<option value="{{ decision_status }}"{% if decision_form.decision_status == decision_status %} selected{% endif %}>{{ t("decision.status." ~ decision_status) }}</option>{% endfor %}</select>
+                </label>
+                {% for field_name in ["context", "decision", "rationale"] %}
+                  <label>{{ schema_fields_by_key[field_name].label }}
+                    <textarea name="{{ field_name }}" placeholder="{{ schema_fields_by_key[field_name].placeholder }}">{{ decision_form[field_name] }}</textarea>
+                    <span class="meta">{{ schema_fields_by_key[field_name].placeholder }}</span>
+                  </label>
+                {% endfor %}
+                <fieldset>
+                  <legend>{{ t("decision.section.validity") }}</legend>
+                  {% for field_name in ["decided_at", "effective_at", "review_after"] %}
+                    <label>{{ schema_fields_by_key[field_name].label }}
+                      <input name="{{ field_name }}" value="{{ decision_form[field_name] }}" autocomplete="off" placeholder="2026-08-11T12:00:00Z" />
+                      <span class="meta">{{ schema_fields_by_key[field_name].placeholder }}</span>
+                    </label>
+                  {% endfor %}
+                </fieldset>
+                {% for field_name in ["alternatives", "consequences"] %}
+                  <label>{{ schema_fields_by_key[field_name].label }}
+                    <textarea name="{{ field_name }}" placeholder="{{ schema_fields_by_key[field_name].placeholder }}">{{ decision_form[field_name] }}</textarea>
+                    <span class="meta">{{ schema_fields_by_key[field_name].placeholder }}</span>
+                  </label>
+                {% endfor %}
+                {% for field_name in ["applies_to", "related_projects", "related_runbooks", "related_decisions", "supersedes"] %}
+                  <label>{{ schema_fields_by_key[field_name].label }}
+                    <textarea name="{{ field_name }}" placeholder="{{ schema_fields_by_key[field_name].placeholder }}">{{ decision_form[field_name] }}</textarea>
+                    <span class="meta">{{ schema_fields_by_key[field_name].placeholder }}</span>
+                  </label>
+                {% endfor %}
+                <label>{{ schema_fields_by_key.superseded_by.label }}
+                  <input name="superseded_by" value="{{ decision_form.superseded_by }}" autocomplete="off" placeholder="{{ schema_fields_by_key.superseded_by.placeholder }}" />
+                  <span class="meta">{{ schema_fields_by_key.superseded_by.placeholder }}</span>
+                </label>
+                <fieldset>
+                  <legend>{{ schema_fields_by_key.docs.label }}</legend>
+                  <p class="meta">{{ schema_fields_by_key.docs.placeholder }}</p>
+                  <div class="table-wrap"><table class="table edit-table">
+                    <thead><tr><th>{{ t("decision.source.type") }}</th><th>{{ t("decision.source.title") }}</th><th>{{ t("decision.source.url") }}</th><th>{{ t("decision.source.published_at") }}</th><th><span class="visually-hidden">{{ t("decision.collection.actions") }}</span></th></tr></thead>
+                    <tbody data-row-list="decision-docs">
+                      {% for source in decision_docs_rows %}
+                        <tr>
+                          <td><select name="doc_source_type">{% for source_type in decision_source_types %}<option value="{{ source_type }}"{% if source.source_type == source_type %} selected{% endif %}>{{ t("decision.source_type." ~ source_type) }}</option>{% endfor %}</select></td>
+                          <td><input name="doc_title" value="{{ source.title or '' }}" maxlength="200" autocomplete="off" /></td>
+                          <td><input name="doc_url" value="{{ source.url or '' }}" type="url" maxlength="2048" inputmode="url" autocomplete="off" placeholder="https://example.invalid/source" /></td>
+                          <td><input name="doc_published_at" value="{{ source.published_at or '' }}" autocomplete="off" placeholder="2026-08-11T12:00:00Z" /></td>
+                          <td><button class="button button-small button-muted" type="button" data-remove-row>{{ t("decision.collection.remove") }}</button></td>
+                        </tr>
+                      {% endfor %}
+                    </tbody>
+                  </table></div>
+                  <template data-row-template="decision-docs"><tr><td><select name="doc_source_type">{% for source_type in decision_source_types %}<option value="{{ source_type }}">{{ t("decision.source_type." ~ source_type) }}</option>{% endfor %}</select></td><td><input name="doc_title" value="" maxlength="200" autocomplete="off" /></td><td><input name="doc_url" value="" type="url" maxlength="2048" inputmode="url" autocomplete="off" placeholder="https://example.invalid/source" /></td><td><input name="doc_published_at" value="" autocomplete="off" placeholder="2026-08-11T12:00:00Z" /></td><td><button class="button button-small button-muted" type="button" data-remove-row>{{ t("decision.collection.remove") }}</button></td></tr></template>
+                  <button class="button button-small button-muted" type="button" data-add-row="decision-docs">{{ t("decision.source.add") }}</button>
+                </fieldset>
+                <div class="button-row"><button type="submit">{{ t("detail.save") }}</button><a class="button button-muted" href="{{ detail_href }}">{{ t("detail.cancel") }}</a></div>
+              </form>
+            </section>
+          {% else %}
+            <section class="panel" aria-labelledby="decision-validity-title">
+              <div class="panel-head"><h2 class="section-title" id="decision-validity-title">{{ t("decision.section.validity") }}</h2>{% if can_write %}<a class="button button-small button-muted" href="{{ detail_edit_hrefs.decision }}">{{ t("detail.edit") }}</a>{% endif %}</div>
+              <dl class="fact-grid">
+                <div><dt>{{ schema_fields_by_key.decision_status.label }}</dt><dd>{% if decision_detail.decision_status %}<span class="badge">{{ t("decision.status." ~ decision_detail.decision_status) }}</span>{% else %}{{ t("asset.no_value") }}{% endif %}</dd></div>
+                <div><dt>{{ schema_fields_by_key.decided_at.label }}</dt><dd>{{ decision_detail.decided_at or t("asset.no_value") }}</dd></div>
+                <div><dt>{{ schema_fields_by_key.effective_at.label }}</dt><dd>{{ decision_detail.effective_at or t("asset.no_value") }}</dd></div>
+                <div><dt>{{ schema_fields_by_key.review_after.label }}</dt><dd>{{ decision_detail.review_after or t("asset.no_value") }}</dd></div>
+              </dl>
+            </section>
+            <section class="panel" aria-labelledby="decision-narrative-title">
+              <h2 class="section-title" id="decision-narrative-title">{{ t("decision.section.narrative") }}</h2>
+              <h3>{{ schema_fields_by_key.context.label }}</h3><p class="preserve-lines">{{ decision_detail.context or t("decision.empty.text") }}</p>
+              <h3>{{ schema_fields_by_key.decision.label }}</h3><p class="preserve-lines">{{ decision_detail.decision or t("decision.empty.text") }}</p>
+              <h3>{{ schema_fields_by_key.rationale.label }}</h3><p class="preserve-lines">{{ decision_detail.rationale or t("decision.empty.text") }}</p>
+            </section>
+            <section class="panel" aria-labelledby="decision-outcomes-title">
+              <h2 class="section-title" id="decision-outcomes-title">{{ t("decision.section.outcomes") }}</h2>
+              <h3>{{ schema_fields_by_key.alternatives.label }}</h3>{{ decision_text_list(decision_detail.alternatives_list) }}
+              <h3>{{ schema_fields_by_key.consequences.label }}</h3>{{ decision_text_list(decision_detail.consequences_list) }}
+            </section>
+            <section class="panel" aria-labelledby="decision-scope-title">
+              <h2 class="section-title" id="decision-scope-title">{{ t("decision.section.scope") }}</h2>
+              {{ decision_reference_list(decision_detail.applies_to_links) }}
+            </section>
+            <section class="panel" aria-labelledby="decision-related-title">
+              <h2 class="section-title" id="decision-related-title">{{ t("decision.section.related") }}</h2>
+              <h3>{{ schema_fields_by_key.related_projects.label }}</h3>{{ decision_reference_list(decision_detail.related_projects_links) }}
+              <h3>{{ schema_fields_by_key.related_runbooks.label }}</h3>{{ decision_reference_list(decision_detail.related_runbooks_links) }}
+              <h3>{{ schema_fields_by_key.related_decisions.label }}</h3>{{ decision_reference_list(decision_detail.related_decisions_links) }}
+            </section>
+            <section class="panel" aria-labelledby="decision-supersession-title">
+              <h2 class="section-title" id="decision-supersession-title">{{ t("decision.section.supersession") }}</h2>
+              <h3>{{ schema_fields_by_key.supersedes.label }}</h3>{{ decision_reference_list(decision_detail.supersedes_links) }}
+              <h3>{{ schema_fields_by_key.superseded_by.label }}</h3>
+              {% if decision_detail.superseded_by_link %}{% set successor = decision_detail.superseded_by_link %}<p>{% if successor.id %}<a href="/objects/{{ successor.id }}?{{ detail_query_string }}">{{ successor.label }}</a> <code>{{ successor.ref }}</code>{% else %}<code>{{ successor.ref }}</code>{% endif %}</p>{% else %}<p class="meta">{{ t("decision.empty.successor") }}</p>{% endif %}
+            </section>
+            <section class="panel" aria-labelledby="decision-sources-title">
+              <h2 class="section-title" id="decision-sources-title">{{ t("decision.section.sources") }}</h2>
+              {% if decision_detail.legacy_docs_blocked %}<p class="meta">{{ t("decision.validation.legacy_docs") }}</p>{% endif %}
+              {% if decision_detail.docs %}<ul>{% for source in decision_detail.docs %}<li><strong>{{ source.title }}</strong> · {{ t("decision.source_type." ~ source.source_type) }}{% if source.published_at %} · {{ source.published_at }}{% endif %}{% if source.safe_url %} · <a href="{{ source.safe_url }}" target="_blank" rel="noopener noreferrer">{{ t("decision.source.open") }}</a>{% else %} · {{ t("decision.source.unavailable") }}{% endif %}</li>{% endfor %}</ul>{% else %}<p class="meta">{{ t("decision.empty.sources") }}</p>{% endif %}
+            </section>
+          {% endif %}
+        {% endif %}
 
         {% if supports_hardware %}
           <section class="panel">

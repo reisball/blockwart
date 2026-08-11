@@ -4,6 +4,7 @@ from pydantic import BaseModel, Field
 
 from blockwart.domain.asset_state import AssetHealth, AssetLifecycle
 from blockwart.domain.auth import Permission
+from blockwart.domain.decisions import DecisionStatus
 from blockwart.domain.placement import PlacementState
 from blockwart.domain.provenance import CatalogProvenanceOut
 from blockwart.schemas.catalog import CatalogRecordDiagnostic, ObjectKind
@@ -62,6 +63,8 @@ class AgentCatalogObjectSummary(BaseModel):
     primary_endpoint: AgentEndpoint | None = None
     lifecycle: AssetLifecycle | None = None
     health: AssetHealth | None = None
+    decision_status: DecisionStatus | None = None
+    applies_to: list[str] = Field(default_factory=list)
     placement_state: PlacementState | None = None
     record_state: Literal["valid", "corrupt"] = "valid"
     diagnostics: list[CatalogRecordDiagnostic] = Field(default_factory=list)

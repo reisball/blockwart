@@ -10,6 +10,8 @@ from the database, UI settings, seed files, or Markdown.
 calls, seed import, and Markdown import. Consequently, every write/import path receives the same
 object-kind rules before persistence. Stored-record reads use the same rules with one explicit
 migration exception: existing Network rows without a category remain readable.
+Existing free-form Decision rows without `decision_status` have the same read-only compatibility
+boundary; see [Canonical Decision objects](decisions.md). Any update must satisfy the new schema.
 
 The registry covers the existing object kinds:
 
@@ -37,7 +39,7 @@ segments use `[]`, for example:
 - `applies_to.systems[]`
 
 Supported types are string/text, strict integer, strict boolean, enum, URL, IP,
-port, object, array, string-or-object, and typed reference. Required fields,
+port, RFC 3339 timestamp, object, array, string-or-object, and typed reference. Required fields,
 fixed literal values, closed enums, whitespace normalization, and string length bounds are also
 supported. Validation errors contain the resolved record path, such as
 `data.network.addresses[1].ip`.

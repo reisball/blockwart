@@ -43,6 +43,8 @@ ENDPOINT_TYPES = set(ENDPOINT_TYPE_OPTIONS)
 class CatalogObjectIn(BaseModel):
     reject_acl_data: ClassVar[bool] = True
     allow_legacy_network_without_category: ClassVar[bool] = False
+    allow_legacy_decision_without_status: ClassVar[bool] = False
+    allow_legacy_decision_data: ClassVar[bool] = False
 
     id: str = Field(pattern=r"^[a-z0-9][a-z0-9_-]*[a-z0-9]$|^[a-z0-9]$")
     kind: ObjectKind
@@ -86,6 +88,10 @@ class CatalogObjectIn(BaseModel):
             allow_legacy_network_without_category=(
                 self.allow_legacy_network_without_category
             ),
+            allow_legacy_decision_without_status=(
+                self.allow_legacy_decision_without_status
+            ),
+            allow_legacy_decision_data=self.allow_legacy_decision_data,
         )
         normalize_interface_data(
             self.data,
@@ -129,6 +135,8 @@ class CatalogObjectOut(CatalogObjectIn):
     # ACL-shaped catalog data.
     reject_acl_data: ClassVar[bool] = False
     allow_legacy_network_without_category: ClassVar[bool] = True
+    allow_legacy_decision_without_status: ClassVar[bool] = True
+    allow_legacy_decision_data: ClassVar[bool] = True
 
     visibility: Literal["detail"] = "detail"
     capabilities: list[Permission] = Field(default_factory=list)

@@ -985,6 +985,12 @@ def test_ui_create_root_control_is_only_visible_to_catalog_owner(
     assert 'name="platform"' in owner_modal.text
     assert 'name="summary"' in owner_modal.text
     assert 'name="data_json"' not in owner_modal.text
+    decision_modal = root_client.get("/?kind=decision&create_root=1")
+    assert decision_modal.status_code == 200
+    assert 'name="data_json"' not in decision_modal.text
+    assert 'name="decision_status"' in decision_modal.text
+    assert 'name="context"' in decision_modal.text
+    assert 'name="doc_url"' in decision_modal.text
     assert 'name="relation_target_ref"' not in owner_modal.text
     assert 'name="catalog_role"' not in owner_modal.text
 
