@@ -8,8 +8,8 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import delete, select, update
-from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.dialects.postgresql import insert as pg_insert
+from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.orm import Session
 
 from blockwart.domain.auth import (
@@ -1093,7 +1093,7 @@ def reserve_idempotency_record(
         existing = None
     if existing is None:
         inserted = session.execute(
-            (sqlite_insert if session.bind.dialect.name == "sqlite" else pg_insert)(IdempotencyRecord)
+            (sqlite_insert if session.bind.dialect.name == "sqlite" else pg_insert)(IdempotencyRecord)  # noqa: E501
             .values(
                 principal_id=context.principal.id,
                 key_hash=key_hash,

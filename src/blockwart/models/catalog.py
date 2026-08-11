@@ -220,7 +220,7 @@ event.listen(
     "after_create",
     DDL(
         "CREATE OR REPLACE FUNCTION blockwart_raise_exception() "
-        "RETURNS TRIGGER AS $$ BEGIN RAISE EXCEPTION 'operation blocked by trigger'; END; $$ LANGUAGE plpgsql"
+        "RETURNS TRIGGER AS $$ BEGIN RAISE EXCEPTION 'operation blocked by trigger'; END; $$ LANGUAGE plpgsql"  # noqa: E501
     ).execute_if(dialect="postgresql"),
 )
 event.listen(

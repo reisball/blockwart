@@ -50,7 +50,7 @@ def upgrade() -> None:
                 "instance_id",
                 sa.String(length=32),
                 nullable=False,
-                server_default=sa.text("(lower(hex(randomblob(16))))") if _is_sqlite else sa.text("md5(random()::text)"),
+                server_default=sa.text("(lower(hex(randomblob(16))))") if _is_sqlite else sa.text("md5(random()::text)"),  # noqa: E501
             )
         )
         batch.create_unique_constraint(
@@ -182,7 +182,7 @@ def upgrade() -> None:
             "SELECT RAISE(ABORT, 'object comments are append-only'); END"
         )
     else:
-        op.execute("CREATE OR REPLACE FUNCTION blockwart_raise_exception() RETURNS TRIGGER AS $$ BEGIN RAISE EXCEPTION 'operation blocked by trigger'; END; $$ LANGUAGE plpgsql")
+        op.execute("CREATE OR REPLACE FUNCTION blockwart_raise_exception() RETURNS TRIGGER AS $$ BEGIN RAISE EXCEPTION 'operation blocked by trigger'; END; $$ LANGUAGE plpgsql")  # noqa: E501
         op.execute("DROP TRIGGER IF EXISTS object_comments_no_update ON object_comments")
         op.execute(
             "CREATE TRIGGER object_comments_no_update "

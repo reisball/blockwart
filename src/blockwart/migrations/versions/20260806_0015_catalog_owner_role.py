@@ -136,7 +136,7 @@ def upgrade() -> None:
         op.execute(_LAST_CATALOG_OWNER_UPDATE_TRIGGER_SQLITE)
         op.execute(_LAST_CATALOG_OWNER_DELETE_TRIGGER_SQLITE)
     else:
-        op.execute("CREATE OR REPLACE FUNCTION blockwart_check_last_active_catalog_owner() RETURNS TRIGGER AS $$ BEGIN PERFORM pg_advisory_xact_lock(43); IF NOT EXISTS (SELECT 1 FROM principals WHERE id <> OLD.id AND active = true AND catalog_role = 'catalog_owner') THEN RAISE EXCEPTION 'last active catalog owner'; END IF; IF TG_OP = 'DELETE' THEN RETURN OLD; ELSE RETURN NEW; END IF; END; $$ LANGUAGE plpgsql")
+        op.execute("CREATE OR REPLACE FUNCTION blockwart_check_last_active_catalog_owner() RETURNS TRIGGER AS $$ BEGIN PERFORM pg_advisory_xact_lock(43); IF NOT EXISTS (SELECT 1 FROM principals WHERE id <> OLD.id AND active = true AND catalog_role = 'catalog_owner') THEN RAISE EXCEPTION 'last active catalog owner'; END IF; IF TG_OP = 'DELETE' THEN RETURN OLD; ELSE RETURN NEW; END IF; END; $$ LANGUAGE plpgsql")  # noqa: E501
         op.execute(_LAST_CATALOG_OWNER_UPDATE_TRIGGER_PG)
         op.execute(_LAST_CATALOG_OWNER_DELETE_TRIGGER_PG)
 
@@ -147,8 +147,8 @@ def downgrade() -> None:
         op.execute("DROP TRIGGER IF EXISTS ck_principals_last_active_catalog_owner_delete")
         op.execute("DROP TRIGGER IF EXISTS ck_principals_last_active_catalog_owner_update")
     else:
-        op.execute("DROP TRIGGER IF EXISTS ck_principals_last_active_catalog_owner_delete ON principals")
-        op.execute("DROP TRIGGER IF EXISTS ck_principals_last_active_catalog_owner_update ON principals")
+        op.execute("DROP TRIGGER IF EXISTS ck_principals_last_active_catalog_owner_delete ON principals")  # noqa: E501
+        op.execute("DROP TRIGGER IF EXISTS ck_principals_last_active_catalog_owner_update ON principals")  # noqa: E501
     with op.batch_alter_table("principals") as batch:
         batch.drop_index("ix_principals_catalog_role")
         batch.drop_constraint("ck_principals_catalog_role", type_="check")
@@ -166,6 +166,6 @@ def _restore_last_admin_triggers() -> None:
     else:
         op.execute("DROP TRIGGER IF EXISTS ck_principals_last_active_admin_update ON principals")
         op.execute("DROP TRIGGER IF EXISTS ck_principals_last_active_admin_delete ON principals")
-        op.execute("CREATE OR REPLACE FUNCTION blockwart_check_last_active_admin() RETURNS TRIGGER AS $$ BEGIN PERFORM pg_advisory_xact_lock(42); IF NOT EXISTS (SELECT 1 FROM principals WHERE id <> OLD.id AND active = true AND platform_role = 'admin') THEN RAISE EXCEPTION 'last active platform admin'; END IF; IF TG_OP = 'DELETE' THEN RETURN OLD; ELSE RETURN NEW; END IF; END; $$ LANGUAGE plpgsql")
+        op.execute("CREATE OR REPLACE FUNCTION blockwart_check_last_active_admin() RETURNS TRIGGER AS $$ BEGIN PERFORM pg_advisory_xact_lock(42); IF NOT EXISTS (SELECT 1 FROM principals WHERE id <> OLD.id AND active = true AND platform_role = 'admin') THEN RAISE EXCEPTION 'last active platform admin'; END IF; IF TG_OP = 'DELETE' THEN RETURN OLD; ELSE RETURN NEW; END IF; END; $$ LANGUAGE plpgsql")  # noqa: E501
         op.execute(_LAST_ADMIN_UPDATE_TRIGGER_PG)
         op.execute(_LAST_ADMIN_DELETE_TRIGGER_PG)

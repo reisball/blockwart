@@ -8,8 +8,8 @@ from datetime import UTC, datetime, timedelta
 from functools import lru_cache
 
 from sqlalchemy import delete, func, select
-from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.dialects.postgresql import insert as pg_insert
+from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.orm import Session
 
 from blockwart.config import Settings
