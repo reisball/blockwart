@@ -4690,6 +4690,341 @@
         "title": "V1ScopePreviewObjectOut",
         "type": "object"
       },
+      "V1SourceCoverageDetailOut": {
+        "properties": {
+          "classification": {
+            "enum": [
+              "operational",
+              "retired",
+              "historical",
+              "research",
+              "migration",
+              "generated",
+              "ignored"
+            ],
+            "title": "Classification",
+            "type": "string"
+          },
+          "decision_reason": {
+            "enum": [
+              "operational_inventory",
+              "retired_asset",
+              "historical_record",
+              "research_material",
+              "migration_artifact",
+              "generated_artifact",
+              "explicitly_ignored",
+              "not_infrastructure",
+              "unclassified"
+            ],
+            "title": "Decision Reason",
+            "type": "string"
+          },
+          "entry_fingerprint": {
+            "title": "Entry Fingerprint",
+            "type": "string"
+          },
+          "entry_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Entry Id"
+          },
+          "intent": {
+            "enum": [
+              "expect_object",
+              "no_catalog_object"
+            ],
+            "title": "Intent",
+            "type": "string"
+          },
+          "mappings": {
+            "items": {
+              "$ref": "#/components/schemas/V1SourceCoverageMappingOut"
+            },
+            "title": "Mappings",
+            "type": "array"
+          },
+          "observed_at": {
+            "title": "Observed At",
+            "type": "string"
+          },
+          "presence": {
+            "enum": [
+              "present",
+              "absent"
+            ],
+            "title": "Presence",
+            "type": "string"
+          },
+          "source_fingerprint": {
+            "title": "Source Fingerprint",
+            "type": "string"
+          },
+          "source_uri": {
+            "title": "Source Uri",
+            "type": "string"
+          },
+          "state": {
+            "enum": [
+              "mapped_current",
+              "mapped_stale",
+              "unmapped_operational",
+              "intentionally_unmapped",
+              "orphaned_catalog_reference",
+              "missing_source",
+              "ambiguous_mapping",
+              "duplicate_mapping",
+              "source_changed_since_import"
+            ],
+            "title": "State",
+            "type": "string"
+          }
+        },
+        "required": [
+          "source_uri",
+          "classification",
+          "intent",
+          "decision_reason",
+          "state",
+          "presence",
+          "entry_fingerprint",
+          "source_fingerprint",
+          "observed_at"
+        ],
+        "title": "V1SourceCoverageDetailOut",
+        "type": "object"
+      },
+      "V1SourceCoverageMappingOut": {
+        "properties": {
+          "exists": {
+            "title": "Exists",
+            "type": "boolean"
+          },
+          "imported_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Imported At"
+          },
+          "object_id": {
+            "title": "Object Id",
+            "type": "string"
+          },
+          "role": {
+            "enum": [
+              "primary",
+              "derived"
+            ],
+            "title": "Role",
+            "type": "string"
+          },
+          "source_changed": {
+            "title": "Source Changed",
+            "type": "boolean"
+          },
+          "target_kind": {
+            "anyOf": [
+              {
+                "enum": [
+                  "host",
+                  "system",
+                  "network",
+                  "device",
+                  "service",
+                  "credential_reference",
+                  "runbook",
+                  "decision",
+                  "project"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Target Kind"
+          },
+          "verified_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Verified At"
+          }
+        },
+        "required": [
+          "object_id",
+          "role",
+          "exists",
+          "source_changed"
+        ],
+        "title": "V1SourceCoverageMappingOut",
+        "type": "object"
+      },
+      "V1SourceCoveragePageOut": {
+        "properties": {
+          "direction": {
+            "enum": [
+              "asc",
+              "desc"
+            ],
+            "title": "Direction",
+            "type": "string"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/V1SourceCoverageDetailOut"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Cursor"
+          },
+          "scope": {
+            "enum": [
+              "mapped",
+              "all"
+            ],
+            "title": "Scope",
+            "type": "string"
+          },
+          "snapshot": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/V1SourceCoverageSnapshotOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "sort": {
+            "const": "source_uri",
+            "default": "source_uri",
+            "title": "Sort",
+            "type": "string"
+          },
+          "summary": {
+            "$ref": "#/components/schemas/V1SourceCoverageSummaryOut"
+          },
+          "total": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Total"
+          }
+        },
+        "required": [
+          "summary",
+          "items",
+          "scope",
+          "direction"
+        ],
+        "title": "V1SourceCoveragePageOut",
+        "type": "object"
+      },
+      "V1SourceCoverageSnapshotOut": {
+        "properties": {
+          "collected_at": {
+            "title": "Collected At",
+            "type": "string"
+          },
+          "collector": {
+            "title": "Collector",
+            "type": "string"
+          },
+          "digest": {
+            "maxLength": 64,
+            "minLength": 64,
+            "title": "Digest",
+            "type": "string"
+          },
+          "entry_count": {
+            "minimum": 0.0,
+            "title": "Entry Count",
+            "type": "integer"
+          },
+          "mapping_count": {
+            "minimum": 0.0,
+            "title": "Mapping Count",
+            "type": "integer"
+          },
+          "source_count": {
+            "minimum": 0.0,
+            "title": "Source Count",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "digest",
+          "collector",
+          "collected_at",
+          "source_count",
+          "entry_count",
+          "mapping_count"
+        ],
+        "title": "V1SourceCoverageSnapshotOut",
+        "type": "object"
+      },
+      "V1SourceCoverageSummaryOut": {
+        "properties": {
+          "by_classification": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "title": "By Classification",
+            "type": "object"
+          },
+          "by_state": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "title": "By State",
+            "type": "object"
+          },
+          "total": {
+            "minimum": 0.0,
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "total",
+          "by_state",
+          "by_classification"
+        ],
+        "title": "V1SourceCoverageSummaryOut",
+        "type": "object"
+      },
       "V1TopologyChainOut": {
         "properties": {
           "hosts": {
@@ -12910,6 +13245,302 @@
           }
         ],
         "summary": "Create V1 Catalog Root",
+        "tags": [
+          "api-v1-readonly"
+        ]
+      }
+    },
+    "/api/v1/source-coverage": {
+      "get": {
+        "description": "Project a recorded snapshot; this request never reads workspace files.",
+        "operationId": "get_v1_source_coverage_api_v1_source_coverage_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "source",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 512,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Source"
+            }
+          },
+          {
+            "in": "query",
+            "name": "classification",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "operational",
+                    "retired",
+                    "historical",
+                    "research",
+                    "migration",
+                    "generated",
+                    "ignored"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Classification"
+            }
+          },
+          {
+            "in": "query",
+            "name": "state",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "mapped_current",
+                    "mapped_stale",
+                    "unmapped_operational",
+                    "intentionally_unmapped",
+                    "orphaned_catalog_reference",
+                    "missing_source",
+                    "ambiguous_mapping",
+                    "duplicate_mapping",
+                    "source_changed_since_import"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "State"
+            }
+          },
+          {
+            "in": "query",
+            "name": "target_kind",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "host",
+                    "system",
+                    "network",
+                    "device",
+                    "service",
+                    "credential_reference",
+                    "runbook",
+                    "decision",
+                    "project"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Target Kind"
+            }
+          },
+          {
+            "in": "query",
+            "name": "scope",
+            "required": false,
+            "schema": {
+              "default": "mapped",
+              "enum": [
+                "mapped",
+                "all"
+              ],
+              "title": "Scope",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Opaque cursor returned by the previous page",
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 2048,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Opaque cursor returned by the previous page",
+              "title": "Cursor"
+            }
+          },
+          {
+            "in": "query",
+            "name": "direction",
+            "required": false,
+            "schema": {
+              "default": "asc",
+              "enum": [
+                "asc",
+                "desc"
+              ],
+              "title": "Direction",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Compute the total over the authorized filtered detail set",
+            "in": "query",
+            "name": "include_total",
+            "required": false,
+            "schema": {
+              "default": false,
+              "description": "Compute the total over the authorized filtered detail set",
+              "title": "Include Total",
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1SourceCoveragePageOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Authentication required"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Permission denied"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Resource not found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "412": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Precondition failed"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Request validation failed"
+          },
+          "428": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Precondition required"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Internal server error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Service unavailable"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Read the authorized source inventory coverage snapshot",
         "tags": [
           "api-v1-readonly"
         ]

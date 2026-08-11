@@ -10,6 +10,11 @@ from blockwart.models.auth import (
     ServiceTokenFailureBucket,
 )
 from blockwart.models.catalog import AuditEvent, CatalogObject, ObjectComment, Relationship
+from blockwart.models.source_coverage import (
+    SourceEntry,
+    SourceEntryMapping,
+    SourceSnapshot,
+)
 
 __all__ = [
     "AuditEvent",
@@ -25,4 +30,7 @@ __all__ = [
     "SecurityEvent",
     "ServiceTokenFailureBucket",
     "ServiceToken",
+    "SourceEntry",
+    "SourceEntryMapping",
+    "SourceSnapshot",
 ]

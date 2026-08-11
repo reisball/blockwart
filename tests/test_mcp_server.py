@@ -270,6 +270,10 @@ def test_mcp_client_completes_handshake_and_calls_every_read_only_tool() -> None
                             "blockwart.get_context",
                             {"kind": "host", "limit": 2},
                         ),
+                        "blockwart.get_source_coverage": await session.call_tool(
+                            "blockwart.get_source_coverage",
+                            {"classification": "operational", "limit": 2},
+                        ),
                         "blockwart.get_object_access": await session.call_tool(
                             "blockwart.get_object_access",
                             {"object_id": "host/fabrik"},
@@ -372,6 +376,7 @@ def test_mcp_client_completes_handshake_and_calls_every_read_only_tool() -> None
         "blockwart.list_audit_events",
         "blockwart.add_comment",
         "blockwart.get_context",
+        "blockwart.get_source_coverage",
         "blockwart.create_child",
         "blockwart.create_root",
         "blockwart.update_object",
@@ -400,6 +405,7 @@ def test_mcp_client_completes_handshake_and_calls_every_read_only_tool() -> None
             "blockwart.list_comments",
             "blockwart.list_audit_events",
             "blockwart.get_context",
+            "blockwart.get_source_coverage",
             "blockwart.get_object_access",
             "blockwart.search_principals",
             "blockwart.list_admin_principals",
@@ -452,6 +458,9 @@ def test_mcp_client_completes_handshake_and_calls_every_read_only_tool() -> None
         "limit": ["3"],
     }
     assert result_payloads["blockwart.get_context"]["objects"][0]["path"] == ("/api/v1/context")
+    assert result_payloads["blockwart.get_source_coverage"]["path"] == (
+        "/api/v1/source-coverage"
+    )
     assert result_payloads["blockwart.get_object_access"]["path"] == (
         "/api/v1/objects/host%2Ffabrik/access"
     )
@@ -514,7 +523,7 @@ def test_mcp_client_completes_handshake_and_calls_every_read_only_tool() -> None
         "GET",
         "GET",
         "POST",
-        *["GET"] * 11,
+        *["GET"] * 12,
     ]
     assert [request["path"] for request in requests] == [
         "/api/v1/objects",
@@ -523,6 +532,7 @@ def test_mcp_client_completes_handshake_and_calls_every_read_only_tool() -> None
         "/api/v1/objects/host%2Ffabrik/comments",
         "/api/v1/objects/host%2Ffabrik/audit-events",
         "/api/v1/context",
+        "/api/v1/source-coverage",
         "/api/v1/objects/host%2Ffabrik/access",
         "/api/v1/objects/host%2Ffabrik/access/principals",
         "/api/v1/admin/principals",
@@ -1123,6 +1133,7 @@ def test_mcp_tools_publish_explicit_read_write_and_delete_hints() -> None:
         "blockwart.list_audit_events",
         "blockwart.add_comment",
         "blockwart.get_context",
+        "blockwart.get_source_coverage",
         "blockwart.create_child",
         "blockwart.create_root",
         "blockwart.update_object",
@@ -1152,6 +1163,7 @@ def test_mcp_tools_publish_explicit_read_write_and_delete_hints() -> None:
             "blockwart.list_comments",
             "blockwart.list_audit_events",
             "blockwart.get_context",
+            "blockwart.get_source_coverage",
             "blockwart.get_object_access",
             "blockwart.search_principals",
             "blockwart.list_admin_principals",
@@ -1307,6 +1319,50 @@ def test_mcp_search_calls_read_only_agent_search_endpoint() -> None:
     ]
     payload = json.loads(response["content"][0]["text"])
     assert payload["results"][0]["ref"] == "system:brieftraeger"
+    assert response["isError"] is False
+
+
+def test_mcp_source_coverage_forwards_the_exact_read_only_filter_contract() -> None:
+    calls = []
+    page = {"summary": {"total": 0}, "items": [], "next_cursor": None}
+
+    def fake_fetch(path, params):
+        calls.append((path, params))
+        return page
+
+    response = call_tool(
+        "blockwart.get_source_coverage",
+        {
+            "source": "workspace://TOOLS.md",
+            "classification": "research",
+            "state": "intentionally_unmapped",
+            "target_kind": "runbook",
+            "scope": "all",
+            "limit": 7,
+            "cursor": "opaque-coverage-cursor",
+            "direction": "desc",
+            "include_total": True,
+        },
+        fetcher=fake_fetch,
+    )
+
+    assert calls == [
+        (
+            "/api/v1/source-coverage",
+            {
+                "source": "workspace://TOOLS.md",
+                "classification": "research",
+                "state": "intentionally_unmapped",
+                "target_kind": "runbook",
+                "scope": "all",
+                "limit": 7,
+                "cursor": "opaque-coverage-cursor",
+                "direction": "desc",
+                "include_total": True,
+            },
+        )
+    ]
+    assert json.loads(response["content"][0]["text"]) == page
     assert response["isError"] is False
 
 

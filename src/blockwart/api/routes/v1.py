@@ -11,6 +11,7 @@ from blockwart.config import Settings
 from blockwart.domain.asset_state import AssetHealth, AssetLifecycle
 from blockwart.domain.auth import GrantScope
 from blockwart.domain.provenance import SourceType
+from blockwart.domain.source_coverage import SourceCoverageError
 from blockwart.schemas.agent import AgentCatalogContextRead
 from blockwart.schemas.catalog import CatalogObjectIn, ObjectKind, ObjectStatus
 from blockwart.schemas.comments import (
@@ -21,8 +22,11 @@ from blockwart.schemas.comments import (
 from blockwart.schemas.errors import ApiErrorResponse
 from blockwart.schemas.v1 import (
     MAX_BATCH_RESPONSE_BYTES,
+    CoverageScopeValue,
+    CoverageStateValue,
     ObjectSortField,
     SortDirection,
+    SourceClassificationValue,
     V1AttachedDeviceCreateIn,
     V1AuditPageOut,
     V1ContextPageOut,
@@ -43,6 +47,7 @@ from blockwart.schemas.v1 import (
     V1RelationshipCommandIn,
     V1RelationshipCommandOut,
     V1RelationshipPageOut,
+    V1SourceCoveragePageOut,
     V1TopologyOut,
 )
 from blockwart.services.agent import (
@@ -72,6 +77,10 @@ from blockwart.services.grant_management import (
 )
 from blockwart.services.pagination import InvalidCursor
 from blockwart.services.read_access import ReadAccess
+from blockwart.services.source_coverage import (
+    CoverageAuthorityDenied,
+    query_source_coverage_page,
+)
 from blockwart.services.v1 import (
     query_audit_page,
     query_device_graph_resource,
@@ -118,6 +127,64 @@ CursorParameter = Annotated[
     Query(max_length=2048, description="Opaque cursor returned by the previous page"),
 ]
 PageLimit = Annotated[int, Query(ge=1, le=100)]
+
+
+@router.get(
+    "/source-coverage",
+    response_model=V1SourceCoveragePageOut,
+    summary="Read the authorized source inventory coverage snapshot",
+)
+def get_v1_source_coverage(
+    session: Annotated[Session, Depends(get_session)],
+    access: Annotated[ReadAccess, Depends(require_api_read_access)],
+    source: Annotated[str | None, Query(max_length=512)] = None,
+    classification: SourceClassificationValue | None = None,
+    state: CoverageStateValue | None = None,
+    target_kind: ObjectKind | None = None,
+    scope: CoverageScopeValue = "mapped",
+    limit: PageLimit = 50,
+    cursor: CursorParameter = None,
+    direction: SortDirection = "asc",
+    include_total: Annotated[
+        bool,
+        Query(description="Compute the total over the authorized filtered detail set"),
+    ] = False,
+) -> V1SourceCoveragePageOut:
+    """Project a recorded snapshot; this request never reads workspace files."""
+    try:
+        page = query_source_coverage_page(
+            session,
+            access,
+            source=source,
+            classification=classification,
+            state=state,
+            target_kind=target_kind,
+            scope=scope,
+            limit=limit,
+            cursor=cursor,
+            direction=direction,
+            include_total=include_total,
+        )
+    except InvalidCursor as exc:
+        raise _invalid_cursor() from exc
+    except CoverageAuthorityDenied as exc:
+        raise HTTPException(
+            status_code=403,
+            detail="Source-only coverage requires platform administrator authority",
+        ) from exc
+    except SourceCoverageError as exc:
+        raise HTTPException(status_code=400, detail="Invalid source coverage request") from exc
+    return V1SourceCoveragePageOut.model_validate(
+        {
+            "snapshot": page.snapshot,
+            "summary": page.summary,
+            "items": page.items,
+            "next_cursor": page.next_cursor,
+            "total": page.total,
+            "scope": page.scope,
+            "direction": direction,
+        }
+    )
 
 
 @router.get("/objects", response_model=V1ObjectPageOut)

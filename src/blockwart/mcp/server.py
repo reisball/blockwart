@@ -46,6 +46,7 @@ from blockwart.domain.schema_projection import (
     minimal_object_example,
     object_schema_projection,
 )
+from blockwart.domain.source_coverage import COVERAGE_STATES, SOURCE_CLASSIFICATIONS
 from blockwart.domain.validation_errors import (
     DATA_PATH_ROOT,
     order_public_details,
@@ -453,6 +454,43 @@ TOOLS: list[JSON] = [
             "properties": {
                 **QUERY_FILTER_PROPERTIES,
                 "limit": {"type": "integer", "minimum": 1, "maximum": 20, "default": 5},
+            },
+            "additionalProperties": False,
+        },
+        "annotations": READ_ONLY_ANNOTATIONS,
+    },
+    {
+        "name": "blockwart.get_source_coverage",
+        "description": (
+            "Read the sanitized, digest-bound source inventory coverage snapshot. "
+            "The tool never crawls a workspace or reads source files. The default "
+            "mapped scope contains only mappings derived from objects visible to the "
+            "caller; scope all requires explicit platform-admin authority and includes "
+            "source-only gaps."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "source": {"type": "string", "minLength": 1, "maxLength": 512},
+                "classification": {
+                    "type": "string",
+                    "enum": list(SOURCE_CLASSIFICATIONS),
+                },
+                "state": {"type": "string", "enum": list(COVERAGE_STATES)},
+                "target_kind": {"type": "string", "enum": list(ALL_OBJECT_KINDS)},
+                "scope": {
+                    "type": "string",
+                    "enum": ["mapped", "all"],
+                    "default": "mapped",
+                },
+                "limit": {"type": "integer", "minimum": 1, "maximum": 100, "default": 50},
+                "cursor": {"type": "string", "maxLength": 2048},
+                "direction": {
+                    "type": "string",
+                    "enum": ["asc", "desc"],
+                    "default": "asc",
+                },
+                "include_total": {"type": "boolean", "default": False},
             },
             "additionalProperties": False,
         },
@@ -1113,6 +1151,21 @@ def call_tool(
             fetch("/api/v1/context", _clean_params(args, default_limit=5)),
             args=args,
             items_field="objects",
+        )
+    elif name == "blockwart.get_source_coverage":
+        payload = fetch(
+            "/api/v1/source-coverage",
+            {
+                "source": args.get("source"),
+                "classification": args.get("classification"),
+                "state": args.get("state"),
+                "target_kind": args.get("target_kind"),
+                "scope": args.get("scope", "mapped"),
+                "limit": args.get("limit", 50),
+                "cursor": args.get("cursor"),
+                "direction": args.get("direction", "asc"),
+                "include_total": args.get("include_total", False),
+            },
         )
     elif name == "blockwart.create_child":
         parent_id = _required_string(args, "parent_id")

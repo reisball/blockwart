@@ -40,7 +40,8 @@ PLATFORM_ADMIN_REVISION = "20260731_0012"
 DEVICE_FOUNDATION_REVISION = "20260801_0013"
 OBJECT_COMMENTS_REVISION = "20260804_0014"
 CATALOG_OWNER_REVISION = "20260806_0015"
-HEAD_REVISION = CATALOG_OWNER_REVISION
+SOURCE_COVERAGE_REVISION = "20260811_0016"
+HEAD_REVISION = SOURCE_COVERAGE_REVISION
 PROJECT_ALEMBIC_CONFIG = Path(__file__).resolve().parents[1] / "alembic.ini"
 LEGACY_SNAPSHOT = Path(__file__).resolve().parent / "fixtures" / "legacy_snapshot.sql"
 
@@ -257,6 +258,9 @@ def test_real_alembic_upgrade_creates_fresh_database_and_has_no_drift(
             "security_events",
             "service_tokens",
             "service_token_failure_buckets",
+            "source_entries",
+            "source_entry_mappings",
+            "source_snapshots",
         }
     finally:
         engine.dispose()
@@ -275,6 +279,9 @@ def test_real_alembic_upgrade_creates_fresh_database_and_has_no_drift(
         "security_events",
         "service_tokens",
         "service_token_failure_buckets",
+        "source_entries",
+        "source_entry_mappings",
+        "source_snapshots",
     }
     assert _revision(database_url) == HEAD_REVISION
 
@@ -1946,6 +1953,9 @@ def downgrade() -> None:
             "security_events",
             "service_tokens",
             "service_token_failure_buckets",
+            "source_entries",
+            "source_entry_mappings",
+            "source_snapshots",
         }
         with engine.connect() as connection:
             assert connection.execute(
@@ -2319,6 +2329,105 @@ def test_catalog_owner_migration_is_additive_and_guards_the_last_active_owner(
         assert connection.execute(
             "SELECT principal_id, object_id, role, scope FROM object_grants"
         ).fetchall() == [("legacy-admin", "legacy-root", "owner", "subtree")]
+        assert connection.execute("PRAGMA foreign_key_check").fetchall() == []
+    finally:
+        connection.close()
+
+
+def test_source_coverage_migration_preserves_populated_catalog_and_provenance(
+    tmp_path: Path,
+) -> None:
+    database_path = tmp_path / "source-coverage.sqlite3"
+    database_url = _database_url(database_path)
+    config = build_alembic_config(database_url)
+    command.upgrade(config, CATALOG_OWNER_REVISION)
+    connection = sqlite3.connect(database_path)
+    try:
+        connection.execute(
+            "INSERT INTO catalog_objects "
+            "(id, kind, label, status, lifecycle, health, data_json, "
+            "provenance_json, revision) VALUES "
+            "('preserved-service', 'service', 'Preserved service', 'active', "
+            "'active', 'healthy', '{\"schema_version\":1}', "
+            "'{\"source_type\":\"import\",\"source_ref\":\"legacy-tools\","
+            "\"manual_override\":false}', 7)"
+        )
+        connection.commit()
+        before = connection.execute(
+            "SELECT * FROM catalog_objects WHERE id = 'preserved-service'"
+        ).fetchone()
+    finally:
+        connection.close()
+
+    command.upgrade(config, SOURCE_COVERAGE_REVISION)
+    connection = sqlite3.connect(database_path)
+    try:
+        connection.execute("PRAGMA foreign_keys = ON")
+        assert connection.execute(
+            "SELECT * FROM catalog_objects WHERE id = 'preserved-service'"
+        ).fetchone() == before
+        assert {
+            "source_snapshots",
+            "source_entries",
+            "source_entry_mappings",
+        } <= {
+            str(row[0])
+            for row in connection.execute(
+                "SELECT name FROM sqlite_master WHERE type = 'table'"
+            )
+        }
+        connection.execute(
+            "INSERT INTO source_snapshots "
+            "(id, digest, collector, collected_at, entry_count, mapping_count) "
+            "VALUES ('00000000-0000-0000-0000-000000000142', ?, "
+            "'markdown_tools', '2026-08-11 00:00:00', 2, 1)",
+            ("a" * 64,),
+        )
+        entry_ids = []
+        for entry_id, fingerprint in (("first", "b" * 64), ("second", "c" * 64)):
+            cursor = connection.execute(
+                "INSERT INTO source_entries "
+                "(snapshot_id, source_uri, entry_id, entry_key, classification, "
+                "intent, decision_reason, presence, entry_fingerprint, "
+                "source_fingerprint, observed_at) VALUES "
+                "('00000000-0000-0000-0000-000000000142', "
+                "'workspace://TOOLS.md', ?, ?, 'operational', 'expect_object', "
+                "'operational_inventory', 'present', ?, ?, '2026-08-11 00:00:00')",
+                (entry_id, entry_id, fingerprint, "d" * 64),
+            )
+            entry_ids.append(cursor.lastrowid)
+        mapping_id = connection.execute(
+            "INSERT INTO source_entry_mappings "
+            "(snapshot_id, entry_row_id, object_id, role, "
+            "imported_entry_fingerprint) VALUES "
+            "('00000000-0000-0000-0000-000000000142', ?, "
+            "'preserved-service', 'primary', ?)",
+            (entry_ids[0], "b" * 64),
+        ).lastrowid
+        connection.commit()
+        assert entry_ids[0] is not None
+        assert entry_ids[1] == entry_ids[0] + 1
+        assert mapping_id is not None and mapping_id > 0
+        assert connection.execute("PRAGMA foreign_key_check").fetchall() == []
+    finally:
+        connection.close()
+
+    command.downgrade(config, CATALOG_OWNER_REVISION)
+    connection = sqlite3.connect(database_path)
+    try:
+        assert connection.execute(
+            "SELECT * FROM catalog_objects WHERE id = 'preserved-service'"
+        ).fetchone() == before
+        assert not {
+            "source_snapshots",
+            "source_entries",
+            "source_entry_mappings",
+        } & {
+            str(row[0])
+            for row in connection.execute(
+                "SELECT name FROM sqlite_master WHERE type = 'table'"
+            )
+        }
         assert connection.execute("PRAGMA foreign_key_check").fetchall() == []
     finally:
         connection.close()

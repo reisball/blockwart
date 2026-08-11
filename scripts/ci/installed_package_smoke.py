@@ -139,6 +139,7 @@ async def check_mcp(
                 "blockwart.list_audit_events",
                 "blockwart.add_comment",
                 "blockwart.get_context",
+                "blockwart.get_source_coverage",
                 "blockwart.create_child",
                 "blockwart.create_root",
                 "blockwart.update_object",
@@ -170,6 +171,7 @@ async def check_mcp(
                         "blockwart.list_comments",
                         "blockwart.list_audit_events",
                         "blockwart.get_context",
+                        "blockwart.get_source_coverage",
                         "blockwart.get_object_access",
                         "blockwart.search_principals",
                         "blockwart.list_admin_principals",
@@ -297,6 +299,7 @@ async def check_mcp(
                     {"object_ids": [object_id]},
                 ),
                 await session.call_tool("blockwart.get_context", {"limit": 1}),
+                await session.call_tool("blockwart.get_source_coverage", {"limit": 1}),
                 admin_first_page,
                 admin_second_page,
                 await session.call_tool(
@@ -601,7 +604,7 @@ def main() -> None:
         token=api_token,
     )["objects"][0]
 
-    assert readiness["revision"] == "20260806_0015"
+    assert readiness["revision"] == "20260811_0016"
     assert "Blockwart" in index
     assert static_content_type == "text/css"
     assert not any(
@@ -627,7 +630,7 @@ def main() -> None:
     print(
         "installed_package=ok "
         f"cwd={Path.cwd()} revision={readiness['revision']} "
-        f"openapi_paths={len(openapi['paths'])} mcp_protocol={protocol} mcp_calls=31"
+        f"openapi_paths={len(openapi['paths'])} mcp_protocol={protocol} mcp_calls=32"
     )
 
 

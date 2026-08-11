@@ -44,6 +44,7 @@ EXPECTED_OPERATIONS = {
     "/api/v1/objects/{parent_id}/attached-devices": {"post"},
     "/api/v1/object-contexts": {"post"},
     "/api/v1/roots": {"post"},
+    "/api/v1/source-coverage": {"get"},
 }
 
 

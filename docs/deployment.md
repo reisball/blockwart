@@ -219,6 +219,20 @@ tokens become `api` audience. Once any timeline row exists, downgrade
 is intentionally refused; rollback requires the paired pre-`0014` backup and
 matching image. See `object-comments.md`.
 
+Revision `0016` is additive: it creates the normalized source snapshot, entry,
+and many-to-many mapping tables and does not rewrite existing catalog objects,
+provenance, relationships, grants, comments, or principals. After upgrading a
+restored candidate, run the Markdown collector with `--record-coverage`, review
+its digest and state counts, then query `/api/v1/source-coverage` using both an
+ordinary service account and the explicit platform-admin `scope=all` view. The
+collector is the only workspace filesystem trust boundary; application HTTP
+and MCP workers need no OpenClaw workspace mount. The same `0015` -> `0016`
+upgrade and `0016` -> `0015` downgrade contract applies to SQLite and
+PostgreSQL: downgrade removes only the three source-coverage tables. The entry
+and mapping integer keys retain native auto-increment/sequence behavior, while
+the composite entry/snapshot foreign key prevents mappings from crossing
+snapshot boundaries.
+
 For a fresh Markdown import, bind the reviewed mapping directly to both the
 dry-run and apply commands. The importer requires exact coverage of all Network
 rows and rejects missing, unknown, or conflicting evidence before schema or
@@ -279,6 +293,11 @@ downgrade because its two SQLite rebuilds require the matching pre-migration bac
 `0014` likewise refuses downgrade while any comment exists, preventing silent timeline loss. Primary
 recovery remains the matching verified pre-upgrade database plus pinned old image. Never supply a
 retired global-bypass credential to an old image.
+
+Downgrading `0016` drops only recorded coverage snapshots and mappings; it does
+not change catalog objects or their `CatalogProvenance.source_ref`. Treat those
+snapshots as reproducible audit inventory: export or re-collect them if their
+history is needed after rollback.
 
 An existing unversioned Blockwart database is adopted only if Alembic finds no model/schema
 differences. The adopter stamps the known initial revision and then applies later revisions

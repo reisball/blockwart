@@ -24,6 +24,7 @@ import pytest
 from alembic import command
 from sqlalchemy import create_engine, inspect, text
 from sqlalchemy.engine import Engine
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
 
 from blockwart.db.base import Base
@@ -43,7 +44,8 @@ PG_TEST_URL = os.environ.get(
     "postgresql+psycopg2://postgres:test@127.0.0.1:5432/blockwart_test",
 )
 
-HEAD_REVISION = "20260806_0015"
+CATALOG_OWNER_REVISION = "20260806_0015"
+HEAD_REVISION = "20260811_0016"
 
 
 def _pg_url(database: str) -> str:
@@ -103,6 +105,18 @@ def _upgrade_to(url: str, revision: str) -> None:
 
 def _make_pg_engine(database_name: str) -> Engine:
     return build_engine(_pg_url(database_name))
+
+
+def _table_rows(engine: Engine, tables: set[str]) -> dict[str, list[tuple[object, ...]]]:
+    """Capture every row from trusted migration table names, order-independently."""
+    with engine.connect() as connection:
+        return {
+            table: sorted(
+                (tuple(row) for row in connection.execute(text(f'SELECT * FROM "{table}"'))),
+                key=repr,
+            )
+            for table in sorted(tables)
+        }
 
 
 def _insert_principal(
@@ -226,7 +240,313 @@ def test_postgresql_fresh_migrations_match_model_schema(
             "relationships",
             "service_token_failure_buckets",
             "idempotency_records",
+            "source_entries",
+            "source_entry_mappings",
+            "source_snapshots",
         } <= tables
+    finally:
+        engine.dispose()
+
+
+@PG_SKIP
+def test_postgresql_populated_0015_source_coverage_upgrade_and_downgrade(
+    pg_database_name: str,
+) -> None:
+    """Revision 0016 is additive, reversible, and keeps PostgreSQL integrity.
+
+    Every pre-existing 0015 table is snapshotted before the upgrade and compared
+    byte-for-byte afterwards. Representative catalog, relationship, principal,
+    credential, session, token, grant, audit, security, idempotency, rate-limit,
+    and append-only comment rows make the preservation assertion productive.
+    """
+    database_url = _pg_url(pg_database_name)
+    _upgrade_to(database_url, CATALOG_OWNER_REVISION)
+    engine = build_engine(database_url)
+    preserved_principal = "00000000-0000-0000-0000-000000000142"
+    preserved_token = "00000000-0000-0000-0000-000000000143"
+    preserved_session = "00000000-0000-0000-0000-000000000144"
+    preserved_challenge = "00000000-0000-0000-0000-000000000145"
+    preserved_comment = "00000000-0000-0000-0000-000000000146"
+    try:
+        with engine.begin() as connection:
+            connection.execute(
+                text(
+                    "INSERT INTO principals "
+                    "(id, principal_type, login, display_name, active) VALUES "
+                    "(:id, 'service_account', 'coverage-preserved', "
+                    "'Coverage Preserved', true)"
+                ),
+                {"id": preserved_principal},
+            )
+            connection.execute(
+                text(
+                    "INSERT INTO password_credentials (principal_id, password_hash) "
+                    "VALUES (:id, 'test-password-hash')"
+                ),
+                {"id": preserved_principal},
+            )
+            connection.execute(
+                text(
+                    "INSERT INTO browser_sessions "
+                    "(id, principal_id, token_hash, csrf_hash, expires_at) VALUES "
+                    "(:session_id, :principal_id, :token_hash, :csrf_hash, "
+                    "'2035-01-01T00:00:00')"
+                ),
+                {
+                    "session_id": preserved_session,
+                    "principal_id": preserved_principal,
+                    "token_hash": "a" * 64,
+                    "csrf_hash": "b" * 64,
+                },
+            )
+            connection.execute(
+                text(
+                    "INSERT INTO login_challenges (id, token_hash, expires_at) "
+                    "VALUES (:id, :token_hash, '2035-01-01T00:00:00')"
+                ),
+                {"id": preserved_challenge, "token_hash": "c" * 64},
+            )
+            connection.execute(
+                text(
+                    "INSERT INTO service_tokens "
+                    "(id, principal_id, name, audience, token_prefix, token_hash) "
+                    "VALUES (:token_id, :principal_id, 'coverage-token', 'mcp', "
+                    "'bwst_coverage', :token_hash)"
+                ),
+                {
+                    "token_id": preserved_token,
+                    "principal_id": preserved_principal,
+                    "token_hash": "d" * 64,
+                },
+            )
+            connection.execute(
+                text(
+                    "INSERT INTO catalog_objects "
+                    "(id, kind, label, status, lifecycle, health, data_json, "
+                    "provenance_json, revision) VALUES "
+                    "('coverage-host', 'host', 'Coverage host', 'active', "
+                    "'active', 'healthy', '{}', :host_provenance, 9), "
+                    "('coverage-service', 'service', 'Coverage service', 'active', "
+                    "'active', 'healthy', '{}', :service_provenance, 4)"
+                ),
+                {
+                    "host_provenance": json.dumps(
+                        {
+                            "source_type": "import",
+                            "source_ref": "legacy-tools",
+                            "manual_override": False,
+                        },
+                        separators=(",", ":"),
+                        sort_keys=True,
+                    ),
+                    "service_provenance": json.dumps(
+                        {"source_type": "manual", "manual_override": False},
+                        separators=(",", ":"),
+                        sort_keys=True,
+                    ),
+                },
+            )
+            connection.execute(
+                text(
+                    "INSERT INTO relationships "
+                    "(from_ref, relation_type, to_ref, metadata_json) VALUES "
+                    "('host:coverage-host', 'hosts', 'service:coverage-service', '{}')"
+                )
+            )
+            connection.execute(
+                text(
+                    "INSERT INTO object_grants "
+                    "(principal_id, object_id, role, scope, created_by_principal_id) "
+                    "VALUES (:principal_id, 'coverage-host', 'owner', 'self', "
+                    ":principal_id)"
+                ),
+                {"principal_id": preserved_principal},
+            )
+            connection.execute(
+                text(
+                    "INSERT INTO audit_events "
+                    "(object_id, action, actor, summary, details_json) VALUES "
+                    "('coverage-host', 'preserved', 'migration-test', "
+                    "'Preserved audit', :details)"
+                ),
+                {"details": '{"event":"preserved","version":1}'},
+            )
+            connection.execute(
+                text(
+                    "INSERT INTO security_events "
+                    "(principal_id, event_type, outcome, channel, request_id, details_json) "
+                    "VALUES (:principal_id, 'preserved', 'success', 'system', "
+                    "'coverage-142', '{}')"
+                ),
+                {"principal_id": preserved_principal},
+            )
+            connection.execute(
+                text(
+                    "INSERT INTO service_token_failure_buckets "
+                    "(dimension, key_hash, window_start, failure_count, event_emitted, "
+                    "expires_at) VALUES ('global', :key_hash, '2026-08-11T00:00:00', "
+                    "2, false, '2035-01-01T00:00:00')"
+                ),
+                {"key_hash": "e" * 64},
+            )
+            connection.execute(
+                text(
+                    "INSERT INTO idempotency_records "
+                    "(principal_id, key_hash, operation_context, request_hash, "
+                    "resource_id, response_json, created_at, expires_at) VALUES "
+                    "(:principal_id, :key_hash, 'coverage-test', :request_hash, "
+                    "'coverage-host', :response_json, '2026-08-11T00:00:00', "
+                    "'2035-01-01T00:00:00')"
+                ),
+                {
+                    "principal_id": preserved_principal,
+                    "key_hash": "f" * 64,
+                    "request_hash": "1" * 64,
+                    "response_json": '{"ok":true}',
+                },
+            )
+            object_instance_id, object_created_at = connection.execute(
+                text(
+                    "SELECT instance_id, created_at FROM catalog_objects "
+                    "WHERE id = 'coverage-host'"
+                )
+            ).one()
+            connection.execute(
+                text(
+                    "INSERT INTO object_comments "
+                    "(id, object_id, object_instance_id, object_created_at, origin, "
+                    "format, body, created_at) VALUES "
+                    "(:id, 'coverage-host', :instance_id, :object_created_at, "
+                    "'legacy', 'plain_text', 'preserved comment', :object_created_at)"
+                ),
+                {
+                    "id": preserved_comment,
+                    "instance_id": object_instance_id,
+                    "object_created_at": object_created_at,
+                },
+            )
+        existing_tables = set(inspect(engine).get_table_names()) - {"alembic_version"}
+        before = _table_rows(engine, existing_tables)
+    finally:
+        engine.dispose()
+
+    _upgrade_to(database_url, HEAD_REVISION)
+    engine = build_engine(database_url)
+    try:
+        assert _table_rows(engine, existing_tables) == before
+        command.check(build_alembic_config(database_url))
+        inspector = inspect(engine)
+        assert {
+            "source_snapshots",
+            "source_entries",
+            "source_entry_mappings",
+        } <= set(inspector.get_table_names())
+        assert {
+            fk["referred_table"] for fk in inspector.get_foreign_keys("source_entries")
+        } == {"source_snapshots"}
+        mapping_targets = {
+            fk["referred_table"]
+            for fk in inspector.get_foreign_keys("source_entry_mappings")
+        }
+        assert mapping_targets == {"source_entries", "source_snapshots"}
+        assert "catalog_objects" not in mapping_targets
+
+        snapshot_id = "00000000-0000-0000-0000-000000000147"
+        other_snapshot_id = "00000000-0000-0000-0000-000000000148"
+        with engine.begin() as connection:
+            for current_id, digest in (
+                (snapshot_id, "2" * 64),
+                (other_snapshot_id, "3" * 64),
+            ):
+                connection.execute(
+                    text(
+                        "INSERT INTO source_snapshots "
+                        "(id, digest, collector, collected_at, entry_count, "
+                        "mapping_count) VALUES (:id, :digest, 'markdown_tools', "
+                        "'2026-08-11T00:00:00', 1, 1)"
+                    ),
+                    {"id": current_id, "digest": digest},
+                )
+            entry_id = connection.execute(
+                text(
+                    "INSERT INTO source_entries "
+                    "(snapshot_id, source_uri, entry_id, entry_key, classification, "
+                    "intent, decision_reason, presence, entry_fingerprint, "
+                    "source_fingerprint, observed_at) VALUES "
+                    "(:snapshot_id, 'workspace://TOOLS.md', 'coverage-host', "
+                    "'coverage-host', 'operational', 'expect_object', "
+                    "'operational_inventory', 'present', :fingerprint, "
+                    ":fingerprint, '2026-08-11T00:00:00') RETURNING id"
+                ),
+                {"snapshot_id": snapshot_id, "fingerprint": "4" * 64},
+            ).scalar_one()
+            next_entry_id = connection.execute(
+                text(
+                    "INSERT INTO source_entries "
+                    "(snapshot_id, source_uri, entry_id, entry_key, classification, "
+                    "intent, decision_reason, presence, entry_fingerprint, "
+                    "source_fingerprint, observed_at) VALUES "
+                    "(:snapshot_id, 'workspace://TOOLS.md', 'second', 'second', "
+                    "'research', 'no_catalog_object', 'research_material', "
+                    "'present', :fingerprint, :fingerprint, "
+                    "'2026-08-11T00:00:00') RETURNING id"
+                ),
+                {"snapshot_id": snapshot_id, "fingerprint": "5" * 64},
+            ).scalar_one()
+            mapping_id = connection.execute(
+                text(
+                    "INSERT INTO source_entry_mappings "
+                    "(snapshot_id, entry_row_id, object_id, role, "
+                    "imported_entry_fingerprint) VALUES "
+                    "(:snapshot_id, :entry_id, 'coverage-host', 'primary', "
+                    ":fingerprint) RETURNING id"
+                ),
+                {
+                    "snapshot_id": snapshot_id,
+                    "entry_id": entry_id,
+                    "fingerprint": "4" * 64,
+                },
+            ).scalar_one()
+            assert next_entry_id == entry_id + 1
+            assert mapping_id > 0
+            assert connection.execute(
+                text("SELECT pg_get_serial_sequence('source_entries', 'id')")
+            ).scalar_one()
+            assert connection.execute(
+                text("SELECT pg_get_serial_sequence('source_entry_mappings', 'id')")
+            ).scalar_one()
+            with pytest.raises(IntegrityError):
+                with connection.begin_nested():
+                    connection.execute(
+                        text(
+                            "INSERT INTO source_entry_mappings "
+                            "(snapshot_id, entry_row_id, object_id, role, "
+                            "imported_entry_fingerprint) VALUES "
+                            "(:snapshot_id, :entry_id, 'coverage-service', 'derived', "
+                            ":fingerprint)"
+                        ),
+                        {
+                            "snapshot_id": other_snapshot_id,
+                            "entry_id": entry_id,
+                            "fingerprint": "4" * 64,
+                        },
+                    )
+    finally:
+        engine.dispose()
+
+    command.downgrade(build_alembic_config(database_url), CATALOG_OWNER_REVISION)
+    engine = build_engine(database_url)
+    try:
+        assert _table_rows(engine, existing_tables) == before
+        assert not {
+            "source_snapshots",
+            "source_entries",
+            "source_entry_mappings",
+        } & set(inspect(engine).get_table_names())
+        with engine.connect() as connection:
+            assert connection.execute(
+                text("SELECT version_num FROM alembic_version")
+            ).scalar_one() == CATALOG_OWNER_REVISION
     finally:
         engine.dispose()
 

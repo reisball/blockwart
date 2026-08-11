@@ -2,7 +2,8 @@ from __future__ import annotations
 
 import re
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -14,6 +15,26 @@ from blockwart.domain.provenance import (
     CatalogProvenance,
     load_provenance,
 )
+from blockwart.domain.source_coverage import (
+    CLASSIFICATION_DEFAULTS,
+    COLLECTOR_MARKDOWN_TOOLS,
+    DECISION_REASONS,
+    MAPPING_INTENTS,
+    MAX_ENTRY_ID_LENGTH,
+    SOURCE_CLASSIFICATIONS,
+    DecisionReason,
+    MappingIntent,
+    SourceClassification,
+    SourceEntry,
+    SourceMapping,
+    SourceSnapshot,
+    content_fingerprint,
+    normalize_entry_id,
+    normalize_source_uri,
+    source_fingerprint,
+    validate_snapshot,
+)
+from blockwart.domain.timestamps import format_rfc3339_utc
 from blockwart.models import CatalogObject, Relationship
 from blockwart.schemas.catalog import CatalogObjectIn
 from blockwart.services.access import (
@@ -65,6 +86,7 @@ class MarkdownImportPlan:
     source_rows: int
     object_count: int
     credential_reference_count: int
+    coverage_snapshot: SourceSnapshot
 
 
 class MarkdownImportNetworkError(ValueError):
@@ -80,6 +102,10 @@ def build_tools_import_plan(
     *,
     references_root: str | Path | None = None,
     network_evidence: Mapping[str, NetworkClassificationEvidence] | None = None,
+    source_uri: str = "workspace://TOOLS.md",
+    observed_at: str | None = None,
+    previous_snapshot: SourceSnapshot | None = None,
+    mapped_object_ids: frozenset[str] = frozenset(),
 ) -> MarkdownImportPlan:
     path = Path(tools_path)
     references_base = Path(references_root) if references_root else path.parent
@@ -89,12 +115,23 @@ def build_tools_import_plan(
     relationships: list[dict[str, str]] = []
     seen_ids: set[str] = set()
     hosted_system_refs: list[str] = []
+    coverage_rows: list[
+        tuple[
+            dict[str, str],
+            SourceClassification,
+            MappingIntent,
+            DecisionReason,
+            tuple[str, ...],
+        ]
+    ] = []
 
     for row in rows:
         label = row.get("System") or row.get("Name")
         if not label:
             continue
-        if _is_non_infra_row(row):
+        classification, intent, decision_reason = _source_decision(row)
+        if classification != "operational" or intent == "no_catalog_object":
+            coverage_rows.append((row, classification, intent, decision_reason, ()))
             continue
 
         slug_label = _slugify(_plain_text(label))
@@ -171,6 +208,7 @@ def build_tools_import_plan(
                 "data": system_data,
             }
         )
+        mapped_candidates = [system_id]
         if is_hosted_service:
             service_ref = f"service:{service_id}"
             system_ref = f"system:{system_id}"
@@ -205,6 +243,16 @@ def build_tools_import_plan(
                 }
             )
             hosted_system_refs.append(system_ref)
+            mapped_candidates.append(service_id)
+        coverage_rows.append(
+            (
+                row,
+                classification,
+                intent,
+                decision_reason,
+                tuple(mapped_candidates),
+            )
+        )
 
     if any(obj["id"] == "fabrik" and obj["kind"] == "host" for obj in objects):
         relationships.extend(
@@ -234,12 +282,163 @@ def build_tools_import_plan(
         "objects": objects,
         "relationships": relationships,
     }
+    coverage_snapshot = _build_coverage_snapshot(
+        coverage_rows,
+        source_uri=source_uri,
+        observed_at=observed_at,
+        previous_snapshot=previous_snapshot,
+        mapped_object_ids=mapped_object_ids,
+    )
     return MarkdownImportPlan(
         payload=payload,
         source_rows=len(rows),
         object_count=len(objects),
         credential_reference_count=0,
+        coverage_snapshot=coverage_snapshot,
     )
+
+
+def _build_coverage_snapshot(
+    rows: list[
+        tuple[
+            dict[str, str],
+            SourceClassification,
+            MappingIntent,
+            DecisionReason,
+            tuple[str, ...],
+        ]
+    ],
+    *,
+    source_uri: str,
+    observed_at: str | None,
+    previous_snapshot: SourceSnapshot | None,
+    mapped_object_ids: frozenset[str],
+) -> SourceSnapshot:
+    stable_uri = normalize_source_uri(source_uri)
+    timestamp = observed_at or format_rfc3339_utc(datetime.now(UTC)) or ""
+    previous_by_key = {
+        entry.key: entry
+        for entry in (previous_snapshot.entries if previous_snapshot is not None else ())
+        if entry.source_uri == stable_uri
+    }
+
+    normalized_rows: list[
+        tuple[
+            str,
+            str,
+            dict[str, str],
+            SourceClassification,
+            MappingIntent,
+            DecisionReason,
+            tuple[str, ...],
+        ]
+    ] = []
+    base_id_counts: dict[str, int] = {}
+    for row, classification, intent, reason, candidates in rows:
+        label = _plain_text(row.get("System") or row.get("Name") or "")
+        explicit_id = (
+            row.get("Entry ID")
+            or row.get("Source Entry ID")
+            or row.get("Source ID")
+        )
+        base_id = normalize_entry_id(explicit_id) if explicit_id else _slugify(label)
+        if base_id is None:
+            raise ValueError("Markdown source entry id is required")
+        normalized_row = {
+            _plain_text(key): _plain_text(value)
+            for key, value in sorted(row.items())
+        }
+        fingerprint = content_fingerprint([normalized_row])
+        normalized_rows.append(
+            (
+                base_id,
+                fingerprint,
+                normalized_row,
+                classification,
+                intent,
+                reason,
+                candidates,
+            )
+        )
+        base_id_counts[base_id] = base_id_counts.get(base_id, 0) + 1
+
+    current_entries: list[SourceEntry] = []
+    current_keys: set[tuple[str, str]] = set()
+    for (
+        base_id,
+        fingerprint,
+        _normalized_row,
+        classification,
+        intent,
+        reason,
+        candidates,
+    ) in sorted(normalized_rows, key=lambda item: (item[0], item[1], item[6])):
+        entry_id = (
+            base_id
+            if base_id_counts[base_id] == 1
+            else f"{base_id[: MAX_ENTRY_ID_LENGTH - 14]}--{fingerprint[:12]}"
+        )
+        key = (stable_uri, entry_id)
+        if key in current_keys:
+            raise ValueError("duplicate indistinguishable Markdown source entries")
+        current_keys.add(key)
+        previous = previous_by_key.get(key)
+        if previous is not None:
+            mappings = previous.mappings
+        else:
+            existing_candidates = tuple(
+                object_id
+                for object_id in candidates
+                if object_id in mapped_object_ids
+            )
+            mappings = tuple(
+                SourceMapping(
+                    object_id=object_id,
+                    role="primary" if index == 0 else "derived",
+                    imported_entry_fingerprint=fingerprint,
+                    imported_at=timestamp,
+                    verified_at=timestamp,
+                )
+                for index, object_id in enumerate(existing_candidates)
+            )
+        current_entries.append(
+            SourceEntry(
+                source_uri=stable_uri,
+                entry_id=entry_id,
+                classification=classification,
+                intent=intent,
+                decision_reason=reason,
+                entry_fingerprint=fingerprint,
+                source_fingerprint="0" * 64,
+                observed_at=timestamp,
+                mappings=mappings,
+            )
+        )
+
+    aggregate_fingerprint = source_fingerprint(
+        entry.entry_fingerprint for entry in current_entries
+    )
+    entries = [
+        replace(entry, source_fingerprint=aggregate_fingerprint)
+        for entry in current_entries
+    ]
+    for key, previous in sorted(previous_by_key.items()):
+        if key in current_keys:
+            continue
+        entries.append(
+            replace(
+                previous,
+                source_fingerprint=aggregate_fingerprint,
+                observed_at=timestamp,
+                presence="absent",
+            )
+        )
+    snapshot = SourceSnapshot(
+        collector=COLLECTOR_MARKDOWN_TOOLS,
+        collected_at=timestamp,
+        entries=tuple(sorted(entries, key=lambda entry: entry.key)),
+    ).with_digest()
+    return validate_snapshot(snapshot)
 
 
 def _apply_network_evidence(
@@ -314,12 +513,14 @@ def import_tools_markdown(
     *,
     references_root: str | Path | None = None,
     network_evidence: Mapping[str, NetworkClassificationEvidence] | None = None,
+    source_uri: str = "workspace://TOOLS.md",
 ) -> SeedImportResult:
     previously_covered_ids = active_owner_covered_object_ids(session)
     plan = build_tools_import_plan(
         tools_path,
         references_root=references_root,
         network_evidence=network_evidence,
+        source_uri=source_uri,
     )
     objects = plan.payload["objects"]
     relationships = plan.payload["relationships"]
@@ -486,6 +687,15 @@ def _is_workspace_import(row: CatalogObject) -> bool:
     )
 
 
+def workspace_import_object_ids(session: Session) -> frozenset[str]:
+    """Return existing Markdown-import targets without reading any source file."""
+    return frozenset(
+        row.id
+        for row in session.scalars(select(CatalogObject).order_by(CatalogObject.id))
+        if _is_workspace_import(row)
+    )
+
+
 def _merge_existing_object(
     existing: CatalogObject,
     imported: CatalogObjectIn,
@@ -543,10 +753,50 @@ def _is_separator_row(cells: list[str]) -> bool:
 
 
 def _is_non_infra_row(row: dict[str, str]) -> bool:
-    typ = row.get("Typ", "").casefold()
+    typ = (row.get("Typ", "") or row.get("Type", "")).casefold()
     if typ in {"typ", ""}:
         return True
     return "Zeitplan" in row or "Activity" in row
+
+
+def _source_decision(
+    row: dict[str, str],
+) -> tuple[SourceClassification, MappingIntent, DecisionReason]:
+    raw_classification = _plain_text(
+        row.get("Classification", "")
+        or row.get("Source Classification", "")
+    ).casefold()
+    if raw_classification:
+        if raw_classification not in SOURCE_CLASSIFICATIONS:
+            raise ValueError("unknown Markdown source classification")
+        classification: SourceClassification = raw_classification  # type: ignore[assignment]
+    elif _is_non_infra_row(row):
+        classification = "ignored"
+    else:
+        classification = "operational"
+
+    default_intent, default_reason = CLASSIFICATION_DEFAULTS[classification]
+    raw_intent = _plain_text(
+        row.get("Catalog Intent", "")
+        or row.get("Mapping Intent", "")
+    ).casefold()
+    if raw_intent:
+        if raw_intent not in MAPPING_INTENTS:
+            raise ValueError("unknown Markdown mapping intent")
+        intent: MappingIntent = raw_intent  # type: ignore[assignment]
+    else:
+        intent = default_intent
+
+    raw_reason = _plain_text(row.get("Decision Reason", "")).casefold()
+    if raw_reason:
+        if raw_reason not in DECISION_REASONS:
+            raise ValueError("unknown Markdown decision reason")
+        reason: DecisionReason = raw_reason  # type: ignore[assignment]
+    elif classification == "ignored" and _is_non_infra_row(row):
+        reason = "not_infrastructure"
+    else:
+        reason = default_reason
+    return classification, intent, reason
 
 
 def _is_hosted_service_row(row: dict[str, str]) -> bool:
