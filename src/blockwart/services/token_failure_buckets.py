@@ -9,6 +9,7 @@ from functools import lru_cache
 
 from sqlalchemy import delete, func, select
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session
 
 from blockwart.config import Settings
@@ -283,7 +284,8 @@ def _increment_bucket(
         )
         if not has_room:
             return None, False
-    statement = sqlite_insert(ServiceTokenFailureBucket).values(
+    _insert_fn = sqlite_insert if session.bind.dialect.name == "sqlite" else pg_insert
+    statement = _insert_fn(ServiceTokenFailureBucket).values(
         dimension=dimension,
         key_hash=key_hash,
         window_start=window_start,
