@@ -59,6 +59,7 @@ def precheck_service_token_failure(
     request_id: str | None,
     now: datetime | None = None,
 ) -> TokenFailureDecision:
+    _validate_policy_limits(policy)
     timestamp = now or utc_now()
     window_start = _window_start(timestamp, policy.window_seconds)
     for dimension, key_hash, limit in _bucket_specs(token, source, policy):
@@ -92,6 +93,7 @@ def record_service_token_failure(
     request_id: str | None,
     now: datetime | None = None,
 ) -> TokenFailureDecision:
+    _validate_policy_limits(policy)
     timestamp = now or utc_now()
     window_start = _window_start(timestamp, policy.window_seconds)
     expires_at = window_start + timedelta(seconds=policy.window_seconds)
@@ -267,6 +269,8 @@ def _increment_bucket(
     now: datetime,
     evict_dimensions: tuple[str, ...],
 ) -> tuple[ServiceTokenFailureBucket | None, bool]:
+    if limit <= 0:
+        raise ValueError("service-token failure-bucket limit must be strictly positive")
     existing = session.scalar(
         select(ServiceTokenFailureBucket).where(
             ServiceTokenFailureBucket.dimension == dimension,
@@ -367,6 +371,23 @@ def _make_bucket_room(
     )
     session.flush()
     return True, True
+
+
+def _validate_policy_limits(policy: TokenFailurePolicy) -> None:
+    invalid = [
+        name
+        for name, value in (
+            ("global_limit", policy.global_limit),
+            ("source_limit", policy.source_limit),
+            ("token_limit", policy.token_limit),
+        )
+        if value <= 0
+    ]
+    if invalid:
+        raise ValueError(
+            "service-token failure limits must be strictly positive: "
+            + ", ".join(invalid)
+        )
 
 
 def _saturate_bucket(bucket: ServiceTokenFailureBucket, limit: int) -> None:
