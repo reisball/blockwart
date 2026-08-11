@@ -153,6 +153,7 @@ def upgrade() -> None:
         ["to_ref"],
         unique=True,
         sqlite_where=sa.text("relation_type = 'hosts'"),
+        postgresql_where=sa.text("relation_type = 'hosts'"),
     )
 
 

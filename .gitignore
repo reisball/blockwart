@@ -4,6 +4,9 @@ __pycache__/
 *.egg-info/
 .pytest_cache/
 .ruff_cache/
+build/
+dist/
+*.whl
 .mypy_cache/
 .env
 .env.*
@@ -14,3 +17,6 @@ __pycache__/
 *.sqlite3-shm
 exports/*
 !exports/.gitkeep
+
+# CI: local venv for testing
+/tmp/blockwart-test-venv/

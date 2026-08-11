@@ -284,7 +284,19 @@ def _increment_bucket(
         )
         if not has_room:
             return None, False
-    _insert_fn = sqlite_insert if session.bind.dialect.name == "sqlite" else pg_insert
+    _is_sqlite = session.bind.dialect.name == "sqlite"
+    _insert_fn = sqlite_insert if _is_sqlite else pg_insert
+    _clamp_expr = (
+        func.min(
+            ServiceTokenFailureBucket.failure_count + 1,
+            limit + 1,
+        )
+        if _is_sqlite
+        else func.least(
+            ServiceTokenFailureBucket.failure_count + 1,
+            limit + 1,
+        )
+    )
     statement = _insert_fn(ServiceTokenFailureBucket).values(
         dimension=dimension,
         key_hash=key_hash,
@@ -296,10 +308,7 @@ def _increment_bucket(
     statement = statement.on_conflict_do_update(
         index_elements=("dimension", "key_hash", "window_start"),
         set_={
-            "failure_count": func.min(
-                ServiceTokenFailureBucket.failure_count + 1,
-                limit + 1,
-            ),
+            "failure_count": _clamp_expr,
             "expires_at": expires_at,
         },
     )

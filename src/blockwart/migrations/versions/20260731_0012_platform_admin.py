@@ -92,7 +92,7 @@ def upgrade() -> None:
         op.execute(_LAST_ADMIN_UPDATE_TRIGGER_SQLITE)
         op.execute(_LAST_ADMIN_DELETE_TRIGGER_SQLITE)
     else:
-        op.execute("CREATE OR REPLACE FUNCTION blockwart_check_last_active_admin() RETURNS TRIGGER AS $$ BEGIN IF NOT EXISTS (SELECT 1 FROM principals WHERE id <> OLD.id AND active = true AND platform_role = 'admin') THEN RAISE EXCEPTION 'last active platform admin'; END IF; IF TG_OP = 'DELETE' THEN RETURN OLD; ELSE RETURN NEW; END IF; END; $$ LANGUAGE plpgsql")
+        op.execute("CREATE OR REPLACE FUNCTION blockwart_check_last_active_admin() RETURNS TRIGGER AS $$ BEGIN PERFORM pg_advisory_xact_lock(42); IF NOT EXISTS (SELECT 1 FROM principals WHERE id <> OLD.id AND active = true AND platform_role = 'admin') THEN RAISE EXCEPTION 'last active platform admin'; END IF; IF TG_OP = 'DELETE' THEN RETURN OLD; ELSE RETURN NEW; END IF; END; $$ LANGUAGE plpgsql")
         op.execute(_LAST_ADMIN_UPDATE_TRIGGER_PG)
         op.execute(_LAST_ADMIN_DELETE_TRIGGER_PG)
 
