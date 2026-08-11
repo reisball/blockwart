@@ -26,7 +26,7 @@ class Principal(Base):
             name="ck_principals_type",
         ),
         CheckConstraint(
-            "active IN (0,1)",
+            "active IN (true, false)",
             name="ck_principals_active_boolean",
         ),
         CheckConstraint(
@@ -56,7 +56,7 @@ class Principal(Base):
     active: Mapped[bool] = mapped_column(
         Boolean,
         default=True,
-        server_default=text("1"),
+        server_default=text("true"),
         index=True,
     )
     platform_role: Mapped[str | None] = mapped_column(
@@ -245,7 +245,7 @@ class ServiceTokenFailureBucket(Base):
             name="ck_service_token_failure_buckets_count",
         ),
         CheckConstraint(
-            "event_emitted IN (0,1)",
+            "event_emitted IN (true, false)",
             name="ck_service_token_failure_buckets_event_boolean",
         ),
         UniqueConstraint(
@@ -268,7 +268,7 @@ class ServiceTokenFailureBucket(Base):
     event_emitted: Mapped[bool] = mapped_column(
         Boolean,
         default=False,
-        server_default=text("0"),
+        server_default=text("false"),
         nullable=False,
     )
     expires_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
