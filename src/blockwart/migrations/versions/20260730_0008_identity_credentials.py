@@ -24,7 +24,10 @@ def upgrade() -> None:
         sa.Column("principal_type", sa.String(length=32), nullable=False),
         sa.Column(
             "login",
-            sa.String(length=128),
+            sa.String(length=128).with_variant(
+                sa.String(length=128, collation="NOCASE"),
+                "sqlite",
+            ),
             nullable=False,
         ),
         sa.Column("display_name", sa.String(length=255), nullable=False),

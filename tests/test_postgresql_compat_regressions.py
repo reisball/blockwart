@@ -14,6 +14,8 @@ from __future__ import annotations
 
 import json
 import os
+import threading
+import time
 import uuid
 from collections.abc import Iterator
 from pathlib import Path
@@ -203,9 +205,11 @@ def test_postgresql_fresh_migrations_match_model_schema(
     pg_database_name: str,
 ) -> None:
     """The PostgreSQL migration chain leaves a schema equal to ``Base.metadata``."""
-    _upgrade_to(_pg_url(pg_database_name), HEAD_REVISION)
+    database_url = _pg_url(pg_database_name)
+    _upgrade_to(database_url, HEAD_REVISION)
+    command.check(build_alembic_config(database_url))
 
-    engine = build_engine(_pg_url(pg_database_name))
+    engine = build_engine(database_url)
     try:
         with engine.connect() as connection:
             tables = {
@@ -263,7 +267,6 @@ def test_postgresql_seeded_migration_upgrades_cleanly(
         engine.dispose()
 
     _upgrade_to(database_url, HEAD_REVISION)
-
     engine = build_engine(database_url)
     try:
         with engine.connect() as connection:
@@ -278,6 +281,157 @@ def test_postgresql_seeded_migration_upgrades_cleanly(
             assert rel_count >= 1
     finally:
         engine.dispose()
+
+
+@PG_SKIP
+def test_postgresql_populated_0013_upgrade_preserves_fks_and_reseeds_identity(
+    pg_database_name: str,
+) -> None:
+    """Explicit legacy relationship IDs advance the replacement identity."""
+    database_url = _pg_url(pg_database_name)
+    _upgrade_to(database_url, "20260731_0012")
+    engine = build_engine(database_url)
+    try:
+        with engine.begin() as connection:
+            connection.execute(
+                text(
+                    "INSERT INTO principals "
+                    "(id, principal_type, login, display_name, active) VALUES "
+                    "('00000000-0000-0000-0000-000000000031', "
+                    "'service_account', 'migration-seed', 'Migration Seed', true)"
+                )
+            )
+            connection.execute(
+                text(
+                    "INSERT INTO catalog_objects "
+                    "(id, kind, label, status, lifecycle, health, data_json) VALUES "
+                    "('sequence-host', 'host', 'Sequence Host', 'active', "
+                    "'active', 'healthy', '{}'), "
+                    "('sequence-service', 'service', 'Sequence Service', 'active', "
+                    "'active', 'healthy', '{}')"
+                )
+            )
+            connection.execute(
+                text(
+                    "INSERT INTO relationships "
+                    "(id, from_ref, relation_type, to_ref) VALUES "
+                    "(41, 'host:sequence-host', 'hosts', 'service:sequence-service')"
+                )
+            )
+            connection.execute(
+                text(
+                    "INSERT INTO object_grants "
+                    "(principal_id, object_id, role, scope, created_by_principal_id) "
+                    "VALUES ('00000000-0000-0000-0000-000000000031', "
+                    "'sequence-host', 'owner', 'self', "
+                    "'00000000-0000-0000-0000-000000000031')"
+                )
+            )
+            connection.execute(
+                text(
+                    "INSERT INTO service_tokens "
+                    "(id, principal_id, name, token_prefix, token_hash) VALUES "
+                    "('00000000-0000-0000-0000-000000000032', "
+                    "'00000000-0000-0000-0000-000000000031', "
+                    "'migration-token', 'bwst_seed', :token_hash)"
+                ),
+                {"token_hash": "a" * 64},
+            )
+    finally:
+        engine.dispose()
+
+    _upgrade_to(database_url, HEAD_REVISION)
+    engine = build_engine(database_url)
+    try:
+        with engine.begin() as connection:
+            next_id = connection.execute(
+                text(
+                    "INSERT INTO relationships "
+                    "(from_ref, relation_type, to_ref) VALUES "
+                    "('service:sequence-service', 'depends_on', 'host:sequence-host') "
+                    "RETURNING id"
+                )
+            ).scalar_one()
+            assert next_id == 42
+            assert connection.execute(
+                text(
+                    "SELECT object_id FROM object_grants "
+                    "WHERE principal_id = "
+                    "'00000000-0000-0000-0000-000000000031'"
+                )
+            ).scalar_one() == "sequence-host"
+            assert connection.execute(
+                text(
+                    "SELECT audience FROM service_tokens WHERE id = "
+                    "'00000000-0000-0000-0000-000000000032'"
+                )
+            ).scalar_one() == "api"
+    finally:
+        engine.dispose()
+
+
+@PG_SKIP
+def test_postgresql_empty_comments_downgrade_0015_to_0013(
+    pg_database_name: str,
+) -> None:
+    database_url = _pg_url(pg_database_name)
+    _upgrade_to(database_url, HEAD_REVISION)
+    config = build_alembic_config(database_url)
+    command.downgrade(config, "20260801_0013")
+
+    engine = build_engine(database_url)
+    try:
+        inspector = inspect(engine)
+        assert "object_comments" not in inspector.get_table_names()
+        assert "instance_id" not in {
+            column["name"] for column in inspector.get_columns("catalog_objects")
+        }
+        assert "audience" not in {
+            column["name"] for column in inspector.get_columns("service_tokens")
+        }
+    finally:
+        engine.dispose()
+
+
+@PG_SKIP
+def test_postgresql_nonempty_comments_downgrade_fails_closed(
+    pg_database_name: str,
+) -> None:
+    database_url = _pg_url(pg_database_name)
+    _upgrade_to(database_url, HEAD_REVISION)
+    engine = build_engine(database_url)
+    try:
+        with engine.begin() as connection:
+            connection.execute(
+                text(
+                    "INSERT INTO catalog_objects "
+                    "(id, kind, label, status, lifecycle, health, data_json) VALUES "
+                    "('downgrade-comment', 'host', 'Downgrade Comment', 'active', "
+                    "'active', 'healthy', '{}')"
+                )
+            )
+            instance_id, created_at = connection.execute(
+                text(
+                    "SELECT instance_id, created_at FROM catalog_objects "
+                    "WHERE id = 'downgrade-comment'"
+                )
+            ).one()
+            connection.execute(
+                text(
+                    "INSERT INTO object_comments "
+                    "(id, object_id, object_instance_id, object_created_at, origin, "
+                    "format, body, created_at) VALUES "
+                    "('00000000-0000-0000-0000-000000000033', "
+                    "'downgrade-comment', :instance_id, :created_at, "
+                    "'legacy', 'plain_text', 'keep', :created_at)"
+                ),
+                {"instance_id": instance_id, "created_at": created_at},
+            )
+    finally:
+        engine.dispose()
+
+    with pytest.raises(RuntimeError, match="comments cannot be downgraded"):
+        command.downgrade(build_alembic_config(database_url), "20260801_0013")
 
 
 # ---------------------------------------------------------------------------
@@ -407,6 +561,41 @@ def test_postgresql_last_catalog_owner_delete_is_blocked(
 
 
 @PG_SKIP
+@pytest.mark.parametrize("multiple", [False, True])
+def test_postgresql_last_catalog_owner_update_contract(
+    migrated_pg_engine: Engine,
+    multiple: bool,
+) -> None:
+    """Owner demotion succeeds with a survivor and fails for the last owner."""
+    owner_ids = ["00000000-0000-0000-0000-000000000016"]
+    if multiple:
+        owner_ids.append("00000000-0000-0000-0000-000000000017")
+    with migrated_pg_engine.begin() as connection:
+        for index, principal_id in enumerate(owner_ids):
+            _insert_principal(
+                connection,
+                principal_id=principal_id,
+                login=f"update-owner-{multiple}-{index}",
+                catalog_role="catalog_owner",
+            )
+
+    if multiple:
+        with migrated_pg_engine.begin() as connection:
+            result = connection.execute(
+                text("UPDATE principals SET catalog_role = NULL WHERE id = :id"),
+                {"id": owner_ids[0]},
+            )
+            assert result.rowcount == 1
+    else:
+        with pytest.raises(Exception, match="last active catalog owner"):
+            with migrated_pg_engine.begin() as connection:
+                connection.execute(
+                    text("UPDATE principals SET catalog_role = NULL WHERE id = :id"),
+                    {"id": owner_ids[0]},
+                )
+
+
+@PG_SKIP
 def test_postgresql_last_admin_update_with_multiple_admins_succeeds(
     migrated_pg_engine: Engine,
 ) -> None:
@@ -458,6 +647,167 @@ def test_postgresql_last_admin_update_is_blocked(
             )
 
     assert "last active platform admin" in str(excinfo.value).lower()
+
+
+@PG_SKIP
+@pytest.mark.parametrize(
+    ("role_column", "role_value", "operation", "invariant", "message"),
+    [
+        (
+            "platform_role",
+            "admin",
+            "delete",
+            "platform_admin",
+            "last active platform admin",
+        ),
+        (
+            "platform_role",
+            "admin",
+            "update",
+            "platform_admin",
+            "last active platform admin",
+        ),
+        (
+            "catalog_role",
+            "catalog_owner",
+            "delete",
+            "catalog_owner",
+            "last active catalog owner",
+        ),
+        (
+            "catalog_role",
+            "catalog_owner",
+            "update",
+            "catalog_owner",
+            "last active catalog owner",
+        ),
+    ],
+)
+def test_postgresql_concurrent_principal_invariant_is_serialized(
+    migrated_pg_engine: Engine,
+    role_column: str,
+    role_value: str,
+    operation: str,
+    invariant: str,
+    message: str,
+) -> None:
+    """A held counter-row update deterministically serializes both removals."""
+    principal_ids = [
+        "00000000-0000-0000-0000-000000000021",
+        "00000000-0000-0000-0000-000000000022",
+    ]
+    with migrated_pg_engine.begin() as connection:
+        for index, principal_id in enumerate(principal_ids):
+            _insert_principal(
+                connection,
+                principal_id=principal_id,
+                login=f"concurrent-{role_column}-{operation}-{index}",
+                platform_role=role_value if role_column == "platform_role" else None,
+                catalog_role=role_value if role_column == "catalog_role" else None,
+            )
+
+    first_mutated = threading.Event()
+    release_first = threading.Event()
+    second_started = threading.Event()
+    outcomes: dict[str, str] = {}
+    application_name = f"bw-invariant-{uuid.uuid4().hex}"
+
+    def statement(principal_id: str):
+        if operation == "delete":
+            return text("DELETE FROM principals WHERE id = :id"), {"id": principal_id}
+        return (
+            text(f"UPDATE principals SET {role_column} = NULL WHERE id = :id"),
+            {"id": principal_id},
+        )
+
+    def first_transaction() -> None:
+        engine = create_engine(
+            migrated_pg_engine.url,
+            isolation_level="READ COMMITTED",
+        )
+        try:
+            with engine.connect() as connection:
+                transaction = connection.begin()
+                sql, params = statement(principal_ids[0])
+                connection.execute(sql, params)
+                first_mutated.set()
+                assert release_first.wait(timeout=10)
+                transaction.commit()
+                outcomes["first"] = "committed"
+        except Exception as exc:  # pragma: no cover - surfaced by assertions below
+            outcomes["first"] = f"error: {exc}"
+            first_mutated.set()
+            release_first.set()
+        finally:
+            engine.dispose()
+
+    def second_transaction() -> None:
+        assert first_mutated.wait(timeout=10)
+        engine = create_engine(
+            migrated_pg_engine.url,
+            isolation_level="READ COMMITTED",
+            connect_args={"application_name": application_name},
+        )
+        try:
+            with engine.begin() as connection:
+                second_started.set()
+                sql, params = statement(principal_ids[1])
+                connection.execute(sql, params)
+            outcomes["second"] = "committed"
+        except Exception as exc:
+            outcomes["second"] = f"error: {exc}"
+        finally:
+            engine.dispose()
+
+    first = threading.Thread(target=first_transaction)
+    second = threading.Thread(target=second_transaction)
+    first.start()
+    assert first_mutated.wait(timeout=10)
+    second.start()
+    assert second_started.wait(timeout=10)
+
+    deadline = time.monotonic() + 10
+    lock_wait_observed = False
+    while time.monotonic() < deadline:
+        with migrated_pg_engine.connect() as connection:
+            lock_wait_observed = (
+                connection.execute(
+                    text(
+                        "SELECT wait_event_type = 'Lock' FROM pg_stat_activity "
+                        "WHERE application_name = :application_name"
+                    ),
+                    {"application_name": application_name},
+                ).scalar_one_or_none()
+                is True
+            )
+        if lock_wait_observed:
+            break
+        time.sleep(0.02)
+    release_first.set()
+    first.join(timeout=10)
+    second.join(timeout=10)
+
+    assert lock_wait_observed
+    assert not first.is_alive() and not second.is_alive()
+    assert outcomes["first"] == "committed"
+    assert outcomes["second"].startswith("error:")
+    assert message in outcomes["second"].lower()
+    with migrated_pg_engine.connect() as connection:
+        active_count = connection.execute(
+            text(
+                f"SELECT COUNT(*) FROM principals WHERE active = true "
+                f"AND {role_column} = :role_value"
+            ),
+            {"role_value": role_value},
+        ).scalar_one()
+        stored_count = connection.execute(
+            text(
+                "SELECT active_count FROM principal_invariant_counts "
+                "WHERE invariant = :invariant"
+            ),
+            {"invariant": invariant},
+        ).scalar_one()
+    assert active_count == stored_count == 1
 
 
 # ---------------------------------------------------------------------------
@@ -514,6 +864,32 @@ def test_postgresql_fresh_model_schema_creates_required_objects(
             )
         ).scalar_one_or_none()
         assert present == 1
+        login_collation = connection.execute(
+            text(
+                "SELECT col.collname FROM pg_attribute attr "
+                "JOIN pg_class cls ON cls.oid = attr.attrelid "
+                "JOIN pg_collation col ON col.oid = attr.attcollation "
+                "WHERE cls.relname = 'principals' AND attr.attname = 'login'"
+            )
+        ).scalar_one()
+        assert login_collation != "NOCASE"
+        trigger_names = {
+            row[0]
+            for row in connection.execute(
+                text(
+                    "SELECT tgname FROM pg_trigger "
+                    "WHERE tgrelid = 'principals'::regclass AND NOT tgisinternal"
+                )
+            )
+        }
+        assert {
+            "ck_principals_last_active_admin_update",
+            "ck_principals_last_active_admin_delete",
+            "ck_principals_last_active_catalog_owner_update",
+            "ck_principals_last_active_catalog_owner_delete",
+            "ck_principals_active_admin_counter",
+            "ck_principals_active_catalog_owner_counter",
+        } <= trigger_names
 
 
 @PG_SKIP

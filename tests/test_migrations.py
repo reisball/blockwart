@@ -251,6 +251,7 @@ def test_real_alembic_upgrade_creates_fresh_database_and_has_no_drift(
             "object_grants",
             "object_comments",
             "password_credentials",
+            "principal_invariant_counts",
             "principals",
             "relationships",
             "security_events",
@@ -268,6 +269,7 @@ def test_real_alembic_upgrade_creates_fresh_database_and_has_no_drift(
         "object_grants",
         "object_comments",
         "password_credentials",
+        "principal_invariant_counts",
         "principals",
         "relationships",
         "security_events",
@@ -1100,6 +1102,10 @@ def test_platform_admin_migration_is_lossless_and_guards_last_active_admin(
         with pytest.raises(sqlite3.IntegrityError, match="last active platform admin"):
             connection.execute("DELETE FROM principals WHERE id = 'admin-b'")
         connection.rollback()
+        assert connection.execute(
+            "SELECT active_count FROM principal_invariant_counts "
+            "WHERE invariant = 'platform_admin'"
+        ).fetchone() == (1,)
     finally:
         connection.close()
 
@@ -1934,6 +1940,7 @@ def downgrade() -> None:
             "object_grants",
             "object_comments",
             "password_credentials",
+            "principal_invariant_counts",
             "principals",
             "relationships",
             "security_events",
@@ -2281,6 +2288,10 @@ def test_catalog_owner_migration_is_additive_and_guards_the_last_active_owner(
         with pytest.raises(sqlite3.IntegrityError, match="last active catalog owner"):
             connection.execute("DELETE FROM principals WHERE id = 'second-owner'")
         connection.rollback()
+        assert connection.execute(
+            "SELECT active_count FROM principal_invariant_counts "
+            "WHERE invariant = 'catalog_owner'"
+        ).fetchone() == (1,)
     finally:
         connection.close()
 

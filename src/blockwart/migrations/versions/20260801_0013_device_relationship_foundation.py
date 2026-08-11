@@ -361,10 +361,10 @@ def _json_object(raw_value: Any, *, location: str) -> dict[str, Any]:
 def _rebuild_catalog_objects() -> None:
     _bind = op.get_bind()
     _is_sqlite = _bind.dialect.name == "sqlite"
-    _ts_type = "DATETIME" if _is_sqlite else "TIMESTAMP"
     if not _is_sqlite:
-        for _constraint in ["ck_catalog_objects_revision_positive", "ck_catalog_objects_lifecycle", "ck_catalog_objects_health", "ck_catalog_objects_asset_state", "ck_catalog_objects_compatibility_status"]:  # noqa: E501
-            op.execute(f"ALTER TABLE catalog_objects DROP CONSTRAINT IF EXISTS {_constraint}")
+        _alter_catalog_objects_postgresql()
+        return
+
     op.get_bind().exec_driver_sql(
         f"""
             CREATE TABLE _bw_0013_catalog_objects (
@@ -374,8 +374,8 @@ def _rebuild_catalog_objects() -> None:
                 status VARCHAR(64) NOT NULL,
                 summary TEXT,
                 data_json TEXT NOT NULL,
-                created_at {_ts_type} DEFAULT CURRENT_TIMESTAMP NOT NULL,
-                updated_at {_ts_type} DEFAULT CURRENT_TIMESTAMP NOT NULL,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP NOT NULL,
+                updated_at DATETIME DEFAULT CURRENT_TIMESTAMP NOT NULL,
                 lifecycle VARCHAR(32),
                 health VARCHAR(32),
                 provenance_json TEXT DEFAULT '{{"manual_override":false,"source_type":"unknown"}}'
@@ -403,23 +403,29 @@ def _rebuild_catalog_objects() -> None:
         "SELECT id, kind, label, status, summary, data_json, created_at, updated_at, lifecycle, "
         "health, provenance_json, revision FROM catalog_objects"
     )
-    if _is_sqlite:
-        op.execute("DROP TABLE catalog_objects")
-    else:
-        op.execute("DROP TABLE catalog_objects CASCADE")
+    op.execute("DROP TABLE catalog_objects")
     op.execute("ALTER TABLE _bw_0013_catalog_objects RENAME TO catalog_objects")
     op.create_index("ix_catalog_objects_kind", "catalog_objects", ["kind"])
     op.create_index("ix_catalog_objects_label", "catalog_objects", ["label"])
-    # Restore FK from object_grants.object_id → catalog_objects.id (dropped by CASCADE)
-    if not _is_sqlite:
-        op.create_foreign_key(
-            "fk_object_grants_object_id_catalog_objects",
-            "object_grants",
-            "catalog_objects",
-            ["object_id"],
-            ["id"],
-            ondelete="RESTRICT",
-        )
+
+
+def _alter_catalog_objects_postgresql() -> None:
+    """Replace only the changed checks, preserving dependent PostgreSQL FKs."""
+    constraints = {
+        "ck_catalog_objects_revision_positive": "revision >= 1",
+        "ck_catalog_objects_lifecycle": (
+            "lifecycle IS NULL OR lifecycle IN ('planned','active','retired')"
+        ),
+        "ck_catalog_objects_health": (
+            "health IS NULL OR "
+            "health IN ('unknown','healthy','degraded','down','maintenance')"
+        ),
+        "ck_catalog_objects_asset_state": CATALOG_ASSET_STATE_SQL,
+        "ck_catalog_objects_compatibility_status": COMPATIBILITY_STATUS_SQL,
+    }
+    for name, condition in constraints.items():
+        op.execute(f"ALTER TABLE catalog_objects DROP CONSTRAINT IF EXISTS {name}")
+        op.create_check_constraint(name, "catalog_objects", condition)
 
 
 def _rebuild_relationships() -> None:
@@ -458,6 +464,13 @@ def _rebuild_relationships() -> None:
     else:
         op.execute("DROP TABLE relationships CASCADE")
     op.execute("ALTER TABLE _bw_0013_relationships RENAME TO relationships")
+    if not _is_sqlite:
+        op.execute(
+            "SELECT setval("
+            "pg_get_serial_sequence('relationships', 'id'), "
+            "COALESCE((SELECT MAX(id) FROM relationships), 1), "
+            "EXISTS (SELECT 1 FROM relationships))"
+        )
     op.create_index("ix_relationships_from_ref", "relationships", ["from_ref"])
     op.create_index("ix_relationships_relation_type", "relationships", ["relation_type"])
     op.create_index("ix_relationships_to_ref", "relationships", ["to_ref"])

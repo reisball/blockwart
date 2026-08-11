@@ -131,6 +131,14 @@ def test_sqlite_metadata_create_all_works(tmp_path: Path) -> None:
     engine = create_engine(f"sqlite:///{tmp_path / 'meta.sqlite3'}")
     try:
         Base.metadata.create_all(engine)
+        with engine.connect() as conn:
+            principal_ddl = conn.execute(
+                text(
+                    "SELECT sql FROM sqlite_master "
+                    "WHERE type = 'table' AND name = 'principals'"
+                )
+            ).scalar_one()
+        assert 'COLLATE "NOCASE"' in principal_ddl
         with engine.begin() as conn:
             conn.execute(
                 text(
@@ -183,18 +191,20 @@ def test_postgresql_relationships_id_autoincrement(migrated_pg_engine: Engine) -
         conn.execute(
             text(
                 "INSERT INTO catalog_objects "
-                "(id, kind, label, status, data_json) "
-                "VALUES ('rel-host', 'host', 'Rel Host', 'active', '{}')"
+                "(id, kind, label, status, lifecycle, health, data_json) VALUES "
+                "('rel-host', 'host', 'Rel Host', 'active', 'active', 'healthy', '{}'), "
+                "('rel-service', 'service', 'Rel Service', 'active', "
+                "'active', 'healthy', '{}')"
             )
         )
         conn.execute(
             text(
                 "INSERT INTO relationships (from_ref, relation_type, to_ref) "
-                "VALUES ('rel-host', 'hosts', 'rel-host')"
+                "VALUES ('host:rel-host', 'hosts', 'service:rel-service')"
             )
         )
         row = conn.execute(
-            text("SELECT id FROM relationships WHERE from_ref = 'rel-host'")
+            text("SELECT id FROM relationships WHERE from_ref = 'host:rel-host'")
         ).scalar_one()
         assert row is not None and row > 0
 
@@ -206,40 +216,37 @@ def test_postgresql_relationships_id_autoincrement(migrated_pg_engine: Engine) -
 def test_postgresql_token_bucket_least_clamp(migrated_pg_engine: Engine) -> None:
     """The on-conflict update uses LEAST on PG, clamping at limit+1."""
     from blockwart.models import ServiceTokenFailureBucket
-    from blockwart.services.token_failure_buckets import upsert_failure_bucket
-
-    with migrated_pg_engine.begin() as conn:
-        _insert_principal(
-            conn,
-            principal_id="00000000-0000-0000-0000-0000000000cc",
-            login="bucket-test",
-        )
+    from blockwart.services.token_failure_buckets import (
+        TokenFailurePolicy,
+        record_service_token_failure,
+    )
 
     SessionLocal = sessionmaker(bind=migrated_pg_engine, autoflush=False)
     with SessionLocal() as session:
         now = session.execute(text("SELECT now()")).scalar()
-        window_start = now.replace(microsecond=0)
-        expires_at = session.execute(
-            text("SELECT now() + interval '1 hour'")
-        ).scalar()
+        policy = TokenFailurePolicy(
+            window_seconds=60,
+            global_limit=3,
+            source_limit=100,
+            token_limit=100,
+            max_rows=100,
+        )
 
         for _ in range(6):
-            upsert_failure_bucket(
+            record_service_token_failure(
                 session,
-                dimension="global",
-                key_hash="clamp-test",
-                window_start=window_start,
-                expires_at=expires_at,
-                limit=3,
-                max_rows=100,
+                token="clamp-test-token",
+                source="192.0.2.44",
+                policy=policy,
+                channel="api",
+                request_id="least-clamp",
                 now=now,
-                evict_dimensions=(),
             )
         session.commit()
 
         bucket = (
             session.query(ServiceTokenFailureBucket)
-            .filter_by(key_hash="clamp-test")
+            .filter_by(dimension="global")
             .one()
         )
         assert bucket.failure_count == 4  # clamped at limit + 1
@@ -256,28 +263,29 @@ def test_postgresql_partial_index_non_host(migrated_pg_engine: Engine) -> None:
         conn.execute(
             text(
                 "INSERT INTO catalog_objects "
-                "(id, kind, label, status, data_json) VALUES "
-                "('idx-h1', 'host', 'H1', 'active', '{}'),"
-                "('idx-h2', 'host', 'H2', 'active', '{}'),"
-                "('idx-svc', 'service', 'Svc', 'active', '{}')"
+                "(id, kind, label, status, lifecycle, health, data_json) VALUES "
+                "('idx-h1', 'host', 'H1', 'active', 'active', 'healthy', '{}'),"
+                "('idx-h2', 'host', 'H2', 'active', 'active', 'healthy', '{}'),"
+                "('idx-svc', 'service', 'Svc', 'active', "
+                "'active', 'healthy', '{}')"
             )
         )
         conn.execute(
             text(
                 "INSERT INTO relationships (from_ref, relation_type, to_ref) "
-                "VALUES ('idx-h1', 'hosts', 'idx-svc')"
+                "VALUES ('host:idx-h1', 'hosts', 'service:idx-svc')"
             )
         )
         conn.execute(
             text(
                 "INSERT INTO relationships (from_ref, relation_type, to_ref) "
-                "VALUES ('idx-h1', 'depends_on', 'idx-svc')"
+                "VALUES ('host:idx-h1', 'depends_on', 'service:idx-svc')"
             )
         )
         conn.execute(
             text(
                 "INSERT INTO relationships (from_ref, relation_type, to_ref) "
-                "VALUES ('idx-h2', 'depends_on', 'idx-svc')"
+                "VALUES ('host:idx-h2', 'depends_on', 'service:idx-svc')"
             )
         )
 
@@ -285,83 +293,7 @@ def test_postgresql_partial_index_non_host(migrated_pg_engine: Engine) -> None:
         count = conn.execute(
             text(
                 "SELECT COUNT(*) FROM relationships "
-                "WHERE to_ref = 'idx-svc' AND relation_type = 'depends_on'"
+                "WHERE to_ref = 'service:idx-svc' AND relation_type = 'depends_on'"
             )
         ).scalar_one()
         assert count == 2
-
-
-# --- Concurrent last-admin DELETE (review follow-up #6) ---
-
-
-@PG_SKIP
-def test_postgresql_concurrent_last_admin_delete(
-    migrated_pg_engine: Engine,
-) -> None:
-    """Two concurrent transactions deleting different admins must not
-    both succeed when only one admin would remain.
-
-    The advisory lock serializes the trigger check so that the second
-    transaction sees the committed state of the first.
-    """
-    import threading
-
-    with migrated_pg_engine.begin() as conn:
-        _insert_principal(
-            conn,
-            principal_id="00000000-0000-0000-0000-0000000000d1",
-            login="conc-admin1",
-            platform_role="admin",
-        )
-        _insert_principal(
-            conn,
-            principal_id="00000000-0000-0000-0000-0000000000d2",
-            login="conc-admin2",
-            platform_role="admin",
-        )
-
-    errors: list[Exception] = []
-
-    def delete_admin(pid: str) -> None:
-        try:
-            engine = create_engine(
-                migrated_pg_engine.url,
-                isolation_level="READ COMMITTED",
-            )
-            with engine.begin() as conn:
-                conn.execute(
-                    text("DELETE FROM principals WHERE id = :id"),
-                    {"id": pid},
-                )
-            engine.dispose()
-        except Exception as exc:
-            errors.append(exc)
-
-    t1 = threading.Thread(
-        target=delete_admin,
-        args=("00000000-0000-0000-0000-0000000000d1",),
-    )
-    t2 = threading.Thread(
-        target=delete_admin,
-        args=("00000000-0000-0000-0000-0000000000d2",),
-    )
-    t1.start()
-    t2.start()
-    t1.join(timeout=10)
-    t2.join(timeout=10)
-
-    # Exactly one delete must succeed, the other must be blocked
-    assert len(errors) == 1, (
-        f"Expected exactly 1 error from concurrent delete, got {len(errors)}: "
-        f"{[str(e)[:80] for e in errors]}"
-    )
-    assert "last active platform admin" in str(errors[0]).lower()
-
-    with migrated_pg_engine.connect() as conn:
-        count = conn.execute(
-            text(
-                "SELECT COUNT(*) FROM principals "
-                "WHERE active = true AND platform_role = 'admin'"
-            )
-        ).scalar_one()
-        assert count == 1

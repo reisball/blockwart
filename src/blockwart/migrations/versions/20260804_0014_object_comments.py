@@ -44,31 +44,63 @@ def upgrade() -> None:
                 f"object-comment migration rejected non-string legacy comment for {row['id']}"
             )
 
-    with op.batch_alter_table("catalog_objects", recreate="always") as batch:
-        batch.add_column(
+    if _is_sqlite:
+        with op.batch_alter_table("catalog_objects", recreate="always") as batch:
+            batch.add_column(
+                sa.Column(
+                    "instance_id",
+                    sa.String(length=32),
+                    nullable=False,
+                    server_default=sa.text("(lower(hex(randomblob(16))))"),
+                )
+            )
+            batch.create_unique_constraint(
+                "uq_catalog_objects_instance_id",
+                ["instance_id"],
+            )
+
+        with op.batch_alter_table("service_tokens", recreate="always") as batch:
+            batch.add_column(
+                sa.Column(
+                    "audience",
+                    sa.String(length=16),
+                    nullable=False,
+                    server_default="api",
+                )
+            )
+            batch.create_check_constraint(
+                "ck_service_tokens_audience",
+                "audience IN ('api','mcp')",
+            )
+    else:
+        op.add_column(
+            "catalog_objects",
             sa.Column(
                 "instance_id",
                 sa.String(length=32),
                 nullable=False,
-                server_default=sa.text("(lower(hex(randomblob(16))))") if _is_sqlite else sa.text("md5(random()::text)"),  # noqa: E501
-            )
+                server_default=sa.text(
+                    "md5(random()::text || clock_timestamp()::text)"
+                ),
+            ),
         )
-        batch.create_unique_constraint(
+        op.create_unique_constraint(
             "uq_catalog_objects_instance_id",
+            "catalog_objects",
             ["instance_id"],
         )
-
-    with op.batch_alter_table("service_tokens", recreate="always") as batch:
-        batch.add_column(
+        op.add_column(
+            "service_tokens",
             sa.Column(
                 "audience",
                 sa.String(length=16),
                 nullable=False,
                 server_default="api",
-            )
+            ),
         )
-        batch.create_check_constraint(
+        op.create_check_constraint(
             "ck_service_tokens_audience",
+            "service_tokens",
             "audience IN ('api','mcp')",
         )
 
@@ -206,19 +238,37 @@ def downgrade() -> None:
             "object comments cannot be downgraded while comments exist; "
             "restore the paired pre-migration backup"
         )
-    op.execute("DROP TRIGGER object_comments_no_update")
-    op.execute("DROP TRIGGER object_comments_no_delete")
+    if _is_sqlite:
+        op.execute("DROP TRIGGER object_comments_no_update")
+        op.execute("DROP TRIGGER object_comments_no_delete")
+    else:
+        op.execute("DROP TRIGGER object_comments_no_update ON object_comments")
+        op.execute("DROP TRIGGER object_comments_no_delete ON object_comments")
     op.drop_index(
         "ix_object_comments_instance_created",
         table_name="object_comments",
     )
     op.drop_table("object_comments")
-    with op.batch_alter_table("service_tokens", recreate="always") as batch:
-        batch.drop_constraint("ck_service_tokens_audience", type_="check")
-        batch.drop_column("audience")
-    with op.batch_alter_table("catalog_objects", recreate="always") as batch:
-        batch.drop_constraint("uq_catalog_objects_instance_id", type_="unique")
-        batch.drop_column("instance_id")
+    if _is_sqlite:
+        with op.batch_alter_table("service_tokens", recreate="always") as batch:
+            batch.drop_constraint("ck_service_tokens_audience", type_="check")
+            batch.drop_column("audience")
+        with op.batch_alter_table("catalog_objects", recreate="always") as batch:
+            batch.drop_constraint("uq_catalog_objects_instance_id", type_="unique")
+            batch.drop_column("instance_id")
+    else:
+        op.drop_constraint(
+            "ck_service_tokens_audience",
+            "service_tokens",
+            type_="check",
+        )
+        op.drop_column("service_tokens", "audience")
+        op.drop_constraint(
+            "uq_catalog_objects_instance_id",
+            "catalog_objects",
+            type_="unique",
+        )
+        op.drop_column("catalog_objects", "instance_id")
 
 
 def _legacy_comment_rows(
