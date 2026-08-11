@@ -24,14 +24,17 @@ def upgrade() -> None:
         sa.Column("principal_type", sa.String(length=32), nullable=False),
         sa.Column(
             "login",
-            sa.String(length=128, collation="NOCASE"),
+            sa.String(length=128).with_variant(
+                sa.String(length=128, collation="NOCASE"),
+                "sqlite",
+            ),
             nullable=False,
         ),
         sa.Column("display_name", sa.String(length=255), nullable=False),
         sa.Column(
             "active",
             sa.Boolean(),
-            server_default=sa.text("1"),
+            server_default=sa.text("true"),
             nullable=False,
         ),
         sa.Column(
@@ -47,7 +50,7 @@ def upgrade() -> None:
             nullable=False,
         ),
         sa.CheckConstraint(
-            "active IN (0,1)",
+            "active IN (true, false)",
             name="ck_principals_active_boolean",
         ),
         sa.CheckConstraint(

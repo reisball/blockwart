@@ -15,6 +15,7 @@ from blockwart.db.session import transaction
 from blockwart.models import SecurityEvent, ServiceTokenFailureBucket
 from blockwart.services.identity import utc_now
 from blockwart.services.token_failure_buckets import (
+    TokenFailureDecision,
     TokenFailurePolicy,
     precheck_service_token_failure,
     prune_service_token_failure_buckets,
@@ -304,6 +305,111 @@ print(json.dumps({'allowed': result.allowed, 'dimension': result.dimension}))
 
 
 @pytest.mark.parametrize(
+    "policy",
+    [
+        _policy(global_limit=0),
+        _policy(source_limit=-1),
+        _policy(token_limit=0),
+    ],
+)
+def test_nonpositive_runtime_limits_reject_before_bucket_mutation(
+    alembic_session_factory,
+    policy: TokenFailurePolicy,
+) -> None:
+    now = utc_now()
+    with alembic_session_factory() as session:
+        existing = ServiceTokenFailureBucket(
+            dimension="global",
+            key_hash="existing",
+            window_start=now.replace(microsecond=0),
+            failure_count=1,
+            event_emitted=False,
+            expires_at=now + timedelta(seconds=60),
+        )
+        session.add(existing)
+        session.commit()
+
+        with pytest.raises(ValueError, match="strictly positive"):
+            record_service_token_failure(
+                session,
+                token=CANARY_TOKEN,
+                source=CANARY_SOURCE,
+                policy=policy,
+                channel="api",
+                request_id="invalid-limit",
+                now=now,
+            )
+
+        rows = list(session.scalars(select(ServiceTokenFailureBucket)).all())
+        assert [(row.key_hash, row.failure_count) for row in rows] == [
+            ("existing", 1)
+        ]
+
+
+@pytest.mark.parametrize("limit", [0, -1])
+def test_internal_bucket_upsert_rejects_nonpositive_limit_before_insert(
+    alembic_session_factory,
+    limit: int,
+) -> None:
+    from blockwart.services.token_failure_buckets import _increment_bucket
+
+    now = utc_now()
+    with alembic_session_factory() as session:
+        with pytest.raises(ValueError, match="strictly positive"):
+            _increment_bucket(
+                session,
+                dimension="global",
+                key_hash=f"invalid-{limit}",
+                window_start=now.replace(microsecond=0),
+                expires_at=now + timedelta(seconds=60),
+                limit=limit,
+                max_rows=100,
+                now=now,
+                evict_dimensions=(),
+            )
+        assert session.scalar(
+            select(func.count()).select_from(ServiceTokenFailureBucket)
+        ) == 0
+
+
+def test_limit_one_precheck_and_record_path_preserve_clamp(
+    alembic_session_factory,
+) -> None:
+    now = utc_now()
+    policy = _policy(global_limit=1, source_limit=10, token_limit=10)
+    with alembic_session_factory() as session:
+        for _ in range(4):
+            record_service_token_failure(
+                session,
+                token=CANARY_TOKEN,
+                source=CANARY_SOURCE,
+                policy=policy,
+                channel="api",
+                request_id="limit-one",
+                now=now,
+            )
+        session.commit()
+
+        global_bucket = session.scalar(
+            select(ServiceTokenFailureBucket).where(
+                ServiceTokenFailureBucket.dimension == "global"
+            )
+        )
+        assert global_bucket is not None
+        assert global_bucket.failure_count == 2
+        decision = precheck_service_token_failure(
+            session,
+            token=CANARY_TOKEN,
+            source=CANARY_SOURCE,
+            policy=policy,
+            channel="api",
+            request_id="limit-one-precheck",
+            now=now,
+        )
+        assert decision == TokenFailureDecision(False, "global", 2)
+
+
+@pytest.mark.parametrize(
     ("direct", "forwarded", "trusted", "expected"),
     [
         ("192.0.2.10", "198.51.100.8", "", "192.0.2.10"),
@@ -339,6 +445,8 @@ def test_duplicate_forwarded_source_fields_are_rejected() -> None:
     [
         ("auth_service_token_rate_window_seconds", 9),
         ("auth_service_token_global_failure_limit", 0),
+        ("auth_service_token_source_failure_limit", 0),
+        ("auth_service_token_fingerprint_failure_limit", -1),
         ("auth_service_token_source_failure_limit", 10001),
         ("auth_service_token_fingerprint_failure_limit", 1001),
         ("auth_service_token_failure_bucket_max_rows", 99),
@@ -348,3 +456,15 @@ def test_duplicate_forwarded_source_fields_are_rejected() -> None:
 def test_failure_bucket_configuration_bounds(field: str, value: int) -> None:
     with pytest.raises(ValidationError):
         Settings(**{field: value})
+
+
+@pytest.mark.parametrize(
+    "field",
+    [
+        "auth_service_token_global_failure_limit",
+        "auth_service_token_source_failure_limit",
+        "auth_service_token_fingerprint_failure_limit",
+    ],
+)
+def test_failure_bucket_configuration_accepts_limit_one(field: str) -> None:
+    assert getattr(Settings(**{field: 1}), field) == 1

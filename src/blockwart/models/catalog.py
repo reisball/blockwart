@@ -62,7 +62,6 @@ class CatalogObject(Base):
         String(32),
         nullable=False,
         default=lambda: uuid4().hex,
-        server_default=text("(lower(hex(randomblob(16))))"),
     )
     kind: Mapped[str] = mapped_column(String(64), index=True)
     label: Mapped[str] = mapped_column(String(255), index=True)
@@ -113,6 +112,7 @@ class Relationship(Base):
             "to_ref",
             unique=True,
             sqlite_where=text("relation_type = 'hosts'"),
+            postgresql_where=text("relation_type = 'hosts'"),
         ),
     )
 
@@ -215,3 +215,42 @@ event.listen(
         "SELECT RAISE(ABORT, 'object comments are append-only'); END"
     ).execute_if(dialect="sqlite"),
 )
+event.listen(
+    ObjectComment.__table__,
+    "after_create",
+    DDL(
+        "CREATE OR REPLACE FUNCTION blockwart_raise_exception() "
+        "RETURNS TRIGGER AS $$ BEGIN RAISE EXCEPTION 'operation blocked by trigger'; END; $$ LANGUAGE plpgsql"  # noqa: E501
+    ).execute_if(dialect="postgresql"),
+)
+event.listen(
+    ObjectComment.__table__,
+    "after_create",
+    DDL(
+        "CREATE TRIGGER object_comments_no_update "
+        "BEFORE UPDATE ON object_comments "
+        "FOR EACH ROW EXECUTE FUNCTION blockwart_raise_exception()"
+    ).execute_if(dialect="postgresql"),
+)
+event.listen(
+    ObjectComment.__table__,
+    "after_create",
+    DDL(
+        "CREATE TRIGGER object_comments_no_delete "
+        "BEFORE DELETE ON object_comments "
+        "FOR EACH ROW EXECUTE FUNCTION blockwart_raise_exception()"
+    ).execute_if(dialect="postgresql"),
+)
+
+
+event.listen(
+    CatalogObject.__table__,
+    "after_create",
+    DDL(
+        "ALTER TABLE catalog_objects ALTER COLUMN instance_id "
+        "SET DEFAULT md5(random()::text || clock_timestamp()::text)"
+    ).execute_if(dialect="postgresql"),
+)
+# SQLite: ALTER TABLE ... ALTER COLUMN is not supported.
+# The Python-side default (uuid4().hex) handles instance_id on insert.
+# For raw SQL inserts, a trigger would be needed — but migrations cover that path.

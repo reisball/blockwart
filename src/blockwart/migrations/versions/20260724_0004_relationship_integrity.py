@@ -101,14 +101,24 @@ def upgrade() -> None:
     _validate_triplet_collection(final_triplets)
 
     for object_id in dependency_object_ids:
-        bind.execute(
-            sa.text(
-                "UPDATE catalog_objects "
-                "SET data_json = json_remove(data_json, '$.dependencies') "
-                "WHERE id = :object_id"
-            ),
-            {"object_id": object_id},
-        )
+        if bind.dialect.name == "sqlite":
+            bind.execute(
+                sa.text(
+                    "UPDATE catalog_objects "
+                    "SET data_json = json_remove(data_json, '$.dependencies') "
+                    "WHERE id = :object_id"
+                ),
+                {"object_id": object_id},
+            )
+        else:
+            bind.execute(
+                sa.text(
+                    "UPDATE catalog_objects "
+                    "SET data_json = (data_json::jsonb #- '{dependencies}')::text "
+                    "WHERE id = :object_id"
+                ),
+                {"object_id": object_id},
+            )
     for from_ref, relation_type, to_ref in sorted(
         dependency_triplets - set(existing_triplets)
     ):
@@ -143,6 +153,7 @@ def upgrade() -> None:
         ["to_ref"],
         unique=True,
         sqlite_where=sa.text("relation_type = 'hosts'"),
+        postgresql_where=sa.text("relation_type = 'hosts'"),
     )
 
 

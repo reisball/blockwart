@@ -23,8 +23,7 @@ _LEGACY_NAMESPACE = UUID("ab7a2da4-b30f-4a4c-9bbb-c37f418ba9e7")
 
 def upgrade() -> None:
     bind = op.get_bind()
-    if bind.dialect.name != "sqlite":
-        raise RuntimeError("object-comment migration requires SQLite")
+    _is_sqlite = bind.dialect.name == "sqlite"
 
     preflight_rows = _legacy_comment_rows(bind, include_instance_id=False)
     # Validate every row before the first schema or data mutation.
@@ -45,31 +44,63 @@ def upgrade() -> None:
                 f"object-comment migration rejected non-string legacy comment for {row['id']}"
             )
 
-    with op.batch_alter_table("catalog_objects", recreate="always") as batch:
-        batch.add_column(
+    if _is_sqlite:
+        with op.batch_alter_table("catalog_objects", recreate="always") as batch:
+            batch.add_column(
+                sa.Column(
+                    "instance_id",
+                    sa.String(length=32),
+                    nullable=False,
+                    server_default=sa.text("(lower(hex(randomblob(16))))"),
+                )
+            )
+            batch.create_unique_constraint(
+                "uq_catalog_objects_instance_id",
+                ["instance_id"],
+            )
+
+        with op.batch_alter_table("service_tokens", recreate="always") as batch:
+            batch.add_column(
+                sa.Column(
+                    "audience",
+                    sa.String(length=16),
+                    nullable=False,
+                    server_default="api",
+                )
+            )
+            batch.create_check_constraint(
+                "ck_service_tokens_audience",
+                "audience IN ('api','mcp')",
+            )
+    else:
+        op.add_column(
+            "catalog_objects",
             sa.Column(
                 "instance_id",
                 sa.String(length=32),
                 nullable=False,
-                server_default=sa.text("(lower(hex(randomblob(16))))"),
-            )
+                server_default=sa.text(
+                    "md5(random()::text || clock_timestamp()::text)"
+                ),
+            ),
         )
-        batch.create_unique_constraint(
+        op.create_unique_constraint(
             "uq_catalog_objects_instance_id",
+            "catalog_objects",
             ["instance_id"],
         )
-
-    with op.batch_alter_table("service_tokens", recreate="always") as batch:
-        batch.add_column(
+        op.add_column(
+            "service_tokens",
             sa.Column(
                 "audience",
                 sa.String(length=16),
                 nullable=False,
                 server_default="api",
-            )
+            ),
         )
-        batch.create_check_constraint(
+        op.create_check_constraint(
             "ck_service_tokens_audience",
+            "service_tokens",
             "audience IN ('api','mcp')",
         )
 
@@ -171,41 +202,73 @@ def upgrade() -> None:
             },
         )
 
-    op.execute(
-        "CREATE TRIGGER object_comments_no_update "
-        "BEFORE UPDATE ON object_comments BEGIN "
-        "SELECT RAISE(ABORT, 'object comments are append-only'); END"
-    )
-    op.execute(
-        "CREATE TRIGGER object_comments_no_delete "
-        "BEFORE DELETE ON object_comments BEGIN "
-        "SELECT RAISE(ABORT, 'object comments are append-only'); END"
-    )
+    if bind.dialect.name == "sqlite":
+        op.execute(
+            "CREATE TRIGGER object_comments_no_update "
+            "BEFORE UPDATE ON object_comments BEGIN "
+            "SELECT RAISE(ABORT, 'object comments are append-only'); END"
+        )
+        op.execute(
+            "CREATE TRIGGER object_comments_no_delete "
+            "BEFORE DELETE ON object_comments BEGIN "
+            "SELECT RAISE(ABORT, 'object comments are append-only'); END"
+        )
+    else:
+        op.execute("CREATE OR REPLACE FUNCTION blockwart_raise_exception() RETURNS TRIGGER AS $$ BEGIN RAISE EXCEPTION 'operation blocked by trigger'; END; $$ LANGUAGE plpgsql")  # noqa: E501
+        op.execute("DROP TRIGGER IF EXISTS object_comments_no_update ON object_comments")
+        op.execute(
+            "CREATE TRIGGER object_comments_no_update "
+            "BEFORE UPDATE ON object_comments "
+            "FOR EACH ROW EXECUTE FUNCTION blockwart_raise_exception()"
+        )
+        op.execute("DROP TRIGGER IF EXISTS object_comments_no_delete ON object_comments")
+        op.execute(
+            "CREATE TRIGGER object_comments_no_delete "
+            "BEFORE DELETE ON object_comments "
+            "FOR EACH ROW EXECUTE FUNCTION blockwart_raise_exception()"
+        )
 
 
 def downgrade() -> None:
     bind = op.get_bind()
-    if bind.dialect.name != "sqlite":
-        raise RuntimeError("object-comment migration requires SQLite")
+    _is_sqlite = bind.dialect.name == "sqlite"
     count = bind.scalar(sa.text("SELECT COUNT(*) FROM object_comments"))
     if int(count or 0) != 0:
         raise RuntimeError(
             "object comments cannot be downgraded while comments exist; "
             "restore the paired pre-migration backup"
         )
-    op.execute("DROP TRIGGER object_comments_no_update")
-    op.execute("DROP TRIGGER object_comments_no_delete")
+    if _is_sqlite:
+        op.execute("DROP TRIGGER object_comments_no_update")
+        op.execute("DROP TRIGGER object_comments_no_delete")
+    else:
+        op.execute("DROP TRIGGER object_comments_no_update ON object_comments")
+        op.execute("DROP TRIGGER object_comments_no_delete ON object_comments")
     op.drop_index(
         "ix_object_comments_instance_created",
         table_name="object_comments",
     )
     op.drop_table("object_comments")
-    with op.batch_alter_table("service_tokens", recreate="always") as batch:
-        batch.drop_constraint("ck_service_tokens_audience", type_="check")
-        batch.drop_column("audience")
-    with op.batch_alter_table("catalog_objects", recreate="always") as batch:
-        batch.drop_constraint("uq_catalog_objects_instance_id", type_="unique")
-        batch.drop_column("instance_id")
+    if _is_sqlite:
+        with op.batch_alter_table("service_tokens", recreate="always") as batch:
+            batch.drop_constraint("ck_service_tokens_audience", type_="check")
+            batch.drop_column("audience")
+        with op.batch_alter_table("catalog_objects", recreate="always") as batch:
+            batch.drop_constraint("uq_catalog_objects_instance_id", type_="unique")
+            batch.drop_column("instance_id")
+    else:
+        op.drop_constraint(
+            "ck_service_tokens_audience",
+            "service_tokens",
+            type_="check",
+        )
+        op.drop_column("service_tokens", "audience")
+        op.drop_constraint(
+            "uq_catalog_objects_instance_id",
+            "catalog_objects",
+            type_="unique",
+        )
+        op.drop_column("catalog_objects", "instance_id")
 
 
 def _legacy_comment_rows(

@@ -1,6 +1,7 @@
 from datetime import datetime
 
 from sqlalchemy import (
+    DDL,
     Boolean,
     CheckConstraint,
     DateTime,
@@ -10,6 +11,7 @@ from sqlalchemy import (
     String,
     Text,
     UniqueConstraint,
+    event,
     func,
     text,
 )
@@ -26,7 +28,7 @@ class Principal(Base):
             name="ck_principals_type",
         ),
         CheckConstraint(
-            "active IN (0,1)",
+            "active IN (true, false)",
             name="ck_principals_active_boolean",
         ),
         CheckConstraint(
@@ -50,13 +52,16 @@ class Principal(Base):
     id: Mapped[str] = mapped_column(String(36), primary_key=True)
     principal_type: Mapped[str] = mapped_column(String(32), index=True)
     login: Mapped[str] = mapped_column(
-        String(128, collation="NOCASE"),
+        String(128).with_variant(
+            String(128, collation="NOCASE"),
+            "sqlite",
+        ),
     )
     display_name: Mapped[str] = mapped_column(String(255))
     active: Mapped[bool] = mapped_column(
         Boolean,
         default=True,
-        server_default=text("1"),
+        server_default=text("true"),
         index=True,
     )
     platform_role: Mapped[str | None] = mapped_column(
@@ -80,6 +85,25 @@ class Principal(Base):
         server_default=func.now(),
         onupdate=func.now(),
     )
+
+
+class PrincipalInvariantCount(Base):
+    """Serialized database state for global principal-role invariants."""
+
+    __tablename__ = "principal_invariant_counts"
+    __table_args__ = (
+        CheckConstraint(
+            "active_count >= 0",
+            name="ck_principal_invariant_counts_nonnegative",
+        ),
+        CheckConstraint(
+            "invariant IN ('platform_admin','catalog_owner')",
+            name="ck_principal_invariant_counts_known",
+        ),
+    )
+
+    invariant: Mapped[str] = mapped_column(String(32), primary_key=True)
+    active_count: Mapped[int] = mapped_column(Integer, nullable=False)
 
 
 class PasswordCredential(Base):
@@ -245,7 +269,7 @@ class ServiceTokenFailureBucket(Base):
             name="ck_service_token_failure_buckets_count",
         ),
         CheckConstraint(
-            "event_emitted IN (0,1)",
+            "event_emitted IN (true, false)",
             name="ck_service_token_failure_buckets_event_boolean",
         ),
         UniqueConstraint(
@@ -268,7 +292,7 @@ class ServiceTokenFailureBucket(Base):
     event_emitted: Mapped[bool] = mapped_column(
         Boolean,
         default=False,
-        server_default=text("0"),
+        server_default=text("false"),
         nullable=False,
     )
     expires_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
@@ -301,3 +325,225 @@ class IdempotencyRecord(Base):
     response_json: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
     expires_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+
+
+_SQLITE_PRINCIPAL_INVARIANT_DDL = (
+    """
+    CREATE TRIGGER ck_principals_last_active_admin_update
+    BEFORE UPDATE OF active, platform_role ON principals
+    WHEN OLD.active = 1 AND OLD.platform_role = 'admin'
+      AND (NEW.active = 0 OR NEW.platform_role IS NULL OR NEW.platform_role <> 'admin')
+      AND NOT EXISTS (
+        SELECT 1 FROM principals
+        WHERE id <> OLD.id AND active = 1 AND platform_role = 'admin'
+      )
+    BEGIN SELECT RAISE(ABORT, 'last active platform admin'); END
+    """,
+    """
+    CREATE TRIGGER ck_principals_last_active_admin_delete
+    BEFORE DELETE ON principals
+    WHEN OLD.active = 1 AND OLD.platform_role = 'admin'
+      AND NOT EXISTS (
+        SELECT 1 FROM principals
+        WHERE id <> OLD.id AND active = 1 AND platform_role = 'admin'
+      )
+    BEGIN SELECT RAISE(ABORT, 'last active platform admin'); END
+    """,
+    """
+    CREATE TRIGGER ck_principals_last_active_catalog_owner_update
+    BEFORE UPDATE OF active, catalog_role ON principals
+    WHEN OLD.active = 1 AND OLD.catalog_role = 'catalog_owner'
+      AND (NEW.active = 0 OR NEW.catalog_role IS NULL OR NEW.catalog_role <> 'catalog_owner')
+      AND NOT EXISTS (
+        SELECT 1 FROM principals
+        WHERE id <> OLD.id AND active = 1 AND catalog_role = 'catalog_owner'
+      )
+    BEGIN SELECT RAISE(ABORT, 'last active catalog owner'); END
+    """,
+    """
+    CREATE TRIGGER ck_principals_last_active_catalog_owner_delete
+    BEFORE DELETE ON principals
+    WHEN OLD.active = 1 AND OLD.catalog_role = 'catalog_owner'
+      AND NOT EXISTS (
+        SELECT 1 FROM principals
+        WHERE id <> OLD.id AND active = 1 AND catalog_role = 'catalog_owner'
+      )
+    BEGIN SELECT RAISE(ABORT, 'last active catalog owner'); END
+    """,
+    """
+    CREATE TRIGGER ck_principals_active_admin_counter_insert
+    AFTER INSERT ON principals
+    WHEN NEW.active = 1 AND NEW.platform_role = 'admin'
+    BEGIN
+      UPDATE principal_invariant_counts SET active_count = active_count + 1
+      WHERE invariant = 'platform_admin';
+    END
+    """,
+    """
+    CREATE TRIGGER ck_principals_active_admin_counter_update
+    AFTER UPDATE OF active, platform_role ON principals
+    WHEN (CASE WHEN OLD.active = 1 AND OLD.platform_role = 'admin' THEN 1 ELSE 0 END)
+      <> (CASE WHEN NEW.active = 1 AND NEW.platform_role = 'admin' THEN 1 ELSE 0 END)
+    BEGIN
+      UPDATE principal_invariant_counts
+      SET active_count = active_count + CASE
+        WHEN NEW.active = 1 AND NEW.platform_role = 'admin' THEN 1 ELSE -1 END
+      WHERE invariant = 'platform_admin';
+    END
+    """,
+    """
+    CREATE TRIGGER ck_principals_active_admin_counter_delete
+    AFTER DELETE ON principals
+    WHEN OLD.active = 1 AND OLD.platform_role = 'admin'
+    BEGIN
+      UPDATE principal_invariant_counts SET active_count = active_count - 1
+      WHERE invariant = 'platform_admin';
+    END
+    """,
+    """
+    CREATE TRIGGER ck_principals_active_catalog_owner_counter_insert
+    AFTER INSERT ON principals
+    WHEN NEW.active = 1 AND NEW.catalog_role = 'catalog_owner'
+    BEGIN
+      UPDATE principal_invariant_counts SET active_count = active_count + 1
+      WHERE invariant = 'catalog_owner';
+    END
+    """,
+    """
+    CREATE TRIGGER ck_principals_active_catalog_owner_counter_update
+    AFTER UPDATE OF active, catalog_role ON principals
+    WHEN (CASE WHEN OLD.active = 1 AND OLD.catalog_role = 'catalog_owner' THEN 1 ELSE 0 END)
+      <> (CASE WHEN NEW.active = 1 AND NEW.catalog_role = 'catalog_owner' THEN 1 ELSE 0 END)
+    BEGIN
+      UPDATE principal_invariant_counts
+      SET active_count = active_count + CASE
+        WHEN NEW.active = 1 AND NEW.catalog_role = 'catalog_owner' THEN 1 ELSE -1 END
+      WHERE invariant = 'catalog_owner';
+    END
+    """,
+    """
+    CREATE TRIGGER ck_principals_active_catalog_owner_counter_delete
+    AFTER DELETE ON principals
+    WHEN OLD.active = 1 AND OLD.catalog_role = 'catalog_owner'
+    BEGIN
+      UPDATE principal_invariant_counts SET active_count = active_count - 1
+      WHERE invariant = 'catalog_owner';
+    END
+    """,
+)
+
+_POSTGRESQL_PRINCIPAL_INVARIANT_DDL = (
+    """
+    CREATE OR REPLACE FUNCTION blockwart_check_last_active_admin()
+    RETURNS TRIGGER AS $$
+    DECLARE remaining integer;
+    BEGIN
+      UPDATE principal_invariant_counts SET active_count = active_count - 1
+      WHERE invariant = 'platform_admin' AND active_count > 1
+      RETURNING active_count INTO remaining;
+      IF remaining IS NULL THEN RAISE EXCEPTION 'last active platform admin'; END IF;
+      IF TG_OP = 'DELETE' THEN RETURN OLD; ELSE RETURN NEW; END IF;
+    END; $$ LANGUAGE plpgsql
+    """,
+    """
+    CREATE OR REPLACE FUNCTION blockwart_increment_active_admin_count()
+    RETURNS TRIGGER AS $$
+    BEGIN
+      IF NEW.active = true AND NEW.platform_role = 'admin' THEN
+        IF TG_OP = 'INSERT' THEN
+          UPDATE principal_invariant_counts SET active_count = active_count + 1
+          WHERE invariant = 'platform_admin';
+        ELSIF OLD.active IS NOT TRUE OR OLD.platform_role IS DISTINCT FROM 'admin' THEN
+          UPDATE principal_invariant_counts SET active_count = active_count + 1
+          WHERE invariant = 'platform_admin';
+        END IF;
+      END IF;
+      RETURN NEW;
+    END; $$ LANGUAGE plpgsql
+    """,
+    """
+    CREATE OR REPLACE FUNCTION blockwart_check_last_active_catalog_owner()
+    RETURNS TRIGGER AS $$
+    DECLARE remaining integer;
+    BEGIN
+      UPDATE principal_invariant_counts SET active_count = active_count - 1
+      WHERE invariant = 'catalog_owner' AND active_count > 1
+      RETURNING active_count INTO remaining;
+      IF remaining IS NULL THEN RAISE EXCEPTION 'last active catalog owner'; END IF;
+      IF TG_OP = 'DELETE' THEN RETURN OLD; ELSE RETURN NEW; END IF;
+    END; $$ LANGUAGE plpgsql
+    """,
+    """
+    CREATE OR REPLACE FUNCTION blockwart_increment_active_catalog_owner_count()
+    RETURNS TRIGGER AS $$
+    BEGIN
+      IF NEW.active = true AND NEW.catalog_role = 'catalog_owner' THEN
+        IF TG_OP = 'INSERT' THEN
+          UPDATE principal_invariant_counts SET active_count = active_count + 1
+          WHERE invariant = 'catalog_owner';
+        ELSIF OLD.active IS NOT TRUE OR OLD.catalog_role IS DISTINCT FROM 'catalog_owner' THEN
+          UPDATE principal_invariant_counts SET active_count = active_count + 1
+          WHERE invariant = 'catalog_owner';
+        END IF;
+      END IF;
+      RETURN NEW;
+    END; $$ LANGUAGE plpgsql
+    """,
+    """
+    CREATE TRIGGER ck_principals_last_active_admin_update
+    BEFORE UPDATE OF active, platform_role ON principals FOR EACH ROW
+    WHEN (OLD.active = true AND OLD.platform_role = 'admin'
+      AND (NEW.active = false OR NEW.platform_role IS NULL OR NEW.platform_role <> 'admin'))
+    EXECUTE FUNCTION blockwart_check_last_active_admin()
+    """,
+    """
+    CREATE TRIGGER ck_principals_last_active_admin_delete
+    BEFORE DELETE ON principals FOR EACH ROW
+    WHEN (OLD.active = true AND OLD.platform_role = 'admin')
+    EXECUTE FUNCTION blockwart_check_last_active_admin()
+    """,
+    """
+    CREATE TRIGGER ck_principals_active_admin_counter
+    AFTER INSERT OR UPDATE ON principals FOR EACH ROW
+    EXECUTE FUNCTION blockwart_increment_active_admin_count()
+    """,
+    """
+    CREATE TRIGGER ck_principals_last_active_catalog_owner_update
+    BEFORE UPDATE OF active, catalog_role ON principals FOR EACH ROW
+    WHEN (OLD.active = true AND OLD.catalog_role = 'catalog_owner'
+      AND (NEW.active = false OR NEW.catalog_role IS NULL OR NEW.catalog_role <> 'catalog_owner'))
+    EXECUTE FUNCTION blockwart_check_last_active_catalog_owner()
+    """,
+    """
+    CREATE TRIGGER ck_principals_last_active_catalog_owner_delete
+    BEFORE DELETE ON principals FOR EACH ROW
+    WHEN (OLD.active = true AND OLD.catalog_role = 'catalog_owner')
+    EXECUTE FUNCTION blockwart_check_last_active_catalog_owner()
+    """,
+    """
+    CREATE TRIGGER ck_principals_active_catalog_owner_counter
+    AFTER INSERT OR UPDATE ON principals FOR EACH ROW
+    EXECUTE FUNCTION blockwart_increment_active_catalog_owner_count()
+    """,
+)
+
+event.listen(
+    PrincipalInvariantCount.__table__,
+    "after_create",
+    DDL(
+        "INSERT INTO principal_invariant_counts (invariant, active_count) "
+        "VALUES ('platform_admin', 0), ('catalog_owner', 0)"
+    ),
+)
+for _statement in _SQLITE_PRINCIPAL_INVARIANT_DDL:
+    event.listen(
+        PrincipalInvariantCount.__table__,
+        "after_create",
+        DDL(_statement).execute_if(dialect="sqlite"),
+    )
+for _statement in _POSTGRESQL_PRINCIPAL_INVARIANT_DDL:
+    event.listen(
+        PrincipalInvariantCount.__table__,
+        "after_create",
+        DDL(_statement).execute_if(dialect="postgresql"),
+    )

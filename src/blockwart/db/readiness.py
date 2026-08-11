@@ -89,7 +89,7 @@ def check_database_readiness(settings: Settings) -> DatabaseReadiness:
 
             connection.rollback()
             try:
-                connection.exec_driver_sql("BEGIN IMMEDIATE")
+                connection.exec_driver_sql("BEGIN IMMEDIATE" if connection.dialect.name == "sqlite" else "BEGIN")  # noqa: E501
                 write_probe = connection.execute(
                     text(
                         "UPDATE alembic_version "

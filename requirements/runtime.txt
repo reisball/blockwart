@@ -2,7 +2,7 @@
 # Python 3.12 / Linux / pip-tools 7.6.0.
 # Do not edit manually; see docs/ci.md.
 
-alembic==1.19.0
+alembic==1.19.1
     # via blockwart (pyproject.toml)
 annotated-doc==0.0.5
     # via fastapi
@@ -37,7 +37,7 @@ cryptography==50.0.0
     # via pyjwt
 fastapi==0.141.1
     # via blockwart (pyproject.toml)
-greenlet==3.5.4
+greenlet==3.5.5
     # via sqlalchemy
 h11==0.16.0
     # via
@@ -77,6 +77,8 @@ mdurl==0.1.2
     # via markdown-it-py
 nh3==0.3.6
     # via blockwart (pyproject.toml)
+psycopg2-binary==2.9.12
+    # via blockwart (pyproject.toml)
 pycparser==3.0
     # via cffi
 pydantic==2.13.4
@@ -87,7 +89,7 @@ pydantic==2.13.4
     #   pydantic-settings
 pydantic-core==2.46.4
     # via pydantic
-pydantic-settings==2.14.2
+pydantic-settings==2.15.0
     # via
     #   blockwart (pyproject.toml)
     #   mcp
@@ -119,7 +121,7 @@ sqlalchemy==2.0.51
     #   blockwart (pyproject.toml)
 sse-starlette==3.4.8
     # via mcp
-starlette==1.4.0
+starlette==1.6.0
     # via
     #   fastapi
     #   mcp
@@ -136,7 +138,7 @@ typing-extensions==4.16.0
     #   sqlalchemy
     #   starlette
     #   typing-inspection
-typing-inspection==0.4.2
+typing-inspection==0.4.3
     # via
     #   fastapi
     #   mcp
