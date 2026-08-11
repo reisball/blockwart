@@ -50,7 +50,7 @@ class Principal(Base):
     id: Mapped[str] = mapped_column(String(36), primary_key=True)
     principal_type: Mapped[str] = mapped_column(String(32), index=True)
     login: Mapped[str] = mapped_column(
-        String(128),
+        String(128, collation="NOCASE"),
     )
     display_name: Mapped[str] = mapped_column(String(255))
     active: Mapped[bool] = mapped_column(

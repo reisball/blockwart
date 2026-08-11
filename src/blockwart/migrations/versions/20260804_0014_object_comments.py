@@ -183,11 +183,13 @@ def upgrade() -> None:
         )
     else:
         op.execute("CREATE OR REPLACE FUNCTION blockwart_raise_exception() RETURNS TRIGGER AS $$ BEGIN RAISE EXCEPTION 'operation blocked by trigger'; END; $$ LANGUAGE plpgsql")
+        op.execute("DROP TRIGGER IF EXISTS object_comments_no_update ON object_comments")
         op.execute(
             "CREATE TRIGGER object_comments_no_update "
             "BEFORE UPDATE ON object_comments "
             "FOR EACH ROW EXECUTE FUNCTION blockwart_raise_exception()"
         )
+        op.execute("DROP TRIGGER IF EXISTS object_comments_no_delete ON object_comments")
         op.execute(
             "CREATE TRIGGER object_comments_no_delete "
             "BEFORE DELETE ON object_comments "

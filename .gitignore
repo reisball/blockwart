@@ -18,5 +18,7 @@ dist/
 exports/*
 !exports/.gitkeep
 
-# CI: local venv for testing
+# CI: local test venvs
+.venv*
+venv/
 /tmp/blockwart-test-venv/
