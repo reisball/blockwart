@@ -143,6 +143,37 @@ DECISION_STATUS_VALUES = (
     "rejected",
 )
 DECISION_STATUSES = frozenset(DECISION_STATUS_VALUES)
+# One shared closed vocabulary for every safe structured source reference. The
+# Decision `docs` contract accepted in #144 and the Project `sources` contract
+# use the same values so a client cannot learn two source taxonomies.
+SOURCE_TYPE_VALUES = ("original", "documentation", "reference")
+SOURCE_TYPES = frozenset(SOURCE_TYPE_VALUES)
+PROJECT_CATEGORY_VALUES = (
+    "implementation",
+    "migration",
+    "research",
+    "experiment",
+    "incident_review",
+    "other",
+)
+PROJECT_CATEGORIES = frozenset(PROJECT_CATEGORY_VALUES)
+PROJECT_STATUS_VALUES = (
+    "planned",
+    "active",
+    "paused",
+    "completed",
+    "cancelled",
+    "archived",
+)
+PROJECT_STATUSES = frozenset(PROJECT_STATUS_VALUES)
+PROJECT_EVIDENCE_GRADE_VALUES = ("source_backed", "observed", "inferred")
+PROJECT_EVIDENCE_GRADES = frozenset(PROJECT_EVIDENCE_GRADE_VALUES)
+# `principal` names a Blockwart principal id as provenance only. Resolving it is
+# deliberately not attempted, so it can neither confer nor prove access.
+PROJECT_MANAGED_BY_KIND_VALUES = ("principal", "person", "team")
+PROJECT_MANAGED_BY_KINDS = frozenset(PROJECT_MANAGED_BY_KIND_VALUES)
+PROJECT_TIMELINE_REFERENCE_TYPE_VALUES = ("object_comments", "source")
+PROJECT_TIMELINE_REFERENCE_TYPES = frozenset(PROJECT_TIMELINE_REFERENCE_TYPE_VALUES)
 INSTALLED_SOFTWARE_KINDS = frozenset({"host", "system"})
 INSTALLED_SOFTWARE_ENTRY_FIELDS = frozenset({"name", "version", "url"})
 
@@ -307,6 +338,14 @@ def normalize_object_data(kind: str, data: Mapping[str, Any]) -> dict[str, Any]:
     return normalized
 
 
+# The fields a legacy knowledge row is still held to. They are the obsolete
+# markers and the globally forbidden shapes, never the canonical contract, so a
+# historical free-form document stays readable without being reinterpreted.
+LEGACY_KNOWLEDGE_READ_FIELD_PATHS = frozenset(
+    {"schema_version", "lifecycle", "health", "dependencies", "installed_software"}
+)
+
+
 def validate_object_data(
     kind: str,
     data: Mapping[str, Any],
@@ -314,6 +353,8 @@ def validate_object_data(
     allow_legacy_network_without_category: bool = False,
     allow_legacy_decision_without_status: bool = False,
     allow_legacy_decision_data: bool = False,
+    allow_legacy_project_without_category: bool = False,
+    allow_legacy_project_data: bool = False,
 ) -> None:
     schema = BUILTIN_SCHEMAS[kind]
     fields = schema.fields
@@ -324,31 +365,52 @@ def validate_object_data(
             else field
             for field in fields
         )
-    if allow_legacy_decision_data and kind == "decision":
-        fields = tuple(
-            field
-            for field in fields
-            if field.path
-            in {"schema_version", "lifecycle", "health", "dependencies", "installed_software"}
-        )
-        validate_fields(data, fields)
-        return
-    if (
-        allow_legacy_decision_without_status
-        and kind == "decision"
-        and "decision_status" not in data
+    if _reads_as_legacy_knowledge_row(
+        kind,
+        data,
+        allow_legacy_decision_without_status=allow_legacy_decision_without_status,
+        allow_legacy_decision_data=allow_legacy_decision_data,
+        allow_legacy_project_without_category=allow_legacy_project_without_category,
+        allow_legacy_project_data=allow_legacy_project_data,
     ):
-        fields = tuple(
-            field
-            for field in fields
-            if field.path
-            in {"schema_version", "lifecycle", "health", "dependencies", "installed_software"}
+        validate_fields(
+            data,
+            tuple(
+                field
+                for field in fields
+                if field.path in LEGACY_KNOWLEDGE_READ_FIELD_PATHS
+            ),
         )
-        validate_fields(data, fields)
         return
     validate_fields(data, fields)
     for rule in schema.rules:
         rule(data)
+
+
+def _reads_as_legacy_knowledge_row(
+    kind: str,
+    data: Mapping[str, Any],
+    *,
+    allow_legacy_decision_without_status: bool,
+    allow_legacy_decision_data: bool,
+    allow_legacy_project_without_category: bool,
+    allow_legacy_project_data: bool,
+) -> bool:
+    """Whether this read may fall back to the tolerant legacy field set.
+
+    A Project without a canonical `category` is historical free-form content.
+    Blockwart never guesses which category it was, so the canonical contract is
+    not applied to it on read; any rewrite must still satisfy that contract.
+    """
+    if kind == "decision":
+        return allow_legacy_decision_data or (
+            allow_legacy_decision_without_status and "decision_status" not in data
+        )
+    if kind == "project":
+        return allow_legacy_project_data or (
+            allow_legacy_project_without_category and "category" not in data
+        )
+    return False
 
 
 def _normalize_string_field(value: Any, path: list[str]) -> None:
@@ -694,6 +756,114 @@ def _reference_list(
     )
 
 
+def _text_list(
+    path: str,
+    *,
+    max_items: int = 50,
+    max_length: int = 2000,
+) -> tuple[FieldSpec, FieldSpec]:
+    """Declare one bounded array of trimmed, nonblank free-text entries."""
+    return (
+        _field(path, "array", max_items=max_items),
+        _field(
+            f"{path}[]",
+            "text",
+            strip_whitespace=True,
+            min_length=1,
+            max_length=max_length,
+        ),
+    )
+
+
+def _entry_id(path: str) -> FieldSpec:
+    """Declare the stable, document-local identifier of one closed list entry."""
+    return _field(
+        path,
+        "string",
+        required_in_item=True,
+        strip_whitespace=True,
+        min_length=1,
+        max_length=64,
+    )
+
+
+def _source_entries(
+    path: str,
+    *,
+    max_items: int,
+    identified: bool = False,
+    retrieval_metadata: bool = False,
+) -> tuple[FieldSpec, ...]:
+    """Declare one safe structured external-source array.
+
+    This is the single definition of Blockwart's source-entry contract. The
+    base shape is exactly the Decision `docs` contract accepted in #144:
+    a closed entry with a required source type, a required nonblank title, a
+    required credential-free absolute HTTP(S) URL, and an optional publication
+    timestamp. Blockwart stores the reference and never fetches the original.
+
+    `identified` adds the document-local `id` that evidence entries cite, and
+    `retrieval_metadata` adds the explicit provenance a research record needs.
+    Both are opt-in so the accepted #144 entry shape stays byte-identical.
+    """
+    keys = {"source_type", "title", "url", "published_at"}
+    fields = [
+        _field(path, "array", max_items=max_items),
+        _field(
+            f"{path}[].source_type",
+            "enum",
+            required_in_item=True,
+            enum_values=SOURCE_TYPES,
+        ),
+        _field(
+            f"{path}[].title",
+            "text",
+            required_in_item=True,
+            strip_whitespace=True,
+            min_length=1,
+            max_length=200,
+        ),
+        _field(
+            f"{path}[].url",
+            "url",
+            required_in_item=True,
+            max_length=2048,
+            forbid_url_credentials=True,
+            message="must be an HTTP(S) URL without embedded credentials",
+        ),
+        _field(f"{path}[].published_at", "datetime"),
+    ]
+    if identified:
+        keys.add("id")
+        fields.append(_entry_id(f"{path}[].id"))
+    if retrieval_metadata:
+        keys.update({"author", "publisher", "retrieved_at"})
+        fields.extend(
+            (
+                _field(
+                    f"{path}[].author",
+                    "text",
+                    strip_whitespace=True,
+                    min_length=1,
+                    max_length=200,
+                ),
+                _field(
+                    f"{path}[].publisher",
+                    "text",
+                    strip_whitespace=True,
+                    min_length=1,
+                    max_length=200,
+                ),
+                _field(f"{path}[].retrieved_at", "datetime"),
+            )
+        )
+    return (
+        fields[0],
+        _field(f"{path}[]", "object", allowed_keys=frozenset(keys)),
+        *fields[1:],
+    )
+
+
 COMMON_FIELDS = (
     _field("schema_version", "integer", literal=1, message="must be 1"),
     _field(
@@ -973,35 +1143,273 @@ DECISION_FIELDS = (
     *_reference_list("related_decisions", "decision"),
     *_reference_list("supersedes", "decision"),
     _field("superseded_by", "reference", reference_kinds=frozenset({"decision"})),
-    _field("docs", "array", max_items=25),
+    *_source_entries("docs", max_items=25),
+)
+
+# Fields every canonical Project carries, whatever its category. `category` and
+# `project_status` are the two closed discriminators; everything below them is
+# the reviewed current knowledge state, never work chronology.
+PROJECT_COMMON_FIELDS = (
     _field(
-        "docs[]",
-        "object",
-        allowed_keys=frozenset({"source_type", "title", "url", "published_at"}),
-    ),
-    _field(
-        "docs[].source_type",
+        "category",
         "enum",
-        required_in_item=True,
-        enum_values=frozenset({"original", "documentation", "reference"}),
+        required=True,
+        enum_values=PROJECT_CATEGORIES,
+        message="must be a supported project category",
     ),
     _field(
-        "docs[].title",
+        "project_status",
+        "enum",
+        required=True,
+        enum_values=PROJECT_STATUSES,
+        message="must be a supported project status",
+    ),
+    _field("objective", "text", strip_whitespace=True, max_length=4000),
+    *_text_list("in_scope"),
+    *_text_list("out_of_scope"),
+    _field(
+        "managed_by",
+        "object",
+        allowed_keys=frozenset({"kind", "label", "principal_id"}),
+    ),
+    _field(
+        "managed_by.kind",
+        "enum",
+        enum_values=PROJECT_MANAGED_BY_KINDS,
+        message="must be principal, person, or team",
+    ),
+    _field(
+        "managed_by.label",
+        "text",
+        strip_whitespace=True,
+        min_length=1,
+        max_length=128,
+    ),
+    _field(
+        "managed_by.principal_id",
+        "string",
+        strip_whitespace=True,
+        min_length=1,
+        max_length=128,
+    ),
+    _field("started_at", "datetime"),
+    _field("completed_at", "datetime"),
+    _field("review_after", "datetime"),
+    *_reference_list(
+        "related_assets",
+        "host",
+        "system",
+        "network",
+        "device",
+        "service",
+    ),
+    *_reference_list("related_runbooks", "runbook"),
+    *_reference_list("related_decisions", "decision"),
+    *_reference_list("related_projects", "project"),
+    *_source_entries(
+        "sources",
+        max_items=50,
+        identified=True,
+        retrieval_metadata=True,
+    ),
+    _field("current_summary", "text", strip_whitespace=True, max_length=4000),
+    *_text_list("open_questions"),
+    *_text_list("recommendations"),
+    *_text_list("next_actions"),
+)
+
+PROJECT_RESEARCH_FIELDS = (
+    *_text_list("research_questions"),
+    *_text_list("hypotheses"),
+    _field("methodology", "text", strip_whitespace=True, max_length=4000),
+    _field("findings", "array", max_items=100),
+    _field(
+        "findings[]",
+        "object",
+        allowed_keys=frozenset(
+            {
+                "id",
+                "statement",
+                "evidence_grade",
+                "source_ids",
+                "observed_at",
+                "verified_at",
+            }
+        ),
+    ),
+    _entry_id("findings[].id"),
+    _field(
+        "findings[].statement",
         "text",
         required_in_item=True,
         strip_whitespace=True,
         min_length=1,
-        max_length=200,
+        max_length=2000,
     ),
     _field(
-        "docs[].url",
-        "url",
+        "findings[].evidence_grade",
+        "enum",
         required_in_item=True,
-        max_length=2048,
-        forbid_url_credentials=True,
-        message="must be an HTTP(S) URL without embedded credentials",
+        enum_values=PROJECT_EVIDENCE_GRADES,
+        message="must be source_backed, observed, or inferred",
     ),
-    _field("docs[].published_at", "datetime"),
+    _field("findings[].source_ids", "array", max_items=25),
+    _field(
+        "findings[].source_ids[]",
+        "string",
+        strip_whitespace=True,
+        min_length=1,
+        max_length=64,
+    ),
+    _field("findings[].observed_at", "datetime"),
+    _field("findings[].verified_at", "datetime"),
+    *_text_list("limitations"),
+    *_text_list("conclusions"),
+)
+
+PROJECT_EXPERIMENT_FIELDS = (
+    _field("hypothesis", "text", strip_whitespace=True, max_length=4000),
+    _field("setup", "text", strip_whitespace=True, max_length=4000),
+    _field("expected_result", "text", strip_whitespace=True, max_length=4000),
+    _field("observed_result", "text", strip_whitespace=True, max_length=4000),
+    _field("measurements", "array", max_items=100),
+    _field(
+        "measurements[]",
+        "object",
+        allowed_keys=frozenset({"name", "quantity", "unit", "observed_at"}),
+    ),
+    _field(
+        "measurements[].name",
+        "text",
+        required_in_item=True,
+        strip_whitespace=True,
+        min_length=1,
+        max_length=128,
+    ),
+    _field(
+        "measurements[].quantity",
+        "string",
+        required_in_item=True,
+        strip_whitespace=True,
+        min_length=1,
+        max_length=128,
+    ),
+    _field(
+        "measurements[].unit",
+        "string",
+        strip_whitespace=True,
+        min_length=1,
+        max_length=64,
+    ),
+    _field("measurements[].observed_at", "datetime"),
+    _field("conclusion", "text", strip_whitespace=True, max_length=4000),
+    _field(
+        "reproducibility_notes",
+        "text",
+        strip_whitespace=True,
+        max_length=4000,
+    ),
+)
+
+PROJECT_INCIDENT_REVIEW_FIELDS = (
+    _field(
+        "incident_window",
+        "object",
+        allowed_keys=frozenset({"started_at", "ended_at"}),
+    ),
+    _field("incident_window.started_at", "datetime"),
+    _field("incident_window.ended_at", "datetime"),
+    _field("impact", "text", strip_whitespace=True, max_length=4000),
+    _field("detection", "text", strip_whitespace=True, max_length=4000),
+    _field(
+        "timeline_reference",
+        "object",
+        allowed_keys=frozenset({"type", "source_id", "note"}),
+    ),
+    _field(
+        "timeline_reference.type",
+        "enum",
+        enum_values=PROJECT_TIMELINE_REFERENCE_TYPES,
+        message="must be object_comments or source",
+    ),
+    _field(
+        "timeline_reference.source_id",
+        "string",
+        strip_whitespace=True,
+        min_length=1,
+        max_length=64,
+    ),
+    _field(
+        "timeline_reference.note",
+        "text",
+        strip_whitespace=True,
+        min_length=1,
+        max_length=2000,
+    ),
+    _field("root_cause", "text", strip_whitespace=True, max_length=4000),
+    *_text_list("contributing_factors"),
+    *_text_list("remediation"),
+    *_text_list("prevention"),
+)
+
+PROJECT_MIGRATION_FIELDS = (
+    _field("source_state", "text", strip_whitespace=True, max_length=4000),
+    _field("target_state", "text", strip_whitespace=True, max_length=4000),
+    *_text_list("migration_plan"),
+    *_text_list("verification"),
+    _field("rollback", "text", strip_whitespace=True, max_length=4000),
+    _field("outcome", "text", strip_whitespace=True, max_length=4000),
+)
+
+# `lessons_learned` is deliberately shared: research, experiment retrospectives,
+# incident reviews, and migrations all record it with the same meaning.
+PROJECT_SHARED_CATEGORY_FIELDS = (*_text_list("lessons_learned"),)
+
+# Which category admits which category-specific top-level fields. Every field
+# below is rejected with a field-accurate error under any other category, so a
+# Project can never silently carry contradictory category content.
+PROJECT_CATEGORY_FIELD_GROUPS: Mapping[str, tuple[FieldSpec, ...]] = MappingProxyType(
+    {
+        "research": PROJECT_RESEARCH_FIELDS,
+        "experiment": PROJECT_EXPERIMENT_FIELDS,
+        "incident_review": PROJECT_INCIDENT_REVIEW_FIELDS,
+        "migration": PROJECT_MIGRATION_FIELDS,
+    }
+)
+
+
+def _top_level_paths(fields: tuple[FieldSpec, ...]) -> frozenset[str]:
+    return frozenset(
+        field.path.split(".")[0].removesuffix("[]") for field in fields
+    )
+
+
+PROJECT_CATEGORY_FIELD_NAMES: Mapping[str, frozenset[str]] = MappingProxyType(
+    {
+        category: _top_level_paths(fields)
+        | _top_level_paths(PROJECT_SHARED_CATEGORY_FIELDS)
+        for category, fields in PROJECT_CATEGORY_FIELD_GROUPS.items()
+    }
+)
+# `implementation` and `other` carry the common contract only. They still admit
+# `lessons_learned`, which is common retrospective content rather than a
+# category-specific result shape.
+PROJECT_COMMON_ONLY_CATEGORY_FIELD_NAMES = _top_level_paths(
+    PROJECT_SHARED_CATEGORY_FIELDS
+)
+ALL_PROJECT_CATEGORY_FIELD_NAMES = frozenset(
+    name
+    for fields in PROJECT_CATEGORY_FIELD_GROUPS.values()
+    for name in _top_level_paths(fields)
+)
+
+PROJECT_FIELDS = (
+    *PROJECT_COMMON_FIELDS,
+    *PROJECT_SHARED_CATEGORY_FIELDS,
+    *PROJECT_RESEARCH_FIELDS,
+    *PROJECT_EXPERIMENT_FIELDS,
+    *PROJECT_INCIDENT_REVIEW_FIELDS,
+    *PROJECT_MIGRATION_FIELDS,
 )
 
 
@@ -1057,6 +1465,326 @@ def _validate_decision_lifecycle(data: Mapping[str, Any]) -> None:
             "is required for superseded decisions",
             violation=VIOLATION_REQUIRED_FIELD_MISSING,
             rule=public_rule_name(_validate_decision_lifecycle),
+        )
+
+
+def _require_project_conditional_fields(data: Mapping[str, Any]) -> None:
+    """Require the fields other canonical Project fields make mandatory."""
+    rule = public_rule_name(_require_project_conditional_fields)
+    status = data.get("project_status")
+    if status in {"active", "paused", "completed"} and "started_at" not in data:
+        raise ObjectSchemaError(
+            "data.started_at",
+            f"is required for {status} projects",
+            violation=VIOLATION_REQUIRED_FIELD_MISSING,
+            rule=rule,
+        )
+    if status == "completed" and "completed_at" not in data:
+        raise ObjectSchemaError(
+            "data.completed_at",
+            "is required for completed projects",
+            violation=VIOLATION_REQUIRED_FIELD_MISSING,
+            rule=rule,
+        )
+    if "completed_at" in data and "started_at" not in data:
+        raise ObjectSchemaError(
+            "data.started_at",
+            "is required when data.completed_at is present",
+            violation=VIOLATION_REQUIRED_FIELD_MISSING,
+            rule=rule,
+        )
+
+    managed_by = data.get("managed_by")
+    if isinstance(managed_by, Mapping):
+        owner_kind = managed_by.get("kind")
+        if owner_kind is None:
+            raise ObjectSchemaError(
+                "data.managed_by.kind",
+                "is required",
+                violation=VIOLATION_REQUIRED_FIELD_MISSING,
+                rule=rule,
+            )
+        required_key = "principal_id" if owner_kind == "principal" else "label"
+        if owner_kind in PROJECT_MANAGED_BY_KINDS and required_key not in managed_by:
+            raise ObjectSchemaError(
+                f"data.managed_by.{required_key}",
+                f"is required for {owner_kind} ownership",
+                violation=VIOLATION_REQUIRED_FIELD_MISSING,
+                rule=rule,
+            )
+
+    timeline = data.get("timeline_reference")
+    if isinstance(timeline, Mapping):
+        if "type" not in timeline:
+            raise ObjectSchemaError(
+                "data.timeline_reference.type",
+                "is required",
+                violation=VIOLATION_REQUIRED_FIELD_MISSING,
+                rule=rule,
+            )
+        if timeline.get("type") == "source" and "source_id" not in timeline:
+            raise ObjectSchemaError(
+                "data.timeline_reference.source_id",
+                "is required for source timeline references",
+                violation=VIOLATION_REQUIRED_FIELD_MISSING,
+                rule=rule,
+            )
+
+    incident_window = data.get("incident_window")
+    if isinstance(incident_window, Mapping):
+        for field_name in ("started_at", "ended_at"):
+            if field_name not in incident_window:
+                raise ObjectSchemaError(
+                    f"data.incident_window.{field_name}",
+                    "is required when data.incident_window is present",
+                    violation=VIOLATION_REQUIRED_FIELD_MISSING,
+                    rule=rule,
+                )
+    findings = data.get("findings")
+    if isinstance(findings, list):
+        for index, finding in enumerate(findings):
+            if not isinstance(finding, Mapping):
+                continue
+            if finding.get("evidence_grade") == "source_backed" and not finding.get(
+                "source_ids"
+            ):
+                raise ObjectSchemaError(
+                    f"data.findings[{index}].source_ids",
+                    "is required for source_backed findings",
+                    violation=VIOLATION_REQUIRED_FIELD_MISSING,
+                    rule=rule,
+                )
+
+
+def _reject_project_contradictory_fields(data: Mapping[str, Any]) -> None:
+    """Reject fields the declared category, status, or shape does not admit."""
+    rule = public_rule_name(_reject_project_contradictory_fields)
+    category = data.get("category")
+    if isinstance(category, str) and category in PROJECT_CATEGORIES:
+        allowed = PROJECT_CATEGORY_FIELD_NAMES.get(
+            category,
+            PROJECT_COMMON_ONLY_CATEGORY_FIELD_NAMES,
+        )
+        present = sorted((ALL_PROJECT_CATEGORY_FIELD_NAMES & set(data)) - allowed)
+        if present:
+            raise ObjectSchemaError(
+                f"data.{present[0]}",
+                f"is not part of the {category} project contract",
+                violation=VIOLATION_FIELD_NOT_ALLOWED,
+                rule=rule,
+            )
+
+    status = data.get("project_status")
+    if status == "planned" and "started_at" in data:
+        raise ObjectSchemaError(
+            "data.started_at",
+            "is not allowed for planned projects",
+            violation=VIOLATION_FIELD_NOT_ALLOWED,
+            rule=rule,
+        )
+    if status in {"planned", "active", "paused"} and "completed_at" in data:
+        raise ObjectSchemaError(
+            "data.completed_at",
+            f"is not allowed for {status} projects",
+            violation=VIOLATION_FIELD_NOT_ALLOWED,
+            rule=rule,
+        )
+
+    managed_by = data.get("managed_by")
+    if isinstance(managed_by, Mapping):
+        forbidden_key = (
+            "label" if managed_by.get("kind") == "principal" else "principal_id"
+        )
+        if managed_by.get("kind") in PROJECT_MANAGED_BY_KINDS and forbidden_key in (
+            managed_by
+        ):
+            raise ObjectSchemaError(
+                f"data.managed_by.{forbidden_key}",
+                f"is not allowed for {managed_by['kind']} ownership",
+                violation=VIOLATION_FIELD_NOT_ALLOWED,
+                rule=rule,
+            )
+
+    timeline = data.get("timeline_reference")
+    if (
+        isinstance(timeline, Mapping)
+        and timeline.get("type") == "object_comments"
+        and "source_id" in timeline
+    ):
+        raise ObjectSchemaError(
+            "data.timeline_reference.source_id",
+            "is allowed only for source timeline references",
+            violation=VIOLATION_FIELD_NOT_ALLOWED,
+            rule=rule,
+        )
+
+
+def _reject_ambiguous_project_evidence(data: Mapping[str, Any]) -> None:
+    """Keep sources, findings, citations, and measurements unambiguous.
+
+    Contradictory findings stay representable: two findings may make opposite
+    statements about the same subject as long as each carries its own id. Only
+    entries the canonical contract cannot tell apart are rejected.
+    """
+    rule = public_rule_name(_reject_ambiguous_project_evidence)
+    source_ids = _unique_entry_ids(data.get("sources"), "data.sources", rule=rule)
+    _unique_entry_ids(data.get("findings"), "data.findings", rule=rule)
+
+    findings = data.get("findings")
+    if isinstance(findings, list):
+        for index, finding in enumerate(findings):
+            if not isinstance(finding, Mapping):
+                continue
+            cited = finding.get("source_ids")
+            if not isinstance(cited, list):
+                continue
+            seen_citations: set[str] = set()
+            for cited_index, cited_id in enumerate(cited):
+                if not isinstance(cited_id, str):
+                    continue
+                path = f"data.findings[{index}].source_ids[{cited_index}]"
+                if cited_id not in source_ids:
+                    raise ObjectSchemaError(
+                        path,
+                        "must name an id declared in data.sources",
+                        violation=VIOLATION_VALUE_NOT_ALLOWED,
+                        rule=rule,
+                    )
+                if cited_id in seen_citations:
+                    raise ObjectSchemaError(
+                        path,
+                        "cites the same source twice",
+                        violation=VIOLATION_VALUE_NOT_ALLOWED,
+                        rule=rule,
+                    )
+                seen_citations.add(cited_id)
+
+    timeline = data.get("timeline_reference")
+    if (
+        isinstance(timeline, Mapping)
+        and timeline.get("type") == "source"
+        and isinstance(source_id := timeline.get("source_id"), str)
+        and source_id not in source_ids
+    ):
+        raise ObjectSchemaError(
+            "data.timeline_reference.source_id",
+            "must name an id declared in data.sources",
+            violation=VIOLATION_VALUE_NOT_ALLOWED,
+            rule=rule,
+        )
+
+    measurements = data.get("measurements")
+    if isinstance(measurements, list):
+        seen_measurements: set[tuple[str, str]] = set()
+        for index, measurement in enumerate(measurements):
+            if not isinstance(measurement, Mapping):
+                continue
+            key = (str(measurement.get("name")), str(measurement.get("observed_at")))
+            if key in seen_measurements:
+                raise ObjectSchemaError(
+                    f"data.measurements[{index}].name",
+                    "repeats an earlier measurement of the same name and time",
+                    violation=VIOLATION_VALUE_NOT_ALLOWED,
+                    rule=rule,
+                )
+            seen_measurements.add(key)
+
+
+def _validate_project_timestamp_order(data: Mapping[str, Any]) -> None:
+    """Reject Project timestamps that run backwards."""
+    rule = public_rule_name(_validate_project_timestamp_order)
+    started_at = _parse_rfc3339(data.get("started_at"))
+    completed_at = _parse_rfc3339(data.get("completed_at"))
+    _require_order(
+        "data.completed_at",
+        started_at,
+        completed_at,
+        rule=rule,
+    )
+    _require_order(
+        "data.review_after",
+        completed_at or started_at,
+        _parse_rfc3339(data.get("review_after")),
+        rule=rule,
+    )
+    window = data.get("incident_window")
+    if isinstance(window, Mapping):
+        _require_order(
+            "data.incident_window.ended_at",
+            _parse_rfc3339(window.get("started_at")),
+            _parse_rfc3339(window.get("ended_at")),
+            rule=rule,
+        )
+        if completed_at is not None:
+            _require_order(
+                "data.completed_at",
+                _parse_rfc3339(window.get("ended_at")),
+                completed_at,
+                rule=rule,
+            )
+    sources = data.get("sources")
+    if isinstance(sources, list):
+        for index, source in enumerate(sources):
+            if not isinstance(source, Mapping):
+                continue
+            _require_order(
+                f"data.sources[{index}].retrieved_at",
+                _parse_rfc3339(source.get("published_at")),
+                _parse_rfc3339(source.get("retrieved_at")),
+                rule=rule,
+            )
+    findings = data.get("findings")
+    if isinstance(findings, list):
+        for index, finding in enumerate(findings):
+            if not isinstance(finding, Mapping):
+                continue
+            _require_order(
+                f"data.findings[{index}].verified_at",
+                _parse_rfc3339(finding.get("observed_at")),
+                _parse_rfc3339(finding.get("verified_at")),
+                rule=rule,
+            )
+
+
+def _unique_entry_ids(
+    entries: Any,
+    path: str,
+    *,
+    rule: str,
+) -> set[str]:
+    if not isinstance(entries, list):
+        return set()
+    seen: set[str] = set()
+    for index, entry in enumerate(entries):
+        if not isinstance(entry, Mapping):
+            continue
+        entry_id = entry.get("id")
+        if not isinstance(entry_id, str):
+            continue
+        if entry_id in seen:
+            raise ObjectSchemaError(
+                f"{path}[{index}].id",
+                "repeats an earlier entry id",
+                violation=VIOLATION_VALUE_NOT_ALLOWED,
+                rule=rule,
+            )
+        seen.add(entry_id)
+    return seen
+
+
+def _require_order(
+    path: str,
+    earlier: datetime | None,
+    later: datetime | None,
+    *,
+    rule: str,
+) -> None:
+    if earlier is not None and later is not None and later < earlier:
+        raise ObjectSchemaError(
+            path,
+            "must not be earlier than the timestamp it follows",
+            violation=VIOLATION_VALUE_OUT_OF_RANGE,
+            rule=rule,
         )
 
 
@@ -1128,6 +1856,34 @@ SCHEMA_RULE_CONTRACTS: Mapping[str, str] = MappingProxyType(
             "Accepted decisions require nonblank context, decision, rationale, and "
             "decided_at; superseded decisions require superseded_by."
         ),
+        "_require_project_conditional_fields": (
+            "Active, paused, and completed projects require data.started_at; "
+            "completed projects require data.completed_at; data.completed_at "
+            "requires data.started_at; data.managed_by requires kind plus the "
+            "principal_id or label that kind uses; a source timeline reference "
+            "requires source_id; an incident window requires both timestamps; "
+            "and source_backed findings require source_ids."
+        ),
+        "_reject_project_contradictory_fields": (
+            "A project may carry only the category-specific fields its declared "
+            "data.category admits; planned projects reject data.started_at; "
+            "planned, active, and paused projects reject data.completed_at; "
+            "principal ownership rejects label and human or team ownership "
+            "rejects principal_id; and an object-comment timeline reference "
+            "rejects source_id."
+        ),
+        "_reject_ambiguous_project_evidence": (
+            "Source and finding ids are unique, findings and source timeline "
+            "references cite declared source ids at most once each, and no two "
+            "measurements repeat the same name at the same time."
+        ),
+        "_validate_project_timestamp_order": (
+            "data.completed_at must not precede data.started_at; data.review_after "
+            "must not precede completion when present (otherwise start); an "
+            "incident window must not end before it starts or after review "
+            "completion; source retrieval must not precede publication; and a "
+            "finding must not be verified before it was observed."
+        ),
         "_require_installed_software_fields": (
             "Every installed-software entry must contain name and version fields."
         ),
@@ -1148,6 +1904,10 @@ SCHEMA_RULE_VIOLATIONS: Mapping[str, str] = MappingProxyType(
         "_reject_credential_value_keys": VIOLATION_FORBIDDEN_KEY,
         "_validate_runbook_approval": VIOLATION_RULE_VIOLATION,
         "_validate_decision_lifecycle": VIOLATION_REQUIRED_FIELD_MISSING,
+        "_require_project_conditional_fields": VIOLATION_REQUIRED_FIELD_MISSING,
+        "_reject_project_contradictory_fields": VIOLATION_FIELD_NOT_ALLOWED,
+        "_reject_ambiguous_project_evidence": VIOLATION_VALUE_NOT_ALLOWED,
+        "_validate_project_timestamp_order": VIOLATION_VALUE_OUT_OF_RANGE,
         "_require_installed_software_fields": VIOLATION_REQUIRED_FIELD_MISSING,
         "_reject_empty_installed_software_fields": VIOLATION_VALUE_TOO_SHORT,
         "_reject_installed_software_extra_fields": VIOLATION_FIELD_NOT_ALLOWED,
@@ -1256,6 +2016,16 @@ BUILTIN_SCHEMAS: Mapping[str, TypeSchema] = MappingProxyType(
             *DECISION_FIELDS,
             rules=(_validate_decision_lifecycle,),
         ),
-        "project": _schema("project", *INSTALLED_SOFTWARE_FORBIDDEN_FIELDS),
+        "project": _schema(
+            "project",
+            *INSTALLED_SOFTWARE_FORBIDDEN_FIELDS,
+            *PROJECT_FIELDS,
+            rules=(
+                _require_project_conditional_fields,
+                _reject_project_contradictory_fields,
+                _reject_ambiguous_project_evidence,
+                _validate_project_timestamp_order,
+            ),
+        ),
     }
 )

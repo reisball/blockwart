@@ -343,6 +343,44 @@
               }
             ]
           },
+          "project_category": {
+            "anyOf": [
+              {
+                "enum": [
+                  "implementation",
+                  "migration",
+                  "research",
+                  "experiment",
+                  "incident_review",
+                  "other"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Project Category"
+          },
+          "project_status": {
+            "anyOf": [
+              {
+                "enum": [
+                  "planned",
+                  "active",
+                  "paused",
+                  "completed",
+                  "cancelled",
+                  "archived"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Project Status"
+          },
           "provenance": {
             "$ref": "#/components/schemas/CatalogProvenanceOut"
           },
@@ -365,6 +403,13 @@
           "ref": {
             "title": "Ref",
             "type": "string"
+          },
+          "related_assets": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Related Assets",
+            "type": "array"
           },
           "relationships": {
             "items": {
@@ -682,6 +727,44 @@
               }
             ]
           },
+          "project_category": {
+            "anyOf": [
+              {
+                "enum": [
+                  "implementation",
+                  "migration",
+                  "research",
+                  "experiment",
+                  "incident_review",
+                  "other"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Project Category"
+          },
+          "project_status": {
+            "anyOf": [
+              {
+                "enum": [
+                  "planned",
+                  "active",
+                  "paused",
+                  "completed",
+                  "cancelled",
+                  "archived"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Project Status"
+          },
           "provenance": {
             "$ref": "#/components/schemas/CatalogProvenanceOut"
           },
@@ -697,6 +780,13 @@
           "ref": {
             "title": "Ref",
             "type": "string"
+          },
+          "related_assets": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Related Assets",
+            "type": "array"
           },
           "revision": {
             "minimum": 1.0,
@@ -5513,6 +5603,74 @@
           },
           {
             "in": "query",
+            "name": "project_category",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "implementation",
+                    "migration",
+                    "research",
+                    "experiment",
+                    "incident_review",
+                    "other"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Project Category"
+            }
+          },
+          {
+            "in": "query",
+            "name": "project_status",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "planned",
+                    "active",
+                    "paused",
+                    "completed",
+                    "cancelled",
+                    "archived"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Project Status"
+            }
+          },
+          {
+            "description": "Exact authorized kind:id Project relationship target",
+            "in": "query",
+            "name": "related_object",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 192,
+                  "pattern": "^(host|system|network|device|service|runbook|decision|project):[^:]+$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Exact authorized kind:id Project relationship target",
+              "title": "Related Object"
+            }
+          },
+          {
+            "in": "query",
             "name": "lifecycle",
             "required": false,
             "schema": {
@@ -6213,6 +6371,74 @@
               ],
               "description": "Exact authorized asset kind:id Decision scope",
               "title": "Applies To"
+            }
+          },
+          {
+            "in": "query",
+            "name": "project_category",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "implementation",
+                    "migration",
+                    "research",
+                    "experiment",
+                    "incident_review",
+                    "other"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Project Category"
+            }
+          },
+          {
+            "in": "query",
+            "name": "project_status",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "planned",
+                    "active",
+                    "paused",
+                    "completed",
+                    "cancelled",
+                    "archived"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Project Status"
+            }
+          },
+          {
+            "description": "Exact authorized kind:id Project relationship target",
+            "in": "query",
+            "name": "related_object",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 192,
+                  "pattern": "^(host|system|network|device|service|runbook|decision|project):[^:]+$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Exact authorized kind:id Project relationship target",
+              "title": "Related Object"
             }
           },
           {
@@ -9204,6 +9430,74 @@
           },
           {
             "in": "query",
+            "name": "project_category",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "implementation",
+                    "migration",
+                    "research",
+                    "experiment",
+                    "incident_review",
+                    "other"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Project Category"
+            }
+          },
+          {
+            "in": "query",
+            "name": "project_status",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "planned",
+                    "active",
+                    "paused",
+                    "completed",
+                    "cancelled",
+                    "archived"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Project Status"
+            }
+          },
+          {
+            "description": "Exact authorized kind:id Project relationship target",
+            "in": "query",
+            "name": "related_object",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 192,
+                  "pattern": "^(host|system|network|device|service|runbook|decision|project):[^:]+$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Exact authorized kind:id Project relationship target",
+              "title": "Related Object"
+            }
+          },
+          {
+            "in": "query",
             "name": "lifecycle",
             "required": false,
             "schema": {
@@ -9854,6 +10148,74 @@
               ],
               "description": "Exact authorized asset kind:id Decision scope",
               "title": "Applies To"
+            }
+          },
+          {
+            "in": "query",
+            "name": "project_category",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "implementation",
+                    "migration",
+                    "research",
+                    "experiment",
+                    "incident_review",
+                    "other"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Project Category"
+            }
+          },
+          {
+            "in": "query",
+            "name": "project_status",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "planned",
+                    "active",
+                    "paused",
+                    "completed",
+                    "cancelled",
+                    "archived"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Project Status"
+            }
+          },
+          {
+            "description": "Exact authorized kind:id Project relationship target",
+            "in": "query",
+            "name": "related_object",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 192,
+                  "pattern": "^(host|system|network|device|service|runbook|decision|project):[^:]+$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Exact authorized kind:id Project relationship target",
+              "title": "Related Object"
             }
           },
           {
@@ -18693,9 +19055,1639 @@
               "violations": [
                 "field_not_allowed"
               ]
+            },
+            {
+              "constraint": "must be a supported project category",
+              "enum": [
+                "experiment",
+                "implementation",
+                "incident_review",
+                "migration",
+                "other",
+                "research"
+              ],
+              "json_types": [
+                "string"
+              ],
+              "normalization": [],
+              "path": "category",
+              "requirement": "required",
+              "type": "enum",
+              "violations": [
+                "required_field_missing",
+                "value_not_allowed"
+              ]
+            },
+            {
+              "constraint": "must be a supported project status",
+              "enum": [
+                "active",
+                "archived",
+                "cancelled",
+                "completed",
+                "paused",
+                "planned"
+              ],
+              "json_types": [
+                "string"
+              ],
+              "normalization": [],
+              "path": "project_status",
+              "requirement": "required",
+              "type": "enum",
+              "violations": [
+                "required_field_missing",
+                "value_not_allowed"
+              ]
+            },
+            {
+              "format": "multiline-text",
+              "json_types": [
+                "string"
+              ],
+              "max_length": 4000,
+              "normalization": [
+                "strip_whitespace"
+              ],
+              "path": "objective",
+              "requirement": "optional",
+              "type": "text",
+              "violations": [
+                "type_mismatch",
+                "value_too_long"
+              ]
+            },
+            {
+              "json_types": [
+                "array"
+              ],
+              "max_items": 50,
+              "normalization": [],
+              "path": "in_scope",
+              "requirement": "optional",
+              "type": "array",
+              "violations": [
+                "type_mismatch",
+                "value_out_of_range"
+              ]
+            },
+            {
+              "format": "multiline-text",
+              "json_types": [
+                "string"
+              ],
+              "max_length": 2000,
+              "min_length": 1,
+              "normalization": [
+                "strip_whitespace"
+              ],
+              "path": "in_scope[]",
+              "requirement": "optional",
+              "type": "text",
+              "violations": [
+                "type_mismatch",
+                "value_too_long",
+                "value_too_short"
+              ]
+            },
+            {
+              "json_types": [
+                "array"
+              ],
+              "max_items": 50,
+              "normalization": [],
+              "path": "out_of_scope",
+              "requirement": "optional",
+              "type": "array",
+              "violations": [
+                "type_mismatch",
+                "value_out_of_range"
+              ]
+            },
+            {
+              "format": "multiline-text",
+              "json_types": [
+                "string"
+              ],
+              "max_length": 2000,
+              "min_length": 1,
+              "normalization": [
+                "strip_whitespace"
+              ],
+              "path": "out_of_scope[]",
+              "requirement": "optional",
+              "type": "text",
+              "violations": [
+                "type_mismatch",
+                "value_too_long",
+                "value_too_short"
+              ]
+            },
+            {
+              "additional_properties": false,
+              "allowed_keys": [
+                "kind",
+                "label",
+                "principal_id"
+              ],
+              "json_types": [
+                "object"
+              ],
+              "normalization": [],
+              "path": "managed_by",
+              "requirement": "optional",
+              "type": "object",
+              "violations": [
+                "field_not_allowed",
+                "type_mismatch"
+              ]
+            },
+            {
+              "constraint": "must be principal, person, or team",
+              "enum": [
+                "person",
+                "principal",
+                "team"
+              ],
+              "json_types": [
+                "string"
+              ],
+              "normalization": [],
+              "path": "managed_by.kind",
+              "requirement": "optional",
+              "type": "enum",
+              "violations": [
+                "value_not_allowed"
+              ]
+            },
+            {
+              "format": "multiline-text",
+              "json_types": [
+                "string"
+              ],
+              "max_length": 128,
+              "min_length": 1,
+              "normalization": [
+                "strip_whitespace"
+              ],
+              "path": "managed_by.label",
+              "requirement": "optional",
+              "type": "text",
+              "violations": [
+                "type_mismatch",
+                "value_too_long",
+                "value_too_short"
+              ]
+            },
+            {
+              "json_types": [
+                "string"
+              ],
+              "max_length": 128,
+              "min_length": 1,
+              "normalization": [
+                "strip_whitespace"
+              ],
+              "path": "managed_by.principal_id",
+              "requirement": "optional",
+              "type": "string",
+              "violations": [
+                "type_mismatch",
+                "value_too_long",
+                "value_too_short"
+              ]
+            },
+            {
+              "format": "date-time",
+              "json_types": [
+                "string"
+              ],
+              "normalization": [],
+              "path": "started_at",
+              "requirement": "optional",
+              "type": "datetime",
+              "violations": [
+                "invalid_format"
+              ]
+            },
+            {
+              "format": "date-time",
+              "json_types": [
+                "string"
+              ],
+              "normalization": [],
+              "path": "completed_at",
+              "requirement": "optional",
+              "type": "datetime",
+              "violations": [
+                "invalid_format"
+              ]
+            },
+            {
+              "format": "date-time",
+              "json_types": [
+                "string"
+              ],
+              "normalization": [],
+              "path": "review_after",
+              "requirement": "optional",
+              "type": "datetime",
+              "violations": [
+                "invalid_format"
+              ]
+            },
+            {
+              "json_types": [
+                "array"
+              ],
+              "normalization": [],
+              "path": "related_assets",
+              "requirement": "optional",
+              "type": "array",
+              "violations": [
+                "type_mismatch"
+              ]
+            },
+            {
+              "format": "kind:id",
+              "json_types": [
+                "string"
+              ],
+              "normalization": [],
+              "path": "related_assets[]",
+              "reference_kinds": [
+                "device",
+                "host",
+                "network",
+                "service",
+                "system"
+              ],
+              "requirement": "optional",
+              "type": "reference",
+              "violations": [
+                "invalid_format",
+                "reference_kind_not_allowed",
+                "type_mismatch"
+              ]
+            },
+            {
+              "json_types": [
+                "array"
+              ],
+              "normalization": [],
+              "path": "related_runbooks",
+              "requirement": "optional",
+              "type": "array",
+              "violations": [
+                "type_mismatch"
+              ]
+            },
+            {
+              "format": "kind:id",
+              "json_types": [
+                "string"
+              ],
+              "normalization": [],
+              "path": "related_runbooks[]",
+              "reference_kinds": [
+                "runbook"
+              ],
+              "requirement": "optional",
+              "type": "reference",
+              "violations": [
+                "invalid_format",
+                "reference_kind_not_allowed",
+                "type_mismatch"
+              ]
+            },
+            {
+              "json_types": [
+                "array"
+              ],
+              "normalization": [],
+              "path": "related_decisions",
+              "requirement": "optional",
+              "type": "array",
+              "violations": [
+                "type_mismatch"
+              ]
+            },
+            {
+              "format": "kind:id",
+              "json_types": [
+                "string"
+              ],
+              "normalization": [],
+              "path": "related_decisions[]",
+              "reference_kinds": [
+                "decision"
+              ],
+              "requirement": "optional",
+              "type": "reference",
+              "violations": [
+                "invalid_format",
+                "reference_kind_not_allowed",
+                "type_mismatch"
+              ]
+            },
+            {
+              "json_types": [
+                "array"
+              ],
+              "normalization": [],
+              "path": "related_projects",
+              "requirement": "optional",
+              "type": "array",
+              "violations": [
+                "type_mismatch"
+              ]
+            },
+            {
+              "format": "kind:id",
+              "json_types": [
+                "string"
+              ],
+              "normalization": [],
+              "path": "related_projects[]",
+              "reference_kinds": [
+                "project"
+              ],
+              "requirement": "optional",
+              "type": "reference",
+              "violations": [
+                "invalid_format",
+                "reference_kind_not_allowed",
+                "type_mismatch"
+              ]
+            },
+            {
+              "json_types": [
+                "array"
+              ],
+              "max_items": 50,
+              "normalization": [],
+              "path": "sources",
+              "requirement": "optional",
+              "type": "array",
+              "violations": [
+                "type_mismatch",
+                "value_out_of_range"
+              ]
+            },
+            {
+              "additional_properties": false,
+              "allowed_keys": [
+                "author",
+                "id",
+                "published_at",
+                "publisher",
+                "retrieved_at",
+                "source_type",
+                "title",
+                "url"
+              ],
+              "json_types": [
+                "object"
+              ],
+              "normalization": [],
+              "path": "sources[]",
+              "requirement": "optional",
+              "type": "object",
+              "violations": [
+                "field_not_allowed",
+                "type_mismatch"
+              ]
+            },
+            {
+              "enum": [
+                "documentation",
+                "original",
+                "reference"
+              ],
+              "json_types": [
+                "string"
+              ],
+              "normalization": [],
+              "path": "sources[].source_type",
+              "required_scope": "containing_array_item",
+              "requirement": "required",
+              "type": "enum",
+              "violations": [
+                "required_field_missing",
+                "value_not_allowed"
+              ]
+            },
+            {
+              "format": "multiline-text",
+              "json_types": [
+                "string"
+              ],
+              "max_length": 200,
+              "min_length": 1,
+              "normalization": [
+                "strip_whitespace"
+              ],
+              "path": "sources[].title",
+              "required_scope": "containing_array_item",
+              "requirement": "required",
+              "type": "text",
+              "violations": [
+                "required_field_missing",
+                "type_mismatch",
+                "value_too_long",
+                "value_too_short"
+              ]
+            },
+            {
+              "constraint": "must be an HTTP(S) URL without embedded credentials",
+              "embedded_credentials_allowed": false,
+              "format": "uri",
+              "json_types": [
+                "string"
+              ],
+              "max_length": 2048,
+              "normalization": [],
+              "path": "sources[].url",
+              "pattern": "^[Hh][Tt][Tt][Pp][Ss]?://",
+              "required_scope": "containing_array_item",
+              "requirement": "required",
+              "secret_query_parameters_allowed": false,
+              "type": "url",
+              "violations": [
+                "invalid_format",
+                "required_field_missing",
+                "value_too_long"
+              ]
+            },
+            {
+              "format": "date-time",
+              "json_types": [
+                "string"
+              ],
+              "normalization": [],
+              "path": "sources[].published_at",
+              "requirement": "optional",
+              "type": "datetime",
+              "violations": [
+                "invalid_format"
+              ]
+            },
+            {
+              "json_types": [
+                "string"
+              ],
+              "max_length": 64,
+              "min_length": 1,
+              "normalization": [
+                "strip_whitespace"
+              ],
+              "path": "sources[].id",
+              "required_scope": "containing_array_item",
+              "requirement": "required",
+              "type": "string",
+              "violations": [
+                "required_field_missing",
+                "type_mismatch",
+                "value_too_long",
+                "value_too_short"
+              ]
+            },
+            {
+              "format": "multiline-text",
+              "json_types": [
+                "string"
+              ],
+              "max_length": 200,
+              "min_length": 1,
+              "normalization": [
+                "strip_whitespace"
+              ],
+              "path": "sources[].author",
+              "requirement": "optional",
+              "type": "text",
+              "violations": [
+                "type_mismatch",
+                "value_too_long",
+                "value_too_short"
+              ]
+            },
+            {
+              "format": "multiline-text",
+              "json_types": [
+                "string"
+              ],
+              "max_length": 200,
+              "min_length": 1,
+              "normalization": [
+                "strip_whitespace"
+              ],
+              "path": "sources[].publisher",
+              "requirement": "optional",
+              "type": "text",
+              "violations": [
+                "type_mismatch",
+                "value_too_long",
+                "value_too_short"
+              ]
+            },
+            {
+              "format": "date-time",
+              "json_types": [
+                "string"
+              ],
+              "normalization": [],
+              "path": "sources[].retrieved_at",
+              "requirement": "optional",
+              "type": "datetime",
+              "violations": [
+                "invalid_format"
+              ]
+            },
+            {
+              "format": "multiline-text",
+              "json_types": [
+                "string"
+              ],
+              "max_length": 4000,
+              "normalization": [
+                "strip_whitespace"
+              ],
+              "path": "current_summary",
+              "requirement": "optional",
+              "type": "text",
+              "violations": [
+                "type_mismatch",
+                "value_too_long"
+              ]
+            },
+            {
+              "json_types": [
+                "array"
+              ],
+              "max_items": 50,
+              "normalization": [],
+              "path": "open_questions",
+              "requirement": "optional",
+              "type": "array",
+              "violations": [
+                "type_mismatch",
+                "value_out_of_range"
+              ]
+            },
+            {
+              "format": "multiline-text",
+              "json_types": [
+                "string"
+              ],
+              "max_length": 2000,
+              "min_length": 1,
+              "normalization": [
+                "strip_whitespace"
+              ],
+              "path": "open_questions[]",
+              "requirement": "optional",
+              "type": "text",
+              "violations": [
+                "type_mismatch",
+                "value_too_long",
+                "value_too_short"
+              ]
+            },
+            {
+              "json_types": [
+                "array"
+              ],
+              "max_items": 50,
+              "normalization": [],
+              "path": "recommendations",
+              "requirement": "optional",
+              "type": "array",
+              "violations": [
+                "type_mismatch",
+                "value_out_of_range"
+              ]
+            },
+            {
+              "format": "multiline-text",
+              "json_types": [
+                "string"
+              ],
+              "max_length": 2000,
+              "min_length": 1,
+              "normalization": [
+                "strip_whitespace"
+              ],
+              "path": "recommendations[]",
+              "requirement": "optional",
+              "type": "text",
+              "violations": [
+                "type_mismatch",
+                "value_too_long",
+                "value_too_short"
+              ]
+            },
+            {
+              "json_types": [
+                "array"
+              ],
+              "max_items": 50,
+              "normalization": [],
+              "path": "next_actions",
+              "requirement": "optional",
+              "type": "array",
+              "violations": [
+                "type_mismatch",
+                "value_out_of_range"
+              ]
+            },
+            {
+              "format": "multiline-text",
+              "json_types": [
+                "string"
+              ],
+              "max_length": 2000,
+              "min_length": 1,
+              "normalization": [
+                "strip_whitespace"
+              ],
+              "path": "next_actions[]",
+              "requirement": "optional",
+              "type": "text",
+              "violations": [
+                "type_mismatch",
+                "value_too_long",
+                "value_too_short"
+              ]
+            },
+            {
+              "json_types": [
+                "array"
+              ],
+              "max_items": 50,
+              "normalization": [],
+              "path": "lessons_learned",
+              "requirement": "optional",
+              "type": "array",
+              "violations": [
+                "type_mismatch",
+                "value_out_of_range"
+              ]
+            },
+            {
+              "format": "multiline-text",
+              "json_types": [
+                "string"
+              ],
+              "max_length": 2000,
+              "min_length": 1,
+              "normalization": [
+                "strip_whitespace"
+              ],
+              "path": "lessons_learned[]",
+              "requirement": "optional",
+              "type": "text",
+              "violations": [
+                "type_mismatch",
+                "value_too_long",
+                "value_too_short"
+              ]
+            },
+            {
+              "json_types": [
+                "array"
+              ],
+              "max_items": 50,
+              "normalization": [],
+              "path": "research_questions",
+              "requirement": "optional",
+              "type": "array",
+              "violations": [
+                "type_mismatch",
+                "value_out_of_range"
+              ]
+            },
+            {
+              "format": "multiline-text",
+              "json_types": [
+                "string"
+              ],
+              "max_length": 2000,
+              "min_length": 1,
+              "normalization": [
+                "strip_whitespace"
+              ],
+              "path": "research_questions[]",
+              "requirement": "optional",
+              "type": "text",
+              "violations": [
+                "type_mismatch",
+                "value_too_long",
+                "value_too_short"
+              ]
+            },
+            {
+              "json_types": [
+                "array"
+              ],
+              "max_items": 50,
+              "normalization": [],
+              "path": "hypotheses",
+              "requirement": "optional",
+              "type": "array",
+              "violations": [
+                "type_mismatch",
+                "value_out_of_range"
+              ]
+            },
+            {
+              "format": "multiline-text",
+              "json_types": [
+                "string"
+              ],
+              "max_length": 2000,
+              "min_length": 1,
+              "normalization": [
+                "strip_whitespace"
+              ],
+              "path": "hypotheses[]",
+              "requirement": "optional",
+              "type": "text",
+              "violations": [
+                "type_mismatch",
+                "value_too_long",
+                "value_too_short"
+              ]
+            },
+            {
+              "format": "multiline-text",
+              "json_types": [
+                "string"
+              ],
+              "max_length": 4000,
+              "normalization": [
+                "strip_whitespace"
+              ],
+              "path": "methodology",
+              "requirement": "optional",
+              "type": "text",
+              "violations": [
+                "type_mismatch",
+                "value_too_long"
+              ]
+            },
+            {
+              "json_types": [
+                "array"
+              ],
+              "max_items": 100,
+              "normalization": [],
+              "path": "findings",
+              "requirement": "optional",
+              "type": "array",
+              "violations": [
+                "type_mismatch",
+                "value_out_of_range"
+              ]
+            },
+            {
+              "additional_properties": false,
+              "allowed_keys": [
+                "evidence_grade",
+                "id",
+                "observed_at",
+                "source_ids",
+                "statement",
+                "verified_at"
+              ],
+              "json_types": [
+                "object"
+              ],
+              "normalization": [],
+              "path": "findings[]",
+              "requirement": "optional",
+              "type": "object",
+              "violations": [
+                "field_not_allowed",
+                "type_mismatch"
+              ]
+            },
+            {
+              "json_types": [
+                "string"
+              ],
+              "max_length": 64,
+              "min_length": 1,
+              "normalization": [
+                "strip_whitespace"
+              ],
+              "path": "findings[].id",
+              "required_scope": "containing_array_item",
+              "requirement": "required",
+              "type": "string",
+              "violations": [
+                "required_field_missing",
+                "type_mismatch",
+                "value_too_long",
+                "value_too_short"
+              ]
+            },
+            {
+              "format": "multiline-text",
+              "json_types": [
+                "string"
+              ],
+              "max_length": 2000,
+              "min_length": 1,
+              "normalization": [
+                "strip_whitespace"
+              ],
+              "path": "findings[].statement",
+              "required_scope": "containing_array_item",
+              "requirement": "required",
+              "type": "text",
+              "violations": [
+                "required_field_missing",
+                "type_mismatch",
+                "value_too_long",
+                "value_too_short"
+              ]
+            },
+            {
+              "constraint": "must be source_backed, observed, or inferred",
+              "enum": [
+                "inferred",
+                "observed",
+                "source_backed"
+              ],
+              "json_types": [
+                "string"
+              ],
+              "normalization": [],
+              "path": "findings[].evidence_grade",
+              "required_scope": "containing_array_item",
+              "requirement": "required",
+              "type": "enum",
+              "violations": [
+                "required_field_missing",
+                "value_not_allowed"
+              ]
+            },
+            {
+              "json_types": [
+                "array"
+              ],
+              "max_items": 25,
+              "normalization": [],
+              "path": "findings[].source_ids",
+              "requirement": "optional",
+              "type": "array",
+              "violations": [
+                "type_mismatch",
+                "value_out_of_range"
+              ]
+            },
+            {
+              "json_types": [
+                "string"
+              ],
+              "max_length": 64,
+              "min_length": 1,
+              "normalization": [
+                "strip_whitespace"
+              ],
+              "path": "findings[].source_ids[]",
+              "requirement": "optional",
+              "type": "string",
+              "violations": [
+                "type_mismatch",
+                "value_too_long",
+                "value_too_short"
+              ]
+            },
+            {
+              "format": "date-time",
+              "json_types": [
+                "string"
+              ],
+              "normalization": [],
+              "path": "findings[].observed_at",
+              "requirement": "optional",
+              "type": "datetime",
+              "violations": [
+                "invalid_format"
+              ]
+            },
+            {
+              "format": "date-time",
+              "json_types": [
+                "string"
+              ],
+              "normalization": [],
+              "path": "findings[].verified_at",
+              "requirement": "optional",
+              "type": "datetime",
+              "violations": [
+                "invalid_format"
+              ]
+            },
+            {
+              "json_types": [
+                "array"
+              ],
+              "max_items": 50,
+              "normalization": [],
+              "path": "limitations",
+              "requirement": "optional",
+              "type": "array",
+              "violations": [
+                "type_mismatch",
+                "value_out_of_range"
+              ]
+            },
+            {
+              "format": "multiline-text",
+              "json_types": [
+                "string"
+              ],
+              "max_length": 2000,
+              "min_length": 1,
+              "normalization": [
+                "strip_whitespace"
+              ],
+              "path": "limitations[]",
+              "requirement": "optional",
+              "type": "text",
+              "violations": [
+                "type_mismatch",
+                "value_too_long",
+                "value_too_short"
+              ]
+            },
+            {
+              "json_types": [
+                "array"
+              ],
+              "max_items": 50,
+              "normalization": [],
+              "path": "conclusions",
+              "requirement": "optional",
+              "type": "array",
+              "violations": [
+                "type_mismatch",
+                "value_out_of_range"
+              ]
+            },
+            {
+              "format": "multiline-text",
+              "json_types": [
+                "string"
+              ],
+              "max_length": 2000,
+              "min_length": 1,
+              "normalization": [
+                "strip_whitespace"
+              ],
+              "path": "conclusions[]",
+              "requirement": "optional",
+              "type": "text",
+              "violations": [
+                "type_mismatch",
+                "value_too_long",
+                "value_too_short"
+              ]
+            },
+            {
+              "format": "multiline-text",
+              "json_types": [
+                "string"
+              ],
+              "max_length": 4000,
+              "normalization": [
+                "strip_whitespace"
+              ],
+              "path": "hypothesis",
+              "requirement": "optional",
+              "type": "text",
+              "violations": [
+                "type_mismatch",
+                "value_too_long"
+              ]
+            },
+            {
+              "format": "multiline-text",
+              "json_types": [
+                "string"
+              ],
+              "max_length": 4000,
+              "normalization": [
+                "strip_whitespace"
+              ],
+              "path": "setup",
+              "requirement": "optional",
+              "type": "text",
+              "violations": [
+                "type_mismatch",
+                "value_too_long"
+              ]
+            },
+            {
+              "format": "multiline-text",
+              "json_types": [
+                "string"
+              ],
+              "max_length": 4000,
+              "normalization": [
+                "strip_whitespace"
+              ],
+              "path": "expected_result",
+              "requirement": "optional",
+              "type": "text",
+              "violations": [
+                "type_mismatch",
+                "value_too_long"
+              ]
+            },
+            {
+              "format": "multiline-text",
+              "json_types": [
+                "string"
+              ],
+              "max_length": 4000,
+              "normalization": [
+                "strip_whitespace"
+              ],
+              "path": "observed_result",
+              "requirement": "optional",
+              "type": "text",
+              "violations": [
+                "type_mismatch",
+                "value_too_long"
+              ]
+            },
+            {
+              "json_types": [
+                "array"
+              ],
+              "max_items": 100,
+              "normalization": [],
+              "path": "measurements",
+              "requirement": "optional",
+              "type": "array",
+              "violations": [
+                "type_mismatch",
+                "value_out_of_range"
+              ]
+            },
+            {
+              "additional_properties": false,
+              "allowed_keys": [
+                "name",
+                "observed_at",
+                "quantity",
+                "unit"
+              ],
+              "json_types": [
+                "object"
+              ],
+              "normalization": [],
+              "path": "measurements[]",
+              "requirement": "optional",
+              "type": "object",
+              "violations": [
+                "field_not_allowed",
+                "type_mismatch"
+              ]
+            },
+            {
+              "format": "multiline-text",
+              "json_types": [
+                "string"
+              ],
+              "max_length": 128,
+              "min_length": 1,
+              "normalization": [
+                "strip_whitespace"
+              ],
+              "path": "measurements[].name",
+              "required_scope": "containing_array_item",
+              "requirement": "required",
+              "type": "text",
+              "violations": [
+                "required_field_missing",
+                "type_mismatch",
+                "value_too_long",
+                "value_too_short"
+              ]
+            },
+            {
+              "json_types": [
+                "string"
+              ],
+              "max_length": 128,
+              "min_length": 1,
+              "normalization": [
+                "strip_whitespace"
+              ],
+              "path": "measurements[].quantity",
+              "required_scope": "containing_array_item",
+              "requirement": "required",
+              "type": "string",
+              "violations": [
+                "required_field_missing",
+                "type_mismatch",
+                "value_too_long",
+                "value_too_short"
+              ]
+            },
+            {
+              "json_types": [
+                "string"
+              ],
+              "max_length": 64,
+              "min_length": 1,
+              "normalization": [
+                "strip_whitespace"
+              ],
+              "path": "measurements[].unit",
+              "requirement": "optional",
+              "type": "string",
+              "violations": [
+                "type_mismatch",
+                "value_too_long",
+                "value_too_short"
+              ]
+            },
+            {
+              "format": "date-time",
+              "json_types": [
+                "string"
+              ],
+              "normalization": [],
+              "path": "measurements[].observed_at",
+              "requirement": "optional",
+              "type": "datetime",
+              "violations": [
+                "invalid_format"
+              ]
+            },
+            {
+              "format": "multiline-text",
+              "json_types": [
+                "string"
+              ],
+              "max_length": 4000,
+              "normalization": [
+                "strip_whitespace"
+              ],
+              "path": "conclusion",
+              "requirement": "optional",
+              "type": "text",
+              "violations": [
+                "type_mismatch",
+                "value_too_long"
+              ]
+            },
+            {
+              "format": "multiline-text",
+              "json_types": [
+                "string"
+              ],
+              "max_length": 4000,
+              "normalization": [
+                "strip_whitespace"
+              ],
+              "path": "reproducibility_notes",
+              "requirement": "optional",
+              "type": "text",
+              "violations": [
+                "type_mismatch",
+                "value_too_long"
+              ]
+            },
+            {
+              "additional_properties": false,
+              "allowed_keys": [
+                "ended_at",
+                "started_at"
+              ],
+              "json_types": [
+                "object"
+              ],
+              "normalization": [],
+              "path": "incident_window",
+              "requirement": "optional",
+              "type": "object",
+              "violations": [
+                "field_not_allowed",
+                "type_mismatch"
+              ]
+            },
+            {
+              "format": "date-time",
+              "json_types": [
+                "string"
+              ],
+              "normalization": [],
+              "path": "incident_window.started_at",
+              "requirement": "optional",
+              "type": "datetime",
+              "violations": [
+                "invalid_format"
+              ]
+            },
+            {
+              "format": "date-time",
+              "json_types": [
+                "string"
+              ],
+              "normalization": [],
+              "path": "incident_window.ended_at",
+              "requirement": "optional",
+              "type": "datetime",
+              "violations": [
+                "invalid_format"
+              ]
+            },
+            {
+              "format": "multiline-text",
+              "json_types": [
+                "string"
+              ],
+              "max_length": 4000,
+              "normalization": [
+                "strip_whitespace"
+              ],
+              "path": "impact",
+              "requirement": "optional",
+              "type": "text",
+              "violations": [
+                "type_mismatch",
+                "value_too_long"
+              ]
+            },
+            {
+              "format": "multiline-text",
+              "json_types": [
+                "string"
+              ],
+              "max_length": 4000,
+              "normalization": [
+                "strip_whitespace"
+              ],
+              "path": "detection",
+              "requirement": "optional",
+              "type": "text",
+              "violations": [
+                "type_mismatch",
+                "value_too_long"
+              ]
+            },
+            {
+              "additional_properties": false,
+              "allowed_keys": [
+                "note",
+                "source_id",
+                "type"
+              ],
+              "json_types": [
+                "object"
+              ],
+              "normalization": [],
+              "path": "timeline_reference",
+              "requirement": "optional",
+              "type": "object",
+              "violations": [
+                "field_not_allowed",
+                "type_mismatch"
+              ]
+            },
+            {
+              "constraint": "must be object_comments or source",
+              "enum": [
+                "object_comments",
+                "source"
+              ],
+              "json_types": [
+                "string"
+              ],
+              "normalization": [],
+              "path": "timeline_reference.type",
+              "requirement": "optional",
+              "type": "enum",
+              "violations": [
+                "value_not_allowed"
+              ]
+            },
+            {
+              "json_types": [
+                "string"
+              ],
+              "max_length": 64,
+              "min_length": 1,
+              "normalization": [
+                "strip_whitespace"
+              ],
+              "path": "timeline_reference.source_id",
+              "requirement": "optional",
+              "type": "string",
+              "violations": [
+                "type_mismatch",
+                "value_too_long",
+                "value_too_short"
+              ]
+            },
+            {
+              "format": "multiline-text",
+              "json_types": [
+                "string"
+              ],
+              "max_length": 2000,
+              "min_length": 1,
+              "normalization": [
+                "strip_whitespace"
+              ],
+              "path": "timeline_reference.note",
+              "requirement": "optional",
+              "type": "text",
+              "violations": [
+                "type_mismatch",
+                "value_too_long",
+                "value_too_short"
+              ]
+            },
+            {
+              "format": "multiline-text",
+              "json_types": [
+                "string"
+              ],
+              "max_length": 4000,
+              "normalization": [
+                "strip_whitespace"
+              ],
+              "path": "root_cause",
+              "requirement": "optional",
+              "type": "text",
+              "violations": [
+                "type_mismatch",
+                "value_too_long"
+              ]
+            },
+            {
+              "json_types": [
+                "array"
+              ],
+              "max_items": 50,
+              "normalization": [],
+              "path": "contributing_factors",
+              "requirement": "optional",
+              "type": "array",
+              "violations": [
+                "type_mismatch",
+                "value_out_of_range"
+              ]
+            },
+            {
+              "format": "multiline-text",
+              "json_types": [
+                "string"
+              ],
+              "max_length": 2000,
+              "min_length": 1,
+              "normalization": [
+                "strip_whitespace"
+              ],
+              "path": "contributing_factors[]",
+              "requirement": "optional",
+              "type": "text",
+              "violations": [
+                "type_mismatch",
+                "value_too_long",
+                "value_too_short"
+              ]
+            },
+            {
+              "json_types": [
+                "array"
+              ],
+              "max_items": 50,
+              "normalization": [],
+              "path": "remediation",
+              "requirement": "optional",
+              "type": "array",
+              "violations": [
+                "type_mismatch",
+                "value_out_of_range"
+              ]
+            },
+            {
+              "format": "multiline-text",
+              "json_types": [
+                "string"
+              ],
+              "max_length": 2000,
+              "min_length": 1,
+              "normalization": [
+                "strip_whitespace"
+              ],
+              "path": "remediation[]",
+              "requirement": "optional",
+              "type": "text",
+              "violations": [
+                "type_mismatch",
+                "value_too_long",
+                "value_too_short"
+              ]
+            },
+            {
+              "json_types": [
+                "array"
+              ],
+              "max_items": 50,
+              "normalization": [],
+              "path": "prevention",
+              "requirement": "optional",
+              "type": "array",
+              "violations": [
+                "type_mismatch",
+                "value_out_of_range"
+              ]
+            },
+            {
+              "format": "multiline-text",
+              "json_types": [
+                "string"
+              ],
+              "max_length": 2000,
+              "min_length": 1,
+              "normalization": [
+                "strip_whitespace"
+              ],
+              "path": "prevention[]",
+              "requirement": "optional",
+              "type": "text",
+              "violations": [
+                "type_mismatch",
+                "value_too_long",
+                "value_too_short"
+              ]
+            },
+            {
+              "format": "multiline-text",
+              "json_types": [
+                "string"
+              ],
+              "max_length": 4000,
+              "normalization": [
+                "strip_whitespace"
+              ],
+              "path": "source_state",
+              "requirement": "optional",
+              "type": "text",
+              "violations": [
+                "type_mismatch",
+                "value_too_long"
+              ]
+            },
+            {
+              "format": "multiline-text",
+              "json_types": [
+                "string"
+              ],
+              "max_length": 4000,
+              "normalization": [
+                "strip_whitespace"
+              ],
+              "path": "target_state",
+              "requirement": "optional",
+              "type": "text",
+              "violations": [
+                "type_mismatch",
+                "value_too_long"
+              ]
+            },
+            {
+              "json_types": [
+                "array"
+              ],
+              "max_items": 50,
+              "normalization": [],
+              "path": "migration_plan",
+              "requirement": "optional",
+              "type": "array",
+              "violations": [
+                "type_mismatch",
+                "value_out_of_range"
+              ]
+            },
+            {
+              "format": "multiline-text",
+              "json_types": [
+                "string"
+              ],
+              "max_length": 2000,
+              "min_length": 1,
+              "normalization": [
+                "strip_whitespace"
+              ],
+              "path": "migration_plan[]",
+              "requirement": "optional",
+              "type": "text",
+              "violations": [
+                "type_mismatch",
+                "value_too_long",
+                "value_too_short"
+              ]
+            },
+            {
+              "json_types": [
+                "array"
+              ],
+              "max_items": 50,
+              "normalization": [],
+              "path": "verification",
+              "requirement": "optional",
+              "type": "array",
+              "violations": [
+                "type_mismatch",
+                "value_out_of_range"
+              ]
+            },
+            {
+              "format": "multiline-text",
+              "json_types": [
+                "string"
+              ],
+              "max_length": 2000,
+              "min_length": 1,
+              "normalization": [
+                "strip_whitespace"
+              ],
+              "path": "verification[]",
+              "requirement": "optional",
+              "type": "text",
+              "violations": [
+                "type_mismatch",
+                "value_too_long",
+                "value_too_short"
+              ]
+            },
+            {
+              "format": "multiline-text",
+              "json_types": [
+                "string"
+              ],
+              "max_length": 4000,
+              "normalization": [
+                "strip_whitespace"
+              ],
+              "path": "rollback",
+              "requirement": "optional",
+              "type": "text",
+              "violations": [
+                "type_mismatch",
+                "value_too_long"
+              ]
+            },
+            {
+              "format": "multiline-text",
+              "json_types": [
+                "string"
+              ],
+              "max_length": 4000,
+              "normalization": [
+                "strip_whitespace"
+              ],
+              "path": "outcome",
+              "requirement": "optional",
+              "type": "text",
+              "violations": [
+                "type_mismatch",
+                "value_too_long"
+              ]
             }
           ],
-          "rules": [],
+          "rules": [
+            {
+              "description": "Active, paused, and completed projects require data.started_at; completed projects require data.completed_at; data.completed_at requires data.started_at; data.managed_by requires kind plus the principal_id or label that kind uses; a source timeline reference requires source_id; an incident window requires both timestamps; and source_backed findings require source_ids.",
+              "rule": "require_project_conditional_fields",
+              "violation": "required_field_missing"
+            },
+            {
+              "description": "A project may carry only the category-specific fields its declared data.category admits; planned projects reject data.started_at; planned, active, and paused projects reject data.completed_at; principal ownership rejects label and human or team ownership rejects principal_id; and an object-comment timeline reference rejects source_id.",
+              "rule": "reject_project_contradictory_fields",
+              "violation": "field_not_allowed"
+            },
+            {
+              "description": "Source and finding ids are unique, findings and source timeline references cite declared source ids at most once each, and no two measurements repeat the same name at the same time.",
+              "rule": "reject_ambiguous_project_evidence",
+              "violation": "value_not_allowed"
+            },
+            {
+              "description": "data.completed_at must not precede data.started_at; data.review_after must not precede completion when present (otherwise start); an incident window must not end before it starts or after review completion; source retrieval must not precede publication; and a finding must not be verified before it was observed.",
+              "rule": "validate_project_timestamp_order",
+              "violation": "value_out_of_range"
+            }
+          ],
           "secret_policy": "global_enforced",
           "unknown_properties": "allow"
         },
@@ -18719,12 +20711,147 @@
         },
         "minimal_example": {
           "data": {
+            "category": "implementation",
+            "project_status": "planned",
             "schema_version": 1
           },
           "id": "example-project",
           "kind": "project",
           "label": "Example project",
           "status": "active"
+        },
+        "project": {
+          "category": {
+            "fields_by_category": {
+              "experiment": [
+                "conclusion",
+                "expected_result",
+                "hypothesis",
+                "lessons_learned",
+                "measurements",
+                "observed_result",
+                "reproducibility_notes",
+                "setup"
+              ],
+              "implementation": [
+                "lessons_learned"
+              ],
+              "incident_review": [
+                "contributing_factors",
+                "detection",
+                "impact",
+                "incident_window",
+                "lessons_learned",
+                "prevention",
+                "remediation",
+                "root_cause",
+                "timeline_reference"
+              ],
+              "migration": [
+                "lessons_learned",
+                "migration_plan",
+                "outcome",
+                "rollback",
+                "source_state",
+                "target_state",
+                "verification"
+              ],
+              "other": [
+                "lessons_learned"
+              ],
+              "research": [
+                "conclusions",
+                "findings",
+                "hypotheses",
+                "lessons_learned",
+                "limitations",
+                "methodology",
+                "research_questions"
+              ]
+            },
+            "guessed_during_compatibility": false,
+            "values": [
+              "implementation",
+              "migration",
+              "research",
+              "experiment",
+              "incident_review",
+              "other"
+            ]
+          },
+          "evidence": {
+            "citation_target": "data.sources[].id",
+            "contradictory_findings_allowed": true,
+            "evidence_timestamps": [
+              "observed_at",
+              "verified_at"
+            ],
+            "findings_path": "data.findings[]",
+            "grades": [
+              "source_backed",
+              "observed",
+              "inferred"
+            ],
+            "source_backed_requires_source_ids": true
+          },
+          "external_sources": {
+            "embedded_credentials_allowed": false,
+            "full_text_import": false,
+            "http_only": true,
+            "live_fetch": false,
+            "path": "data.sources[]",
+            "secret_query_parameters_allowed": false,
+            "source_type_values": [
+              "documentation",
+              "original",
+              "reference"
+            ]
+          },
+          "knowledge_layers": {
+            "audit": "material canonical-field changes without comment or secret bodies",
+            "comments": "append-only work chronology, never promoted automatically",
+            "decisions": "binding choices created from the work",
+            "external_docs": "large originals, referenced but never imported",
+            "fields": "current reviewed knowledge and results",
+            "runbooks": "resulting operational or recovery procedures"
+          },
+          "legacy_reads": {
+            "missing_category": "readable",
+            "writes": "must satisfy the canonical schema"
+          },
+          "ownership": {
+            "grants_access": false,
+            "kinds": [
+              "principal",
+              "person",
+              "team"
+            ],
+            "path": "data.managed_by",
+            "resolved": false
+          },
+          "project_status": {
+            "values": [
+              "planned",
+              "active",
+              "paused",
+              "completed",
+              "cancelled",
+              "archived"
+            ]
+          },
+          "reference_paths": [
+            "related_assets[]",
+            "related_runbooks[]",
+            "related_decisions[]",
+            "related_projects[]"
+          ],
+          "timeline_reference": {
+            "path": "data.timeline_reference",
+            "types": [
+              "object_comments",
+              "source"
+            ]
+          }
         },
         "status": {
           "default": "active",
@@ -18802,7 +20929,7 @@
       "raw_secret_values_rejected": true
     },
     "source": "blockwart.domain.object_schema",
-    "version": 3,
+    "version": 4,
     "violation_policy": {
       "description": "A rejected write names the canonical public data path, one violation code, and the published rule when a schema postcondition rejected it. Rejected values are never returned.",
       "detail_fields": [

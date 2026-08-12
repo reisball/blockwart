@@ -45,6 +45,8 @@ class CatalogObjectIn(BaseModel):
     allow_legacy_network_without_category: ClassVar[bool] = False
     allow_legacy_decision_without_status: ClassVar[bool] = False
     allow_legacy_decision_data: ClassVar[bool] = False
+    allow_legacy_project_without_category: ClassVar[bool] = False
+    allow_legacy_project_data: ClassVar[bool] = False
 
     id: str = Field(pattern=r"^[a-z0-9][a-z0-9_-]*[a-z0-9]$|^[a-z0-9]$")
     kind: ObjectKind
@@ -92,6 +94,10 @@ class CatalogObjectIn(BaseModel):
                 self.allow_legacy_decision_without_status
             ),
             allow_legacy_decision_data=self.allow_legacy_decision_data,
+            allow_legacy_project_without_category=(
+                self.allow_legacy_project_without_category
+            ),
+            allow_legacy_project_data=self.allow_legacy_project_data,
         )
         normalize_interface_data(
             self.data,
@@ -137,6 +143,8 @@ class CatalogObjectOut(CatalogObjectIn):
     allow_legacy_network_without_category: ClassVar[bool] = True
     allow_legacy_decision_without_status: ClassVar[bool] = True
     allow_legacy_decision_data: ClassVar[bool] = True
+    allow_legacy_project_without_category: ClassVar[bool] = True
+    allow_legacy_project_data: ClassVar[bool] = True
 
     visibility: Literal["detail"] = "detail"
     capabilities: list[Permission] = Field(default_factory=list)

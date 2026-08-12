@@ -21,6 +21,8 @@ automatically.
 - model infrastructure as typed catalog objects and validated relationships;
 - record canonical Decisions with explicit lifecycle, asset scope, related knowledge, and
   cycle-safe supersession links;
+- keep canonical Project research, experiments, migrations, implementations, and incident
+  reviews as structured reviewed knowledge with safe evidence and typed links;
 - show placement, device, dependency, and network topology in the human UI;
 - search and read authorized context through REST and MCP;
 - create, update, relate, and delete catalog objects through authorized UI,

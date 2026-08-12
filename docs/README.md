@@ -31,6 +31,8 @@ deleted by this classification.
   integrity](relationship-integrity.md)
 - [Canonical Decision objects](decisions.md), including lifecycle, links, and
   dry-run-first legacy classification
+- [Canonical Project knowledge](projects.md), including category-specific results,
+  evidence, typed links, and reviewed migration
 - [Application read models](read-models.md) and [service
   interfaces](service-interfaces.md)
 - [Source coverage and import drift](source-coverage.md)

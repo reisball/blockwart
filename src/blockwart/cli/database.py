@@ -33,6 +33,11 @@ from blockwart.services.placement_migration import (
     apply_placement_migration_plan,
     build_placement_migration_plan,
 )
+from blockwart.services.project_migration import (
+    apply_project_migration_plan,
+    build_project_migration_plan,
+    load_project_migration_mapping,
+)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -51,7 +56,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--mapping",
-        help="Reviewed YAML mapping for the networks or decisions action.",
+        help="Reviewed YAML mapping for the networks, decisions, or projects action.",
     )
     parser.add_argument(
         "action",
@@ -63,6 +68,7 @@ def build_parser() -> argparse.ArgumentParser:
             "placements",
             "networks",
             "decisions",
+            "projects",
         ),
     )
     return parser
@@ -193,6 +199,29 @@ def main(argv: Sequence[str] | None = None) -> int:
                 f"diagnostics={len(plan.diagnostics)}"
             )
             return 1 if failed else 0
+        elif args.action == "projects":
+            revision = check_database_revision(args.database_url, read_only=not args.apply)
+            plan = _project_plan(
+                args.database_url,
+                mapping_path=args.mapping,
+                apply=args.apply,
+            )
+            for diagnostic in plan.diagnostics:
+                print(
+                    "project_migration_diagnostic "
+                    f"code={diagnostic.code} object_id={diagnostic.object_id}",
+                    file=sys.stderr,
+                )
+            mode = "apply" if args.apply else "dry-run"
+            failed = bool(plan.diagnostics)
+            result = "database_projects_error" if failed else "database_projects_ok"
+            print(
+                f"{result} revision={revision} mode={mode} "
+                f"scanned={plan.scanned_projects} canonical={plan.canonical_projects} "
+                f"changed={len(plan.changes)} blocked={plan.blocked_projects} "
+                f"diagnostics={len(plan.diagnostics)}"
+            )
+            return 1 if failed else 0
         else:
             revision = check_database_revision(args.database_url)
     except Exception:  # noqa: BLE001 - CLI boundary must redact database details
@@ -279,6 +308,31 @@ def _decision_plan(
             if apply and not plan.diagnostics:
                 with transaction(session):
                     apply_decision_migration_plan(session, plan)
+            return plan
+    finally:
+        engine.dispose()
+
+
+def _project_plan(
+    database_url: str | None,
+    *,
+    mapping_path: str | None,
+    apply: bool,
+):
+    config = build_alembic_config(database_url)
+    engine_builder = build_engine if apply else build_read_only_engine
+    engine = engine_builder(str(config.attributes["database_url"]))
+    try:
+        mapping = (
+            load_project_migration_mapping(mapping_path)
+            if mapping_path is not None
+            else {}
+        )
+        with Session(engine) as session:
+            plan = build_project_migration_plan(session, mapping)
+            if apply and not plan.diagnostics:
+                with transaction(session):
+                    apply_project_migration_plan(session, plan)
             return plan
     finally:
         engine.dispose()

@@ -80,4 +80,5 @@ fi
 "$TEMP_DIR/venv/bin/blockwart-db" interfaces
 "$TEMP_DIR/venv/bin/blockwart-db" placements
 "$TEMP_DIR/venv/bin/blockwart-db" networks
+"$TEMP_DIR/venv/bin/blockwart-db" projects
 echo "package_smoke=passed"

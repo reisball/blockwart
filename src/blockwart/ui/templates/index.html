@@ -7,6 +7,8 @@
     <span class="state-badge state-restricted"><i></i>{{ t("auth.restricted_short") }}</span>
   {% elif asset.kind == "decision" %}
     <span class="state-badge"><i></i>{{ asset.decision_status or t("asset.no_value") }}</span>
+  {% elif asset.kind == "project" %}
+    <span class="state-badge"><i></i>{{ asset.project_status or t("asset.no_value") }}</span>
   {% else %}
     {% set health = asset.health or "unknown" %}
     <span class="state-badge state-{{ health }}">
@@ -276,6 +278,24 @@
             <label data-create-field="summary"><span data-field-label="summary">{{ create_fields_by_key.summary.label }}</span>
               <textarea class="summary-input" name="summary" data-field-input="summary" placeholder="{{ create_fields_by_key.summary.placeholder }}" {% if create_fields_by_key.summary.required %}required{% endif %}>{{ form.summary }}</textarea>
             </label>
+            {% for field in ui_schemas.project.create_field_definitions if field.storage_path.startswith("data_json.") %}
+              <label data-create-field="{{ field.key }}" {% if field.key not in form_ui_schema.create_fields %}hidden{% endif %}><span data-field-label="{{ field.key }}">{{ field.label }}</span>
+                {% if field.key == "category" %}
+                  <select name="category" data-field-input="category" required>
+                    {% for option in project_categories %}<option value="{{ option }}"{% if form.category == option %} selected{% endif %}>{{ t("project.category." ~ option) }}</option>{% endfor %}
+                  </select>
+                {% elif field.key == "project_status" %}
+                  <select name="project_status" data-field-input="project_status" required>
+                    {% for option in project_statuses %}<option value="{{ option }}"{% if form.project_status == option %} selected{% endif %}>{{ t("project.status." ~ option) }}</option>{% endfor %}
+                  </select>
+                {% elif field.input_type in ["textarea", "list", "reference-list"] %}
+                  <textarea name="{{ field.key }}" data-field-input="{{ field.key }}" autocomplete="off" placeholder="{{ field.placeholder }}">{{ form[field.key] }}</textarea>
+                {% else %}
+                  <input name="{{ field.key }}" data-field-input="{{ field.key }}" value="{{ form[field.key] }}" autocomplete="off" placeholder="{{ field.placeholder }}" />
+                {% endif %}
+                <span class="meta">{{ field.placeholder }}</span>
+              </label>
+            {% endfor %}
             {% for field in ui_schemas.decision.create_field_definitions if field.storage_path.startswith("data_json.") %}
               {% if field.key == "docs" %}
                 <fieldset data-create-field="docs" {% if "docs" not in form_ui_schema.create_fields %}hidden{% endif %}>
@@ -338,7 +358,7 @@
             <input type="hidden" name="idempotency_key" value="{{ form.idempotency_key }}" />
             <label data-create-field="kind"><span data-field-label="kind">{{ create_fields_by_key.kind.label }}</span>
               <select name="kind" data-kind-select>
-                {% for object_kind in object_kinds if object_kind != "decision" %}
+                {% for object_kind in object_kinds if object_kind not in ["decision", "project"] %}
                   <option value="{{ object_kind }}" {% if object_kind == form.kind %}selected{% endif %}>{{ t("kind." ~ object_kind) }}</option>
                 {% endfor %}
               </select>
@@ -534,6 +554,17 @@
                         </td>
                       </tr>
                       {% for device in explorer.devices %}{{ asset_row(device, 1, "devices", 1) }}{% endfor %}
+                    {% endif %}
+                    {% if explorer.projects %}
+                      <tr class="group-row secondary-group" data-tree-node="projects" data-tree-label="{{ t('kind.project') }}" data-tree-depth="0">
+                        <td colspan="8">
+                          {{ tree_toggle("projects", t("kind.project")) }}
+                          <span class="node-icon project">▤</span>
+                          <strong>{{ t("kind.project") }}</strong>
+                          <span class="group-count">{{ t("catalog.asset_count", count=explorer.projects|length) }}</span>
+                        </td>
+                      </tr>
+                      {% for project in explorer.projects %}{{ asset_row(project, 1, "projects", 1) }}{% endfor %}
                     {% endif %}
                     {% if explorer.decisions %}
                       <tr class="group-row secondary-group" data-tree-node="decisions" data-tree-label="{{ t('kind.decision') }}" data-tree-depth="0">

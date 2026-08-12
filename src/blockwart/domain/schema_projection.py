@@ -43,11 +43,13 @@ from blockwart.domain.object_schema import (
     FieldSpec,
     public_rule_name,
 )
+from blockwart.domain.projects import project_contract_projection
 from blockwart.domain.security import FORBIDDEN_ACL_DATA_KEYS, FORBIDDEN_SECRET_KEYS
 
-# Version 3 additively publishes canonical Decision lifecycle, timestamp,
-# reference, legacy-read, and supersession-graph contracts.
-SCHEMA_PROJECTION_VERSION = 3
+# Version 4 additively publishes the canonical Project category, status,
+# evidence, ownership, source, and knowledge-layer contracts next to the
+# Decision contracts published by version 3.
+SCHEMA_PROJECTION_VERSION = 4
 SCHEMA_DATA_VERSION = 1
 OBJECT_STATUS_VALUES: tuple[str, ...] = get_args(LegacyObjectStatus)
 DEFAULT_OBJECT_STATUS = "active"
@@ -111,6 +113,11 @@ _EXAMPLE_PORT = 8443
 _EXAMPLE_TEXT = "example"
 _EXAMPLE_DATETIME = "2026-08-11T12:00:00Z"
 _HTTP_URL_PATTERN = r"^[Hh][Tt][Tt][Pp][Ss]?://"
+_PINNED_ENUM_EXAMPLES: Mapping[str, str] = {
+    "decision_status": "proposed",
+    "category": "implementation",
+    "project_status": "planned",
+}
 
 
 def object_schema_projection() -> dict[str, Any]:
@@ -205,6 +212,8 @@ def kind_schema_projection(kind: str) -> dict[str, Any]:
     }
     if kind == "decision":
         projection["decision"] = decision_contract_projection()
+    if kind == "project":
+        projection["project"] = project_contract_projection()
     return projection
 
 
@@ -365,8 +374,11 @@ def _scalar_example_value(field: FieldSpec) -> Any:
         return field.literal
     field_type = field.field_type
     if field_type == "enum":
-        if field.path == "decision_status":
-            return "proposed"
+        # A minimal example must itself satisfy the schema rules, so the
+        # discriminators pin the values that require no further fields.
+        pinned = _PINNED_ENUM_EXAMPLES.get(field.path)
+        if pinned is not None:
+            return pinned
         return sorted(field.enum_values, key=_enum_sort_key)[0]
     if field_type == "reference":
         return f"{sorted(field.reference_kinds)[0]}:example"

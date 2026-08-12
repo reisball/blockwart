@@ -12,6 +12,9 @@ object-kind rules before persistence. Stored-record reads use the same rules wit
 migration exception: existing Network rows without a category remain readable.
 Existing free-form Decision rows without `decision_status` have the same read-only compatibility
 boundary; see [Canonical Decision objects](decisions.md). Any update must satisfy the new schema.
+Existing free-form Project rows without a canonical category have the same read-only boundary;
+see [Canonical Project knowledge](projects.md). Category and status are never inferred, and every
+updated Project must satisfy the canonical category-conditioned contract.
 
 The registry covers the existing object kinds:
 

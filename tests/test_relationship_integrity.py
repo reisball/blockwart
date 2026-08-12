@@ -504,7 +504,11 @@ def test_object_upsert_rejects_missing_json_typed_reference(session: Session) ->
                 id="project",
                 kind="project",
                 label="Project",
-                data={"target_refs": ["service:missing"]},
+                data={
+                    "category": "implementation",
+                    "project_status": "planned",
+                    "target_refs": ["service:missing"],
+                },
             ),
         )
 

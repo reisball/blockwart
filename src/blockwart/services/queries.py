@@ -13,6 +13,7 @@ from blockwart.domain.asset_state import AssetHealth, AssetLifecycle
 from blockwart.domain.auth import ObjectVisibility, Permission
 from blockwart.domain.decisions import project_authorized_decision_data
 from blockwart.domain.placement import PlacementGraph
+from blockwart.domain.projects import project_authorized_data
 from blockwart.domain.relationships import (
     NETWORK_DEVICE_CATEGORIES,
     relationship_metadata,
@@ -37,9 +38,10 @@ from blockwart.services.comments import query_comment_page
 from blockwart.services.read_access import ReadAccess
 
 PUBLIC_KIND_PRIORITY = {
-    kind: index for index, kind in enumerate((*PUBLIC_OBJECT_KINDS, "decision"))
+    kind: index
+    for index, kind in enumerate((*PUBLIC_OBJECT_KINDS, "decision", "project"))
 }
-UI_VISIBLE_KINDS = frozenset((*PUBLIC_OBJECT_KINDS, "decision"))
+UI_VISIBLE_KINDS = frozenset((*PUBLIC_OBJECT_KINDS, "decision", "project"))
 
 
 class RelationshipReadModel(TypedDict):
@@ -169,6 +171,8 @@ class ExplorerAssetDetailReadModel(TypedDict):
     capabilities: list[Permission]
     category: NotRequired[str]
     decision_status: NotRequired[str]
+    project_category: NotRequired[str]
+    project_status: NotRequired[str]
 
 
 class ExplorerAssetStubReadModel(TypedDict):
@@ -238,6 +242,7 @@ class ExplorerReadModel(TypedDict):
     networks: list[ExplorerAssetReadModel]
     devices: list[ExplorerAssetReadModel]
     decisions: list[ExplorerAssetReadModel]
+    projects: list[ExplorerAssetReadModel]
     device_chains: list[ExplorerDeviceChainReadModel]
     network_path_groups: list[ExplorerNetworkPathGroupReadModel]
     assets: dict[str, ExplorerAssetReadModel]
@@ -1110,6 +1115,11 @@ def build_explorer_read_model(
         for decision_ref in _refs_for_kind(objects, "decision")
         if is_included(decision_ref)
     ]
+    projects = [
+        assets[project_ref]
+        for project_ref in _refs_for_kind(objects, "project")
+        if is_included(project_ref)
+    ]
     device_chains = _explorer_device_chains(
         objects,
         relationships,
@@ -1149,6 +1159,7 @@ def build_explorer_read_model(
     visible_refs.update(network["ref"] for network in networks)
     visible_refs.update(device["ref"] for device in devices)
     visible_refs.update(decision["ref"] for decision in decisions)
+    visible_refs.update(project["ref"] for project in projects)
     visible_refs.update(
         row["asset"]["ref"]
         for chain in device_chains
@@ -1168,6 +1179,7 @@ def build_explorer_read_model(
         "networks": networks,
         "devices": devices,
         "decisions": decisions,
+        "projects": projects,
         "device_chains": device_chains,
         "network_path_groups": network_path_groups,
         "assets": {
@@ -1898,6 +1910,14 @@ def _explorer_asset(
         decision_status = catalog_object.data.get("decision_status")
         if isinstance(decision_status, str):
             asset["decision_status"] = decision_status
+    if catalog_object.kind == "project":
+        for source_key, asset_key in (
+            ("category", "project_category"),
+            ("project_status", "project_status"),
+        ):
+            value = catalog_object.data.get(source_key)
+            if isinstance(value, str):
+                asset[asset_key] = value
     return asset
 
 
@@ -1927,14 +1947,14 @@ def _project_catalog_object(
         placement_state = "unknown"
     if visibility == ObjectVisibility.DETAIL:
         data = catalog_object.data
+
+        def can_discover(object_id: str) -> bool:
+            return access.policy.can(Permission.DISCOVER, object_id)
+
         if catalog_object.kind == "decision":
-            data = project_authorized_decision_data(
-                data,
-                can_discover=lambda object_id: access.policy.can(
-                    Permission.DISCOVER,
-                    object_id,
-                ),
-            )
+            data = project_authorized_decision_data(data, can_discover=can_discover)
+        elif catalog_object.kind == "project":
+            data = project_authorized_data(data, can_discover=can_discover)
         return catalog_object.model_copy(
             update={
                 "visibility": ObjectVisibility.DETAIL,

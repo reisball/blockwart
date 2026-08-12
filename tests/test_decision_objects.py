@@ -976,7 +976,15 @@ def test_structured_ui_create_detail_noop_edit_and_supersession_round_trip(
         assert response.status_code == 201, response.text
 
     create_root("decision-scope", "system", {"schema_version": 1})
-    create_root("decision-project", "project", {"schema_version": 1})
+    create_root(
+        "decision-project",
+        "project",
+        {
+            "schema_version": 1,
+            "category": "implementation",
+            "project_status": "planned",
+        },
+    )
     create_root("decision-runbook", "runbook", {"schema_version": 1})
     create_root(
         "related-decision",

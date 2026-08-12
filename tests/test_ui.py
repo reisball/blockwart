@@ -556,6 +556,7 @@ def test_create_form_schema_gates_fields_by_type(client: TestClient) -> None:
         "device",
         "service",
         "decision",
+        "project",
     }
     assert "platform" in UI_SCHEMAS["system"].create_fields
     assert "platform" not in UI_SCHEMAS["service"].create_fields
@@ -640,12 +641,15 @@ def test_schema_settings_type_matrix(
 
 
 def test_ui_schema_payload_matches_ui_object_kinds() -> None:
-    ui_kinds = {*PUBLIC_OBJECT_KINDS, "decision"}
+    ui_kinds = {*PUBLIC_OBJECT_KINDS, "decision", "project"}
     assert set(UI_SCHEMAS) == ui_kinds
     assert set(ui_schema_payload()) == ui_kinds
     for schema in UI_SCHEMAS.values():
-        assert all(field_key in FIELD_DEFINITIONS for field_key in schema.create_fields)
-        assert all(field_key in FIELD_DEFINITIONS for field_key in schema.fields)
+        # Every declared field resolves either from the shared registry or from
+        # the kind's own definitions; nothing may be left unresolvable.
+        known = set(FIELD_DEFINITIONS) | set(schema.field_overrides)
+        assert all(field_key in known for field_key in schema.create_fields)
+        assert all(field_key in known for field_key in schema.fields)
         assert set(schema.create_fields).issubset(schema.fields)
         fields = create_field_payload(schema)
         assert fields[0]["key"] == "kind"

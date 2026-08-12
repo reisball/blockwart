@@ -21,6 +21,7 @@ from blockwart.domain.auth import (
     permissions_for_role,
 )
 from blockwart.domain.decisions import iter_decision_references
+from blockwart.domain.projects import iter_project_references
 from blockwart.domain.relationships import (
     RelationshipIntegrityError,
     canonical_relationship_metadata_json,
@@ -175,7 +176,7 @@ def update_catalog_object(
         raise CommandConflict("payload object id does not match the resource")
     if row.revision != expected_revision:
         raise CommandPreconditionFailed("object revision changed")
-    _require_decision_reference_access(session, context, payload)
+    _require_knowledge_reference_access(session, context, payload)
     before = _object_snapshot(row)
     try:
         upsert_object(
@@ -261,7 +262,7 @@ def create_child_object(
     if session.get(CatalogObject, payload.id) is not None:
         raise CommandConflict("catalog object id already exists")
 
-    _require_decision_reference_access(session, context, payload)
+    _require_knowledge_reference_access(session, context, payload)
 
     created = upsert_object(session, payload, write_audit=False)
     child_ref = f"{created.kind}:{created.id}"
@@ -377,7 +378,7 @@ def create_catalog_root(
     if session.get(CatalogObject, payload.id) is not None:
         raise CommandConflict("catalog object id already exists")
 
-    _require_decision_reference_access(session, context, payload)
+    _require_knowledge_reference_access(session, context, payload)
 
     created = upsert_object(session, payload, write_audit=False)
     object_ref = f"{created.kind}:{created.id}"
@@ -491,7 +492,7 @@ def create_attached_device(
     if session.get(CatalogObject, payload.id) is not None:
         raise CommandConflict("catalog object id already exists")
 
-    _require_decision_reference_access(session, context, payload)
+    _require_knowledge_reference_access(session, context, payload)
 
     created = upsert_object(session, payload, write_audit=False)
     device_ref = f"{created.kind}:{created.id}"
@@ -1306,20 +1307,26 @@ def _canonical_relationship_metadata(
     return validate_relationship_metadata(relation_type, metadata)
 
 
-def _require_decision_reference_access(
+def _require_knowledge_reference_access(
     session: Session,
     context: WriteContext,
     payload: CatalogObjectIn,
 ) -> None:
-    """Fail closed when a Decision write names an unreadable target.
+    """Fail closed when a knowledge write names an unreadable target.
 
     Missing, kind-mismatched, and concealed targets intentionally share the
     same public command error. The projected object may name itself here so the
     canonical supersession graph validator can report the self-link rule.
     """
-    if payload.kind != "decision":
+    if payload.kind == "decision":
+        references = iter_decision_references(payload.data)
+        message = "decision reference target not found"
+    elif payload.kind == "project":
+        references = iter_project_references(payload.data)
+        message = "project reference target not found"
+    else:
         return
-    for reference in iter_decision_references(payload.data):
+    for reference in references:
         if reference.parsed.object_id == payload.id:
             continue
         target = session.get(CatalogObject, reference.parsed.object_id)
@@ -1328,7 +1335,7 @@ def _require_decision_reference_access(
             or target.kind != reference.parsed.kind
             or not context.policy.can(Permission.READ, target.id)
         ):
-            raise CommandNotFound("decision reference target not found")
+            raise CommandNotFound(message)
 
 
 def _now() -> datetime:

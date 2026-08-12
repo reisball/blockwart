@@ -369,6 +369,74 @@ FIELD_DEFINITIONS.update(
     }
 )
 
+
+def _project_ui_fields() -> tuple[FieldSpec, ...]:
+    return tuple(
+        field
+        for field in BUILTIN_SCHEMAS["project"].fields
+        if "." not in field.path
+        and "[]" not in field.path
+        and field.path != "schema_version"
+        and field.forbidden_message is None
+    )
+
+
+# Table editors for the closed nested shapes, and grouped editors for the closed
+# nested objects. Everything else falls back to a scalar or line-list control.
+PROJECT_TABLE_INPUT_TYPES: dict[str, str] = {
+    "sources": "source-list",
+    "findings": "finding-list",
+    "measurements": "measurement-list",
+}
+PROJECT_GROUP_INPUT_TYPES: dict[str, str] = {
+    "managed_by": "owner-group",
+    "incident_window": "window-group",
+    "timeline_reference": "timeline-group",
+}
+PROJECT_REFERENCE_LIST_FIELDS = (
+    "related_assets",
+    "related_runbooks",
+    "related_decisions",
+    "related_projects",
+)
+
+
+def _project_input_type(field: FieldSpec) -> str:
+    if field.path in PROJECT_TABLE_INPUT_TYPES:
+        return PROJECT_TABLE_INPUT_TYPES[field.path]
+    if field.path in PROJECT_GROUP_INPUT_TYPES:
+        return PROJECT_GROUP_INPUT_TYPES[field.path]
+    if field.field_type == "enum":
+        return "select"
+    if field.field_type == "datetime":
+        # RFC 3339 requires an explicit timezone; HTML datetime-local omits it.
+        return "text"
+    if field.field_type == "array":
+        return (
+            "reference-list"
+            if field.path in PROJECT_REFERENCE_LIST_FIELDS
+            else "list"
+        )
+    return "textarea" if field.field_type == "text" else "text"
+
+
+PROJECT_DATA_FIELDS = _project_ui_fields()
+# Project field definitions stay scoped to the Project schema instead of joining
+# the shared registry: several Project paths (`review_after`, `related_*`) are
+# also canonical Decision paths, and the two kinds label them differently.
+PROJECT_FIELD_OVERRIDES: dict[str, UiField] = {
+    field.path: UiField(
+        field.path,
+        f"project.field.{field.path}.label",
+        _project_input_type(field),
+        f"data_json.{field.path}",
+        required=field.required,
+        placeholder_key=f"project.field.{field.path}.help",
+        visible_in_create=True,
+    )
+    for field in PROJECT_DATA_FIELDS
+}
+
 COMMON_CREATE_FIELDS = (
     "kind",
     "object_id",
@@ -445,6 +513,70 @@ DEVICE_UI_PANELS = (
     UiPanel("audit", "panel.audit", "audit"),
 )
 
+PROJECT_COMMON_UI_FIELDS = (
+    "category",
+    "project_status",
+    "objective",
+    "in_scope",
+    "out_of_scope",
+    "managed_by",
+    "started_at",
+    "completed_at",
+    "review_after",
+    "related_assets",
+    "related_runbooks",
+    "related_decisions",
+    "related_projects",
+    "sources",
+    "current_summary",
+    "open_questions",
+    "recommendations",
+    "next_actions",
+)
+PROJECT_SCHEMA_FIELDS = (
+    "kind",
+    "object_id",
+    "primary_name",
+    "status",
+    "summary",
+    *(field.path for field in PROJECT_DATA_FIELDS),
+)
+# Creation captures the common contract. Category-specific results, structured
+# sources, and graded evidence are entered in the structured detail editor once
+# the record exists, so the create form never asks for results that do not exist
+# yet and never needs raw JSON.
+PROJECT_CREATE_FIELDS = (
+    "kind",
+    "object_id",
+    "primary_name",
+    "status",
+    "summary",
+    "category",
+    "project_status",
+    "objective",
+    "in_scope",
+    "out_of_scope",
+    "started_at",
+    "completed_at",
+    "review_after",
+    "related_assets",
+    "related_runbooks",
+    "related_decisions",
+    "related_projects",
+    "current_summary",
+    "open_questions",
+    "recommendations",
+    "next_actions",
+)
+
+PROJECT_UI_PANELS = (
+    UiPanel("overview", "panel.overview", "overview"),
+    UiPanel("project", "project.panel.title", "project"),
+    UiPanel("relationships", "panel.relationships", "relationship-add"),
+    UiPanel("comment", "panel.comment", "comment"),
+    UiPanel("audit", "panel.audit", "audit"),
+)
+
 DECISION_UI_PANELS = (
     UiPanel("overview", "panel.overview", "overview"),
     UiPanel("decision", "decision.panel.title", "decision"),
@@ -509,6 +641,16 @@ UI_SCHEMAS: dict[str, UiTypeSchema] = {
         create_fields=DECISION_SCHEMA_FIELDS,
         panels=DECISION_UI_PANELS,
     ),
+    "project": UiTypeSchema(
+        kind="project",
+        primary_name_label_key="field.primary_name.project.label",
+        primary_name_storage="label",
+        supports_platform=False,
+        fields=PROJECT_SCHEMA_FIELDS,
+        create_fields=PROJECT_CREATE_FIELDS,
+        panels=PROJECT_UI_PANELS,
+        field_overrides=PROJECT_FIELD_OVERRIDES,
+    ),
 }
 
 if {
@@ -529,7 +671,7 @@ def ui_schema_payload() -> dict[str, dict[str, object]]:
     for kind in UI_SCHEMAS:
         schema = get_ui_schema(kind)
         schema_payload = schema.as_dict()
-        if kind == "decision":
+        if kind in {"decision", "project"}:
             schema_payload["object_schema"] = kind_schema_projection(kind)
         schema_payload["schema_fields"] = schema_field_payload(schema)
         schema_payload["create_field_definitions"] = create_field_payload(schema)
@@ -559,7 +701,7 @@ def _field_payload(
 ) -> list[dict[str, object]]:
     fields: list[dict[str, object]] = []
     for key in field_keys:
-        field = schema.field_overrides.get(key, FIELD_DEFINITIONS[key])
+        field = _base_ui_field(schema, key)
         payload = field.as_dict()
         if key == "primary_name":
             payload["label_key"] = schema.primary_name_label_key
@@ -665,6 +807,17 @@ def apply_schema_overrides_migration() -> Path | None:
     return backup_path
 
 
+def _base_ui_field(schema: UiTypeSchema, key: str) -> UiField:
+    """Resolve one field definition, preferring the kind's own definitions.
+
+    Kind-scoped definitions come first so a kind may declare a field the shared
+    registry does not carry, and so two kinds may label the same canonical path
+    differently.
+    """
+    override = schema.field_overrides.get(key)
+    return override if override is not None else FIELD_DEFINITIONS[key]
+
+
 def _apply_schema_overrides(schema: UiTypeSchema, raw_override: object) -> UiTypeSchema:
     if not isinstance(raw_override, dict):
         return schema
@@ -680,10 +833,12 @@ def _apply_schema_overrides(schema: UiTypeSchema, raw_override: object) -> UiTyp
         ):
             fields = tuple(candidate_order)
             create_fields = tuple(key for key in fields if key in schema.create_fields)
-    field_overrides: dict[str, UiField] = {}
+    # Start from the kind's own definitions so a configured override refines
+    # them instead of discarding fields the shared registry does not carry.
+    field_overrides: dict[str, UiField] = dict(schema.field_overrides)
     if isinstance(fields_override, dict):
         for key in schema.fields:
-            base_field = FIELD_DEFINITIONS[key]
+            base_field = _base_ui_field(schema, key)
             raw_field = fields_override.get(key)
             if not isinstance(raw_field, dict):
                 continue

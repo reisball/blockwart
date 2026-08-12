@@ -1,3 +1,42 @@
+{% macro project_reference_list(items) -%}
+  {% if items %}
+    <ul class="plain-list">
+      {% for item in items %}
+        <li>{% if item.id %}<a href="/objects/{{ item.id }}?{{ detail_query_string }}">{{ item.label }}</a> <code>{{ item.ref }}</code>{% else %}<code>{{ item.ref }}</code>{% endif %}</li>
+      {% endfor %}
+    </ul>
+  {% else %}<p class="meta">{{ t("project.empty.references") }}</p>{% endif %}
+{%- endmacro %}
+
+{% macro project_text_list(items) -%}
+  {% if items %}<ul>{% for item in items %}<li>{{ item }}</li>{% endfor %}</ul>{% else %}<p class="meta">{{ t("project.empty.collection") }}</p>{% endif %}
+{%- endmacro %}
+
+{% macro project_text(value) -%}
+  <p class="preserve-lines">{{ value or t("project.empty.text") }}</p>
+{%- endmacro %}
+
+{% macro project_line_field(field_name) -%}
+  <label>{{ schema_fields_by_key[field_name].label }}
+    <textarea name="{{ field_name }}" placeholder="{{ schema_fields_by_key[field_name].placeholder }}">{{ project_form[field_name] }}</textarea>
+    <span class="meta">{{ schema_fields_by_key[field_name].placeholder }}</span>
+  </label>
+{%- endmacro %}
+
+{% macro project_text_field(field_name) -%}
+  <label>{{ schema_fields_by_key[field_name].label }}
+    <textarea name="{{ field_name }}" placeholder="{{ schema_fields_by_key[field_name].placeholder }}">{{ project_form[field_name] }}</textarea>
+    <span class="meta">{{ schema_fields_by_key[field_name].placeholder }}</span>
+  </label>
+{%- endmacro %}
+
+{% macro project_time_field(field_name) -%}
+  <label>{{ schema_fields_by_key[field_name].label }}
+    <input name="{{ field_name }}" value="{{ project_form[field_name] }}" autocomplete="off" placeholder="2026-08-11T12:00:00Z" />
+    <span class="meta">{{ schema_fields_by_key[field_name].placeholder }}</span>
+  </label>
+{%- endmacro %}
+
 {% macro decision_reference_list(items) -%}
   {% if items %}
     <ul class="plain-list">
@@ -186,6 +225,300 @@
             </form>
           {% endif %}
         </section>
+
+        {% if supports_project %}
+          {% if edit_section == "project" %}
+            <section class="panel" aria-labelledby="project-editor-title">
+              <div class="panel-head">
+                <h2 class="section-title" id="project-editor-title">{{ t("project.editor.title") }}</h2>
+                <a class="button button-small button-muted" href="{{ detail_href }}">{{ t("detail.cancel") }}</a>
+              </div>
+              {% if error %}<div class="error" role="alert">{{ error }}</div>{% endif %}
+              {% for table in project_detail.legacy_rows_blocked %}<div class="error" role="alert">{{ t("project.validation.legacy_rows", section=t("project.field." ~ table ~ ".label")) }}</div>{% endfor %}
+              <p class="meta">{{ t("project.editor.help") }}</p>
+              <form class="form-grid" method="post" action="{{ detail_post_urls.overview }}">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+                <input type="hidden" name="if_match" value="{{ object_etag }}" />
+                <fieldset>
+                  <legend>{{ t("project.section.classification") }}</legend>
+                  <label>{{ schema_fields_by_key.category.label }}
+                    <select name="category" required>{% for option in project_categories %}<option value="{{ option }}"{% if project_form.category == option %} selected{% endif %}>{{ t("project.category." ~ option) }}</option>{% endfor %}</select>
+                    <span class="meta">{{ schema_fields_by_key.category.placeholder }}</span>
+                  </label>
+                  <label>{{ schema_fields_by_key.project_status.label }}
+                    <select name="project_status" required>{% for option in project_statuses %}<option value="{{ option }}"{% if project_form.project_status == option %} selected{% endif %}>{{ t("project.status." ~ option) }}</option>{% endfor %}</select>
+                    <span class="meta">{{ schema_fields_by_key.project_status.placeholder }}</span>
+                  </label>
+                </fieldset>
+                {{ project_text_field("objective") }}
+                {{ project_line_field("in_scope") }}
+                {{ project_line_field("out_of_scope") }}
+                <fieldset>
+                  <legend>{{ schema_fields_by_key.managed_by.label }}</legend>
+                  <p class="meta">{{ schema_fields_by_key.managed_by.placeholder }}</p>
+                  <label>{{ t("project.column.owner_kind") }}
+                    <select name="managed_by_kind"><option value=""{% if not project_form.managed_by_kind %} selected{% endif %}>{{ t("project.owner.unset") }}</option>{% for option in project_owner_kinds %}<option value="{{ option }}"{% if project_form.managed_by_kind == option %} selected{% endif %}>{{ t("project.owner_kind." ~ option) }}</option>{% endfor %}</select>
+                  </label>
+                  <label>{{ t("project.column.owner_label") }}
+                    <input name="managed_by_label" value="{{ project_form.managed_by_label }}" maxlength="128" autocomplete="off" />
+                  </label>
+                  <label>{{ t("project.column.owner_principal_id") }}
+                    <input name="managed_by_principal_id" value="{{ project_form.managed_by_principal_id }}" maxlength="128" autocomplete="off" />
+                    <span class="meta">{{ t("project.owner.principal_help") }}</span>
+                  </label>
+                </fieldset>
+                <fieldset>
+                  <legend>{{ t("project.section.timeline") }}</legend>
+                  {{ project_time_field("started_at") }}
+                  {{ project_time_field("completed_at") }}
+                  {{ project_time_field("review_after") }}
+                </fieldset>
+                <fieldset>
+                  <legend>{{ t("project.section.relationships") }}</legend>
+                  {{ project_line_field("related_assets") }}
+                  {{ project_line_field("related_runbooks") }}
+                  {{ project_line_field("related_decisions") }}
+                  {{ project_line_field("related_projects") }}
+                </fieldset>
+                <fieldset>
+                  <legend>{{ schema_fields_by_key.sources.label }}</legend>
+                  <p class="meta">{{ schema_fields_by_key.sources.placeholder }}</p>
+                  <div class="table-wrap"><table class="table edit-table">
+                    <thead><tr><th>{{ t("project.column.id") }}</th><th>{{ t("project.column.source_type") }}</th><th>{{ t("project.column.title") }}</th><th>{{ t("project.column.url") }}</th><th>{{ t("project.column.author") }}</th><th>{{ t("project.column.publisher") }}</th><th>{{ t("project.column.published_at") }}</th><th>{{ t("project.column.retrieved_at") }}</th><th><span class="visually-hidden">{{ t("project.collection.actions") }}</span></th></tr></thead>
+                    <tbody data-row-list="project-sources">
+                      {% for row in project_table_rows.sources %}
+                        <tr>
+                          <td><input name="source_id" value="{{ row.id or '' }}" maxlength="64" autocomplete="off" /></td>
+                          <td><select name="source_source_type">{% for option in project_source_types %}<option value="{{ option }}"{% if row.source_type == option %} selected{% endif %}>{{ t("project.source_type." ~ option) }}</option>{% endfor %}</select></td>
+                          <td><input name="source_title" value="{{ row.title or '' }}" maxlength="200" autocomplete="off" /></td>
+                          <td><input name="source_url" type="url" maxlength="2048" inputmode="url" value="{{ row.url or '' }}" autocomplete="off" placeholder="https://example.invalid/source" /></td>
+                          <td><input name="source_author" value="{{ row.author or '' }}" maxlength="200" autocomplete="off" /></td>
+                          <td><input name="source_publisher" value="{{ row.publisher or '' }}" maxlength="200" autocomplete="off" /></td>
+                          <td><input name="source_published_at" value="{{ row.published_at or '' }}" autocomplete="off" placeholder="2026-08-11T12:00:00Z" /></td>
+                          <td><input name="source_retrieved_at" value="{{ row.retrieved_at or '' }}" autocomplete="off" placeholder="2026-08-11T12:00:00Z" /></td>
+                          <td><button class="button button-small button-muted" type="button" data-remove-row>{{ t("project.collection.remove") }}</button></td>
+                        </tr>
+                      {% endfor %}
+                    </tbody>
+                  </table></div>
+                  <template data-row-template="project-sources"><tr><td><input name="source_id" value="" maxlength="64" autocomplete="off" /></td><td><select name="source_source_type">{% for option in project_source_types %}<option value="{{ option }}">{{ t("project.source_type." ~ option) }}</option>{% endfor %}</select></td><td><input name="source_title" value="" maxlength="200" autocomplete="off" /></td><td><input name="source_url" type="url" maxlength="2048" inputmode="url" value="" autocomplete="off" placeholder="https://example.invalid/source" /></td><td><input name="source_author" value="" maxlength="200" autocomplete="off" /></td><td><input name="source_publisher" value="" maxlength="200" autocomplete="off" /></td><td><input name="source_published_at" value="" autocomplete="off" placeholder="2026-08-11T12:00:00Z" /></td><td><input name="source_retrieved_at" value="" autocomplete="off" placeholder="2026-08-11T12:00:00Z" /></td><td><button class="button button-small button-muted" type="button" data-remove-row>{{ t("project.collection.remove") }}</button></td></tr></template>
+                  <button class="button button-small button-muted" type="button" data-add-row="project-sources">{{ t("project.source.add") }}</button>
+                </fieldset>
+                {{ project_text_field("current_summary") }}
+                {{ project_line_field("open_questions") }}
+                {{ project_line_field("recommendations") }}
+                {{ project_line_field("next_actions") }}
+                {% if project_form.category == "research" %}
+                  <fieldset>
+                    <legend>{{ t("project.section.research") }}</legend>
+                    {{ project_line_field("research_questions") }}
+                    {{ project_line_field("hypotheses") }}
+                    {{ project_text_field("methodology") }}
+                    {{ project_line_field("limitations") }}
+                    {{ project_line_field("conclusions") }}
+                  </fieldset>
+                  <fieldset>
+                    <legend>{{ schema_fields_by_key.findings.label }}</legend>
+                    <p class="meta">{{ schema_fields_by_key.findings.placeholder }}</p>
+                    <div class="table-wrap"><table class="table edit-table">
+                      <thead><tr><th>{{ t("project.column.id") }}</th><th>{{ t("project.column.statement") }}</th><th>{{ t("project.column.evidence_grade") }}</th><th>{{ t("project.column.source_ids") }}</th><th>{{ t("project.column.observed_at") }}</th><th>{{ t("project.column.verified_at") }}</th><th><span class="visually-hidden">{{ t("project.collection.actions") }}</span></th></tr></thead>
+                      <tbody data-row-list="project-findings">
+                        {% for row in project_table_rows.findings %}
+                          <tr>
+                            <td><input name="finding_id" value="{{ row.id or '' }}" maxlength="64" autocomplete="off" /></td>
+                            <td><textarea name="finding_statement" rows="2">{{ row.statement or '' }}</textarea></td>
+                            <td><select name="finding_evidence_grade">{% for option in project_evidence_grades %}<option value="{{ option }}"{% if row.evidence_grade == option %} selected{% endif %}>{{ t("project.evidence_grade." ~ option) }}</option>{% endfor %}</select></td>
+                            <td><textarea name="finding_source_ids" rows="2">{{ row.source_ids_text or '' }}</textarea></td>
+                            <td><input name="finding_observed_at" value="{{ row.observed_at or '' }}" autocomplete="off" placeholder="2026-08-11T12:00:00Z" /></td>
+                            <td><input name="finding_verified_at" value="{{ row.verified_at or '' }}" autocomplete="off" placeholder="2026-08-11T12:00:00Z" /></td>
+                            <td><button class="button button-small button-muted" type="button" data-remove-row>{{ t("project.collection.remove") }}</button></td>
+                          </tr>
+                        {% endfor %}
+                      </tbody>
+                    </table></div>
+                    <template data-row-template="project-findings"><tr><td><input name="finding_id" value="" maxlength="64" autocomplete="off" /></td><td><textarea name="finding_statement" rows="2"></textarea></td><td><select name="finding_evidence_grade">{% for option in project_evidence_grades %}<option value="{{ option }}">{{ t("project.evidence_grade." ~ option) }}</option>{% endfor %}</select></td><td><textarea name="finding_source_ids" rows="2"></textarea></td><td><input name="finding_observed_at" value="" autocomplete="off" placeholder="2026-08-11T12:00:00Z" /></td><td><input name="finding_verified_at" value="" autocomplete="off" placeholder="2026-08-11T12:00:00Z" /></td><td><button class="button button-small button-muted" type="button" data-remove-row>{{ t("project.collection.remove") }}</button></td></tr></template>
+                    <button class="button button-small button-muted" type="button" data-add-row="project-findings">{{ t("project.finding.add") }}</button>
+                  </fieldset>
+                {% elif project_form.category == "experiment" %}
+                  <fieldset>
+                    <legend>{{ t("project.section.experiment") }}</legend>
+                    {{ project_text_field("hypothesis") }}
+                    {{ project_text_field("setup") }}
+                    {{ project_text_field("expected_result") }}
+                    {{ project_text_field("observed_result") }}
+                    {{ project_text_field("conclusion") }}
+                    {{ project_text_field("reproducibility_notes") }}
+                  </fieldset>
+                  <fieldset>
+                    <legend>{{ schema_fields_by_key.measurements.label }}</legend>
+                    <p class="meta">{{ schema_fields_by_key.measurements.placeholder }}</p>
+                    <div class="table-wrap"><table class="table edit-table">
+                      <thead><tr><th>{{ t("project.column.name") }}</th><th>{{ t("project.column.quantity") }}</th><th>{{ t("project.column.unit") }}</th><th>{{ t("project.column.observed_at") }}</th><th><span class="visually-hidden">{{ t("project.collection.actions") }}</span></th></tr></thead>
+                      <tbody data-row-list="project-measurements">
+                        {% for row in project_table_rows.measurements %}
+                          <tr>
+                            <td><input name="measurement_name" value="{{ row.name or '' }}" maxlength="128" autocomplete="off" /></td>
+                            <td><input name="measurement_quantity" value="{{ row.quantity or '' }}" maxlength="128" autocomplete="off" /></td>
+                            <td><input name="measurement_unit" value="{{ row.unit or '' }}" maxlength="64" autocomplete="off" /></td>
+                            <td><input name="measurement_observed_at" value="{{ row.observed_at or '' }}" autocomplete="off" placeholder="2026-08-11T12:00:00Z" /></td>
+                            <td><button class="button button-small button-muted" type="button" data-remove-row>{{ t("project.collection.remove") }}</button></td>
+                          </tr>
+                        {% endfor %}
+                      </tbody>
+                    </table></div>
+                    <template data-row-template="project-measurements"><tr><td><input name="measurement_name" value="" maxlength="128" autocomplete="off" /></td><td><input name="measurement_quantity" value="" maxlength="128" autocomplete="off" /></td><td><input name="measurement_unit" value="" maxlength="64" autocomplete="off" /></td><td><input name="measurement_observed_at" value="" autocomplete="off" placeholder="2026-08-11T12:00:00Z" /></td><td><button class="button button-small button-muted" type="button" data-remove-row>{{ t("project.collection.remove") }}</button></td></tr></template>
+                    <button class="button button-small button-muted" type="button" data-add-row="project-measurements">{{ t("project.measurement.add") }}</button>
+                  </fieldset>
+                {% elif project_form.category == "incident_review" %}
+                  <fieldset>
+                    <legend>{{ t("project.section.incident") }}</legend>
+                    <label>{{ t("project.column.window_started_at") }}
+                      <input name="incident_window_started_at" value="{{ project_form.incident_window_started_at }}" autocomplete="off" placeholder="2026-08-11T12:00:00Z" />
+                    </label>
+                    <label>{{ t("project.column.window_ended_at") }}
+                      <input name="incident_window_ended_at" value="{{ project_form.incident_window_ended_at }}" autocomplete="off" placeholder="2026-08-11T12:00:00Z" />
+                    </label>
+                    {{ project_text_field("impact") }}
+                    {{ project_text_field("detection") }}
+                    <label>{{ t("project.column.timeline_type") }}
+                      <select name="timeline_reference_type"><option value=""{% if not project_form.timeline_reference_type %} selected{% endif %}>{{ t("project.timeline.unset") }}</option>{% for option in project_timeline_types %}<option value="{{ option }}"{% if project_form.timeline_reference_type == option %} selected{% endif %}>{{ t("project.timeline_type." ~ option) }}</option>{% endfor %}</select>
+                      <span class="meta">{{ t("project.timeline.help") }}</span>
+                    </label>
+                    <label>{{ t("project.column.timeline_source_id") }}
+                      <input name="timeline_reference_source_id" value="{{ project_form.timeline_reference_source_id }}" maxlength="64" autocomplete="off" />
+                    </label>
+                    <label>{{ t("project.column.timeline_note") }}
+                      <textarea name="timeline_reference_note">{{ project_form.timeline_reference_note }}</textarea>
+                    </label>
+                    {{ project_text_field("root_cause") }}
+                    {{ project_line_field("contributing_factors") }}
+                    {{ project_line_field("remediation") }}
+                    {{ project_line_field("prevention") }}
+                  </fieldset>
+                {% elif project_form.category == "migration" %}
+                  <fieldset>
+                    <legend>{{ t("project.section.migration") }}</legend>
+                    {{ project_text_field("source_state") }}
+                    {{ project_text_field("target_state") }}
+                    {{ project_line_field("migration_plan") }}
+                    {{ project_line_field("verification") }}
+                    {{ project_text_field("rollback") }}
+                    {{ project_text_field("outcome") }}
+                  </fieldset>
+                {% endif %}
+                {{ project_line_field("lessons_learned") }}
+                <div class="button-row"><button type="submit">{{ t("detail.save") }}</button><a class="button button-muted" href="{{ detail_href }}">{{ t("detail.cancel") }}</a></div>
+              </form>
+            </section>
+          {% else %}
+            <section class="panel" aria-labelledby="project-classification-title">
+              <div class="panel-head"><h2 class="section-title" id="project-classification-title">{{ t("project.section.classification") }}</h2>{% if can_write %}<a class="button button-small button-muted" href="{{ detail_edit_hrefs.project }}">{{ t("detail.edit") }}</a>{% endif %}</div>
+              <dl class="fact-grid">
+                <div><dt>{{ schema_fields_by_key.category.label }}</dt><dd>{% if project_detail.category %}<span class="badge">{{ t("project.category." ~ project_detail.category) }}</span>{% else %}{{ t("asset.no_value") }}{% endif %}</dd></div>
+                <div><dt>{{ schema_fields_by_key.project_status.label }}</dt><dd>{% if project_detail.project_status %}<span class="badge">{{ t("project.status." ~ project_detail.project_status) }}</span>{% else %}{{ t("asset.no_value") }}{% endif %}</dd></div>
+                <div><dt>{{ schema_fields_by_key.started_at.label }}</dt><dd>{{ project_detail.started_at or t("asset.no_value") }}</dd></div>
+                <div><dt>{{ schema_fields_by_key.completed_at.label }}</dt><dd>{{ project_detail.completed_at or t("asset.no_value") }}</dd></div>
+                <div><dt>{{ schema_fields_by_key.review_after.label }}</dt><dd>{{ project_detail.review_after or t("asset.no_value") }}</dd></div>
+                <div><dt>{{ schema_fields_by_key.managed_by.label }}</dt><dd>{% if project_detail.managed_by_kind %}{{ t("project.owner_kind." ~ project_detail.managed_by_kind) }}: {{ project_detail.managed_by_label or project_detail.managed_by_principal_id }}{% else %}{{ t("asset.no_value") }}{% endif %}</dd></div>
+              </dl>
+              <p class="meta">{{ t("project.knowledge_layers") }}</p>
+            </section>
+            <section class="panel" aria-labelledby="project-scope-title">
+              <h2 class="section-title" id="project-scope-title">{{ t("project.section.scope") }}</h2>
+              <h3>{{ schema_fields_by_key.objective.label }}</h3>{{ project_text(project_detail.objective) }}
+              <h3>{{ schema_fields_by_key.in_scope.label }}</h3>{{ project_text_list(project_detail.in_scope_list) }}
+              <h3>{{ schema_fields_by_key.out_of_scope.label }}</h3>{{ project_text_list(project_detail.out_of_scope_list) }}
+            </section>
+            <section class="panel" aria-labelledby="project-state-title">
+              <h2 class="section-title" id="project-state-title">{{ t("project.section.state") }}</h2>
+              <h3>{{ schema_fields_by_key.current_summary.label }}</h3>{{ project_text(project_detail.current_summary) }}
+              <h3>{{ schema_fields_by_key.open_questions.label }}</h3>{{ project_text_list(project_detail.open_questions_list) }}
+              <h3>{{ schema_fields_by_key.recommendations.label }}</h3>{{ project_text_list(project_detail.recommendations_list) }}
+              <h3>{{ schema_fields_by_key.next_actions.label }}</h3>{{ project_text_list(project_detail.next_actions_list) }}
+              <h3>{{ schema_fields_by_key.lessons_learned.label }}</h3>{{ project_text_list(project_detail.lessons_learned_list) }}
+            </section>
+            {% if project_detail.category == "research" %}
+              <section class="panel" aria-labelledby="project-research-title">
+                <h2 class="section-title" id="project-research-title">{{ t("project.section.research") }}</h2>
+                <h3>{{ schema_fields_by_key.research_questions.label }}</h3>{{ project_text_list(project_detail.research_questions_list) }}
+                <h3>{{ schema_fields_by_key.hypotheses.label }}</h3>{{ project_text_list(project_detail.hypotheses_list) }}
+                <h3>{{ schema_fields_by_key.methodology.label }}</h3>{{ project_text(project_detail.methodology) }}
+                <h3>{{ schema_fields_by_key.limitations.label }}</h3>{{ project_text_list(project_detail.limitations_list) }}
+                <h3>{{ schema_fields_by_key.conclusions.label }}</h3>{{ project_text_list(project_detail.conclusions_list) }}
+              </section>
+              <section class="panel" aria-labelledby="project-findings-title">
+                <h2 class="section-title" id="project-findings-title">{{ schema_fields_by_key.findings.label }}</h2>
+                {% if project_detail.findings %}
+                  <div class="table-wrap"><table class="table">
+                    <thead><tr><th>{{ t("project.column.id") }}</th><th>{{ t("project.column.statement") }}</th><th>{{ t("project.column.evidence_grade") }}</th><th>{{ t("project.column.source_ids") }}</th><th>{{ t("project.column.observed_at") }}</th><th>{{ t("project.column.verified_at") }}</th></tr></thead>
+                    <tbody>
+                      {% for finding in project_detail.findings %}
+                        <tr><td><code>{{ finding.id }}</code></td><td>{{ finding.statement }}</td><td><span class="badge">{{ t("project.evidence_grade." ~ finding.evidence_grade) }}</span></td><td>{% for source_id in finding.source_ids or [] %}<code>{{ source_id }}</code> {% endfor %}</td><td>{{ finding.observed_at or t("asset.no_value") }}</td><td>{{ finding.verified_at or t("asset.no_value") }}</td></tr>
+                      {% endfor %}
+                    </tbody>
+                  </table></div>
+                {% else %}<p class="meta">{{ t("project.empty.findings") }}</p>{% endif %}
+              </section>
+            {% elif project_detail.category == "experiment" %}
+              <section class="panel" aria-labelledby="project-experiment-title">
+                <h2 class="section-title" id="project-experiment-title">{{ t("project.section.experiment") }}</h2>
+                <h3>{{ schema_fields_by_key.hypothesis.label }}</h3>{{ project_text(project_detail.hypothesis) }}
+                <h3>{{ schema_fields_by_key.setup.label }}</h3>{{ project_text(project_detail.setup) }}
+                <h3>{{ schema_fields_by_key.expected_result.label }}</h3>{{ project_text(project_detail.expected_result) }}
+                <h3>{{ schema_fields_by_key.observed_result.label }}</h3>{{ project_text(project_detail.observed_result) }}
+                <h3>{{ schema_fields_by_key.conclusion.label }}</h3>{{ project_text(project_detail.conclusion) }}
+                <h3>{{ schema_fields_by_key.reproducibility_notes.label }}</h3>{{ project_text(project_detail.reproducibility_notes) }}
+                <h3>{{ schema_fields_by_key.measurements.label }}</h3>
+                {% if project_detail.measurements %}
+                  <div class="table-wrap"><table class="table">
+                    <thead><tr><th>{{ t("project.column.name") }}</th><th>{{ t("project.column.quantity") }}</th><th>{{ t("project.column.unit") }}</th><th>{{ t("project.column.observed_at") }}</th></tr></thead>
+                    <tbody>{% for row in project_detail.measurements %}<tr><td>{{ row.name }}</td><td>{{ row.quantity }}</td><td>{{ row.unit or t("asset.no_value") }}</td><td>{{ row.observed_at or t("asset.no_value") }}</td></tr>{% endfor %}</tbody>
+                  </table></div>
+                {% else %}<p class="meta">{{ t("project.empty.measurements") }}</p>{% endif %}
+              </section>
+            {% elif project_detail.category == "incident_review" %}
+              <section class="panel" aria-labelledby="project-incident-title">
+                <h2 class="section-title" id="project-incident-title">{{ t("project.section.incident") }}</h2>
+                <dl class="fact-grid">
+                  <div><dt>{{ t("project.column.window_started_at") }}</dt><dd>{{ project_detail.incident_window_started_at or t("asset.no_value") }}</dd></div>
+                  <div><dt>{{ t("project.column.window_ended_at") }}</dt><dd>{{ project_detail.incident_window_ended_at or t("asset.no_value") }}</dd></div>
+                  <div><dt>{{ t("project.column.timeline_type") }}</dt><dd>{% if project_detail.timeline_reference_type %}{{ t("project.timeline_type." ~ project_detail.timeline_reference_type) }}{% if project_detail.timeline_reference_source_id %} · <code>{{ project_detail.timeline_reference_source_id }}</code>{% endif %}{% else %}{{ t("asset.no_value") }}{% endif %}</dd></div>
+                </dl>
+                {% if project_detail.timeline_reference_note %}<p class="preserve-lines">{{ project_detail.timeline_reference_note }}</p>{% endif %}
+                <h3>{{ schema_fields_by_key.impact.label }}</h3>{{ project_text(project_detail.impact) }}
+                <h3>{{ schema_fields_by_key.detection.label }}</h3>{{ project_text(project_detail.detection) }}
+                <h3>{{ schema_fields_by_key.root_cause.label }}</h3>{{ project_text(project_detail.root_cause) }}
+                <h3>{{ schema_fields_by_key.contributing_factors.label }}</h3>{{ project_text_list(project_detail.contributing_factors_list) }}
+                <h3>{{ schema_fields_by_key.remediation.label }}</h3>{{ project_text_list(project_detail.remediation_list) }}
+                <h3>{{ schema_fields_by_key.prevention.label }}</h3>{{ project_text_list(project_detail.prevention_list) }}
+              </section>
+            {% elif project_detail.category == "migration" %}
+              <section class="panel" aria-labelledby="project-migration-title">
+                <h2 class="section-title" id="project-migration-title">{{ t("project.section.migration") }}</h2>
+                <h3>{{ schema_fields_by_key.source_state.label }}</h3>{{ project_text(project_detail.source_state) }}
+                <h3>{{ schema_fields_by_key.target_state.label }}</h3>{{ project_text(project_detail.target_state) }}
+                <h3>{{ schema_fields_by_key.migration_plan.label }}</h3>{{ project_text_list(project_detail.migration_plan_list) }}
+                <h3>{{ schema_fields_by_key.verification.label }}</h3>{{ project_text_list(project_detail.verification_list) }}
+                <h3>{{ schema_fields_by_key.rollback.label }}</h3>{{ project_text(project_detail.rollback) }}
+                <h3>{{ schema_fields_by_key.outcome.label }}</h3>{{ project_text(project_detail.outcome) }}
+              </section>
+            {% endif %}
+            <section class="panel" aria-labelledby="project-sources-title">
+              <h2 class="section-title" id="project-sources-title">{{ schema_fields_by_key.sources.label }}</h2>
+              {% for table in project_detail.legacy_rows_blocked %}<p class="meta">{{ t("project.validation.legacy_rows", section=t("project.field." ~ table ~ ".label")) }}</p>{% endfor %}
+              {% if project_detail.sources %}
+                <ul>{% for source in project_detail.sources %}<li><code>{{ source.id }}</code> <strong>{{ source.title }}</strong> · {{ t("project.source_type." ~ source.source_type) }}{% if source.author %} · {{ source.author }}{% endif %}{% if source.publisher %} · {{ source.publisher }}{% endif %}{% if source.published_at %} · {{ source.published_at }}{% endif %}{% if source.retrieved_at %} · {{ t("project.column.retrieved_at") }}: {{ source.retrieved_at }}{% endif %}{% if source.safe_url %} · <a href="{{ source.safe_url }}" target="_blank" rel="noopener noreferrer">{{ t("project.source.open") }}</a>{% else %} · {{ t("project.source.unavailable") }}{% endif %}</li>{% endfor %}</ul>
+              {% else %}<p class="meta">{{ t("project.empty.sources") }}</p>{% endif %}
+            </section>
+            <section class="panel" aria-labelledby="project-related-title">
+              <h2 class="section-title" id="project-related-title">{{ t("project.section.relationships") }}</h2>
+              <h3>{{ schema_fields_by_key.related_assets.label }}</h3>{{ project_reference_list(project_detail.related_assets_links) }}
+              <h3>{{ schema_fields_by_key.related_runbooks.label }}</h3>{{ project_reference_list(project_detail.related_runbooks_links) }}
+              <h3>{{ schema_fields_by_key.related_decisions.label }}</h3>{{ project_reference_list(project_detail.related_decisions_links) }}
+              <h3>{{ schema_fields_by_key.related_projects.label }}</h3>{{ project_reference_list(project_detail.related_projects_links) }}
+            </section>
+          {% endif %}
+        {% endif %}
 
         {% if supports_decision %}
           {% if edit_section == "decision" %}

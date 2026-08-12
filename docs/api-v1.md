@@ -109,6 +109,9 @@ The list accepts:
 - `health`: `unknown`, `healthy`, `degraded`, `down`, or `maintenance`
 - `decision_status`: exact canonical Decision lifecycle value
 - `applies_to`: exact authorized asset `kind:id` in a Decision's canonical scope
+- `project_category`: exact canonical Project category
+- `project_status`: exact canonical Project lifecycle value
+- `related_object`: exact authorized `kind:id` in a Project's typed relationships
 - `source_type`: `unknown`, `manual`, `import`, or `discovery`
 - `stale`: exact computed freshness state
 
@@ -118,6 +121,8 @@ caller's capabilities. Detail-field filters exclude stubs rather than probing
 their hidden values; text search on stubs uses only ID, kind, and label.
 Decision reference projections omit concealed targets, and `applies_to` returns
 no match when its target is not discoverable.
+Project reference projections follow the same rule. Project filters exclude discover-only stubs;
+a concealed or missing relationship target yields the same empty result.
 Objects without `discover` are absent.
 
 The resolver loads one bounded catalog/relationship snapshot, applies the
