@@ -6,6 +6,7 @@ from blockwart.domain.asset_state import AssetHealth, AssetLifecycle
 from blockwart.domain.auth import Permission
 from blockwart.domain.decisions import DecisionStatus
 from blockwart.domain.placement import PlacementState
+from blockwart.domain.projects import ProjectCategory, ProjectStatus
 from blockwart.domain.provenance import CatalogProvenanceOut
 from blockwart.schemas.catalog import CatalogRecordDiagnostic, ObjectKind
 from blockwart.schemas.comments import CommentOut
@@ -65,6 +66,9 @@ class AgentCatalogObjectSummary(BaseModel):
     health: AssetHealth | None = None
     decision_status: DecisionStatus | None = None
     applies_to: list[str] = Field(default_factory=list)
+    project_category: ProjectCategory | None = None
+    project_status: ProjectStatus | None = None
+    related_assets: list[str] = Field(default_factory=list)
     placement_state: PlacementState | None = None
     record_state: Literal["valid", "corrupt"] = "valid"
     diagnostics: list[CatalogRecordDiagnostic] = Field(default_factory=list)

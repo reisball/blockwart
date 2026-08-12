@@ -28,6 +28,13 @@ from blockwart.domain.interfaces import (
     normalize_interface_data,
 )
 from blockwart.domain.placement import PlacementGraph, placement_state
+from blockwart.domain.projects import (
+    ProjectCategory,
+    ProjectStatus,
+    project_authorized_data,
+    project_matches_filters,
+    validate_related_object_filter,
+)
 from blockwart.domain.provenance import (
     CatalogProvenanceOut,
     SourceType,
@@ -97,6 +104,9 @@ def query_agent_objects_page(
     status: str | None = None,
     decision_status: DecisionStatus | None = None,
     applies_to: str | None = None,
+    project_category: ProjectCategory | None = None,
+    project_status: ProjectStatus | None = None,
+    related_object: str | None = None,
     lifecycle: AssetLifecycle | None = None,
     health: AssetHealth | None = None,
     source_type: SourceType | None = None,
@@ -122,6 +132,9 @@ def query_agent_objects_page(
         status=status,
         decision_status=decision_status,
         applies_to=applies_to,
+        project_category=project_category,
+        project_status=project_status,
+        related_object=related_object,
         lifecycle=lifecycle,
         health=health,
         source_type=source_type,
@@ -158,6 +171,9 @@ def query_agent_context_page(
     status: str | None = None,
     decision_status: DecisionStatus | None = None,
     applies_to: str | None = None,
+    project_category: ProjectCategory | None = None,
+    project_status: ProjectStatus | None = None,
+    related_object: str | None = None,
     lifecycle: AssetLifecycle | None = None,
     health: AssetHealth | None = None,
     source_type: SourceType | None = None,
@@ -183,6 +199,9 @@ def query_agent_context_page(
         status=status,
         decision_status=decision_status,
         applies_to=applies_to,
+        project_category=project_category,
+        project_status=project_status,
+        related_object=related_object,
         lifecycle=lifecycle,
         health=health,
         source_type=source_type,
@@ -219,6 +238,9 @@ def search_agent_objects(
     status: str | None = None,
     decision_status: DecisionStatus | None = None,
     applies_to: str | None = None,
+    project_category: ProjectCategory | None = None,
+    project_status: ProjectStatus | None = None,
+    related_object: str | None = None,
     lifecycle: AssetLifecycle | None = None,
     health: AssetHealth | None = None,
     source_type: SourceType | None = None,
@@ -239,6 +261,9 @@ def search_agent_objects(
         status=status,
         decision_status=decision_status,
         applies_to=applies_to,
+        project_category=project_category,
+        project_status=project_status,
+        related_object=related_object,
         lifecycle=lifecycle,
         health=health,
         source_type=source_type,
@@ -332,6 +357,9 @@ def build_agent_context(
     status: str | None = None,
     decision_status: DecisionStatus | None = None,
     applies_to: str | None = None,
+    project_category: ProjectCategory | None = None,
+    project_status: ProjectStatus | None = None,
+    related_object: str | None = None,
     lifecycle: AssetLifecycle | None = None,
     health: AssetHealth | None = None,
     source_type: SourceType | None = None,
@@ -352,6 +380,9 @@ def build_agent_context(
         status=status,
         decision_status=decision_status,
         applies_to=applies_to,
+        project_category=project_category,
+        project_status=project_status,
+        related_object=related_object,
         lifecycle=lifecycle,
         health=health,
         source_type=source_type,
@@ -376,6 +407,9 @@ def _query_agent_rows_page(
     status: str | None,
     decision_status: DecisionStatus | None,
     applies_to: str | None,
+    project_category: ProjectCategory | None,
+    project_status: ProjectStatus | None,
+    related_object: str | None,
     lifecycle: AssetLifecycle | None,
     health: AssetHealth | None,
     source_type: SourceType | None,
@@ -400,6 +434,9 @@ def _query_agent_rows_page(
         status=status,
         decision_status=decision_status,
         applies_to=applies_to,
+        project_category=project_category,
+        project_status=project_status,
+        related_object=related_object,
         lifecycle=lifecycle,
         health=health,
         source_type=source_type,
@@ -432,6 +469,9 @@ def _query_agent_rows_page(
             "status": _normalized_filter(status),
             "decision_status": decision_status,
             "applies_to": applies_to,
+            "project_category": project_category,
+            "project_status": project_status,
+            "related_object": related_object,
             "source_type": source_type,
             "stale": stale,
         },
@@ -478,6 +518,9 @@ class _AgentCatalogResolver:
         status: str | None,
         decision_status: DecisionStatus | None,
         applies_to: str | None,
+        project_category: ProjectCategory | None,
+        project_status: ProjectStatus | None,
+        related_object: str | None,
         lifecycle: AssetLifecycle | None,
         health: AssetHealth | None,
         source_type: SourceType | None,
@@ -495,6 +538,16 @@ class _AgentCatalogResolver:
             parsed_applies_to.object_id,
         ):
             return []
+        parsed_related_object = (
+            validate_related_object_filter(related_object)
+            if related_object is not None
+            else None
+        )
+        if parsed_related_object is not None and not self.access.policy.can(
+            Permission.DISCOVER,
+            parsed_related_object.object_id,
+        ):
+            return []
         candidate_ids = self._candidate_ids(
             kind=kind,
         )
@@ -506,14 +559,8 @@ class _AgentCatalogResolver:
             if obj.id not in candidate_ids:
                 continue
             data = _safe_object_data(obj)
-            if obj.kind == "decision" and can_read:
-                data = project_authorized_decision_data(
-                    data,
-                    can_discover=lambda object_id: self.access.policy.can(
-                        Permission.DISCOVER,
-                        object_id,
-                    ),
-                )
+            if can_read:
+                data = self._project_knowledge_data(obj.kind, data)
             state = state_from_record(
                 kind=obj.kind,
                 status=obj.status,
@@ -531,6 +578,9 @@ class _AgentCatalogResolver:
                     status
                     or decision_status
                     or applies_to
+                    or project_category
+                    or project_status
+                    or related_object
                     or lifecycle
                     or health
                     or ip
@@ -551,6 +601,18 @@ class _AgentCatalogResolver:
                     data,
                     decision_status=decision_status,
                     applies_to=applies_to,
+                ):
+                    continue
+            if (
+                project_category is not None
+                or project_status is not None
+                or related_object is not None
+            ):
+                if obj.kind != "project" or not project_matches_filters(
+                    data,
+                    project_category=project_category,
+                    project_status=project_status,
+                    related_object=related_object,
                 ):
                     continue
             if lifecycle and (state is None or state.lifecycle != lifecycle):
@@ -596,6 +658,24 @@ class _AgentCatalogResolver:
                 break
         return matches
 
+    def _project_knowledge_data(
+        self,
+        kind: str,
+        data: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Drop typed knowledge links whose targets the reader cannot discover."""
+        if kind == "decision":
+            return project_authorized_decision_data(
+                data,
+                can_discover=self._can_discover,
+            )
+        if kind == "project":
+            return project_authorized_data(data, can_discover=self._can_discover)
+        return data
+
+    def _can_discover(self, object_id: str) -> bool:
+        return self.access.policy.can(Permission.DISCOVER, object_id)
+
     def _candidate_ids(
         self,
         *,
@@ -611,17 +691,7 @@ class _AgentCatalogResolver:
             return self.stub(obj)
         record = _safe_object_record(obj)
         data = record.data
-        projected_decision_data = (
-            project_authorized_decision_data(
-                data,
-                can_discover=lambda object_id: self.access.policy.can(
-                    Permission.DISCOVER,
-                    object_id,
-                ),
-            )
-            if obj.kind == "decision"
-            else {}
-        )
+        projected_knowledge_data = self._project_knowledge_data(obj.kind, data)
         state = state_from_record(
             kind=obj.kind,
             status=obj.status,
@@ -654,17 +724,28 @@ class _AgentCatalogResolver:
             lifecycle=state.lifecycle if state is not None else None,
             health=state.health if state is not None else None,
             decision_status=(
-                projected_decision_data.get("decision_status")
+                projected_knowledge_data.get("decision_status")
                 if obj.kind == "decision"
                 else None
             ),
             applies_to=(
-                [
-                    value
-                    for value in projected_decision_data.get("applies_to", [])
-                    if isinstance(value, str)
-                ]
-                if isinstance(projected_decision_data.get("applies_to"), list)
+                _string_list(projected_knowledge_data.get("applies_to"))
+                if obj.kind == "decision"
+                else []
+            ),
+            project_category=(
+                projected_knowledge_data.get("category")
+                if obj.kind == "project"
+                else None
+            ),
+            project_status=(
+                projected_knowledge_data.get("project_status")
+                if obj.kind == "project"
+                else None
+            ),
+            related_assets=(
+                _string_list(projected_knowledge_data.get("related_assets"))
+                if obj.kind == "project"
                 else []
             ),
             placement_state=resolved_placement_state,
@@ -697,15 +778,7 @@ class _AgentCatalogResolver:
         obj: CatalogObject,
         recent_comments: dict[str, list[CommentOut]],
     ) -> AgentCatalogObjectContext:
-        data = _safe_object_data(obj)
-        if obj.kind == "decision":
-            data = project_authorized_decision_data(
-                data,
-                can_discover=lambda object_id: self.access.policy.can(
-                    Permission.DISCOVER,
-                    object_id,
-                ),
-            )
+        data = self._project_knowledge_data(obj.kind, _safe_object_data(obj))
         object_ref = _object_ref(obj)
         relationships = [
             AgentRelationshipOut(
@@ -1046,6 +1119,13 @@ def _is_ip(value: Any) -> bool:
     except ValueError:
         return False
     return True
+
+
+def _string_list(values: Any) -> list[str]:
+    """Project one authorized typed-reference array onto its readable strings."""
+    if not isinstance(values, list):
+        return []
+    return [value for value in values if isinstance(value, str)]
 
 
 def _unique_strings(values: Any) -> list[str]:

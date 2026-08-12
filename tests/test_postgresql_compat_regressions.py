@@ -40,6 +40,11 @@ from blockwart.services.decision_migration import (
     build_decision_migration_plan,
     decision_data_sha256,
 )
+from blockwart.services.project_migration import (
+    apply_project_migration_plan,
+    build_project_migration_plan,
+    project_data_sha256,
+)
 
 # ---------------------------------------------------------------------------
 # Constants and helpers
@@ -649,6 +654,65 @@ def test_postgresql_decision_plan_preserves_legacy_data_and_applies_explicitly(
             **before,
             "decision_status": "proposed",
         }
+
+
+@PG_SKIP
+def test_postgresql_project_plan_preserves_identity_links_and_legacy_data(
+    migrated_pg_engine: Engine,
+) -> None:
+    before = {"schema_version": 1, "notes": "Preserve PostgreSQL data."}
+    with Session(migrated_pg_engine) as session:
+        with session.begin():
+            session.add_all(
+                [
+                    CatalogObject(
+                        id="legacy-pg-project",
+                        kind="project",
+                        label="Legacy PG Project",
+                        status="active",
+                        lifecycle=None,
+                        health=None,
+                        data_json=json.dumps(before, sort_keys=True),
+                    ),
+                    CatalogObject(
+                        id="linked-pg-system",
+                        kind="system",
+                        label="Linked PG System",
+                        status="active",
+                        lifecycle="active",
+                        health="unknown",
+                        data_json=json.dumps({"schema_version": 1}, sort_keys=True),
+                    ),
+                ]
+            )
+        plan = build_project_migration_plan(
+            session,
+            {
+                "legacy-pg-project": {
+                    "expected_data_sha256": project_data_sha256(before),
+                    "data_patch": {
+                        "category": "migration",
+                        "project_status": "completed",
+                        "started_at": "2026-01-01T00:00:00Z",
+                        "completed_at": "2026-02-01T00:00:00Z",
+                        "related_assets": ["system:linked-pg-system"],
+                        "source_state": "PostgreSQL 14",
+                        "target_state": "PostgreSQL 16",
+                    },
+                }
+            },
+        )
+        assert plan.diagnostics == ()
+        assert json.loads(session.get(CatalogObject, "legacy-pg-project").data_json) == before
+        assert apply_project_migration_plan(session, plan) == 1
+        session.commit()
+        row = session.get(CatalogObject, "legacy-pg-project")
+        assert row is not None
+        assert row.revision == 2
+        stored = json.loads(row.data_json)
+        assert stored["notes"] == "Preserve PostgreSQL data."
+        assert stored["related_assets"] == ["system:linked-pg-system"]
+        assert session.get(CatalogObject, "linked-pg-system") is not None
 
 
 @PG_SKIP

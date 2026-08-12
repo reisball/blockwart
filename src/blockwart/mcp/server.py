@@ -39,6 +39,12 @@ from blockwart.domain.object_schema import (
     VIOLATION_VALUE_TOO_LONG,
     VIOLATION_VALUE_TOO_SHORT,
 )
+from blockwart.domain.projects import (
+    PROJECT_CATEGORIES,
+    PROJECT_STATUSES,
+    RELATED_OBJECT_MAX_LENGTH,
+    RELATED_OBJECT_PATTERN,
+)
 from blockwart.domain.relationship_projection import (
     metadata_json_schema,
     metadata_union_json_schema,
@@ -302,6 +308,22 @@ QUERY_FILTER_PROPERTIES: JSON = {
         "maxLength": APPLIES_TO_MAX_LENGTH,
         "pattern": APPLIES_TO_PATTERN,
         "description": "Exact authorized asset kind:id Decision scope",
+    },
+    "project_category": {
+        "type": "string",
+        "enum": list(PROJECT_CATEGORIES),
+        "description": "Exact canonical Project category",
+    },
+    "project_status": {
+        "type": "string",
+        "enum": list(PROJECT_STATUSES),
+        "description": "Exact canonical Project status",
+    },
+    "related_object": {
+        "type": "string",
+        "maxLength": RELATED_OBJECT_MAX_LENGTH,
+        "pattern": RELATED_OBJECT_PATTERN,
+        "description": "Exact authorized kind:id Project relationship target",
     },
     "lifecycle": {
         "type": "string",
@@ -1642,6 +1664,9 @@ def _clean_params(args: JSON, *, default_limit: int) -> JSON:
         "status",
         "decision_status",
         "applies_to",
+        "project_category",
+        "project_status",
+        "related_object",
         "lifecycle",
         "health",
         "source_type",
@@ -1680,6 +1705,9 @@ def _legacy_page_payload(
             "status",
             "decision_status",
             "applies_to",
+            "project_category",
+            "project_status",
+            "related_object",
             "lifecycle",
             "health",
             "source_type",

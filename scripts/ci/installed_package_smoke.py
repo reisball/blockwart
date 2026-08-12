@@ -199,6 +199,31 @@ async def check_mcp(
                 "decision",
                 "project",
             }
+            project_contract = schema_kinds["project"]["project"]
+            assert project_contract["category"]["values"] == [
+                "implementation",
+                "migration",
+                "research",
+                "experiment",
+                "incident_review",
+                "other",
+            ]
+            assert project_contract["project_status"]["values"] == [
+                "planned",
+                "active",
+                "paused",
+                "completed",
+                "cancelled",
+                "archived",
+            ]
+            assert project_contract["external_sources"]["live_fetch"] is False
+            assert project_contract["evidence"]["contradictory_findings_allowed"] is True
+            search_properties = tools["blockwart.search"].inputSchema["properties"]
+            assert {
+                "project_category",
+                "project_status",
+                "related_object",
+            } <= set(search_properties)
             device_category = next(
                 field
                 for field in schema_kinds["device"]["data"]["fields"]

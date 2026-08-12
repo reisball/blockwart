@@ -29,6 +29,7 @@ from blockwart.domain.object_schema import (
     is_safe_external_http_url,
 )
 from blockwart.domain.placement import PlacementError
+from blockwart.domain.projects import project_category_fields
 from blockwart.domain.relationships import (
     LINK_KINDS,
     NETWORK_DEVICE_CATEGORIES,
@@ -88,6 +89,26 @@ from blockwart.services.queries import (
 from blockwart.services.read_access import ReadAccess
 from blockwart.ui.i18n import translation_context
 from blockwart.ui.paths import TEMPLATE_DIR
+from blockwart.ui.project_forms import (
+    PROJECT_CATEGORY_OPTIONS,
+    PROJECT_EVIDENCE_GRADE_OPTIONS,
+    PROJECT_MANAGED_BY_KIND_OPTIONS,
+    PROJECT_REFERENCE_LIST_FIELDS,
+    PROJECT_SOURCE_TYPE_OPTIONS,
+    PROJECT_STATUS_OPTIONS,
+    PROJECT_TABLES,
+    PROJECT_TEXT_LIST_FIELDS,
+    PROJECT_TIMELINE_TYPE_OPTIONS,
+    ProjectForm,
+    apply_project_form_data,
+    blank_project_rows,
+    canonical_project_rows,
+    project_form_values,
+    project_has_legacy_rows,
+    safe_project_form_rows,
+    safe_project_form_values,
+    split_form_lines,
+)
 from blockwart.ui.security import (
     AUTH_CSRF_COOKIE_NAME,
     read_access_from_request,
@@ -103,8 +124,9 @@ router = APIRouter(
     dependencies=[Depends(require_browser_read_access)],
 )
 
-OBJECT_KINDS = (*PUBLIC_OBJECT_KINDS, "decision")
+OBJECT_KINDS = (*PUBLIC_OBJECT_KINDS, "decision", "project")
 DECISION_KIND = "decision"
+PROJECT_KIND = "project"
 DECISION_TEXT_FIELDS = ("context", "decision", "rationale")
 DECISION_TIMESTAMP_FIELDS = ("decided_at", "effective_at", "review_after")
 DECISION_TEXT_LIST_FIELDS = ("alternatives", "consequences")
@@ -115,6 +137,7 @@ DECISION_REFERENCE_LIST_FIELDS = (
     "related_decisions",
     "supersedes",
 )
+PROJECT_FORM_KEYS = tuple(project_form_values({}))
 OBJECT_STATUSES_UI = OBJECT_STATUSES
 RELATION_TYPES = RELATIONSHIP_TYPES
 PLATFORM_TYPES = ("LXC", "VM", "WSL")
@@ -232,6 +255,7 @@ def _localized_audit_lines(
         "seed_skip_manual_override": "audit.seed_skip_manual_override",
         "interface_normalize": "audit.interface_normalize",
         "decision_normalize": "audit.decision_normalize",
+        "project_normalize": "audit.project_normalize",
         "placement_state_normalize": "audit.placement_state_normalize",
     }.get(action)
     if template_key is None:
@@ -363,6 +387,12 @@ def _index_template_context(
         "device_categories": sorted(DEVICE_CATEGORIES),
         "decision_statuses": DECISION_STATUS_VALUES,
         "decision_source_types": DECISION_SOURCE_TYPE_VALUES,
+        "project_categories": PROJECT_CATEGORY_OPTIONS,
+        "project_statuses": PROJECT_STATUS_OPTIONS,
+        "project_source_types": PROJECT_SOURCE_TYPE_OPTIONS,
+        "project_evidence_grades": PROJECT_EVIDENCE_GRADE_OPTIONS,
+        "project_owner_kinds": PROJECT_MANAGED_BY_KIND_OPTIONS,
+        "project_timeline_types": PROJECT_TIMELINE_TYPE_OPTIONS,
         "ui_schemas": localized_schemas,
         "form_ui_schema": localized_schemas[selected_form_kind],
         "create_fields_by_key": {
@@ -435,6 +465,17 @@ def _localized_ui_schema_payload(
                         else ""
                     )
                 )
+                # The browser needs the resolved copy and structural metadata,
+                # not internal translation keys. Keeping those keys in the
+                # serialized page made a missing translation indistinguishable
+                # from inert configuration text when inspecting rendered HTML.
+                for internal_key in (
+                    "label_key",
+                    "placeholder_key",
+                    "localized_labels",
+                    "localized_placeholders",
+                ):
+                    field.pop(internal_key, None)
         primary_field = next(
             field
             for field in schema["schema_fields"]
@@ -443,6 +484,7 @@ def _localized_ui_schema_payload(
         schema["primary_name_label"] = primary_field["label"]
         for panel in schema["panels"]:
             panel["label"] = translator(str(panel["label_key"]))
+            panel.pop("label_key", None)
     return payload
 
 
@@ -490,6 +532,10 @@ def index(
         form["decision_status"] = str(
             minimal_object_data("decision")["decision_status"]
         )
+    if normalized_kind == PROJECT_KIND:
+        minimal_project = minimal_object_data(PROJECT_KIND)
+        form["category"] = str(minimal_project["category"])
+        form["project_status"] = str(minimal_project["project_status"])
     return templates.TemplateResponse(
         request,
         "index.html",
@@ -625,6 +671,23 @@ def _detail_template_context(
     can_edit_network_endpoints = catalog_object.kind in NETWORK_ENDPOINT_EDIT_KINDS
     can_edit_device = catalog_object.kind == DEVICE_OBJECT_KIND
     submitted_rows = form_rows or {}
+    project_detail = _project_detail_data(object_data, read_model.object_map)
+    project_form_state = project_form_values(object_data)
+    submitted_project_forms = submitted_rows.get("project_form") or []
+    if submitted_project_forms:
+        project_form_state.update(
+            {
+                str(key): str(value or "")
+                for key, value in submitted_project_forms[0].items()
+            }
+        )
+    project_table_rows = {
+        table: _mapping_rows_override(
+            submitted_rows.get(f"project_{table}"),
+            canonical_project_rows(object_data, table) or blank_project_rows(table),
+        )
+        for table in PROJECT_TABLES
+    }
     decision_detail = _decision_detail_data(object_data, read_model.object_map)
     decision_form = _decision_form_values(object_data)
     submitted_decision_forms = submitted_rows.get("decision_form") or []
@@ -721,6 +784,16 @@ def _detail_template_context(
         "supports_service_information": (
             catalog_object.kind in SERVICE_INFORMATION_OBJECT_KINDS
         ),
+        "supports_project": catalog_object.kind == PROJECT_KIND,
+        "project_detail": project_detail,
+        "project_form": project_form_state,
+        "project_table_rows": project_table_rows,
+        "project_categories": PROJECT_CATEGORY_OPTIONS,
+        "project_statuses": PROJECT_STATUS_OPTIONS,
+        "project_source_types": PROJECT_SOURCE_TYPE_OPTIONS,
+        "project_evidence_grades": PROJECT_EVIDENCE_GRADE_OPTIONS,
+        "project_owner_kinds": PROJECT_MANAGED_BY_KIND_OPTIONS,
+        "project_timeline_types": PROJECT_TIMELINE_TYPE_OPTIONS,
         "supports_decision": catalog_object.kind == DECISION_KIND,
         "decision_detail": decision_detail,
         "decision_form": decision_form,
@@ -895,6 +968,7 @@ def _detail_navigation_context(
         "installed-software",
         "device",
         "decision",
+        "project",
         "network",
         "access",
         "permissions",
@@ -1503,6 +1577,7 @@ def save_object(
 def save_root(
     request: Request,
     session: Annotated[Session, Depends(get_session)],
+    project_form: Annotated[ProjectForm, Depends()],
     object_id: Annotated[str, Form()],
     kind: Annotated[str, Form()],
     label: Annotated[str | None, Form()] = None,
@@ -1592,6 +1667,9 @@ def save_root(
         if kind == DECISION_KIND:
             _apply_decision_form_data(data, decision_values, decision_docs)
             _reject_secret_shaped_form_data(data)
+        if kind == PROJECT_KIND:
+            apply_project_form_data(data, project_form)
+            _reject_secret_shaped_form_data(data)
         ui_schema = get_ui_schema(kind)
         label_values = _split_label_values(labels)
         if label_values:
@@ -1633,6 +1711,8 @@ def save_root(
         if kind == DECISION_KIND:
             form.update(_safe_decision_form_values(decision_values))
             form["decision_docs"] = _safe_decision_form_docs(decision_docs)
+        if kind == PROJECT_KIND:
+            form.update(safe_project_form_values(project_form))
         read_model = query_catalog_browse(
             session,
             read_access_from_request(request),
@@ -1652,6 +1732,8 @@ def save_root(
                     if isinstance(exc, HTTPException)
                     else _decision_form_error(request, exc)
                     if kind == DECISION_KIND
+                    else _project_form_error(request, exc)
+                    if kind == PROJECT_KIND
                     else _safe_error_message(exc)
                 ),
                 show_create_form=False,
@@ -1962,6 +2044,7 @@ def update_object(
     request: Request,
     object_id: str,
     session: Annotated[Session, Depends(get_session)],
+    project_form: Annotated[ProjectForm, Depends()],
     label: Annotated[str | None, Form()] = None,
     primary_name: Annotated[str | None, Form()] = None,
     kind: Annotated[str | None, Form()] = None,
@@ -2166,6 +2249,13 @@ def update_object(
                     else None
                 ),
             )
+        if target_kind == PROJECT_KIND and project_form.submitted:
+            apply_project_form_data(
+                data,
+                project_form,
+                concealed_references=_concealed_project_references(data, access),
+                preserve_legacy_sources=project_has_legacy_rows(data, "sources"),
+            )
         if target_kind == DECISION_KIND and submitted_decision:
             _apply_decision_form_data(
                 data,
@@ -2216,11 +2306,15 @@ def update_object(
                 if isinstance(exc, HTTPException)
                 else _decision_form_error(request, exc)
                 if submitted_decision
+                else _project_form_error(request, exc)
+                if project_form.submitted
                 else _safe_error_message(exc)
             ),
             edit_section=(
                 "decision"
                 if submitted_decision
+                else "project"
+                if project_form.submitted
                 else "device"
                 if submitted_device
                 else "service-information"
@@ -2235,6 +2329,14 @@ def update_object(
                     "decision_docs": _safe_decision_form_docs(decision_docs),
                 }
                 if submitted_decision
+                else {
+                    "project_form": [safe_project_form_values(project_form)],
+                    **{
+                        f"project_{table}": safe_project_form_rows(project_form, table)
+                        for table in PROJECT_TABLES
+                    },
+                }
+                if project_form.submitted
                 else
                 {
                     "device_fields": [
@@ -2943,6 +3045,7 @@ def _empty_form() -> dict[str, Any]:
     form["decision_docs"] = [
         {"source_type": "original", "title": "", "url": "", "published_at": ""}
     ]
+    form.update(dict.fromkeys(PROJECT_FORM_KEYS, ""))
     return form
 
 
@@ -3210,6 +3313,63 @@ def _decision_detail_data(
     successor_links = _decision_reference_display([successor], object_map)
     result["superseded_by_link"] = successor_links[0] if successor_links else None
     return result
+
+
+def _concealed_project_references(
+    data: Mapping[str, Any],
+    access: ReadAccess,
+) -> dict[str, list[str]]:
+    """Keep typed links the editor could not see out of the rewritten document."""
+    concealed: dict[str, list[str]] = {}
+    for field_name in PROJECT_REFERENCE_LIST_FIELDS:
+        raw = data.get(field_name)
+        if not isinstance(raw, list):
+            continue
+        hidden = [
+            value
+            for value in raw
+            if isinstance(value, str)
+            and ":" in value
+            and not access.policy.can(Permission.DISCOVER, value.split(":", 1)[1])
+        ]
+        if hidden:
+            concealed[field_name] = hidden
+    return concealed
+
+
+def _project_detail_data(
+    data: Mapping[str, Any],
+    object_map: Mapping[str, Any],
+) -> dict[str, Any]:
+    form_values = project_form_values(data)
+    category = form_values.get("category", "")
+    result: dict[str, Any] = {
+        **form_values,
+        "category_fields": list(project_category_fields(category)),
+        "legacy_rows_blocked": sorted(
+            table for table in PROJECT_TABLES if project_has_legacy_rows(data, table)
+        ),
+    }
+    for field_name in PROJECT_TEXT_LIST_FIELDS:
+        result[f"{field_name}_list"] = split_form_lines(form_values[field_name])
+    for field_name in PROJECT_REFERENCE_LIST_FIELDS:
+        result[f"{field_name}_links"] = _decision_reference_display(
+            data.get(field_name),
+            object_map,
+        )
+    for table in PROJECT_TABLES:
+        result[table] = canonical_project_rows(data, table)
+    return result
+
+
+def _project_form_error(request: Request, exc: Exception) -> str:
+    translator = translation_context(request)["t"]
+    match = re.search(r"data\.([a-z_]+)", str(exc))
+    field_name = match.group(1) if match is not None else "category"
+    field_label = translator(f"project.field.{field_name}.label")
+    if field_label == f"project.field.{field_name}.label":
+        field_label = translator("project.panel.title")
+    return translator("project.validation.field", field=field_label)
 
 
 def _require_existing_ref(session: Session, ref: str) -> None:

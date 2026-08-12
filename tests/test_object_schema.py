@@ -236,6 +236,7 @@ def test_builtin_schemas_preserve_unknown_fields_and_current_minimal_records() -
             "network": {"network": {"category": "segment"}},
             "device": {"device": {"category": "sensor"}},
             "decision": {"decision_status": "proposed"},
+            "project": {"category": "implementation", "project_status": "planned"},
         }.get(kind, {})
         record = CatalogObjectIn.model_validate(
             {

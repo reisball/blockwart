@@ -78,7 +78,7 @@ directory outside the repository, starts `blockwart-start`, loads packaged templ
 assets, runs the relationship-integrity diagnostic, and exercises all 26
 tools through 32 read/write, coverage, comment, audit, and grant-management calls to the installed
 `blockwart-mcp` console command. It also runs the read-only service-interface
-normalization, placement-state, and network-classification plans from outside
+normalization, placement-state, network-classification, and canonical-Project plans from outside
 the source tree.
 
 The container smoke proves that an empty catalog fails the Owner invariant, then starts an

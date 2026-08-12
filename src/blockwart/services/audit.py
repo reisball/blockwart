@@ -127,6 +127,8 @@ def render_audit_summary_english(
         ).strip()
     if event == "decision_normalize":
         return f"Normalized Decision contract for {_text(details.get('object_ref'))}".strip()
+    if event == "project_normalize":
+        return f"Normalized Project contract for {_text(details.get('object_ref'))}".strip()
     if event == "placement_state_normalize":
         operation = _text(details.get("operation"))
         verb = (

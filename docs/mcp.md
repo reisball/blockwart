@@ -138,11 +138,13 @@ means it deliberately bundles lower-level API concerns behind one agent call.
 | `update_grant` | Change object access | `directly sufficient` | No hidden create/update branching or automatic CAS retry is introduced. |
 | `revoke_grant` | Remove object access | `directly sufficient` | Destructive intent, grant ID, and current ETag stay explicit. |
 
-`blockwart.search` and `blockwart.get_context` accept every catalog kind, including `decision`.
+`blockwart.search` and `blockwart.get_context` accept every catalog kind, including `decision`
+and `project`.
 Both tools also forward v1's structured `parent`, `ip`, `port`,
 `endpoint_type`, `protocol`, `exposure`, `status`, `lifecycle`, `health`,
 canonical `decision_status`, and authorized Decision `applies_to`
-filters plus canonical `source_type` and computed `stale`, `cursor`, `sort`,
+filters; canonical Project `project_category` and `project_status`; authorized Project
+`related_object`; plus canonical `source_type` and computed `stale`, `cursor`, `sort`,
 `direction`, and optional `include_total`.
 Resolved context comes from the same service implementation used by REST.
 `blockwart.get_network_topology` returns the same policy-projected direct or

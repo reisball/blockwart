@@ -46,6 +46,9 @@ Query parameters:
 - health: optional exact `unknown`, `healthy`, `degraded`, `down`, or `maintenance`
 - decision_status: optional exact canonical Decision lifecycle value
 - applies_to: optional exact authorized asset `kind:id` Decision scope
+- project_category: optional exact canonical Project category
+- project_status: optional exact canonical Project lifecycle value
+- related_object: optional exact authorized Project relationship `kind:id`
 - source_type: optional exact `unknown`, `manual`, `import`, or `discovery`
 - stale: optional exact computed freshness state
 - limit: optional result limit, 1..50, default 10

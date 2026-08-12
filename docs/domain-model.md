@@ -21,6 +21,11 @@ Decision is a structured knowledge object rather than an asset or placement leve
 closed lifecycle, typed links, and cycle-safe supersession graph are documented in
 [Canonical Decision objects](decisions.md).
 
+Project is the compatible structured container for reviewed implementation, migration,
+research, experiment, incident-review, and other work knowledge. Its current results, evidence,
+safe sources, lifecycle, and typed Decision/Runbook/asset links are documented in
+[Canonical Project knowledge](projects.md). Project comments remain separate chronology.
+
 English identifiers are the canonical backend contract. Alembic revision
 `20260729_0007` migrates the former `netzwerk` identifier and every valid typed
 reference to `network` before the application starts. UI labels are localized
@@ -34,7 +39,8 @@ Infrastructure assets use two independent, closed dimensions:
 - `health`: `unknown`, `healthy`, `degraded`, `down`, or `maintenance`
 
 The values are stored in dedicated `catalog_objects` columns for `host`, `system`, `network`,
-`device`, and `service`. They are absent for knowledge objects such as runbooks and decisions. Free-form
+`device`, and `service`. They are absent for knowledge objects such as runbooks, decisions, and
+projects. Free-form
 `data.lifecycle` and `data.health` fields are rejected.
 
 The legacy `status` column remains a derived compatibility field while UI work is out of scope:
