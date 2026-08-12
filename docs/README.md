@@ -11,6 +11,7 @@ deleted by this classification.
   contract for `.gitea/workflows/ci.yml` and `.github/workflows/ci.yml`
 - [Markdown import](markdown-import.md) and [canonical English/UI
   localization](internationalization.md)
+- [Write-free Knowledge planning](knowledge-planning.md)
 
 ## Active API Documentation
 

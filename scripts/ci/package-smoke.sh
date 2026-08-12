@@ -82,4 +82,9 @@ fi
 "$TEMP_DIR/venv/bin/blockwart-db" networks
 "$TEMP_DIR/venv/bin/blockwart-db" projects
 "$TEMP_DIR/venv/bin/blockwart-db" runbooks
+"$TEMP_DIR/venv/bin/blockwart-knowledge-plan" \
+  --manifest "$SOURCE_DIR/examples/knowledge-plan/manifest.json" \
+  --source-root "$SOURCE_DIR/examples/knowledge-plan/sources" \
+  --implementation-commit 1111111111111111111111111111111111111111 \
+  --implementation-tree 2222222222222222222222222222222222222222
 echo "package_smoke=passed"

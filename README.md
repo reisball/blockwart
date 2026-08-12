@@ -48,6 +48,7 @@ automatically.
 | MCP (`blockwart-mcp`) | Agent-native catalog reads and authorized commands over stdio | [MCP server](docs/mcp.md) |
 | Object comments | Human and agent operational history, separate from audit | [Object comments](docs/object-comments.md) |
 | Import CLI | Reviewed TOOLS.md/YAML ingestion without resolving secrets | [Markdown import](docs/markdown-import.md) |
+| Knowledge plan CLI | Deterministic private-source classification with no catalog writes | [Knowledge planning](docs/knowledge-planning.md) |
 
 ## Agent quick start
 
