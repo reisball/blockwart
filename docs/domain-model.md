@@ -26,6 +26,11 @@ research, experiment, incident-review, and other work knowledge. Its current res
 safe sources, lifecycle, and typed Decision/Runbook/asset links are documented in
 [Canonical Project knowledge](projects.md). Project comments remain separate chronology.
 
+Runbook is the canonical reviewed current operating or recovery instruction. It
+stores inert exact command text separately from expected effects and verification,
+and distinguishes rollback from recovery. Its lifecycle, risk, typed links, and
+legacy migration contract are documented in [Canonical Runbooks](runbooks.md).
+
 English identifiers are the canonical backend contract. Alembic revision
 `20260729_0007` migrates the former `netzwerk` identifier and every valid typed
 reference to `network` before the application starts. UI labels are localized

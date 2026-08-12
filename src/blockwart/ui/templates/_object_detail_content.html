@@ -51,6 +51,24 @@
   {% if items %}<ul>{% for item in items %}<li>{{ item }}</li>{% endfor %}</ul>{% else %}<p class="meta">{{ t("decision.empty.collection") }}</p>{% endif %}
 {%- endmacro %}
 
+{% macro runbook_reference_list(items) -%}
+  {% if items %}<ul class="plain-list">{% for item in items %}<li><a href="/objects/{{ item.id }}?{{ detail_query_string }}">{{ item.label }}</a> <code>{{ item.ref }}</code></li>{% endfor %}</ul>{% else %}<p class="meta">{{ t("runbook.empty.collection") }}</p>{% endif %}
+{%- endmacro %}
+
+{% macro runbook_edit_table(table, columns, prefix) -%}
+  <fieldset><legend>{{ schema_fields_by_key[table].label }}</legend>
+    <div class="table-wrap"><table class="table edit-table"><thead><tr>{% for column in columns %}<th>{{ t("runbook.entry." ~ column) }}</th>{% endfor %}<th><span class="visually-hidden">{{ t("runbook.collection.actions") }}</span></th></tr></thead><tbody data-row-list="runbook-{{ table }}-edit">
+    {% for row in runbook_table_rows[table] %}<tr>{% for column in columns %}<td>{% if column == "source_type" %}<select name="{{ prefix }}_{{ column }}">{% for source_type in runbook_source_types %}<option value="{{ source_type }}"{% if row[column] == source_type %} selected{% endif %}>{{ t("runbook.source_type." ~ source_type) }}</option>{% endfor %}</select>{% elif column in ["description", "command", "expected_effect", "success_expectation"] %}<textarea name="{{ prefix }}_{{ column }}" spellcheck="false">{{ row[column] }}</textarea>{% else %}<input name="{{ prefix }}_{{ column }}" value="{{ row[column] }}" autocomplete="off" />{% endif %}</td>{% endfor %}<td><button class="button button-small button-muted" type="button" data-remove-row>{{ t("runbook.collection.remove") }}</button></td></tr>{% endfor %}
+    </tbody></table></div>
+    <template data-row-template="runbook-{{ table }}-edit"><tr>{% for column in columns %}<td>{% if column == "source_type" %}<select name="{{ prefix }}_{{ column }}">{% for source_type in runbook_source_types %}<option value="{{ source_type }}">{{ t("runbook.source_type." ~ source_type) }}</option>{% endfor %}</select>{% elif column in ["description", "command", "expected_effect", "success_expectation"] %}<textarea name="{{ prefix }}_{{ column }}" spellcheck="false"></textarea>{% else %}<input name="{{ prefix }}_{{ column }}" value="" autocomplete="off" />{% endif %}</td>{% endfor %}<td><button class="button button-small button-muted" type="button" data-remove-row>{{ t("runbook.collection.remove") }}</button></td></tr></template>
+    <button class="button button-small button-muted" type="button" data-add-row="runbook-{{ table }}-edit">{{ t("runbook.collection.add") }}</button>
+  </fieldset>
+{%- endmacro %}
+
+{% macro runbook_procedure(entries) -%}
+  {% if entries %}<ol class="runbook-procedure">{% for entry in entries %}<li><strong>{{ entry.title or entry.description }}</strong>{% if entry.title and entry.description %}<p class="preserve-lines">{{ entry.description }}</p>{% endif %}{% if entry.command is defined %}<div class="meta">{{ t("runbook.entry.command") }}</div><pre><code>{{ entry.command }}</code></pre>{% endif %}<div class="meta">{{ t("runbook.entry.expected_effect") }}</div><p class="preserve-lines">{{ entry.expected_effect }}</p></li>{% endfor %}</ol>{% else %}<p class="meta">{{ t("runbook.empty.collection") }}</p>{% endif %}
+{%- endmacro %}
+
 <section
   class="integrated-detail"
   aria-labelledby="asset-detail-title"
@@ -225,6 +243,53 @@
             </form>
           {% endif %}
         </section>
+
+        {% if supports_runbook %}
+          {% if edit_section == "runbook" %}
+            <section class="panel" aria-labelledby="runbook-editor-title">
+              <div class="panel-head"><h2 class="section-title" id="runbook-editor-title">{{ t("runbook.editor.title") }}</h2><a class="button button-small button-muted" href="{{ detail_href }}">{{ t("detail.cancel") }}</a></div>
+              {% if error %}<div class="error" role="alert">{{ error }}</div>{% endif %}
+              {% for table in runbook_detail.legacy_rows_blocked %}<div class="error" role="alert">{{ t("runbook.validation.legacy_rows", section=schema_fields_by_key[table].label) }}</div>{% endfor %}
+              <form class="form-grid" method="post" action="{{ detail_post_urls.overview }}">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token }}" /><input type="hidden" name="if_match" value="{{ object_etag }}" />
+                {% for field in ui_schema.schema_fields if field.storage_path.startswith("data_json.") and field.key not in ["prerequisites", "steps", "verification", "rollback", "recovery", "sources"] %}
+                  <label>{{ field.label }}
+                    {% if field.key == "runbook_status" %}<select name="runbook_status" required>{% for option in runbook_statuses %}<option value="{{ option }}"{% if runbook_form.runbook_status == option %} selected{% endif %}>{{ t("runbook.status." ~ option) }}</option>{% endfor %}</select>
+                    {% elif field.key == "risk_level" %}<select name="risk_level"><option value="">{{ t("asset.no_value") }}</option>{% for option in runbook_risks %}<option value="{{ option }}"{% if runbook_form.risk_level == option %} selected{% endif %}>{{ t("runbook.risk." ~ option) }}</option>{% endfor %}</select>
+                    {% elif field.key == "approval_required" %}<select name="approval_required" required><option value="false"{% if runbook_form.approval_required != "true" %} selected{% endif %}>{{ t("runbook.approval.no") }}</option><option value="true"{% if runbook_form.approval_required == "true" %} selected{% endif %}>{{ t("runbook.approval.yes") }}</option></select>
+                    {% elif field.key == "change_fallback" %}<select name="change_fallback"><option value="">{{ t("asset.no_value") }}</option>{% for option in runbook_change_fallbacks %}<option value="{{ option }}"{% if runbook_form.change_fallback == option %} selected{% endif %}>{{ t("runbook.fallback." ~ option) }}</option>{% endfor %}</select>
+                    {% elif field.input_type in ["textarea", "list", "reference-list"] %}<textarea name="{{ field.key }}" placeholder="{{ field.placeholder }}">{{ runbook_form[field.key] }}</textarea>
+                    {% else %}<input name="{{ field.key }}" value="{{ runbook_form[field.key] }}" autocomplete="off" placeholder="{{ field.placeholder }}" />{% endif %}
+                    <span class="meta">{{ field.placeholder }}</span>
+                  </label>
+                {% endfor %}
+                {{ runbook_edit_table("prerequisites", ["id", "description"], "prerequisite") }}
+                {{ runbook_edit_table("steps", ["id", "title", "description", "command", "expected_effect"], "step") }}
+                {{ runbook_edit_table("verification", ["id", "description", "success_expectation"], "verification") }}
+                {{ runbook_edit_table("rollback", ["id", "title", "description", "command", "expected_effect"], "rollback") }}
+                {{ runbook_edit_table("recovery", ["id", "title", "description", "command", "expected_effect"], "recovery") }}
+                {{ runbook_edit_table("sources", ["id", "source_type", "title", "url", "author", "publisher", "published_at", "retrieved_at"], "runbook_source") }}
+                <div class="button-row"><button type="submit">{{ t("detail.save") }}</button><a class="button button-muted" href="{{ detail_href }}">{{ t("detail.cancel") }}</a></div>
+              </form>
+            </section>
+          {% else %}
+            <section class="panel" aria-labelledby="runbook-title">
+              <div class="panel-head"><h2 class="section-title" id="runbook-title">{{ t("runbook.panel.title") }}</h2>{% if can_write %}<a class="button button-small button-muted" href="{{ detail_edit_hrefs.runbook }}">{{ t("detail.edit") }}</a>{% endif %}</div>
+              <dl class="fact-grid"><div><dt>{{ schema_fields_by_key.runbook_status.label }}</dt><dd><span class="badge">{{ t("runbook.status." ~ runbook_detail.runbook_status) if runbook_detail.runbook_status else t("asset.no_value") }}</span></dd></div><div><dt>{{ schema_fields_by_key.risk_level.label }}</dt><dd>{{ t("runbook.risk." ~ runbook_detail.risk_level) if runbook_detail.risk_level else t("asset.no_value") }}</dd></div><div><dt>{{ schema_fields_by_key.approval_required.label }}</dt><dd>{{ t("runbook.approval.yes") if runbook_detail.approval_required else t("runbook.approval.no") }}</dd></div><div><dt>{{ schema_fields_by_key.last_verified_at.label }}</dt><dd>{{ runbook_detail.last_verified_at or t("asset.no_value") }}</dd></div></dl>
+              <h3>{{ schema_fields_by_key.purpose.label }}</h3><p class="preserve-lines">{{ runbook_detail.purpose or t("runbook.empty.text") }}</p>
+              <h3>{{ schema_fields_by_key.in_scope.label }}</h3>{% if runbook_detail.in_scope_list %}<ul>{% for item in runbook_detail.in_scope_list %}<li>{{ item }}</li>{% endfor %}</ul>{% else %}<p class="meta">{{ t("runbook.empty.collection") }}</p>{% endif %}
+              <h3>{{ schema_fields_by_key.out_of_scope.label }}</h3>{% if runbook_detail.out_of_scope_list %}<ul>{% for item in runbook_detail.out_of_scope_list %}<li>{{ item }}</li>{% endfor %}</ul>{% else %}<p class="meta">{{ t("runbook.empty.collection") }}</p>{% endif %}
+              <h3>{{ schema_fields_by_key.approval_requirement.label }}</h3><p class="preserve-lines">{{ runbook_detail.approval_requirement or t("runbook.empty.text") }}</p>
+            </section>
+            <section class="panel"><h2 class="section-title">{{ schema_fields_by_key.prerequisites.label }}</h2>{% if runbook_detail.prerequisites %}<ol>{% for entry in runbook_detail.prerequisites %}<li><strong>{{ entry.id }}</strong> — {{ entry.description }}</li>{% endfor %}</ol>{% else %}<p class="meta">{{ t("runbook.empty.collection") }}</p>{% endif %}</section>
+            <section class="panel"><h2 class="section-title">{{ schema_fields_by_key.steps.label }}</h2>{{ runbook_procedure(runbook_detail.steps) }}</section>
+            <section class="panel"><h2 class="section-title">{{ schema_fields_by_key.verification.label }}</h2>{% if runbook_detail.verification %}<ol>{% for entry in runbook_detail.verification %}<li><p>{{ entry.description }}</p><strong>{{ t("runbook.entry.success_expectation") }}:</strong> {{ entry.success_expectation }}</li>{% endfor %}</ol>{% else %}<p class="meta">{{ t("runbook.empty.collection") }}</p>{% endif %}</section>
+            <section class="panel"><h2 class="section-title">{{ schema_fields_by_key.rollback.label }}</h2><p class="meta">{{ t("runbook.rollback.help") }}</p>{{ runbook_procedure(runbook_detail.rollback) }}</section>
+            <section class="panel"><h2 class="section-title">{{ schema_fields_by_key.recovery.label }}</h2><p class="meta">{{ t("runbook.recovery.help") }}</p>{{ runbook_procedure(runbook_detail.recovery) }}</section>
+            <section class="panel"><h2 class="section-title">{{ t("runbook.section.relationships") }}</h2>{% for field in ["applies_to", "credential_references", "related_decisions", "related_projects", "related_runbooks", "supersedes"] %}<h3>{{ schema_fields_by_key[field].label }}</h3>{{ runbook_reference_list(runbook_detail[field ~ "_links"]) }}{% endfor %}{% if runbook_detail.superseded_by_link %}<h3>{{ schema_fields_by_key.superseded_by.label }}</h3>{{ runbook_reference_list([runbook_detail.superseded_by_link]) }}{% endif %}</section>
+            <section class="panel"><h2 class="section-title">{{ schema_fields_by_key.sources.label }}</h2>{% if runbook_detail.sources %}<ul>{% for source in runbook_detail.sources %}<li><strong>{{ source.title }}</strong>{% if source.safe_url %} · <a href="{{ source.safe_url }}" target="_blank" rel="noopener noreferrer">{{ t("runbook.source.open") }}</a>{% endif %}</li>{% endfor %}</ul>{% else %}<p class="meta">{{ t("runbook.empty.collection") }}</p>{% endif %}</section>
+          {% endif %}
+        {% endif %}
 
         {% if supports_project %}
           {% if edit_section == "project" %}

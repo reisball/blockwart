@@ -237,6 +237,7 @@ def test_builtin_schemas_preserve_unknown_fields_and_current_minimal_records() -
             "device": {"device": {"category": "sensor"}},
             "decision": {"decision_status": "proposed"},
             "project": {"category": "implementation", "project_status": "planned"},
+            "runbook": {"runbook_status": "draft", "approval_required": False},
         }.get(kind, {})
         record = CatalogObjectIn.model_validate(
             {
@@ -409,6 +410,7 @@ def test_runbook_schema_keeps_conditional_approval_rule() -> None:
                 "kind": "runbook",
                 "label": "Unsafe runbook",
                 "data": {
+                    "runbook_status": "draft",
                     "risk_level": "destructive",
                     "approval_required": False,
                 },

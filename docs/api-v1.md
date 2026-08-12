@@ -109,9 +109,11 @@ The list accepts:
 - `health`: `unknown`, `healthy`, `degraded`, `down`, or `maintenance`
 - `decision_status`: exact canonical Decision lifecycle value
 - `applies_to`: exact authorized asset `kind:id` in a Decision's canonical scope
+- `runbook_status`: exact canonical Runbook lifecycle value
+- `runbook_risk`: exact canonical Runbook risk value
 - `project_category`: exact canonical Project category
 - `project_status`: exact canonical Project lifecycle value
-- `related_object`: exact authorized `kind:id` in a Project's typed relationships
+- `related_object`: exact authorized `kind:id` in a Project or Runbook's typed relationships
 - `source_type`: `unknown`, `manual`, `import`, or `discovery`
 - `stale`: exact computed freshness state
 
@@ -123,6 +125,9 @@ Decision reference projections omit concealed targets, and `applies_to` returns
 no match when its target is not discoverable.
 Project reference projections follow the same rule. Project filters exclude discover-only stubs;
 a concealed or missing relationship target yields the same empty result.
+Runbook references and status/risk/relationship filters use that identical rule;
+steps, commands, verification, sources, credential references, and relationships
+are absent from discover-only stubs.
 Objects without `discover` are absent.
 
 The resolver loads one bounded catalog/relationship snapshot, applies the

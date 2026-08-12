@@ -33,6 +33,8 @@ deleted by this classification.
   dry-run-first legacy classification
 - [Canonical Project knowledge](projects.md), including category-specific results,
   evidence, typed links, and reviewed migration
+- [Canonical Runbook contracts / Kanonische Runbook-Verträge](runbooks.md), including
+  operating, rollback, recovery, authorization, and reviewed legacy migration
 - [Application read models](read-models.md) and [service
   interfaces](service-interfaces.md)
 - [Source coverage and import drift](source-coverage.md)

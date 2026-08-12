@@ -37,6 +37,7 @@ from blockwart.domain.relationships import (
     validate_relationship,
     validate_relationship_collection,
 )
+from blockwart.domain.runbooks import validate_runbook_integrity
 from blockwart.domain.timestamps import format_rfc3339_utc
 from blockwart.models import AuditEvent, CatalogObject, Relationship
 from blockwart.schemas.catalog import (
@@ -514,6 +515,14 @@ def upsert_object(
         validate_decision_integrity(
             session.scalars(
                 select(CatalogObject).where(CatalogObject.kind == "decision")
+            ).all(),
+            object_id=payload.id,
+            data=payload.data,
+        )
+    if payload.kind == "runbook":
+        validate_runbook_integrity(
+            session.scalars(
+                select(CatalogObject).where(CatalogObject.kind == "runbook")
             ).all(),
             object_id=payload.id,
             data=payload.data,

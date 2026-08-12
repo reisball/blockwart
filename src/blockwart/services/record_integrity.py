@@ -20,6 +20,8 @@ class _StoredCatalogObjectIn(CatalogObjectIn):
     allow_legacy_decision_data: ClassVar[bool] = True
     allow_legacy_project_without_category: ClassVar[bool] = True
     allow_legacy_project_data: ClassVar[bool] = True
+    allow_legacy_runbook_without_status: ClassVar[bool] = True
+    allow_legacy_runbook_data: ClassVar[bool] = True
 
 
 def read_catalog_record_data(

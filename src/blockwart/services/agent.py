@@ -33,13 +33,19 @@ from blockwart.domain.projects import (
     ProjectStatus,
     project_authorized_data,
     project_matches_filters,
-    validate_related_object_filter,
 )
 from blockwart.domain.provenance import (
     CatalogProvenanceOut,
     SourceType,
     load_provenance,
     provenance_for_read,
+)
+from blockwart.domain.runbooks import (
+    RunbookRisk,
+    RunbookStatus,
+    authorized_runbook_data,
+    runbook_matches_filters,
+    validate_runbook_related_object_filter,
 )
 from blockwart.domain.security import redact_secret_values
 from blockwart.domain.timestamps import format_rfc3339_utc
@@ -104,6 +110,8 @@ def query_agent_objects_page(
     status: str | None = None,
     decision_status: DecisionStatus | None = None,
     applies_to: str | None = None,
+    runbook_status: RunbookStatus | None = None,
+    runbook_risk: RunbookRisk | None = None,
     project_category: ProjectCategory | None = None,
     project_status: ProjectStatus | None = None,
     related_object: str | None = None,
@@ -132,6 +140,8 @@ def query_agent_objects_page(
         status=status,
         decision_status=decision_status,
         applies_to=applies_to,
+        runbook_status=runbook_status,
+        runbook_risk=runbook_risk,
         project_category=project_category,
         project_status=project_status,
         related_object=related_object,
@@ -171,6 +181,8 @@ def query_agent_context_page(
     status: str | None = None,
     decision_status: DecisionStatus | None = None,
     applies_to: str | None = None,
+    runbook_status: RunbookStatus | None = None,
+    runbook_risk: RunbookRisk | None = None,
     project_category: ProjectCategory | None = None,
     project_status: ProjectStatus | None = None,
     related_object: str | None = None,
@@ -199,6 +211,8 @@ def query_agent_context_page(
         status=status,
         decision_status=decision_status,
         applies_to=applies_to,
+        runbook_status=runbook_status,
+        runbook_risk=runbook_risk,
         project_category=project_category,
         project_status=project_status,
         related_object=related_object,
@@ -238,6 +252,8 @@ def search_agent_objects(
     status: str | None = None,
     decision_status: DecisionStatus | None = None,
     applies_to: str | None = None,
+    runbook_status: RunbookStatus | None = None,
+    runbook_risk: RunbookRisk | None = None,
     project_category: ProjectCategory | None = None,
     project_status: ProjectStatus | None = None,
     related_object: str | None = None,
@@ -261,6 +277,8 @@ def search_agent_objects(
         status=status,
         decision_status=decision_status,
         applies_to=applies_to,
+        runbook_status=runbook_status,
+        runbook_risk=runbook_risk,
         project_category=project_category,
         project_status=project_status,
         related_object=related_object,
@@ -357,6 +375,8 @@ def build_agent_context(
     status: str | None = None,
     decision_status: DecisionStatus | None = None,
     applies_to: str | None = None,
+    runbook_status: RunbookStatus | None = None,
+    runbook_risk: RunbookRisk | None = None,
     project_category: ProjectCategory | None = None,
     project_status: ProjectStatus | None = None,
     related_object: str | None = None,
@@ -380,6 +400,8 @@ def build_agent_context(
         status=status,
         decision_status=decision_status,
         applies_to=applies_to,
+        runbook_status=runbook_status,
+        runbook_risk=runbook_risk,
         project_category=project_category,
         project_status=project_status,
         related_object=related_object,
@@ -407,6 +429,8 @@ def _query_agent_rows_page(
     status: str | None,
     decision_status: DecisionStatus | None,
     applies_to: str | None,
+    runbook_status: RunbookStatus | None,
+    runbook_risk: RunbookRisk | None,
     project_category: ProjectCategory | None,
     project_status: ProjectStatus | None,
     related_object: str | None,
@@ -434,6 +458,8 @@ def _query_agent_rows_page(
         status=status,
         decision_status=decision_status,
         applies_to=applies_to,
+        runbook_status=runbook_status,
+        runbook_risk=runbook_risk,
         project_category=project_category,
         project_status=project_status,
         related_object=related_object,
@@ -469,6 +495,8 @@ def _query_agent_rows_page(
             "status": _normalized_filter(status),
             "decision_status": decision_status,
             "applies_to": applies_to,
+            "runbook_status": runbook_status,
+            "runbook_risk": runbook_risk,
             "project_category": project_category,
             "project_status": project_status,
             "related_object": related_object,
@@ -518,6 +546,8 @@ class _AgentCatalogResolver:
         status: str | None,
         decision_status: DecisionStatus | None,
         applies_to: str | None,
+        runbook_status: RunbookStatus | None,
+        runbook_risk: RunbookRisk | None,
         project_category: ProjectCategory | None,
         project_status: ProjectStatus | None,
         related_object: str | None,
@@ -539,7 +569,7 @@ class _AgentCatalogResolver:
         ):
             return []
         parsed_related_object = (
-            validate_related_object_filter(related_object)
+            validate_runbook_related_object_filter(related_object)
             if related_object is not None
             else None
         )
@@ -578,6 +608,8 @@ class _AgentCatalogResolver:
                     status
                     or decision_status
                     or applies_to
+                    or runbook_status
+                    or runbook_risk
                     or project_category
                     or project_status
                     or related_object
@@ -603,17 +635,37 @@ class _AgentCatalogResolver:
                     applies_to=applies_to,
                 ):
                     continue
+            if runbook_status is not None or runbook_risk is not None:
+                if obj.kind != "runbook" or not runbook_matches_filters(
+                    data,
+                    runbook_status=runbook_status,
+                    runbook_risk=runbook_risk,
+                    related_object=None,
+                ):
+                    continue
             if (
                 project_category is not None
                 or project_status is not None
                 or related_object is not None
             ):
-                if obj.kind != "project" or not project_matches_filters(
+                project_match = obj.kind == "project" and project_matches_filters(
                     data,
                     project_category=project_category,
                     project_status=project_status,
                     related_object=related_object,
-                ):
+                )
+                runbook_match = (
+                    project_category is None
+                    and project_status is None
+                    and obj.kind == "runbook"
+                    and runbook_matches_filters(
+                        data,
+                        runbook_status=runbook_status,
+                        runbook_risk=runbook_risk,
+                        related_object=related_object,
+                    )
+                )
+                if not project_match and not runbook_match:
                     continue
             if lifecycle and (state is None or state.lifecycle != lifecycle):
                 continue
@@ -671,6 +723,10 @@ class _AgentCatalogResolver:
             )
         if kind == "project":
             return project_authorized_data(data, can_discover=self._can_discover)
+        if kind == "runbook":
+            return authorized_runbook_data(
+                data, can_discover=self._can_discover
+            )
         return data
 
     def _can_discover(self, object_id: str) -> bool:
@@ -746,6 +802,21 @@ class _AgentCatalogResolver:
             related_assets=(
                 _string_list(projected_knowledge_data.get("related_assets"))
                 if obj.kind == "project"
+                else []
+            ),
+            runbook_status=(
+                projected_knowledge_data.get("runbook_status")
+                if obj.kind == "runbook"
+                else None
+            ),
+            runbook_risk=(
+                projected_knowledge_data.get("risk_level")
+                if obj.kind == "runbook"
+                else None
+            ),
+            runbook_applies_to=(
+                _string_list(projected_knowledge_data.get("applies_to"))
+                if obj.kind == "runbook"
                 else []
             ),
             placement_state=resolved_placement_state,

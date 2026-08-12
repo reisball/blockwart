@@ -985,7 +985,15 @@ def test_structured_ui_create_detail_noop_edit_and_supersession_round_trip(
             "project_status": "planned",
         },
     )
-    create_root("decision-runbook", "runbook", {"schema_version": 1})
+    create_root(
+        "decision-runbook",
+        "runbook",
+        {
+            "schema_version": 1,
+            "runbook_status": "draft",
+            "approval_required": False,
+        },
+    )
     create_root(
         "related-decision",
         "decision",

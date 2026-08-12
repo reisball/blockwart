@@ -86,7 +86,11 @@ def session_factory(alembic_session_factory):
                     id="v1-runbook",
                     kind="runbook",
                     label="V1 Runbook",
-                    data={"schema_version": 1},
+                    data={
+                        "schema_version": 1,
+                        "runbook_status": "draft",
+                        "approval_required": False,
+                    },
                     provenance={
                         "source_type": "import",
                         "source_ref": "runbook-export",

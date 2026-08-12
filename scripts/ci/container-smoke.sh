@@ -69,6 +69,16 @@ PY
   docker exec "$container" blockwart-db interfaces
   docker exec "$container" blockwart-db placements
   docker exec "$container" blockwart-db networks
+  local runbook_classification
+  if runbook_classification=$(docker exec "$container" blockwart-db runbooks 2>&1); then
+    printf 'legacy Runbook classification unexpectedly succeeded\n' >&2
+    return 1
+  fi
+  if [[ "$runbook_classification" != *"missing_runbook_status"* ]] || \
+     [[ "$runbook_classification" != *"database_runbooks_error"* ]]; then
+    printf '%s\n' "$runbook_classification" >&2
+    return 1
+  fi
 }
 
 docker image inspect "$IMAGE" >/dev/null
@@ -127,6 +137,21 @@ with engine.begin() as connection:
             "data_json": '{"schema_version":1,"future":{"preserve":true}}',
         },
     )
+    connection.execute(
+        text(
+            "INSERT INTO catalog_objects "
+            "(id, kind, label, status, summary, data_json) "
+            "VALUES (:id, :kind, :label, :status, :summary, :data_json)"
+        ),
+        {
+            "id": "ci-legacy-runbook",
+            "kind": "runbook",
+            "label": "CI Legacy Runbook",
+            "status": "active",
+            "summary": "Free-form legacy Runbook must survive migration unchanged.",
+            "data_json": '{"schema_version":1,"steps":["Preserve exactly."]}',
+        },
+    )
 engine.dispose()
 print(f"container_fixture=baseline revision={BASELINE_REVISION}")
 PY
@@ -163,9 +188,13 @@ with engine.connect() as connection:
     data_json = connection.execute(
         text("SELECT data_json FROM catalog_objects WHERE id = 'ci-legacy'")
     ).scalar_one()
+    runbook_data_json = connection.execute(
+        text("SELECT data_json FROM catalog_objects WHERE id = 'ci-legacy-runbook'")
+    ).scalar_one()
     integrity = connection.exec_driver_sql("PRAGMA integrity_check").scalar_one()
 engine.dispose()
 assert data_json == '{"schema_version":1,"future":{"preserve":true}}'
+assert runbook_data_json == '{"schema_version":1,"steps":["Preserve exactly."]}'
 assert integrity == "ok"
 print("container_migration=preserved integrity=ok")
 PY

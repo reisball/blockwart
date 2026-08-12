@@ -254,7 +254,7 @@ def test_index_shows_kind_counts(client: TestClient) -> None:
     assert '<html lang="en" data-view="catalog" data-page="catalog">' in response.text
     assert "Asset catalog" in response.text
     assert "All assets" in response.text
-    assert "<b>25</b>" in response.text
+    assert "<b>28</b>" in response.text
     assert "system" in response.text
     assert "network" in response.text
     assert "service" in response.text
@@ -262,7 +262,6 @@ def test_index_shows_kind_counts(client: TestClient) -> None:
     assert "kind=decision" in response.text
     assert 'value="project"' not in response.text
     assert 'value="runbook"' not in response.text
-    assert "credential_reference" not in response.text
     assert "Add asset" in response.text
     assert 'href="/?view=topology' in response.text
     assert 'href="/settings"' in response.text
@@ -555,6 +554,7 @@ def test_create_form_schema_gates_fields_by_type(client: TestClient) -> None:
         "network",
         "device",
         "service",
+        "runbook",
         "decision",
         "project",
     }
@@ -641,7 +641,7 @@ def test_schema_settings_type_matrix(
 
 
 def test_ui_schema_payload_matches_ui_object_kinds() -> None:
-    ui_kinds = {*PUBLIC_OBJECT_KINDS, "decision", "project"}
+    ui_kinds = {*PUBLIC_OBJECT_KINDS, "runbook", "decision", "project"}
     assert set(UI_SCHEMAS) == ui_kinds
     assert set(ui_schema_payload()) == ui_kinds
     for schema in UI_SCHEMAS.values():
@@ -1279,7 +1279,6 @@ def test_object_detail_shows_data_and_relationships(client: TestClient) -> None:
     assert "Outbound" in response.text
     assert "Access" in response.text
     assert "Credential-Referenzen" not in response.text
-    assert "credential_references" not in response.text
     assert "/objects/n8n-api-credential" not in response.text
     assert "Comment" in response.text
     assert "Audit" in response.text
@@ -2096,7 +2095,6 @@ def test_system_detail_labels_inherited_service_access(
     assert "service" in response.text
     assert "Demo Service" in response.text
     assert "http://192.168.50.210:8080" in response.text
-    assert "credential_references" not in response.text
 
 
 def test_panel_edit_forms_update_existing_network_and_access(

@@ -56,7 +56,11 @@ def _seed_query_graph(session: Session) -> None:
                 id="query-runbook",
                 kind="runbook",
                 label="Private Query Runbook",
-                data={"schema_version": 1},
+                data={
+                    "schema_version": 1,
+                    "runbook_status": "draft",
+                    "approval_required": False,
+                },
             ),
         ):
             upsert_object(session, payload)
@@ -99,14 +103,16 @@ def test_application_queries_build_catalog_relationship_audit_and_topology_model
         "query-host",
         "query-system",
         "query-service",
+        "query-runbook",
     ]
     assert browse.object_counts == {
         "host": 1,
         "system": 1,
         "service": 1,
+        "runbook": 1,
     }
     assert browse.health_counts == {"unknown": 3}
-    assert browse.total_objects == 3
+    assert browse.total_objects == 4
     assert [catalog_object.id for catalog_object in filtered.objects] == [
         "query-service"
     ]
@@ -117,6 +123,7 @@ def test_application_queries_build_catalog_relationship_audit_and_topology_model
         "query-host",
         "query-system",
         "query-service",
+        "query-runbook",
     ]
     assert browse.display_names["query-host"] == "query-host.local"
     assert browse.explorer["clusters"][0]["host"]["ref"] == "host:query-host"
@@ -163,7 +170,7 @@ def test_application_queries_build_catalog_relationship_audit_and_topology_model
     )
     assert detail.audit_events
     assert detail.audit_events[0]["created_at"].endswith("Z")
-    assert "query-runbook" not in {
+    assert "query-runbook" in {
         candidate.id for candidate in detail.relationship_targets
     }
     assert missing is None
@@ -218,7 +225,7 @@ def test_catalog_browse_query_has_a_bounded_select_count(
             capture_selects,
         )
 
-    assert browse.total_objects == 3
+    assert browse.total_objects == 4
     assert 0 < len(select_statements) <= 4
 
 

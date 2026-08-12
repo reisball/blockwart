@@ -46,9 +46,11 @@ Query parameters:
 - health: optional exact `unknown`, `healthy`, `degraded`, `down`, or `maintenance`
 - decision_status: optional exact canonical Decision lifecycle value
 - applies_to: optional exact authorized asset `kind:id` Decision scope
+- runbook_status: optional exact canonical Runbook lifecycle value
+- runbook_risk: optional exact canonical Runbook risk value
 - project_category: optional exact canonical Project category
 - project_status: optional exact canonical Project lifecycle value
-- related_object: optional exact authorized Project relationship `kind:id`
+- related_object: optional exact authorized Project or Runbook relationship `kind:id`
 - source_type: optional exact `unknown`, `manual`, `import`, or `discovery`
 - stale: optional exact computed freshness state
 - limit: optional result limit, 1..50, default 10
@@ -115,7 +117,9 @@ Query parameters:
 - q: optional search term
 - kind: optional object kind filter
 - parent, ip, port, endpoint_type, protocol, exposure, status, lifecycle,
-  health, decision_status, applies_to, source_type, stale: same structured filters as search
+  health, decision_status, applies_to, runbook_status, runbook_risk,
+  project_category, project_status, related_object, source_type, stale: same
+  structured filters as search
 - limit: optional object limit, 1..20, default 5
 
 Search and context use the same resolver and filter semantics. All Agent API

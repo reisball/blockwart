@@ -120,6 +120,17 @@ CREDENTIAL_ACCESS_TYPES = frozenset(
 RUNBOOK_RISK_LEVELS = frozenset(
     {"read-only", "safe-change", "disruptive", "destructive"}
 )
+RUNBOOK_STATUS_VALUES = (
+    "draft",
+    "approved",
+    "active",
+    "deprecated",
+    "superseded",
+    "retired",
+)
+RUNBOOK_STATUSES = frozenset(RUNBOOK_STATUS_VALUES)
+RUNBOOK_CHANGE_FALLBACK_VALUES = ("rollback", "recovery", "no_rollback")
+RUNBOOK_CHANGE_FALLBACKS = frozenset(RUNBOOK_CHANGE_FALLBACK_VALUES)
 DEVICE_CATEGORIES = frozenset(
     {"antenna", "sensor", "adapter", "controller", "ups", "other"}
 )
@@ -355,6 +366,8 @@ def validate_object_data(
     allow_legacy_decision_data: bool = False,
     allow_legacy_project_without_category: bool = False,
     allow_legacy_project_data: bool = False,
+    allow_legacy_runbook_without_status: bool = False,
+    allow_legacy_runbook_data: bool = False,
 ) -> None:
     schema = BUILTIN_SCHEMAS[kind]
     fields = schema.fields
@@ -372,6 +385,8 @@ def validate_object_data(
         allow_legacy_decision_data=allow_legacy_decision_data,
         allow_legacy_project_without_category=allow_legacy_project_without_category,
         allow_legacy_project_data=allow_legacy_project_data,
+        allow_legacy_runbook_without_status=allow_legacy_runbook_without_status,
+        allow_legacy_runbook_data=allow_legacy_runbook_data,
     ):
         validate_fields(
             data,
@@ -382,6 +397,21 @@ def validate_object_data(
             ),
         )
         return
+    if kind == "runbook" and "runbook_status" not in data:
+        # Keep precise public errors for malformed references and forbidden
+        # asset fields without changing validation order for any other kind.
+        validate_fields(
+            data,
+            tuple(
+                field
+                for field in fields
+                if field.field_type == "reference"
+                or field.forbidden_message is not None
+            ),
+        )
+        # Preserve the historical loose-shape diagnostic before the canonical
+        # pass below requires runbook_status on every rewrite.
+        validate_fields(data, LEGACY_RUNBOOK_SUBMISSION_FIELDS)
     validate_fields(data, fields)
     for rule in schema.rules:
         rule(data)
@@ -395,6 +425,8 @@ def _reads_as_legacy_knowledge_row(
     allow_legacy_decision_data: bool,
     allow_legacy_project_without_category: bool,
     allow_legacy_project_data: bool,
+    allow_legacy_runbook_without_status: bool,
+    allow_legacy_runbook_data: bool,
 ) -> bool:
     """Whether this read may fall back to the tolerant legacy field set.
 
@@ -409,6 +441,10 @@ def _reads_as_legacy_knowledge_row(
     if kind == "project":
         return allow_legacy_project_data or (
             allow_legacy_project_without_category and "category" not in data
+        )
+    if kind == "runbook":
+        return allow_legacy_runbook_data or (
+            allow_legacy_runbook_without_status and "runbook_status" not in data
         )
     return False
 
@@ -1084,14 +1120,10 @@ CREDENTIAL_REFERENCE_FIELDS = (
     ),
 )
 
-RUNBOOK_FIELDS = (
-    _field(
-        "risk_level",
-        "enum",
-        enum_values=RUNBOOK_RISK_LEVELS,
-        message="must be a supported runbook risk level",
-    ),
-    _field("approval_required", "boolean"),
+RUNBOOK_PROCEDURE_KEYS = frozenset(
+    {"id", "title", "description", "command", "expected_effect"}
+)
+LEGACY_RUNBOOK_SUBMISSION_FIELDS = (
     _field("steps", "array"),
     _field("steps[]", "string_or_object"),
     _field("verification", "array"),
@@ -1100,11 +1132,151 @@ RUNBOOK_FIELDS = (
     _field("prerequisites[]", "string_or_object"),
     _field("docs", "array"),
     _field("docs[]", "string_or_object"),
-    _field("applies_to", "object"),
-    *_reference_list("applies_to.systems", "system"),
-    *_reference_list("applies_to.services", "service"),
+)
+
+
+def _runbook_procedure(path: str, *, max_items: int) -> tuple[FieldSpec, ...]:
+    """Declare ordered inert instruction entries from the Runbook contract."""
+    return (
+        _field(path, "array", max_items=max_items),
+        _field(f"{path}[]", "object", allowed_keys=RUNBOOK_PROCEDURE_KEYS),
+        _entry_id(f"{path}[].id"),
+        _field(
+            f"{path}[].title",
+            "text",
+            strip_whitespace=True,
+            min_length=1,
+            max_length=200,
+        ),
+        _field(
+            f"{path}[].description",
+            "text",
+            strip_whitespace=True,
+            min_length=1,
+            max_length=4000,
+        ),
+        # Deliberately no whitespace normalization: command text is an inert,
+        # byte-for-byte stored instruction, never an executable field.
+        _field(f"{path}[].command", "text", min_length=1, max_length=16000),
+        _field(
+            f"{path}[].expected_effect",
+            "text",
+            required_in_item=True,
+            strip_whitespace=True,
+            min_length=1,
+            max_length=4000,
+        ),
+    )
+
+
+RUNBOOK_FIELDS = (
+    _field(
+        "runbook_status",
+        "enum",
+        required=True,
+        enum_values=RUNBOOK_STATUSES,
+        message="must be a supported runbook status",
+    ),
+    _field("purpose", "text", strip_whitespace=True, max_length=4000),
+    *_text_list("in_scope"),
+    *_text_list("out_of_scope"),
+    _field(
+        "risk_level",
+        "enum",
+        enum_values=RUNBOOK_RISK_LEVELS,
+        message="must be a supported runbook risk level",
+    ),
+    _field("approval_required", "boolean", required=True),
+    _field(
+        "approval_requirement",
+        "text",
+        strip_whitespace=True,
+        min_length=1,
+        max_length=2000,
+    ),
+    _field("prerequisites", "array", max_items=100),
+    _field(
+        "prerequisites[]",
+        "object",
+        allowed_keys=frozenset({"id", "description"}),
+    ),
+    _entry_id("prerequisites[].id"),
+    _field(
+        "prerequisites[].description",
+        "text",
+        required_in_item=True,
+        strip_whitespace=True,
+        min_length=1,
+        max_length=4000,
+    ),
+    *_runbook_procedure("steps", max_items=200),
+    _field("verification", "array", max_items=100),
+    _field(
+        "verification[]",
+        "object",
+        allowed_keys=frozenset({"id", "description", "success_expectation"}),
+    ),
+    _entry_id("verification[].id"),
+    _field(
+        "verification[].description",
+        "text",
+        required_in_item=True,
+        strip_whitespace=True,
+        min_length=1,
+        max_length=4000,
+    ),
+    _field(
+        "verification[].success_expectation",
+        "text",
+        required_in_item=True,
+        strip_whitespace=True,
+        min_length=1,
+        max_length=4000,
+    ),
+    *_runbook_procedure("rollback", max_items=100),
+    *_runbook_procedure("recovery", max_items=100),
+    _field(
+        "change_fallback",
+        "enum",
+        enum_values=RUNBOOK_CHANGE_FALLBACKS,
+        message="must be rollback, recovery, or no_rollback",
+    ),
+    _field(
+        "change_fallback_rationale",
+        "text",
+        strip_whitespace=True,
+        min_length=1,
+        max_length=4000,
+    ),
+    _field(
+        "deprecation_rationale",
+        "text",
+        strip_whitespace=True,
+        min_length=1,
+        max_length=4000,
+    ),
+    _field(
+        "successor_recommendation",
+        "text",
+        strip_whitespace=True,
+        min_length=1,
+        max_length=4000,
+    ),
+    *_reference_list("applies_to", "host", "system", "network", "device", "service"),
     *_reference_list("credential_references", "credential_reference"),
     *_reference_list("related_decisions", "decision"),
+    *_reference_list("related_projects", "project"),
+    *_reference_list("related_runbooks", "runbook"),
+    *_reference_list("supersedes", "runbook"),
+    _field("superseded_by", "reference", reference_kinds=frozenset({"runbook"})),
+    *_source_entries(
+        "sources",
+        max_items=50,
+        identified=True,
+        retrieval_metadata=True,
+    ),
+    _field("last_verified_at", "datetime"),
+    _field("review_after", "datetime"),
 )
 
 DECISION_FIELDS = (
@@ -1434,17 +1606,171 @@ def _reject_credential_value_keys(
             _reject_credential_value_keys(child_value, f"{path}[{index}]")
 
 
-def _validate_runbook_approval(data: Mapping[str, Any]) -> None:
-    if (
-        data.get("risk_level") in {"disruptive", "destructive"}
-        and data.get("approval_required") is False
+def _require_runbook_conditional_fields(data: Mapping[str, Any]) -> None:
+    """Require lifecycle, approval, and change-control fields as one contract."""
+    rule = public_rule_name(_require_runbook_conditional_fields)
+    status = data.get("runbook_status")
+    if status in {"approved", "active"}:
+        for field_name in (
+            "purpose",
+            "risk_level",
+            "prerequisites",
+            "steps",
+            "verification",
+            "last_verified_at",
+        ):
+            value = data.get(field_name)
+            if value is None or value == "" or value == []:
+                raise ObjectSchemaError(
+                    f"data.{field_name}",
+                    f"is required for {status} runbooks",
+                    violation=VIOLATION_REQUIRED_FIELD_MISSING,
+                    rule=rule,
+                )
+
+    approval_required = data.get("approval_required")
+    if approval_required is True and not _nonblank_text(
+        data.get("approval_requirement")
     ):
         raise ObjectSchemaError(
-            "data.approval_required",
-            "must be true for disruptive or destructive runbooks",
-            violation=VIOLATION_RULE_VIOLATION,
-            rule=public_rule_name(_validate_runbook_approval),
+            "data.approval_requirement",
+            "is required when approval is required",
+            violation=VIOLATION_REQUIRED_FIELD_MISSING,
+            rule=rule,
         )
+
+    risk = data.get("risk_level")
+    if risk in {"disruptive", "destructive"}:
+        if approval_required is not True:
+            raise ObjectSchemaError(
+                "data.approval_required",
+                "must be true for disruptive or destructive runbooks",
+                violation=VIOLATION_REQUIRED_FIELD_MISSING,
+                rule=rule,
+            )
+        if not data.get("rollback") and not data.get("recovery"):
+            raise ObjectSchemaError(
+                "data.rollback",
+                "or data.recovery must be nonempty for disruptive or destructive runbooks",
+                violation=VIOLATION_REQUIRED_FIELD_MISSING,
+                rule=rule,
+            )
+
+    if risk in {"safe-change", "disruptive", "destructive"}:
+        fallback = data.get("change_fallback")
+        if fallback is None:
+            raise ObjectSchemaError(
+                "data.change_fallback",
+                "is required for change runbooks",
+                violation=VIOLATION_REQUIRED_FIELD_MISSING,
+                rule=rule,
+            )
+        if fallback == "rollback" and not data.get("rollback"):
+            raise ObjectSchemaError(
+                "data.rollback",
+                "must be nonempty when change_fallback is rollback",
+                violation=VIOLATION_REQUIRED_FIELD_MISSING,
+                rule=rule,
+            )
+        if fallback == "recovery" and not data.get("recovery"):
+            raise ObjectSchemaError(
+                "data.recovery",
+                "must be nonempty when change_fallback is recovery",
+                violation=VIOLATION_REQUIRED_FIELD_MISSING,
+                rule=rule,
+            )
+        if fallback in {"recovery", "no_rollback"} and not _nonblank_text(
+            data.get("change_fallback_rationale")
+        ):
+            raise ObjectSchemaError(
+                "data.change_fallback_rationale",
+                f"is required when change_fallback is {fallback}",
+                violation=VIOLATION_REQUIRED_FIELD_MISSING,
+                rule=rule,
+            )
+
+    if status == "deprecated" and not (
+        _nonblank_text(data.get("deprecation_rationale"))
+        or _nonblank_text(data.get("successor_recommendation"))
+    ):
+        raise ObjectSchemaError(
+            "data.deprecation_rationale",
+            "or data.successor_recommendation is required for deprecated runbooks",
+            violation=VIOLATION_REQUIRED_FIELD_MISSING,
+            rule=rule,
+        )
+    if status == "superseded" and "superseded_by" not in data:
+        raise ObjectSchemaError(
+            "data.superseded_by",
+            "is required for superseded runbooks",
+            violation=VIOLATION_REQUIRED_FIELD_MISSING,
+            rule=rule,
+        )
+
+
+def _reject_runbook_contradictions(data: Mapping[str, Any]) -> None:
+    """Reject combinations whose stored meaning would be ambiguous."""
+    rule = public_rule_name(_reject_runbook_contradictions)
+    if data.get("approval_required") is False and "approval_requirement" in data:
+        raise ObjectSchemaError(
+            "data.approval_requirement",
+            "is allowed only when approval_required is true",
+            violation=VIOLATION_FIELD_NOT_ALLOWED,
+            rule=rule,
+        )
+    if (
+        data.get("change_fallback") == "no_rollback"
+        and data.get("risk_level") in {"disruptive", "destructive"}
+    ):
+        raise ObjectSchemaError(
+            "data.change_fallback",
+            "no_rollback is not allowed for disruptive or destructive runbooks",
+            violation=VIOLATION_FIELD_NOT_ALLOWED,
+            rule=rule,
+        )
+
+
+def _validate_runbook_entries(data: Mapping[str, Any]) -> None:
+    """Keep local ids unique and instruction/command content unambiguous."""
+    rule = public_rule_name(_validate_runbook_entries)
+    for path in ("prerequisites", "steps", "verification", "rollback", "recovery", "sources"):
+        _unique_entry_ids(data.get(path), f"data.{path}", rule=rule)
+    for path in ("steps", "rollback", "recovery"):
+        entries = data.get(path)
+        if not isinstance(entries, list):
+            continue
+        for index, entry in enumerate(entries):
+            if not isinstance(entry, Mapping):
+                continue
+            if not (
+                _nonblank_text(entry.get("title"))
+                or _nonblank_text(entry.get("description"))
+            ):
+                raise ObjectSchemaError(
+                    f"data.{path}[{index}].description",
+                    "or title must be nonblank",
+                    violation=VIOLATION_VALUE_NOT_ALLOWED,
+                    rule=rule,
+                )
+            command = entry.get("command")
+            if isinstance(command, str) and not command.strip():
+                raise ObjectSchemaError(
+                    f"data.{path}[{index}].command",
+                    "must not be blank",
+                    violation=VIOLATION_VALUE_NOT_ALLOWED,
+                    rule=rule,
+                )
+
+
+def _validate_runbook_timestamp_order(data: Mapping[str, Any]) -> None:
+    rule = public_rule_name(_validate_runbook_timestamp_order)
+    verified = _parse_rfc3339(data.get("last_verified_at"))
+    review = _parse_rfc3339(data.get("review_after"))
+    _require_order("data.review_after", verified, review, rule=rule)
+
+
+def _nonblank_text(value: Any) -> bool:
+    return isinstance(value, str) and bool(value.strip())
 
 
 def _validate_decision_lifecycle(data: Mapping[str, Any]) -> None:
@@ -1848,9 +2174,24 @@ SCHEMA_RULE_CONTRACTS: Mapping[str, str] = MappingProxyType(
         "_reject_credential_value_keys": (
             "No key anywhere below data may name a raw credential or secret value."
         ),
-        "_validate_runbook_approval": (
-            "data.approval_required must be true when data.risk_level is "
-            "disruptive or destructive."
+        "_require_runbook_conditional_fields": (
+            "Approved and active runbooks require purpose, risk_level, nonempty "
+            "prerequisites, steps, verification, and last_verified_at. Approval "
+            "requirements, disruptive/destructive fallback procedures, change "
+            "fallback selection and rationale, deprecated rationale or successor "
+            "recommendation, and superseded successor links are conditionally required."
+        ),
+        "_reject_runbook_contradictions": (
+            "approval_requirement is allowed only when approval_required is true, "
+            "and disruptive or destructive runbooks cannot declare no_rollback."
+        ),
+        "_validate_runbook_entries": (
+            "Prerequisite, instruction, verification, rollback, recovery, and source "
+            "ids are unique within their ordered collection; each procedure entry "
+            "has a nonblank title or description; inert command text cannot be blank."
+        ),
+        "_validate_runbook_timestamp_order": (
+            "review_after must not precede last_verified_at."
         ),
         "_validate_decision_lifecycle": (
             "Accepted decisions require nonblank context, decision, rationale, and "
@@ -1902,7 +2243,10 @@ SCHEMA_RULE_CONTRACTS: Mapping[str, str] = MappingProxyType(
 SCHEMA_RULE_VIOLATIONS: Mapping[str, str] = MappingProxyType(
     {
         "_reject_credential_value_keys": VIOLATION_FORBIDDEN_KEY,
-        "_validate_runbook_approval": VIOLATION_RULE_VIOLATION,
+        "_require_runbook_conditional_fields": VIOLATION_REQUIRED_FIELD_MISSING,
+        "_reject_runbook_contradictions": VIOLATION_FIELD_NOT_ALLOWED,
+        "_validate_runbook_entries": VIOLATION_VALUE_NOT_ALLOWED,
+        "_validate_runbook_timestamp_order": VIOLATION_VALUE_OUT_OF_RANGE,
         "_validate_decision_lifecycle": VIOLATION_REQUIRED_FIELD_MISSING,
         "_require_project_conditional_fields": VIOLATION_REQUIRED_FIELD_MISSING,
         "_reject_project_contradictory_fields": VIOLATION_FIELD_NOT_ALLOWED,
@@ -2008,7 +2352,13 @@ BUILTIN_SCHEMAS: Mapping[str, TypeSchema] = MappingProxyType(
             "runbook",
             *RUNBOOK_FIELDS,
             *INSTALLED_SOFTWARE_FORBIDDEN_FIELDS,
-            rules=(_validate_runbook_approval,),
+            rules=(
+                _reject_credential_value_keys,
+                _require_runbook_conditional_fields,
+                _reject_runbook_contradictions,
+                _validate_runbook_entries,
+                _validate_runbook_timestamp_order,
+            ),
         ),
         "decision": _schema(
             "decision",

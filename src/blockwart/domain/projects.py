@@ -52,7 +52,7 @@ PROJECT_SOURCE_TYPE_VALUES = tuple(
 )
 # One exact `kind:id` reference naming any object a Project may point at.
 RELATED_OBJECT_PATTERN = (
-    r"^(host|system|network|device|service|runbook|decision|project):[^:]+$"
+    r"^(host|system|network|device|service|credential_reference|runbook|decision|project):[^:]+$"
 )
 RELATED_OBJECT_MAX_LENGTH = 192
 

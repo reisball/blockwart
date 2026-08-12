@@ -29,6 +29,7 @@ from blockwart.domain.relationships import (
     validate_relationship_collection,
     validate_relationship_metadata,
 )
+from blockwart.domain.runbooks import iter_runbook_references
 from blockwart.domain.security import redact_secret_values
 from blockwart.models import (
     CatalogObject,
@@ -1318,7 +1319,10 @@ def _require_knowledge_reference_access(
     same public command error. The projected object may name itself here so the
     canonical supersession graph validator can report the self-link rule.
     """
-    if payload.kind == "decision":
+    if payload.kind == "runbook":
+        references = iter_runbook_references(payload.data)
+        message = "runbook reference target not found"
+    elif payload.kind == "decision":
         references = iter_decision_references(payload.data)
         message = "decision reference target not found"
     elif payload.kind == "project":

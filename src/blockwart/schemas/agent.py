@@ -8,6 +8,7 @@ from blockwart.domain.decisions import DecisionStatus
 from blockwart.domain.placement import PlacementState
 from blockwart.domain.projects import ProjectCategory, ProjectStatus
 from blockwart.domain.provenance import CatalogProvenanceOut
+from blockwart.domain.runbooks import RunbookRisk, RunbookStatus
 from blockwart.schemas.catalog import CatalogRecordDiagnostic, ObjectKind
 from blockwart.schemas.comments import CommentOut
 
@@ -69,6 +70,9 @@ class AgentCatalogObjectSummary(BaseModel):
     project_category: ProjectCategory | None = None
     project_status: ProjectStatus | None = None
     related_assets: list[str] = Field(default_factory=list)
+    runbook_status: RunbookStatus | None = None
+    runbook_risk: RunbookRisk | None = None
+    runbook_applies_to: list[str] = Field(default_factory=list)
     placement_state: PlacementState | None = None
     record_state: Literal["valid", "corrupt"] = "valid"
     diagnostics: list[CatalogRecordDiagnostic] = Field(default_factory=list)

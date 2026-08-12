@@ -423,6 +423,49 @@
             "title": "Revision",
             "type": "integer"
           },
+          "runbook_applies_to": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Runbook Applies To",
+            "type": "array"
+          },
+          "runbook_risk": {
+            "anyOf": [
+              {
+                "enum": [
+                  "read-only",
+                  "safe-change",
+                  "disruptive",
+                  "destructive"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Runbook Risk"
+          },
+          "runbook_status": {
+            "anyOf": [
+              {
+                "enum": [
+                  "draft",
+                  "approved",
+                  "active",
+                  "deprecated",
+                  "superseded",
+                  "retired"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Runbook Status"
+          },
           "source_references": {
             "items": {
               "additionalProperties": true,
@@ -792,6 +835,49 @@
             "minimum": 1.0,
             "title": "Revision",
             "type": "integer"
+          },
+          "runbook_applies_to": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Runbook Applies To",
+            "type": "array"
+          },
+          "runbook_risk": {
+            "anyOf": [
+              {
+                "enum": [
+                  "read-only",
+                  "safe-change",
+                  "disruptive",
+                  "destructive"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Runbook Risk"
+          },
+          "runbook_status": {
+            "anyOf": [
+              {
+                "enum": [
+                  "draft",
+                  "approved",
+                  "active",
+                  "deprecated",
+                  "superseded",
+                  "retired"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Runbook Status"
           },
           "status": {
             "title": "Status",
@@ -5603,6 +5689,52 @@
           },
           {
             "in": "query",
+            "name": "runbook_status",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "draft",
+                    "approved",
+                    "active",
+                    "deprecated",
+                    "superseded",
+                    "retired"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Runbook Status"
+            }
+          },
+          {
+            "in": "query",
+            "name": "runbook_risk",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "read-only",
+                    "safe-change",
+                    "disruptive",
+                    "destructive"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Runbook Risk"
+            }
+          },
+          {
+            "in": "query",
             "name": "project_category",
             "required": false,
             "schema": {
@@ -5650,7 +5782,7 @@
             }
           },
           {
-            "description": "Exact authorized kind:id Project relationship target",
+            "description": "Exact authorized kind:id Project or Runbook relationship target",
             "in": "query",
             "name": "related_object",
             "required": false,
@@ -5658,14 +5790,14 @@
               "anyOf": [
                 {
                   "maxLength": 192,
-                  "pattern": "^(host|system|network|device|service|runbook|decision|project):[^:]+$",
+                  "pattern": "^(host|system|network|device|service|credential_reference|runbook|decision|project):[^:]+$",
                   "type": "string"
                 },
                 {
                   "type": "null"
                 }
               ],
-              "description": "Exact authorized kind:id Project relationship target",
+              "description": "Exact authorized kind:id Project or Runbook relationship target",
               "title": "Related Object"
             }
           },
@@ -6375,6 +6507,52 @@
           },
           {
             "in": "query",
+            "name": "runbook_status",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "draft",
+                    "approved",
+                    "active",
+                    "deprecated",
+                    "superseded",
+                    "retired"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Runbook Status"
+            }
+          },
+          {
+            "in": "query",
+            "name": "runbook_risk",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "read-only",
+                    "safe-change",
+                    "disruptive",
+                    "destructive"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Runbook Risk"
+            }
+          },
+          {
+            "in": "query",
             "name": "project_category",
             "required": false,
             "schema": {
@@ -6422,7 +6600,7 @@
             }
           },
           {
-            "description": "Exact authorized kind:id Project relationship target",
+            "description": "Exact authorized kind:id Project or Runbook relationship target",
             "in": "query",
             "name": "related_object",
             "required": false,
@@ -6430,14 +6608,14 @@
               "anyOf": [
                 {
                   "maxLength": 192,
-                  "pattern": "^(host|system|network|device|service|runbook|decision|project):[^:]+$",
+                  "pattern": "^(host|system|network|device|service|credential_reference|runbook|decision|project):[^:]+$",
                   "type": "string"
                 },
                 {
                   "type": "null"
                 }
               ],
-              "description": "Exact authorized kind:id Project relationship target",
+              "description": "Exact authorized kind:id Project or Runbook relationship target",
               "title": "Related Object"
             }
           },
@@ -9430,6 +9608,52 @@
           },
           {
             "in": "query",
+            "name": "runbook_status",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "draft",
+                    "approved",
+                    "active",
+                    "deprecated",
+                    "superseded",
+                    "retired"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Runbook Status"
+            }
+          },
+          {
+            "in": "query",
+            "name": "runbook_risk",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "read-only",
+                    "safe-change",
+                    "disruptive",
+                    "destructive"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Runbook Risk"
+            }
+          },
+          {
+            "in": "query",
             "name": "project_category",
             "required": false,
             "schema": {
@@ -9477,7 +9701,7 @@
             }
           },
           {
-            "description": "Exact authorized kind:id Project relationship target",
+            "description": "Exact authorized kind:id Project or Runbook relationship target",
             "in": "query",
             "name": "related_object",
             "required": false,
@@ -9485,14 +9709,14 @@
               "anyOf": [
                 {
                   "maxLength": 192,
-                  "pattern": "^(host|system|network|device|service|runbook|decision|project):[^:]+$",
+                  "pattern": "^(host|system|network|device|service|credential_reference|runbook|decision|project):[^:]+$",
                   "type": "string"
                 },
                 {
                   "type": "null"
                 }
               ],
-              "description": "Exact authorized kind:id Project relationship target",
+              "description": "Exact authorized kind:id Project or Runbook relationship target",
               "title": "Related Object"
             }
           },
@@ -10152,6 +10376,52 @@
           },
           {
             "in": "query",
+            "name": "runbook_status",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "draft",
+                    "approved",
+                    "active",
+                    "deprecated",
+                    "superseded",
+                    "retired"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Runbook Status"
+            }
+          },
+          {
+            "in": "query",
+            "name": "runbook_risk",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "read-only",
+                    "safe-change",
+                    "disruptive",
+                    "destructive"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Runbook Risk"
+            }
+          },
+          {
+            "in": "query",
             "name": "project_category",
             "required": false,
             "schema": {
@@ -10199,7 +10469,7 @@
             }
           },
           {
-            "description": "Exact authorized kind:id Project relationship target",
+            "description": "Exact authorized kind:id Project or Runbook relationship target",
             "in": "query",
             "name": "related_object",
             "required": false,
@@ -10207,14 +10477,14 @@
               "anyOf": [
                 {
                   "maxLength": 192,
-                  "pattern": "^(host|system|network|device|service|runbook|decision|project):[^:]+$",
+                  "pattern": "^(host|system|network|device|service|credential_reference|runbook|decision|project):[^:]+$",
                   "type": "string"
                 },
                 {
                   "type": "null"
                 }
               ],
-              "description": "Exact authorized kind:id Project relationship target",
+              "description": "Exact authorized kind:id Project or Runbook relationship target",
               "title": "Related Object"
             }
           },
@@ -18054,6 +18324,111 @@
               ]
             },
             {
+              "constraint": "must be a supported runbook status",
+              "enum": [
+                "active",
+                "approved",
+                "deprecated",
+                "draft",
+                "retired",
+                "superseded"
+              ],
+              "json_types": [
+                "string"
+              ],
+              "normalization": [],
+              "path": "runbook_status",
+              "requirement": "required",
+              "type": "enum",
+              "violations": [
+                "required_field_missing",
+                "value_not_allowed"
+              ]
+            },
+            {
+              "format": "multiline-text",
+              "json_types": [
+                "string"
+              ],
+              "max_length": 4000,
+              "normalization": [
+                "strip_whitespace"
+              ],
+              "path": "purpose",
+              "requirement": "optional",
+              "type": "text",
+              "violations": [
+                "type_mismatch",
+                "value_too_long"
+              ]
+            },
+            {
+              "json_types": [
+                "array"
+              ],
+              "max_items": 50,
+              "normalization": [],
+              "path": "in_scope",
+              "requirement": "optional",
+              "type": "array",
+              "violations": [
+                "type_mismatch",
+                "value_out_of_range"
+              ]
+            },
+            {
+              "format": "multiline-text",
+              "json_types": [
+                "string"
+              ],
+              "max_length": 2000,
+              "min_length": 1,
+              "normalization": [
+                "strip_whitespace"
+              ],
+              "path": "in_scope[]",
+              "requirement": "optional",
+              "type": "text",
+              "violations": [
+                "type_mismatch",
+                "value_too_long",
+                "value_too_short"
+              ]
+            },
+            {
+              "json_types": [
+                "array"
+              ],
+              "max_items": 50,
+              "normalization": [],
+              "path": "out_of_scope",
+              "requirement": "optional",
+              "type": "array",
+              "violations": [
+                "type_mismatch",
+                "value_out_of_range"
+              ]
+            },
+            {
+              "format": "multiline-text",
+              "json_types": [
+                "string"
+              ],
+              "max_length": 2000,
+              "min_length": 1,
+              "normalization": [
+                "strip_whitespace"
+              ],
+              "path": "out_of_scope[]",
+              "requirement": "optional",
+              "type": "text",
+              "violations": [
+                "type_mismatch",
+                "value_too_long",
+                "value_too_short"
+              ]
+            },
+            {
               "constraint": "must be a supported runbook risk level",
               "enum": [
                 "destructive",
@@ -18078,122 +18453,666 @@
               ],
               "normalization": [],
               "path": "approval_required",
-              "requirement": "optional",
+              "requirement": "required",
               "type": "boolean",
               "violations": [
+                "required_field_missing",
                 "type_mismatch"
               ]
             },
             {
+              "format": "multiline-text",
               "json_types": [
-                "array"
-              ],
-              "normalization": [],
-              "path": "steps",
-              "requirement": "optional",
-              "type": "array",
-              "violations": [
-                "type_mismatch"
-              ]
-            },
-            {
-              "json_types": [
-                "object",
                 "string"
               ],
-              "normalization": [],
-              "path": "steps[]",
+              "max_length": 2000,
+              "min_length": 1,
+              "normalization": [
+                "strip_whitespace"
+              ],
+              "path": "approval_requirement",
               "requirement": "optional",
-              "type": "string_or_object",
+              "type": "text",
               "violations": [
-                "type_mismatch"
+                "type_mismatch",
+                "value_too_long",
+                "value_too_short"
               ]
             },
             {
               "json_types": [
                 "array"
               ],
-              "normalization": [],
-              "path": "verification",
-              "requirement": "optional",
-              "type": "array",
-              "violations": [
-                "type_mismatch"
-              ]
-            },
-            {
-              "json_types": [
-                "object",
-                "string"
-              ],
-              "normalization": [],
-              "path": "verification[]",
-              "requirement": "optional",
-              "type": "string_or_object",
-              "violations": [
-                "type_mismatch"
-              ]
-            },
-            {
-              "json_types": [
-                "array"
-              ],
+              "max_items": 100,
               "normalization": [],
               "path": "prerequisites",
               "requirement": "optional",
               "type": "array",
               "violations": [
-                "type_mismatch"
+                "type_mismatch",
+                "value_out_of_range"
               ]
             },
             {
-              "json_types": [
-                "object",
-                "string"
+              "additional_properties": false,
+              "allowed_keys": [
+                "description",
+                "id"
               ],
-              "normalization": [],
-              "path": "prerequisites[]",
-              "requirement": "optional",
-              "type": "string_or_object",
-              "violations": [
-                "type_mismatch"
-              ]
-            },
-            {
-              "json_types": [
-                "array"
-              ],
-              "normalization": [],
-              "path": "docs",
-              "requirement": "optional",
-              "type": "array",
-              "violations": [
-                "type_mismatch"
-              ]
-            },
-            {
-              "json_types": [
-                "object",
-                "string"
-              ],
-              "normalization": [],
-              "path": "docs[]",
-              "requirement": "optional",
-              "type": "string_or_object",
-              "violations": [
-                "type_mismatch"
-              ]
-            },
-            {
               "json_types": [
                 "object"
               ],
               "normalization": [],
-              "path": "applies_to",
+              "path": "prerequisites[]",
               "requirement": "optional",
               "type": "object",
               "violations": [
+                "field_not_allowed",
                 "type_mismatch"
+              ]
+            },
+            {
+              "json_types": [
+                "string"
+              ],
+              "max_length": 64,
+              "min_length": 1,
+              "normalization": [
+                "strip_whitespace"
+              ],
+              "path": "prerequisites[].id",
+              "required_scope": "containing_array_item",
+              "requirement": "required",
+              "type": "string",
+              "violations": [
+                "required_field_missing",
+                "type_mismatch",
+                "value_too_long",
+                "value_too_short"
+              ]
+            },
+            {
+              "format": "multiline-text",
+              "json_types": [
+                "string"
+              ],
+              "max_length": 4000,
+              "min_length": 1,
+              "normalization": [
+                "strip_whitespace"
+              ],
+              "path": "prerequisites[].description",
+              "required_scope": "containing_array_item",
+              "requirement": "required",
+              "type": "text",
+              "violations": [
+                "required_field_missing",
+                "type_mismatch",
+                "value_too_long",
+                "value_too_short"
+              ]
+            },
+            {
+              "json_types": [
+                "array"
+              ],
+              "max_items": 200,
+              "normalization": [],
+              "path": "steps",
+              "requirement": "optional",
+              "type": "array",
+              "violations": [
+                "type_mismatch",
+                "value_out_of_range"
+              ]
+            },
+            {
+              "additional_properties": false,
+              "allowed_keys": [
+                "command",
+                "description",
+                "expected_effect",
+                "id",
+                "title"
+              ],
+              "json_types": [
+                "object"
+              ],
+              "normalization": [],
+              "path": "steps[]",
+              "requirement": "optional",
+              "type": "object",
+              "violations": [
+                "field_not_allowed",
+                "type_mismatch"
+              ]
+            },
+            {
+              "json_types": [
+                "string"
+              ],
+              "max_length": 64,
+              "min_length": 1,
+              "normalization": [
+                "strip_whitespace"
+              ],
+              "path": "steps[].id",
+              "required_scope": "containing_array_item",
+              "requirement": "required",
+              "type": "string",
+              "violations": [
+                "required_field_missing",
+                "type_mismatch",
+                "value_too_long",
+                "value_too_short"
+              ]
+            },
+            {
+              "format": "multiline-text",
+              "json_types": [
+                "string"
+              ],
+              "max_length": 200,
+              "min_length": 1,
+              "normalization": [
+                "strip_whitespace"
+              ],
+              "path": "steps[].title",
+              "requirement": "optional",
+              "type": "text",
+              "violations": [
+                "type_mismatch",
+                "value_too_long",
+                "value_too_short"
+              ]
+            },
+            {
+              "format": "multiline-text",
+              "json_types": [
+                "string"
+              ],
+              "max_length": 4000,
+              "min_length": 1,
+              "normalization": [
+                "strip_whitespace"
+              ],
+              "path": "steps[].description",
+              "requirement": "optional",
+              "type": "text",
+              "violations": [
+                "type_mismatch",
+                "value_too_long",
+                "value_too_short"
+              ]
+            },
+            {
+              "format": "multiline-text",
+              "json_types": [
+                "string"
+              ],
+              "max_length": 16000,
+              "min_length": 1,
+              "normalization": [],
+              "path": "steps[].command",
+              "requirement": "optional",
+              "type": "text",
+              "violations": [
+                "type_mismatch",
+                "value_too_long",
+                "value_too_short"
+              ]
+            },
+            {
+              "format": "multiline-text",
+              "json_types": [
+                "string"
+              ],
+              "max_length": 4000,
+              "min_length": 1,
+              "normalization": [
+                "strip_whitespace"
+              ],
+              "path": "steps[].expected_effect",
+              "required_scope": "containing_array_item",
+              "requirement": "required",
+              "type": "text",
+              "violations": [
+                "required_field_missing",
+                "type_mismatch",
+                "value_too_long",
+                "value_too_short"
+              ]
+            },
+            {
+              "json_types": [
+                "array"
+              ],
+              "max_items": 100,
+              "normalization": [],
+              "path": "verification",
+              "requirement": "optional",
+              "type": "array",
+              "violations": [
+                "type_mismatch",
+                "value_out_of_range"
+              ]
+            },
+            {
+              "additional_properties": false,
+              "allowed_keys": [
+                "description",
+                "id",
+                "success_expectation"
+              ],
+              "json_types": [
+                "object"
+              ],
+              "normalization": [],
+              "path": "verification[]",
+              "requirement": "optional",
+              "type": "object",
+              "violations": [
+                "field_not_allowed",
+                "type_mismatch"
+              ]
+            },
+            {
+              "json_types": [
+                "string"
+              ],
+              "max_length": 64,
+              "min_length": 1,
+              "normalization": [
+                "strip_whitespace"
+              ],
+              "path": "verification[].id",
+              "required_scope": "containing_array_item",
+              "requirement": "required",
+              "type": "string",
+              "violations": [
+                "required_field_missing",
+                "type_mismatch",
+                "value_too_long",
+                "value_too_short"
+              ]
+            },
+            {
+              "format": "multiline-text",
+              "json_types": [
+                "string"
+              ],
+              "max_length": 4000,
+              "min_length": 1,
+              "normalization": [
+                "strip_whitespace"
+              ],
+              "path": "verification[].description",
+              "required_scope": "containing_array_item",
+              "requirement": "required",
+              "type": "text",
+              "violations": [
+                "required_field_missing",
+                "type_mismatch",
+                "value_too_long",
+                "value_too_short"
+              ]
+            },
+            {
+              "format": "multiline-text",
+              "json_types": [
+                "string"
+              ],
+              "max_length": 4000,
+              "min_length": 1,
+              "normalization": [
+                "strip_whitespace"
+              ],
+              "path": "verification[].success_expectation",
+              "required_scope": "containing_array_item",
+              "requirement": "required",
+              "type": "text",
+              "violations": [
+                "required_field_missing",
+                "type_mismatch",
+                "value_too_long",
+                "value_too_short"
+              ]
+            },
+            {
+              "json_types": [
+                "array"
+              ],
+              "max_items": 100,
+              "normalization": [],
+              "path": "rollback",
+              "requirement": "optional",
+              "type": "array",
+              "violations": [
+                "type_mismatch",
+                "value_out_of_range"
+              ]
+            },
+            {
+              "additional_properties": false,
+              "allowed_keys": [
+                "command",
+                "description",
+                "expected_effect",
+                "id",
+                "title"
+              ],
+              "json_types": [
+                "object"
+              ],
+              "normalization": [],
+              "path": "rollback[]",
+              "requirement": "optional",
+              "type": "object",
+              "violations": [
+                "field_not_allowed",
+                "type_mismatch"
+              ]
+            },
+            {
+              "json_types": [
+                "string"
+              ],
+              "max_length": 64,
+              "min_length": 1,
+              "normalization": [
+                "strip_whitespace"
+              ],
+              "path": "rollback[].id",
+              "required_scope": "containing_array_item",
+              "requirement": "required",
+              "type": "string",
+              "violations": [
+                "required_field_missing",
+                "type_mismatch",
+                "value_too_long",
+                "value_too_short"
+              ]
+            },
+            {
+              "format": "multiline-text",
+              "json_types": [
+                "string"
+              ],
+              "max_length": 200,
+              "min_length": 1,
+              "normalization": [
+                "strip_whitespace"
+              ],
+              "path": "rollback[].title",
+              "requirement": "optional",
+              "type": "text",
+              "violations": [
+                "type_mismatch",
+                "value_too_long",
+                "value_too_short"
+              ]
+            },
+            {
+              "format": "multiline-text",
+              "json_types": [
+                "string"
+              ],
+              "max_length": 4000,
+              "min_length": 1,
+              "normalization": [
+                "strip_whitespace"
+              ],
+              "path": "rollback[].description",
+              "requirement": "optional",
+              "type": "text",
+              "violations": [
+                "type_mismatch",
+                "value_too_long",
+                "value_too_short"
+              ]
+            },
+            {
+              "format": "multiline-text",
+              "json_types": [
+                "string"
+              ],
+              "max_length": 16000,
+              "min_length": 1,
+              "normalization": [],
+              "path": "rollback[].command",
+              "requirement": "optional",
+              "type": "text",
+              "violations": [
+                "type_mismatch",
+                "value_too_long",
+                "value_too_short"
+              ]
+            },
+            {
+              "format": "multiline-text",
+              "json_types": [
+                "string"
+              ],
+              "max_length": 4000,
+              "min_length": 1,
+              "normalization": [
+                "strip_whitespace"
+              ],
+              "path": "rollback[].expected_effect",
+              "required_scope": "containing_array_item",
+              "requirement": "required",
+              "type": "text",
+              "violations": [
+                "required_field_missing",
+                "type_mismatch",
+                "value_too_long",
+                "value_too_short"
+              ]
+            },
+            {
+              "json_types": [
+                "array"
+              ],
+              "max_items": 100,
+              "normalization": [],
+              "path": "recovery",
+              "requirement": "optional",
+              "type": "array",
+              "violations": [
+                "type_mismatch",
+                "value_out_of_range"
+              ]
+            },
+            {
+              "additional_properties": false,
+              "allowed_keys": [
+                "command",
+                "description",
+                "expected_effect",
+                "id",
+                "title"
+              ],
+              "json_types": [
+                "object"
+              ],
+              "normalization": [],
+              "path": "recovery[]",
+              "requirement": "optional",
+              "type": "object",
+              "violations": [
+                "field_not_allowed",
+                "type_mismatch"
+              ]
+            },
+            {
+              "json_types": [
+                "string"
+              ],
+              "max_length": 64,
+              "min_length": 1,
+              "normalization": [
+                "strip_whitespace"
+              ],
+              "path": "recovery[].id",
+              "required_scope": "containing_array_item",
+              "requirement": "required",
+              "type": "string",
+              "violations": [
+                "required_field_missing",
+                "type_mismatch",
+                "value_too_long",
+                "value_too_short"
+              ]
+            },
+            {
+              "format": "multiline-text",
+              "json_types": [
+                "string"
+              ],
+              "max_length": 200,
+              "min_length": 1,
+              "normalization": [
+                "strip_whitespace"
+              ],
+              "path": "recovery[].title",
+              "requirement": "optional",
+              "type": "text",
+              "violations": [
+                "type_mismatch",
+                "value_too_long",
+                "value_too_short"
+              ]
+            },
+            {
+              "format": "multiline-text",
+              "json_types": [
+                "string"
+              ],
+              "max_length": 4000,
+              "min_length": 1,
+              "normalization": [
+                "strip_whitespace"
+              ],
+              "path": "recovery[].description",
+              "requirement": "optional",
+              "type": "text",
+              "violations": [
+                "type_mismatch",
+                "value_too_long",
+                "value_too_short"
+              ]
+            },
+            {
+              "format": "multiline-text",
+              "json_types": [
+                "string"
+              ],
+              "max_length": 16000,
+              "min_length": 1,
+              "normalization": [],
+              "path": "recovery[].command",
+              "requirement": "optional",
+              "type": "text",
+              "violations": [
+                "type_mismatch",
+                "value_too_long",
+                "value_too_short"
+              ]
+            },
+            {
+              "format": "multiline-text",
+              "json_types": [
+                "string"
+              ],
+              "max_length": 4000,
+              "min_length": 1,
+              "normalization": [
+                "strip_whitespace"
+              ],
+              "path": "recovery[].expected_effect",
+              "required_scope": "containing_array_item",
+              "requirement": "required",
+              "type": "text",
+              "violations": [
+                "required_field_missing",
+                "type_mismatch",
+                "value_too_long",
+                "value_too_short"
+              ]
+            },
+            {
+              "constraint": "must be rollback, recovery, or no_rollback",
+              "enum": [
+                "no_rollback",
+                "recovery",
+                "rollback"
+              ],
+              "json_types": [
+                "string"
+              ],
+              "normalization": [],
+              "path": "change_fallback",
+              "requirement": "optional",
+              "type": "enum",
+              "violations": [
+                "value_not_allowed"
+              ]
+            },
+            {
+              "format": "multiline-text",
+              "json_types": [
+                "string"
+              ],
+              "max_length": 4000,
+              "min_length": 1,
+              "normalization": [
+                "strip_whitespace"
+              ],
+              "path": "change_fallback_rationale",
+              "requirement": "optional",
+              "type": "text",
+              "violations": [
+                "type_mismatch",
+                "value_too_long",
+                "value_too_short"
+              ]
+            },
+            {
+              "format": "multiline-text",
+              "json_types": [
+                "string"
+              ],
+              "max_length": 4000,
+              "min_length": 1,
+              "normalization": [
+                "strip_whitespace"
+              ],
+              "path": "deprecation_rationale",
+              "requirement": "optional",
+              "type": "text",
+              "violations": [
+                "type_mismatch",
+                "value_too_long",
+                "value_too_short"
+              ]
+            },
+            {
+              "format": "multiline-text",
+              "json_types": [
+                "string"
+              ],
+              "max_length": 4000,
+              "min_length": 1,
+              "normalization": [
+                "strip_whitespace"
+              ],
+              "path": "successor_recommendation",
+              "requirement": "optional",
+              "type": "text",
+              "violations": [
+                "type_mismatch",
+                "value_too_long",
+                "value_too_short"
               ]
             },
             {
@@ -18201,7 +19120,7 @@
                 "array"
               ],
               "normalization": [],
-              "path": "applies_to.systems",
+              "path": "applies_to",
               "requirement": "optional",
               "type": "array",
               "violations": [
@@ -18214,39 +19133,13 @@
                 "string"
               ],
               "normalization": [],
-              "path": "applies_to.systems[]",
+              "path": "applies_to[]",
               "reference_kinds": [
+                "device",
+                "host",
+                "network",
+                "service",
                 "system"
-              ],
-              "requirement": "optional",
-              "type": "reference",
-              "violations": [
-                "invalid_format",
-                "reference_kind_not_allowed",
-                "type_mismatch"
-              ]
-            },
-            {
-              "json_types": [
-                "array"
-              ],
-              "normalization": [],
-              "path": "applies_to.services",
-              "requirement": "optional",
-              "type": "array",
-              "violations": [
-                "type_mismatch"
-              ]
-            },
-            {
-              "format": "kind:id",
-              "json_types": [
-                "string"
-              ],
-              "normalization": [],
-              "path": "applies_to.services[]",
-              "reference_kinds": [
-                "service"
               ],
               "requirement": "optional",
               "type": "reference",
@@ -18321,6 +19214,323 @@
                 "array"
               ],
               "normalization": [],
+              "path": "related_projects",
+              "requirement": "optional",
+              "type": "array",
+              "violations": [
+                "type_mismatch"
+              ]
+            },
+            {
+              "format": "kind:id",
+              "json_types": [
+                "string"
+              ],
+              "normalization": [],
+              "path": "related_projects[]",
+              "reference_kinds": [
+                "project"
+              ],
+              "requirement": "optional",
+              "type": "reference",
+              "violations": [
+                "invalid_format",
+                "reference_kind_not_allowed",
+                "type_mismatch"
+              ]
+            },
+            {
+              "json_types": [
+                "array"
+              ],
+              "normalization": [],
+              "path": "related_runbooks",
+              "requirement": "optional",
+              "type": "array",
+              "violations": [
+                "type_mismatch"
+              ]
+            },
+            {
+              "format": "kind:id",
+              "json_types": [
+                "string"
+              ],
+              "normalization": [],
+              "path": "related_runbooks[]",
+              "reference_kinds": [
+                "runbook"
+              ],
+              "requirement": "optional",
+              "type": "reference",
+              "violations": [
+                "invalid_format",
+                "reference_kind_not_allowed",
+                "type_mismatch"
+              ]
+            },
+            {
+              "json_types": [
+                "array"
+              ],
+              "normalization": [],
+              "path": "supersedes",
+              "requirement": "optional",
+              "type": "array",
+              "violations": [
+                "type_mismatch"
+              ]
+            },
+            {
+              "format": "kind:id",
+              "json_types": [
+                "string"
+              ],
+              "normalization": [],
+              "path": "supersedes[]",
+              "reference_kinds": [
+                "runbook"
+              ],
+              "requirement": "optional",
+              "type": "reference",
+              "violations": [
+                "invalid_format",
+                "reference_kind_not_allowed",
+                "type_mismatch"
+              ]
+            },
+            {
+              "format": "kind:id",
+              "json_types": [
+                "string"
+              ],
+              "normalization": [],
+              "path": "superseded_by",
+              "reference_kinds": [
+                "runbook"
+              ],
+              "requirement": "optional",
+              "type": "reference",
+              "violations": [
+                "invalid_format",
+                "reference_kind_not_allowed",
+                "type_mismatch"
+              ]
+            },
+            {
+              "json_types": [
+                "array"
+              ],
+              "max_items": 50,
+              "normalization": [],
+              "path": "sources",
+              "requirement": "optional",
+              "type": "array",
+              "violations": [
+                "type_mismatch",
+                "value_out_of_range"
+              ]
+            },
+            {
+              "additional_properties": false,
+              "allowed_keys": [
+                "author",
+                "id",
+                "published_at",
+                "publisher",
+                "retrieved_at",
+                "source_type",
+                "title",
+                "url"
+              ],
+              "json_types": [
+                "object"
+              ],
+              "normalization": [],
+              "path": "sources[]",
+              "requirement": "optional",
+              "type": "object",
+              "violations": [
+                "field_not_allowed",
+                "type_mismatch"
+              ]
+            },
+            {
+              "enum": [
+                "documentation",
+                "original",
+                "reference"
+              ],
+              "json_types": [
+                "string"
+              ],
+              "normalization": [],
+              "path": "sources[].source_type",
+              "required_scope": "containing_array_item",
+              "requirement": "required",
+              "type": "enum",
+              "violations": [
+                "required_field_missing",
+                "value_not_allowed"
+              ]
+            },
+            {
+              "format": "multiline-text",
+              "json_types": [
+                "string"
+              ],
+              "max_length": 200,
+              "min_length": 1,
+              "normalization": [
+                "strip_whitespace"
+              ],
+              "path": "sources[].title",
+              "required_scope": "containing_array_item",
+              "requirement": "required",
+              "type": "text",
+              "violations": [
+                "required_field_missing",
+                "type_mismatch",
+                "value_too_long",
+                "value_too_short"
+              ]
+            },
+            {
+              "constraint": "must be an HTTP(S) URL without embedded credentials",
+              "embedded_credentials_allowed": false,
+              "format": "uri",
+              "json_types": [
+                "string"
+              ],
+              "max_length": 2048,
+              "normalization": [],
+              "path": "sources[].url",
+              "pattern": "^[Hh][Tt][Tt][Pp][Ss]?://",
+              "required_scope": "containing_array_item",
+              "requirement": "required",
+              "secret_query_parameters_allowed": false,
+              "type": "url",
+              "violations": [
+                "invalid_format",
+                "required_field_missing",
+                "value_too_long"
+              ]
+            },
+            {
+              "format": "date-time",
+              "json_types": [
+                "string"
+              ],
+              "normalization": [],
+              "path": "sources[].published_at",
+              "requirement": "optional",
+              "type": "datetime",
+              "violations": [
+                "invalid_format"
+              ]
+            },
+            {
+              "json_types": [
+                "string"
+              ],
+              "max_length": 64,
+              "min_length": 1,
+              "normalization": [
+                "strip_whitespace"
+              ],
+              "path": "sources[].id",
+              "required_scope": "containing_array_item",
+              "requirement": "required",
+              "type": "string",
+              "violations": [
+                "required_field_missing",
+                "type_mismatch",
+                "value_too_long",
+                "value_too_short"
+              ]
+            },
+            {
+              "format": "multiline-text",
+              "json_types": [
+                "string"
+              ],
+              "max_length": 200,
+              "min_length": 1,
+              "normalization": [
+                "strip_whitespace"
+              ],
+              "path": "sources[].author",
+              "requirement": "optional",
+              "type": "text",
+              "violations": [
+                "type_mismatch",
+                "value_too_long",
+                "value_too_short"
+              ]
+            },
+            {
+              "format": "multiline-text",
+              "json_types": [
+                "string"
+              ],
+              "max_length": 200,
+              "min_length": 1,
+              "normalization": [
+                "strip_whitespace"
+              ],
+              "path": "sources[].publisher",
+              "requirement": "optional",
+              "type": "text",
+              "violations": [
+                "type_mismatch",
+                "value_too_long",
+                "value_too_short"
+              ]
+            },
+            {
+              "format": "date-time",
+              "json_types": [
+                "string"
+              ],
+              "normalization": [],
+              "path": "sources[].retrieved_at",
+              "requirement": "optional",
+              "type": "datetime",
+              "violations": [
+                "invalid_format"
+              ]
+            },
+            {
+              "format": "date-time",
+              "json_types": [
+                "string"
+              ],
+              "normalization": [],
+              "path": "last_verified_at",
+              "requirement": "optional",
+              "type": "datetime",
+              "violations": [
+                "invalid_format"
+              ]
+            },
+            {
+              "format": "date-time",
+              "json_types": [
+                "string"
+              ],
+              "normalization": [],
+              "path": "review_after",
+              "requirement": "optional",
+              "type": "datetime",
+              "violations": [
+                "invalid_format"
+              ]
+            },
+            {
+              "json_types": [
+                "array"
+              ],
+              "normalization": [],
               "path": "installed_software",
               "reason": "is supported only for host and system objects",
               "requirement": "forbidden",
@@ -18332,9 +19542,29 @@
           ],
           "rules": [
             {
-              "description": "data.approval_required must be true when data.risk_level is disruptive or destructive.",
-              "rule": "validate_runbook_approval",
-              "violation": "rule_violation"
+              "description": "No key anywhere below data may name a raw credential or secret value.",
+              "rule": "reject_credential_value_keys",
+              "violation": "forbidden_key"
+            },
+            {
+              "description": "Approved and active runbooks require purpose, risk_level, nonempty prerequisites, steps, verification, and last_verified_at. Approval requirements, disruptive/destructive fallback procedures, change fallback selection and rationale, deprecated rationale or successor recommendation, and superseded successor links are conditionally required.",
+              "rule": "require_runbook_conditional_fields",
+              "violation": "required_field_missing"
+            },
+            {
+              "description": "approval_requirement is allowed only when approval_required is true, and disruptive or destructive runbooks cannot declare no_rollback.",
+              "rule": "reject_runbook_contradictions",
+              "violation": "field_not_allowed"
+            },
+            {
+              "description": "Prerequisite, instruction, verification, rollback, recovery, and source ids are unique within their ordered collection; each procedure entry has a nonblank title or description; inert command text cannot be blank.",
+              "rule": "validate_runbook_entries",
+              "violation": "value_not_allowed"
+            },
+            {
+              "description": "review_after must not precede last_verified_at.",
+              "rule": "validate_runbook_timestamp_order",
+              "violation": "value_out_of_range"
             }
           ],
           "secret_policy": "global_enforced",
@@ -18360,12 +19590,102 @@
         },
         "minimal_example": {
           "data": {
+            "approval_required": false,
+            "runbook_status": "draft",
             "schema_version": 1
           },
           "id": "example-runbook",
           "kind": "runbook",
           "label": "Example runbook",
           "status": "active"
+        },
+        "runbook": {
+          "change_fallback": {
+            "values": [
+              "rollback",
+              "recovery",
+              "no_rollback"
+            ]
+          },
+          "commands": {
+            "credential_resolution": false,
+            "deployment": false,
+            "expected_effect_path": "sibling expected_effect",
+            "inert": true,
+            "network_retrieval": false,
+            "normalization": "none",
+            "paths": [
+              "data.steps[].command",
+              "data.rollback[].command",
+              "data.recovery[].command"
+            ],
+            "placeholder_expansion": false,
+            "round_trip": "exact",
+            "shell_execution": false,
+            "verification_path": "data.verification[]"
+          },
+          "external_sources": {
+            "embedded_credentials_allowed": false,
+            "full_text_import": false,
+            "http_only": true,
+            "live_fetch": false,
+            "path": "data.sources[]",
+            "secret_query_parameters_allowed": false,
+            "source_type_values": [
+              "original",
+              "documentation",
+              "reference"
+            ]
+          },
+          "knowledge_layers": {
+            "audit": "material canonical-field changes without comment bodies",
+            "comments": "review and observation chronology",
+            "executor": false,
+            "external_docs": "sources only; never fetched or executed",
+            "fields": "current reviewed operating and recovery truth"
+          },
+          "legacy_reads": {
+            "missing_runbook_status": "readable",
+            "writes": "must satisfy the canonical schema"
+          },
+          "procedures": {
+            "distinct": true,
+            "recovery": "restores a safe or healthy state when reversal is insufficient",
+            "rollback": "reverses a change"
+          },
+          "reference_paths": [
+            "applies_to[]",
+            "credential_references[]",
+            "related_decisions[]",
+            "related_projects[]",
+            "related_runbooks[]",
+            "supersedes[]",
+            "superseded_by"
+          ],
+          "risk_level": {
+            "values": [
+              "destructive",
+              "disruptive",
+              "read-only",
+              "safe-change"
+            ]
+          },
+          "runbook_status": {
+            "values": [
+              "draft",
+              "approved",
+              "active",
+              "deprecated",
+              "superseded",
+              "retired"
+            ]
+          },
+          "supersession": {
+            "cycles_allowed": false,
+            "direction": "superseded runbook to successor",
+            "self_reference_allowed": false,
+            "superseded_requires": "data.superseded_by"
+          }
         },
         "status": {
           "default": "active",
@@ -20929,7 +22249,7 @@
       "raw_secret_values_rejected": true
     },
     "source": "blockwart.domain.object_schema",
-    "version": 4,
+    "version": 5,
     "violation_policy": {
       "description": "A rejected write names the canonical public data path, one violation code, and the published rule when a schema postcondition rejected it. Rejected values are never returned.",
       "detail_fields": [

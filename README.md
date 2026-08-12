@@ -23,6 +23,8 @@ automatically.
   cycle-safe supersession links;
 - keep canonical Project research, experiments, migrations, implementations, and incident
   reviews as structured reviewed knowledge with safe evidence and typed links;
+- keep canonical Runbook operating and recovery contracts with inert exact commands,
+  explicit verification, distinct rollback/recovery, and cycle-safe typed links;
 - show placement, device, dependency, and network topology in the human UI;
 - search and read authorized context through REST and MCP;
 - create, update, relate, and delete catalog objects through authorized UI,

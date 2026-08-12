@@ -53,6 +53,7 @@ from blockwart.domain.relationship_projection import (
     relationship_projection,
 )
 from blockwart.domain.relationships import RELATIONSHIP_PATH_ROOTS, RELATIONSHIP_RULES
+from blockwart.domain.runbooks import RUNBOOK_RISKS, RUNBOOK_STATUSES
 from blockwart.domain.schema_projection import (
     minimal_object_example,
     object_schema_projection,
@@ -309,6 +310,16 @@ QUERY_FILTER_PROPERTIES: JSON = {
         "pattern": APPLIES_TO_PATTERN,
         "description": "Exact authorized asset kind:id Decision scope",
     },
+    "runbook_status": {
+        "type": "string",
+        "enum": list(RUNBOOK_STATUSES),
+        "description": "Exact canonical Runbook status",
+    },
+    "runbook_risk": {
+        "type": "string",
+        "enum": list(RUNBOOK_RISKS),
+        "description": "Exact canonical Runbook risk level",
+    },
     "project_category": {
         "type": "string",
         "enum": list(PROJECT_CATEGORIES),
@@ -323,7 +334,7 @@ QUERY_FILTER_PROPERTIES: JSON = {
         "type": "string",
         "maxLength": RELATED_OBJECT_MAX_LENGTH,
         "pattern": RELATED_OBJECT_PATTERN,
-        "description": "Exact authorized kind:id Project relationship target",
+        "description": "Exact authorized kind:id Project or Runbook relationship target",
     },
     "lifecycle": {
         "type": "string",
@@ -1664,6 +1675,8 @@ def _clean_params(args: JSON, *, default_limit: int) -> JSON:
         "status",
         "decision_status",
         "applies_to",
+        "runbook_status",
+        "runbook_risk",
         "project_category",
         "project_status",
         "related_object",
@@ -1705,6 +1718,8 @@ def _legacy_page_payload(
             "status",
             "decision_status",
             "applies_to",
+            "runbook_status",
+            "runbook_risk",
             "project_category",
             "project_status",
             "related_object",
