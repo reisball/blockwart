@@ -44,12 +44,12 @@ def test_public_asset_kind_registries_are_exactly_equal() -> None:
         "PublicObjectKind": set(get_args(PublicObjectKind)),
         "PUBLIC_OBJECT_KINDS": set(PUBLIC_OBJECT_KINDS),
         "built-in schemas": set(BUILTIN_SCHEMAS) - NON_PUBLIC_KINDS,
-        "UI schemas": set(UI_SCHEMAS),
         "MCP object writes": set(OBJECT_WRITE_SCHEMA["properties"]["kind"]["enum"])
         - NON_PUBLIC_KINDS,
     }
     for name, registry in registries.items():
         _assert_exact_registry(name, registry)
+    assert set(UI_SCHEMAS) == PUBLIC_ASSET_KINDS | {"decision"}
 
     assert set(VALID_REFERENCE_KINDS) == object_kinds == set(BUILTIN_SCHEMAS)
     assert OBJECT_STATUSES == ("active", "inactive", "deleted")

@@ -31,8 +31,14 @@ from blockwart.db.base import Base
 from blockwart.db.migrations import build_alembic_config
 from blockwart.db.session import build_engine
 from blockwart.models import (
+    CatalogObject,
     IdempotencyRecord,
     ServiceTokenFailureBucket,
+)
+from blockwart.services.decision_migration import (
+    apply_decision_migration_plan,
+    build_decision_migration_plan,
+    decision_data_sha256,
 )
 
 # ---------------------------------------------------------------------------
@@ -601,6 +607,48 @@ def test_postgresql_seeded_migration_upgrades_cleanly(
             assert rel_count >= 1
     finally:
         engine.dispose()
+
+
+@PG_SKIP
+def test_postgresql_decision_plan_preserves_legacy_data_and_applies_explicitly(
+    migrated_pg_engine: Engine,
+) -> None:
+    before = {"schema_version": 1, "decision": "Preserve PostgreSQL data."}
+    with Session(migrated_pg_engine) as session:
+        with session.begin():
+            session.add(
+                CatalogObject(
+                    id="legacy-pg-decision",
+                    kind="decision",
+                    label="Legacy PG Decision",
+                    status="active",
+                    lifecycle=None,
+                    health=None,
+                    data_json=json.dumps(before, sort_keys=True),
+                )
+            )
+        plan = build_decision_migration_plan(
+            session,
+            {
+                "legacy-pg-decision": {
+                    "expected_data_sha256": decision_data_sha256(before),
+                    "data_patch": {"decision_status": "proposed"},
+                }
+            },
+        )
+        assert plan.diagnostics == ()
+        assert json.loads(
+            session.get(CatalogObject, "legacy-pg-decision").data_json
+        ) == before
+        assert apply_decision_migration_plan(session, plan) == 1
+        session.commit()
+        row = session.get(CatalogObject, "legacy-pg-decision")
+        assert row is not None
+        assert row.revision == 2
+        assert json.loads(row.data_json) == {
+            **before,
+            "decision_status": "proposed",
+        }
 
 
 @PG_SKIP

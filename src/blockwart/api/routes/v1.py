@@ -10,6 +10,11 @@ from blockwart.api.write_commands import api_write_context, execute_api_command
 from blockwart.config import Settings
 from blockwart.domain.asset_state import AssetHealth, AssetLifecycle
 from blockwart.domain.auth import GrantScope
+from blockwart.domain.decisions import (
+    APPLIES_TO_MAX_LENGTH,
+    APPLIES_TO_PATTERN,
+    DecisionStatus,
+)
 from blockwart.domain.provenance import SourceType
 from blockwart.domain.source_coverage import SourceCoverageError
 from blockwart.schemas.agent import AgentCatalogContextRead
@@ -200,6 +205,15 @@ def list_v1_objects(
     protocol: ProtocolFilter = None,
     exposure: ExposureFilter = None,
     status: ObjectStatus | None = None,
+    decision_status: DecisionStatus | None = None,
+    applies_to: Annotated[
+        str | None,
+        Query(
+            max_length=APPLIES_TO_MAX_LENGTH,
+            pattern=APPLIES_TO_PATTERN,
+            description="Exact authorized asset kind:id Decision scope",
+        ),
+    ] = None,
     lifecycle: AssetLifecycle | None = None,
     health: AssetHealth | None = None,
     source_type: SourceType | None = None,
@@ -229,6 +243,8 @@ def list_v1_objects(
             protocol=protocol,
             exposure=exposure,
             status=status,
+            decision_status=decision_status,
+            applies_to=applies_to,
             lifecycle=lifecycle,
             health=health,
             source_type=source_type,
@@ -263,6 +279,15 @@ def get_v1_context(
     protocol: ProtocolFilter = None,
     exposure: ExposureFilter = None,
     status: ObjectStatus | None = None,
+    decision_status: DecisionStatus | None = None,
+    applies_to: Annotated[
+        str | None,
+        Query(
+            max_length=APPLIES_TO_MAX_LENGTH,
+            pattern=APPLIES_TO_PATTERN,
+            description="Exact authorized asset kind:id Decision scope",
+        ),
+    ] = None,
     lifecycle: AssetLifecycle | None = None,
     health: AssetHealth | None = None,
     source_type: SourceType | None = None,
@@ -292,6 +317,8 @@ def get_v1_context(
             protocol=protocol,
             exposure=exposure,
             status=status,
+            decision_status=decision_status,
+            applies_to=applies_to,
             lifecycle=lifecycle,
             health=health,
             source_type=source_type,

@@ -29,6 +29,8 @@ deleted by this classification.
 
 - [Asset domain model](domain-model.md) and [relationship
   integrity](relationship-integrity.md)
+- [Canonical Decision objects](decisions.md), including lifecycle, links, and
+  dry-run-first legacy classification
 - [Application read models](read-models.md) and [service
   interfaces](service-interfaces.md)
 - [Source coverage and import drift](source-coverage.md)

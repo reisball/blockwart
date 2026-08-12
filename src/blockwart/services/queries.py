@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 
 from blockwart.domain.asset_state import AssetHealth, AssetLifecycle
 from blockwart.domain.auth import ObjectVisibility, Permission
+from blockwart.domain.decisions import project_authorized_decision_data
 from blockwart.domain.placement import PlacementGraph
 from blockwart.domain.relationships import (
     NETWORK_DEVICE_CATEGORIES,
@@ -36,8 +37,9 @@ from blockwart.services.comments import query_comment_page
 from blockwart.services.read_access import ReadAccess
 
 PUBLIC_KIND_PRIORITY = {
-    kind: index for index, kind in enumerate(PUBLIC_OBJECT_KINDS)
+    kind: index for index, kind in enumerate((*PUBLIC_OBJECT_KINDS, "decision"))
 }
+UI_VISIBLE_KINDS = frozenset((*PUBLIC_OBJECT_KINDS, "decision"))
 
 
 class RelationshipReadModel(TypedDict):
@@ -166,6 +168,7 @@ class ExplorerAssetDetailReadModel(TypedDict):
     visibility: Literal["stub", "detail"]
     capabilities: list[Permission]
     category: NotRequired[str]
+    decision_status: NotRequired[str]
 
 
 class ExplorerAssetStubReadModel(TypedDict):
@@ -234,6 +237,7 @@ class ExplorerReadModel(TypedDict):
     standalone_services: list[ExplorerAssetReadModel]
     networks: list[ExplorerAssetReadModel]
     devices: list[ExplorerAssetReadModel]
+    decisions: list[ExplorerAssetReadModel]
     device_chains: list[ExplorerDeviceChainReadModel]
     network_path_groups: list[ExplorerNetworkPathGroupReadModel]
     assets: dict[str, ExplorerAssetReadModel]
@@ -1101,6 +1105,11 @@ def build_explorer_read_model(
         for device_ref in _refs_for_kind(objects, "device")
         if is_included(device_ref)
     ]
+    decisions = [
+        assets[decision_ref]
+        for decision_ref in _refs_for_kind(objects, "decision")
+        if is_included(decision_ref)
+    ]
     device_chains = _explorer_device_chains(
         objects,
         relationships,
@@ -1139,6 +1148,7 @@ def build_explorer_read_model(
     visible_refs.update(service["ref"] for service in standalone_services)
     visible_refs.update(network["ref"] for network in networks)
     visible_refs.update(device["ref"] for device in devices)
+    visible_refs.update(decision["ref"] for decision in decisions)
     visible_refs.update(
         row["asset"]["ref"]
         for chain in device_chains
@@ -1157,6 +1167,7 @@ def build_explorer_read_model(
         "standalone_services": standalone_services,
         "networks": networks,
         "devices": devices,
+        "decisions": decisions,
         "device_chains": device_chains,
         "network_path_groups": network_path_groups,
         "assets": {
@@ -1430,7 +1441,7 @@ def visible_objects(
         [
             catalog_object
             for catalog_object in objects
-            if catalog_object.kind in PUBLIC_OBJECT_KINDS
+            if catalog_object.kind in UI_VISIBLE_KINDS
         ]
     )
 
@@ -1883,6 +1894,10 @@ def _explorer_asset(
         category = category_source.get("category")
         if isinstance(category, str):
             asset["category"] = category
+    if catalog_object.kind == "decision":
+        decision_status = catalog_object.data.get("decision_status")
+        if isinstance(decision_status, str):
+            asset["decision_status"] = decision_status
     return asset
 
 
@@ -1911,12 +1926,22 @@ def _project_catalog_object(
     ):
         placement_state = "unknown"
     if visibility == ObjectVisibility.DETAIL:
+        data = catalog_object.data
+        if catalog_object.kind == "decision":
+            data = project_authorized_decision_data(
+                data,
+                can_discover=lambda object_id: access.policy.can(
+                    Permission.DISCOVER,
+                    object_id,
+                ),
+            )
         return catalog_object.model_copy(
             update={
                 "visibility": ObjectVisibility.DETAIL,
                 "capabilities": capabilities,
                 "parent_path": visible_parent_path,
                 "placement_state": placement_state,
+                "data": data,
             }
         )
     return CatalogObjectStubOut(

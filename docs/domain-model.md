@@ -17,6 +17,10 @@ Blockwart version 1 models concrete infrastructure assets:
 
 `network`, `device`, and the non-public catalog kinds are not placement levels.
 
+Decision is a structured knowledge object rather than an asset or placement level. Its separate
+closed lifecycle, typed links, and cycle-safe supersession graph are documented in
+[Canonical Decision objects](decisions.md).
+
 English identifiers are the canonical backend contract. Alembic revision
 `20260729_0007` migrates the former `netzwerk` identifier and every valid typed
 reference to `network` before the application starts. UI labels are localized

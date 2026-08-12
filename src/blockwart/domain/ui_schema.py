@@ -6,7 +6,8 @@ from pathlib import Path
 from typing import Any, Literal
 
 from blockwart.config import get_settings
-from blockwart.domain.object_schema import INSTALLED_SOFTWARE_KINDS
+from blockwart.domain.object_schema import BUILTIN_SCHEMAS, INSTALLED_SOFTWARE_KINDS, FieldSpec
+from blockwart.domain.schema_projection import kind_schema_projection
 
 PrimaryNameStorage = Literal["label", "network_hostname"]
 
@@ -319,6 +320,55 @@ FIELD_DEFINITIONS: dict[str, UiField] = {
     ),
 }
 
+
+def _decision_ui_fields() -> tuple[FieldSpec, ...]:
+    return tuple(
+        field
+        for field in BUILTIN_SCHEMAS["decision"].fields
+        if "." not in field.path
+        and "[]" not in field.path
+        and field.path != "schema_version"
+        and field.forbidden_message is None
+    )
+
+
+def _decision_input_type(field: FieldSpec) -> str:
+    if field.path == "docs":
+        return "source-list"
+    if field.field_type == "enum":
+        return "select"
+    if field.field_type == "datetime":
+        # RFC 3339 requires an explicit timezone; HTML datetime-local omits it.
+        return "text"
+    if field.field_type == "reference":
+        return "reference"
+    if field.field_type == "array":
+        return "reference-list" if field.path in {
+            "applies_to",
+            "related_projects",
+            "related_runbooks",
+            "related_decisions",
+            "supersedes",
+        } else "list"
+    return "textarea" if field.field_type == "text" else "text"
+
+
+DECISION_DATA_FIELDS = _decision_ui_fields()
+FIELD_DEFINITIONS.update(
+    {
+        field.path: UiField(
+            field.path,
+            f"decision.field.{field.path}.label",
+            _decision_input_type(field),
+            f"data_json.{field.path}",
+            required=field.required,
+            placeholder_key=f"decision.field.{field.path}.help",
+            visible_in_create=True,
+        )
+        for field in DECISION_DATA_FIELDS
+    }
+)
+
 COMMON_CREATE_FIELDS = (
     "kind",
     "object_id",
@@ -376,12 +426,28 @@ DEVICE_SCHEMA_FIELDS = (
     "device_model",
 )
 DEVICE_CREATE_FIELDS = COMMON_CREATE_FIELDS + DEVICE_SCHEMA_FIELDS
+DECISION_SCHEMA_FIELDS = (
+    "kind",
+    "object_id",
+    "primary_name",
+    "status",
+    "summary",
+    *(field.path for field in DECISION_DATA_FIELDS),
+)
 
 DEVICE_UI_PANELS = (
     UiPanel("overview", "panel.overview", "overview"),
     UiPanel("device", "panel.device", "device"),
     UiPanel("network", "panel.network", "network"),
     UiPanel("access", "panel.access", "access"),
+    UiPanel("relationships", "panel.relationships", "relationship-add"),
+    UiPanel("comment", "panel.comment", "comment"),
+    UiPanel("audit", "panel.audit", "audit"),
+)
+
+DECISION_UI_PANELS = (
+    UiPanel("overview", "panel.overview", "overview"),
+    UiPanel("decision", "decision.panel.title", "decision"),
     UiPanel("relationships", "panel.relationships", "relationship-add"),
     UiPanel("comment", "panel.comment", "comment"),
     UiPanel("audit", "panel.audit", "audit"),
@@ -434,6 +500,15 @@ UI_SCHEMAS: dict[str, UiTypeSchema] = {
         create_fields=COMMON_CREATE_FIELDS,
         panels=SERVICE_UI_PANELS,
     ),
+    "decision": UiTypeSchema(
+        kind="decision",
+        primary_name_label_key="field.primary_name.decision.label",
+        primary_name_storage="label",
+        supports_platform=False,
+        fields=DECISION_SCHEMA_FIELDS,
+        create_fields=DECISION_SCHEMA_FIELDS,
+        panels=DECISION_UI_PANELS,
+    ),
 }
 
 if {
@@ -454,6 +529,8 @@ def ui_schema_payload() -> dict[str, dict[str, object]]:
     for kind in UI_SCHEMAS:
         schema = get_ui_schema(kind)
         schema_payload = schema.as_dict()
+        if kind == "decision":
+            schema_payload["object_schema"] = kind_schema_projection(kind)
         schema_payload["schema_fields"] = schema_field_payload(schema)
         schema_payload["create_field_definitions"] = create_field_payload(schema)
         payload[kind] = schema_payload

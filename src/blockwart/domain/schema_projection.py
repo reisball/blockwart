@@ -22,6 +22,7 @@ from blockwart.domain.asset_state import (
     LegacyObjectStatus,
     is_asset_kind,
 )
+from blockwart.domain.decisions import decision_contract_projection
 from blockwart.domain.object_schema import (
     BUILTIN_SCHEMAS,
     FORBIDDEN_DATA_VALUE_KEYS,
@@ -44,9 +45,9 @@ from blockwart.domain.object_schema import (
 )
 from blockwart.domain.security import FORBIDDEN_ACL_DATA_KEYS, FORBIDDEN_SECRET_KEYS
 
-# Version 2 additively publishes the machine-readable violation contract next to
-# the field rules that produce it.
-SCHEMA_PROJECTION_VERSION = 2
+# Version 3 additively publishes canonical Decision lifecycle, timestamp,
+# reference, legacy-read, and supersession-graph contracts.
+SCHEMA_PROJECTION_VERSION = 3
 SCHEMA_DATA_VERSION = 1
 OBJECT_STATUS_VALUES: tuple[str, ...] = get_args(LegacyObjectStatus)
 DEFAULT_OBJECT_STATUS = "active"
@@ -60,6 +61,7 @@ FORBIDDEN = "forbidden"
 _JSON_TYPES: Mapping[str, tuple[str, ...]] = {
     "array": ("array",),
     "boolean": ("boolean",),
+    "datetime": ("string",),
     "integer": ("integer",),
     "ip": ("string",),
     "object": ("object",),
@@ -75,6 +77,7 @@ _JSON_TYPES: Mapping[str, tuple[str, ...]] = {
 _TYPE_VIOLATIONS: Mapping[str, frozenset[str]] = {
     "array": frozenset({VIOLATION_TYPE_MISMATCH}),
     "boolean": frozenset({VIOLATION_TYPE_MISMATCH}),
+    "datetime": frozenset({VIOLATION_INVALID_FORMAT}),
     "enum": frozenset({VIOLATION_VALUE_NOT_ALLOWED}),
     "integer": frozenset({VIOLATION_TYPE_MISMATCH}),
     "ip": frozenset({VIOLATION_INVALID_FORMAT}),
@@ -93,6 +96,7 @@ _PYTHON_JSON_TYPES: tuple[tuple[type, str], ...] = (
     (str, "string"),
 )
 _FORMATS: Mapping[str, str] = {
+    "datetime": "date-time",
     "ip": "ip-address",
     "port": "tcp-udp-port",
     "reference": "kind:id",
@@ -105,6 +109,7 @@ _EXAMPLE_IP = "192.0.2.1"
 _EXAMPLE_URL = "https://service.example.invalid/"
 _EXAMPLE_PORT = 8443
 _EXAMPLE_TEXT = "example"
+_EXAMPLE_DATETIME = "2026-08-11T12:00:00Z"
 _HTTP_URL_PATTERN = r"^[Hh][Tt][Tt][Pp][Ss]?://"
 
 
@@ -174,7 +179,7 @@ def kind_schema_projection(kind: str) -> dict[str, Any]:
     """Return the published contract for exactly one writable object kind."""
     schema = BUILTIN_SCHEMAS[kind]
     asset = is_asset_kind(kind)
-    return {
+    projection = {
         "kind": kind,
         "kind_class": "asset" if asset else "knowledge",
         "status": {
@@ -198,6 +203,9 @@ def kind_schema_projection(kind: str) -> dict[str, Any]:
         },
         "minimal_example": minimal_object_example(kind),
     }
+    if kind == "decision":
+        projection["decision"] = decision_contract_projection()
+    return projection
 
 
 def field_projection(field: FieldSpec) -> dict[str, Any]:
@@ -215,6 +223,8 @@ def field_projection(field: FieldSpec) -> dict[str, Any]:
         projected["pattern"] = _HTTP_URL_PATTERN
     if field.required_in_item:
         projected["required_scope"] = "containing_array_item"
+    if field.required_in_item_rule is not None:
+        projected["required_rule"] = field.required_in_item_rule
     if field.enum_values:
         projected["enum"] = sorted(field.enum_values, key=_enum_sort_key)
     if field.reference_kinds:
@@ -225,6 +235,16 @@ def field_projection(field: FieldSpec) -> dict[str, Any]:
         projected["min_length"] = field.min_length
     if field.max_length is not None:
         projected["max_length"] = field.max_length
+    if field.min_items is not None:
+        projected["min_items"] = field.min_items
+    if field.max_items is not None:
+        projected["max_items"] = field.max_items
+    if field.allowed_keys:
+        projected["allowed_keys"] = sorted(field.allowed_keys)
+        projected["additional_properties"] = False
+    if field.forbid_url_credentials:
+        projected["embedded_credentials_allowed"] = False
+        projected["secret_query_parameters_allowed"] = False
     if field.forbidden_message is not None:
         projected["reason"] = field.forbidden_message
     elif field.message is not None:
@@ -250,6 +270,10 @@ def field_violations(field: FieldSpec) -> set[str]:
         violations.add(VIOLATION_VALUE_TOO_SHORT)
     if field.max_length is not None:
         violations.add(VIOLATION_VALUE_TOO_LONG)
+    if field.min_items is not None or field.max_items is not None:
+        violations.add(VIOLATION_VALUE_OUT_OF_RANGE)
+    if field.allowed_keys:
+        violations.add(VIOLATION_FIELD_NOT_ALLOWED)
     return violations
 
 
@@ -341,6 +365,8 @@ def _scalar_example_value(field: FieldSpec) -> Any:
         return field.literal
     field_type = field.field_type
     if field_type == "enum":
+        if field.path == "decision_status":
+            return "proposed"
         return sorted(field.enum_values, key=_enum_sort_key)[0]
     if field_type == "reference":
         return f"{sorted(field.reference_kinds)[0]}:example"
@@ -358,6 +384,8 @@ def _scalar_example_value(field: FieldSpec) -> Any:
         return _EXAMPLE_IP
     if field_type == "url":
         return _EXAMPLE_URL
+    if field_type == "datetime":
+        return _EXAMPLE_DATETIME
     return _bounded_text(field)
 
 

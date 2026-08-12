@@ -6,6 +6,7 @@ from fastapi import HTTPException, Request
 from sqlalchemy.orm import Session
 
 from blockwart.db.session import transaction
+from blockwart.domain.decisions import DecisionIntegrityError
 from blockwart.domain.placement import PlacementError
 from blockwart.domain.relationships import RelationshipIntegrityError
 from blockwart.services.commands import (
@@ -54,5 +55,10 @@ def execute_api_command[T](
         raise HTTPException(status_code=412, detail=str(exc)) from exc
     except IdempotencyConflict as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
-    except (CommandConflict, PlacementError, RelationshipIntegrityError) as exc:
+    except (
+        CommandConflict,
+        DecisionIntegrityError,
+        PlacementError,
+        RelationshipIntegrityError,
+    ) as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc

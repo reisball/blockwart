@@ -22,6 +22,11 @@ from jsonschema.validators import validator_for
 from mcp.server.lowlevel import NotificationOptions, Server
 
 from blockwart.domain.asset_state import ASSET_KINDS
+from blockwart.domain.decisions import (
+    APPLIES_TO_MAX_LENGTH,
+    APPLIES_TO_PATTERN,
+    DECISION_STATUS_VALUES,
+)
 from blockwart.domain.object_schema import (
     GENERIC_SCHEMA_VIOLATION,
     VIOLATION_FIELD_NOT_ALLOWED,
@@ -287,6 +292,17 @@ QUERY_FILTER_PROPERTIES: JSON = {
         "enum": ["loopback", "lan", "vpn", "internal", "public", "unknown"],
     },
     "status": {"type": "string", "enum": ["active", "inactive", "deleted"]},
+    "decision_status": {
+        "type": "string",
+        "enum": list(DECISION_STATUS_VALUES),
+        "description": "Exact canonical Decision status",
+    },
+    "applies_to": {
+        "type": "string",
+        "maxLength": APPLIES_TO_MAX_LENGTH,
+        "pattern": APPLIES_TO_PATTERN,
+        "description": "Exact authorized asset kind:id Decision scope",
+    },
     "lifecycle": {
         "type": "string",
         "enum": ["planned", "active", "retired"],
@@ -1624,6 +1640,8 @@ def _clean_params(args: JSON, *, default_limit: int) -> JSON:
         "protocol",
         "exposure",
         "status",
+        "decision_status",
+        "applies_to",
         "lifecycle",
         "health",
         "source_type",
@@ -1660,6 +1678,8 @@ def _legacy_page_payload(
             "protocol",
             "exposure",
             "status",
+            "decision_status",
+            "applies_to",
             "lifecycle",
             "health",
             "source_type",

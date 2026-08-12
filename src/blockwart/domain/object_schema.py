@@ -3,10 +3,11 @@ from __future__ import annotations
 from collections.abc import Callable, Mapping
 from copy import deepcopy
 from dataclasses import dataclass, replace
+from datetime import UTC, datetime
 from ipaddress import ip_address
 from types import MappingProxyType
 from typing import Any, Literal
-from urllib.parse import urlsplit
+from urllib.parse import parse_qsl, urlsplit
 
 from blockwart.domain.interfaces import CANONICAL_EXPOSURES, CANONICAL_TRANSPORTS
 from blockwart.domain.references import TypedReference
@@ -15,6 +16,7 @@ from blockwart.domain.security import FORBIDDEN_SECRET_KEYS
 FieldType = Literal[
     "array",
     "boolean",
+    "datetime",
     "enum",
     "integer",
     "ip",
@@ -133,6 +135,14 @@ NETWORK_CATEGORIES = frozenset(
         "other_device",
     }
 )
+DECISION_STATUS_VALUES = (
+    "proposed",
+    "accepted",
+    "superseded",
+    "deprecated",
+    "rejected",
+)
+DECISION_STATUSES = frozenset(DECISION_STATUS_VALUES)
 INSTALLED_SOFTWARE_KINDS = frozenset({"host", "system"})
 INSTALLED_SOFTWARE_ENTRY_FIELDS = frozenset({"name", "version", "url"})
 
@@ -184,12 +194,17 @@ class FieldSpec:
     field_type: FieldType
     required: bool = False
     required_in_item: bool = False
+    required_in_item_rule: str | None = None
     enum_values: frozenset[Any] = frozenset()
     reference_kinds: frozenset[str] = frozenset()
     literal: Any = _UNSET
     strip_whitespace: bool = False
     min_length: int | None = None
     max_length: int | None = None
+    min_items: int | None = None
+    max_items: int | None = None
+    allowed_keys: frozenset[str] = frozenset()
+    forbid_url_credentials: bool = False
     message: str | None = None
     forbidden_message: str | None = None
 
@@ -201,6 +216,10 @@ class FieldSpec:
     def __post_init__(self) -> None:
         if not self.path or any(not part for part in self.path.split(".")):
             raise ValueError("schema field paths must use non-empty dot-separated keys")
+        if self.required_in_item_rule is not None and not self.required_in_item:
+            raise ValueError(
+                f"only item-required fields may declare a required-item rule: {self.path}"
+            )
         path_keys = {part.removesuffix("[]").lower() for part in self.path.split(".")}
         forbidden_keys = path_keys & FORBIDDEN_DATA_VALUE_KEYS
         if forbidden_keys:
@@ -215,6 +234,7 @@ class FieldSpec:
         if (self.min_length is not None or self.max_length is not None) and self.field_type not in {
             "string",
             "text",
+            "url",
         }:
             raise ValueError(f"only string fields may declare length limits: {self.path}")
         if self.min_length is not None and self.min_length < 0:
@@ -227,6 +247,24 @@ class FieldSpec:
             and self.min_length > self.max_length
         ):
             raise ValueError(f"minimum length exceeds maximum length: {self.path}")
+        if (
+            self.min_items is not None or self.max_items is not None
+        ) and self.field_type != "array":
+            raise ValueError(f"only array fields may declare item bounds: {self.path}")
+        if self.min_items is not None and self.min_items < 0:
+            raise ValueError(f"minimum items must be non-negative: {self.path}")
+        if self.max_items is not None and self.max_items < 0:
+            raise ValueError(f"maximum items must be non-negative: {self.path}")
+        if (
+            self.min_items is not None
+            and self.max_items is not None
+            and self.min_items > self.max_items
+        ):
+            raise ValueError(f"minimum items exceeds maximum items: {self.path}")
+        if self.allowed_keys and self.field_type != "object":
+            raise ValueError(f"only object fields may declare allowed keys: {self.path}")
+        if self.forbid_url_credentials and self.field_type != "url":
+            raise ValueError(f"only URL fields may forbid credentials: {self.path}")
         if self.forbidden_message is not None and (
             self.required
             or self.required_in_item
@@ -264,6 +302,8 @@ def normalize_object_data(kind: str, data: Mapping[str, Any]) -> dict[str, Any]:
     for field in BUILTIN_SCHEMAS[kind].fields:
         if field.strip_whitespace:
             _normalize_string_field(normalized, field.path.split("."))
+        if field.field_type == "datetime":
+            _normalize_datetime_field(normalized, field.path.split("."))
     return normalized
 
 
@@ -272,6 +312,8 @@ def validate_object_data(
     data: Mapping[str, Any],
     *,
     allow_legacy_network_without_category: bool = False,
+    allow_legacy_decision_without_status: bool = False,
+    allow_legacy_decision_data: bool = False,
 ) -> None:
     schema = BUILTIN_SCHEMAS[kind]
     fields = schema.fields
@@ -282,6 +324,28 @@ def validate_object_data(
             else field
             for field in fields
         )
+    if allow_legacy_decision_data and kind == "decision":
+        fields = tuple(
+            field
+            for field in fields
+            if field.path
+            in {"schema_version", "lifecycle", "health", "dependencies", "installed_software"}
+        )
+        validate_fields(data, fields)
+        return
+    if (
+        allow_legacy_decision_without_status
+        and kind == "decision"
+        and "decision_status" not in data
+    ):
+        fields = tuple(
+            field
+            for field in fields
+            if field.path
+            in {"schema_version", "lifecycle", "health", "dependencies", "installed_software"}
+        )
+        validate_fields(data, fields)
+        return
     validate_fields(data, fields)
     for rule in schema.rules:
         rule(data)
@@ -309,6 +373,35 @@ def _normalize_string_field(value: Any, path: list[str]) -> None:
         _normalize_string_field(child, path[1:])
 
 
+def _normalize_datetime_field(value: Any, path: list[str]) -> None:
+    if not path or not isinstance(value, dict):
+        return
+    raw_part = path[0]
+    is_array = raw_part.endswith("[]")
+    key = raw_part.removesuffix("[]")
+    if key not in value:
+        return
+    child = value[key]
+    if len(path) > 1:
+        if is_array and isinstance(child, list):
+            for item in child:
+                _normalize_datetime_field(item, path[1:])
+        else:
+            _normalize_datetime_field(child, path[1:])
+        return
+    if is_array and isinstance(child, list):
+        value[key] = [
+            parsed.astimezone(UTC).isoformat().replace("+00:00", "Z")
+            if (parsed := _parse_rfc3339(item)) is not None
+            else item
+            for item in child
+        ]
+    else:
+        parsed = _parse_rfc3339(child)
+        if parsed is not None:
+            value[key] = parsed.astimezone(UTC).isoformat().replace("+00:00", "Z")
+
+
 def validate_fields(
     data: Mapping[str, Any],
     fields: tuple[FieldSpec, ...],
@@ -321,6 +414,15 @@ def validate_fields(
                 "is required",
                 violation=VIOLATION_REQUIRED_FIELD_MISSING,
             )
+        if field.required_in_item:
+            missing_path = _first_missing_item_field(data, field.path)
+            if missing_path is not None:
+                raise ObjectSchemaError(
+                    missing_path,
+                    "is required",
+                    violation=VIOLATION_REQUIRED_FIELD_MISSING,
+                    rule=field.required_in_item_rule,
+                )
         for path, value in values:
             if field.forbidden_message is not None:
                 raise ObjectSchemaError(
@@ -374,6 +476,10 @@ def _validate_value(field: FieldSpec, path: str, value: Any) -> None:
     if field_type in {"string", "text"}:
         valid = isinstance(value, str)
         default_message = "must be a string"
+    elif field_type == "datetime":
+        valid = _parse_rfc3339(value) is not None
+        default_message = "must be an RFC 3339 timestamp with a timezone"
+        violation = VIOLATION_INVALID_FORMAT
     elif field_type == "integer":
         valid = isinstance(value, int) and not isinstance(value, bool)
         default_message = "must be an integer"
@@ -402,7 +508,11 @@ def _validate_value(field: FieldSpec, path: str, value: Any) -> None:
         default_message = "must be a valid IP address"
         violation = VIOLATION_INVALID_FORMAT
     elif field_type == "url":
-        valid = is_absolute_http_url(value)
+        valid = (
+            is_safe_external_http_url(value)
+            if field.forbid_url_credentials
+            else is_absolute_http_url(value)
+        )
         default_message = "must be a valid URL"
         violation = VIOLATION_INVALID_FORMAT
     elif field_type == "port":
@@ -431,6 +541,27 @@ def _validate_value(field: FieldSpec, path: str, value: Any) -> None:
                 path,
                 field.message or f"must contain at most {field.max_length} characters",
                 violation=VIOLATION_VALUE_TOO_LONG,
+            )
+    if isinstance(value, list):
+        if field.min_items is not None and len(value) < field.min_items:
+            raise ObjectSchemaError(
+                path,
+                f"must contain at least {field.min_items} items",
+                violation=VIOLATION_VALUE_OUT_OF_RANGE,
+            )
+        if field.max_items is not None and len(value) > field.max_items:
+            raise ObjectSchemaError(
+                path,
+                f"must contain at most {field.max_items} items",
+                violation=VIOLATION_VALUE_OUT_OF_RANGE,
+            )
+    if isinstance(value, Mapping) and field.allowed_keys:
+        unexpected = sorted(set(value) - field.allowed_keys)
+        if unexpected:
+            raise ObjectSchemaError(
+                f"{path}.{unexpected[0]}",
+                "is not allowed",
+                violation=VIOLATION_FIELD_NOT_ALLOWED,
             )
     if field.has_literal and value != field.literal:
         raise ObjectSchemaError(
@@ -474,6 +605,17 @@ def _is_ip(value: Any) -> bool:
     return True
 
 
+def _parse_rfc3339(value: Any) -> datetime | None:
+    if not isinstance(value, str) or not value:
+        return None
+    normalized = f"{value[:-1]}+00:00" if value.endswith(("Z", "z")) else value
+    try:
+        parsed = datetime.fromisoformat(normalized)
+    except ValueError:
+        return None
+    return parsed if parsed.tzinfo is not None else None
+
+
 def is_absolute_http_url(value: Any) -> bool:
     if not isinstance(value, str):
         return False
@@ -488,6 +630,50 @@ def is_absolute_http_url(value: Any) -> bool:
         )
     except ValueError:
         return False
+
+
+def is_safe_external_http_url(value: Any) -> bool:
+    if not is_absolute_http_url(value):
+        return False
+    try:
+        parsed = urlsplit(value)
+    except ValueError:
+        return False
+    if parsed.username is not None or parsed.password is not None:
+        return False
+    forbidden_query_keys = FORBIDDEN_DATA_VALUE_KEYS | FORBIDDEN_SECRET_KEYS
+    return all(
+        key.casefold() not in forbidden_query_keys
+        for key, _ in parse_qsl(parsed.query, keep_blank_values=True)
+    )
+
+
+def _first_missing_item_field(
+    data: Mapping[str, Any],
+    declared_path: str,
+) -> str | None:
+    array_path, separator, item_path = declared_path.partition("[].")
+    if not separator:
+        return None
+    parent: Any = data
+    rendered_parent = "data"
+    for part in array_path.split("."):
+        if not isinstance(parent, Mapping) or part not in parent:
+            return None
+        parent = parent[part]
+        rendered_parent = f"{rendered_parent}.{part}"
+    if not isinstance(parent, list):
+        return None
+    item_parts = item_path.split(".")
+    for index, item in enumerate(parent):
+        current: Any = item
+        rendered = f"{rendered_parent}[{index}]"
+        for part in item_parts:
+            if not isinstance(current, Mapping) or part not in current:
+                return f"{rendered}.{part}"
+            current = current[part]
+            rendered = f"{rendered}.{part}"
+    return None
 
 
 def _field(
@@ -586,12 +772,14 @@ INSTALLED_SOFTWARE_FIELDS = (
         "installed_software[].name",
         "string",
         required_in_item=True,
+        required_in_item_rule="require_installed_software_fields",
         min_length=1,
     ),
     _field(
         "installed_software[].version",
         "string",
         required_in_item=True,
+        required_in_item_rule="require_installed_software_fields",
         min_length=1,
     ),
     _field("installed_software[].url", "url"),
@@ -749,6 +937,73 @@ RUNBOOK_FIELDS = (
     *_reference_list("related_decisions", "decision"),
 )
 
+DECISION_FIELDS = (
+    _field(
+        "decision_status",
+        "enum",
+        required=True,
+        enum_values=DECISION_STATUSES,
+        message="must be a supported decision status",
+    ),
+    _field("context", "text", strip_whitespace=True),
+    _field("decision", "text", strip_whitespace=True),
+    _field("rationale", "text", strip_whitespace=True),
+    _field("alternatives", "array", max_items=50),
+    _field(
+        "alternatives[]",
+        "text",
+        strip_whitespace=True,
+        min_length=1,
+        max_length=2000,
+    ),
+    _field("consequences", "array", max_items=50),
+    _field(
+        "consequences[]",
+        "text",
+        strip_whitespace=True,
+        min_length=1,
+        max_length=2000,
+    ),
+    _field("decided_at", "datetime"),
+    _field("effective_at", "datetime"),
+    _field("review_after", "datetime"),
+    *_reference_list("applies_to", "host", "system", "network", "device", "service"),
+    *_reference_list("related_projects", "project"),
+    *_reference_list("related_runbooks", "runbook"),
+    *_reference_list("related_decisions", "decision"),
+    *_reference_list("supersedes", "decision"),
+    _field("superseded_by", "reference", reference_kinds=frozenset({"decision"})),
+    _field("docs", "array", max_items=25),
+    _field(
+        "docs[]",
+        "object",
+        allowed_keys=frozenset({"source_type", "title", "url", "published_at"}),
+    ),
+    _field(
+        "docs[].source_type",
+        "enum",
+        required_in_item=True,
+        enum_values=frozenset({"original", "documentation", "reference"}),
+    ),
+    _field(
+        "docs[].title",
+        "text",
+        required_in_item=True,
+        strip_whitespace=True,
+        min_length=1,
+        max_length=200,
+    ),
+    _field(
+        "docs[].url",
+        "url",
+        required_in_item=True,
+        max_length=2048,
+        forbid_url_credentials=True,
+        message="must be an HTTP(S) URL without embedded credentials",
+    ),
+    _field("docs[].published_at", "datetime"),
+)
+
 
 def _reject_credential_value_keys(
     value: Any,
@@ -781,6 +1036,27 @@ def _validate_runbook_approval(data: Mapping[str, Any]) -> None:
             "must be true for disruptive or destructive runbooks",
             violation=VIOLATION_RULE_VIOLATION,
             rule=public_rule_name(_validate_runbook_approval),
+        )
+
+
+def _validate_decision_lifecycle(data: Mapping[str, Any]) -> None:
+    status = data.get("decision_status")
+    if status == "accepted":
+        for field_name in ("context", "decision", "rationale", "decided_at"):
+            value = data.get(field_name)
+            if not isinstance(value, str) or not value.strip():
+                raise ObjectSchemaError(
+                    f"data.{field_name}",
+                    "is required and must not be blank for accepted decisions",
+                    violation=VIOLATION_REQUIRED_FIELD_MISSING,
+                    rule=public_rule_name(_validate_decision_lifecycle),
+                )
+    if status == "superseded" and "superseded_by" not in data:
+        raise ObjectSchemaError(
+            "data.superseded_by",
+            "is required for superseded decisions",
+            violation=VIOLATION_REQUIRED_FIELD_MISSING,
+            rule=public_rule_name(_validate_decision_lifecycle),
         )
 
 
@@ -848,6 +1124,10 @@ SCHEMA_RULE_CONTRACTS: Mapping[str, str] = MappingProxyType(
             "data.approval_required must be true when data.risk_level is "
             "disruptive or destructive."
         ),
+        "_validate_decision_lifecycle": (
+            "Accepted decisions require nonblank context, decision, rationale, and "
+            "decided_at; superseded decisions require superseded_by."
+        ),
         "_require_installed_software_fields": (
             "Every installed-software entry must contain name and version fields."
         ),
@@ -867,6 +1147,7 @@ SCHEMA_RULE_VIOLATIONS: Mapping[str, str] = MappingProxyType(
     {
         "_reject_credential_value_keys": VIOLATION_FORBIDDEN_KEY,
         "_validate_runbook_approval": VIOLATION_RULE_VIOLATION,
+        "_validate_decision_lifecycle": VIOLATION_REQUIRED_FIELD_MISSING,
         "_require_installed_software_fields": VIOLATION_REQUIRED_FIELD_MISSING,
         "_reject_empty_installed_software_fields": VIOLATION_VALUE_TOO_SHORT,
         "_reject_installed_software_extra_fields": VIOLATION_FIELD_NOT_ALLOWED,
@@ -969,7 +1250,12 @@ BUILTIN_SCHEMAS: Mapping[str, TypeSchema] = MappingProxyType(
             *INSTALLED_SOFTWARE_FORBIDDEN_FIELDS,
             rules=(_validate_runbook_approval,),
         ),
-        "decision": _schema("decision", *INSTALLED_SOFTWARE_FORBIDDEN_FIELDS),
+        "decision": _schema(
+            "decision",
+            *INSTALLED_SOFTWARE_FORBIDDEN_FIELDS,
+            *DECISION_FIELDS,
+            rules=(_validate_decision_lifecycle,),
+        ),
         "project": _schema("project", *INSTALLED_SOFTWARE_FORBIDDEN_FIELDS),
     }
 )

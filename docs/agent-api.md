@@ -44,6 +44,8 @@ Query parameters:
 - status: optional catalog status
 - lifecycle: optional exact `planned`, `active`, or `retired`
 - health: optional exact `unknown`, `healthy`, `degraded`, `down`, or `maintenance`
+- decision_status: optional exact canonical Decision lifecycle value
+- applies_to: optional exact authorized asset `kind:id` Decision scope
 - source_type: optional exact `unknown`, `manual`, `import`, or `discovery`
 - stale: optional exact computed freshness state
 - limit: optional result limit, 1..50, default 10
@@ -110,7 +112,7 @@ Query parameters:
 - q: optional search term
 - kind: optional object kind filter
 - parent, ip, port, endpoint_type, protocol, exposure, status, lifecycle,
-  health, source_type, stale: same structured filters as search
+  health, decision_status, applies_to, source_type, stale: same structured filters as search
 - limit: optional object limit, 1..20, default 5
 
 Search and context use the same resolver and filter semantics. All Agent API

@@ -16,11 +16,17 @@ from sqlalchemy.orm import Session
 from blockwart.api.deps import get_session
 from blockwart.domain.auth import GrantScope, Permission, Role
 from blockwart.domain.comment_markdown import render_comment_source
+from blockwart.domain.decisions import (
+    DECISION_SOURCE_TYPE_VALUES,
+    DECISION_STATUS_VALUES,
+    DecisionIntegrityError,
+)
 from blockwart.domain.object_schema import (
     DEVICE_CATEGORIES,
     INSTALLED_SOFTWARE_KINDS,
     NETWORK_CATEGORIES,
     is_absolute_http_url,
+    is_safe_external_http_url,
 )
 from blockwart.domain.placement import PlacementError
 from blockwart.domain.relationships import (
@@ -30,7 +36,8 @@ from blockwart.domain.relationships import (
     UPLINK_MODES,
     RelationshipIntegrityError,
 )
-from blockwart.domain.security import find_secret_violations
+from blockwart.domain.schema_projection import minimal_object_data
+from blockwart.domain.security import find_secret_violations, redact_secret_values
 from blockwart.domain.ui_schema import (
     get_ui_schema,
     schema_field_payload,
@@ -78,6 +85,7 @@ from blockwart.services.queries import (
     query_device_graph,
     query_network_topology,
 )
+from blockwart.services.read_access import ReadAccess
 from blockwart.ui.i18n import translation_context
 from blockwart.ui.paths import TEMPLATE_DIR
 from blockwart.ui.security import (
@@ -95,7 +103,18 @@ router = APIRouter(
     dependencies=[Depends(require_browser_read_access)],
 )
 
-OBJECT_KINDS = PUBLIC_OBJECT_KINDS
+OBJECT_KINDS = (*PUBLIC_OBJECT_KINDS, "decision")
+DECISION_KIND = "decision"
+DECISION_TEXT_FIELDS = ("context", "decision", "rationale")
+DECISION_TIMESTAMP_FIELDS = ("decided_at", "effective_at", "review_after")
+DECISION_TEXT_LIST_FIELDS = ("alternatives", "consequences")
+DECISION_REFERENCE_LIST_FIELDS = (
+    "applies_to",
+    "related_projects",
+    "related_runbooks",
+    "related_decisions",
+    "supersedes",
+)
 OBJECT_STATUSES_UI = OBJECT_STATUSES
 RELATION_TYPES = RELATIONSHIP_TYPES
 PLATFORM_TYPES = ("LXC", "VM", "WSL")
@@ -212,6 +231,7 @@ def _localized_audit_lines(
         "seed_relationship_create": "audit.seed_relationship_create",
         "seed_skip_manual_override": "audit.seed_skip_manual_override",
         "interface_normalize": "audit.interface_normalize",
+        "decision_normalize": "audit.decision_normalize",
         "placement_state_normalize": "audit.placement_state_normalize",
     }.get(action)
     if template_key is None:
@@ -341,6 +361,8 @@ def _index_template_context(
         "object_statuses": OBJECT_STATUSES_UI,
         "platform_types": PLATFORM_TYPES,
         "device_categories": sorted(DEVICE_CATEGORIES),
+        "decision_statuses": DECISION_STATUS_VALUES,
+        "decision_source_types": DECISION_SOURCE_TYPE_VALUES,
         "ui_schemas": localized_schemas,
         "form_ui_schema": localized_schemas[selected_form_kind],
         "create_fields_by_key": {
@@ -461,6 +483,13 @@ def index(
         Permission.CREATE_CHILD in target.capabilities
         for target in read_model.relation_targets
     )
+    form = _empty_form()
+    if normalized_kind:
+        form["kind"] = normalized_kind
+    if normalized_kind == "decision":
+        form["decision_status"] = str(
+            minimal_object_data("decision")["decision_status"]
+        )
     return templates.TemplateResponse(
         request,
         "index.html",
@@ -470,7 +499,7 @@ def index(
             q=q,
             kind=normalized_kind,
             view=selected_view,
-            form=_empty_form(),
+            form=form,
             error=None,
             show_create_form=create_enabled and create == "1",
             show_create_root_form=create_root == "1",
@@ -596,6 +625,27 @@ def _detail_template_context(
     can_edit_network_endpoints = catalog_object.kind in NETWORK_ENDPOINT_EDIT_KINDS
     can_edit_device = catalog_object.kind == DEVICE_OBJECT_KIND
     submitted_rows = form_rows or {}
+    decision_detail = _decision_detail_data(object_data, read_model.object_map)
+    decision_form = _decision_form_values(object_data)
+    submitted_decision_forms = submitted_rows.get("decision_form") or []
+    if submitted_decision_forms:
+        decision_form.update(
+            {
+                str(key): str(value or "")
+                for key, value in submitted_decision_forms[0].items()
+            }
+        )
+    decision_docs_rows = _mapping_rows_override(
+        submitted_rows.get("decision_docs"),
+        _canonical_decision_docs(object_data) or [
+            {
+                "source_type": "original",
+                "title": "",
+                "url": "",
+                "published_at": "",
+            }
+        ],
+    )
     installed_software_rows = _mapping_rows_override(
         submitted_rows.get("installed_software"),
         installed_software or [{"name": "", "version": "", "url": ""}],
@@ -671,6 +721,12 @@ def _detail_template_context(
         "supports_service_information": (
             catalog_object.kind in SERVICE_INFORMATION_OBJECT_KINDS
         ),
+        "supports_decision": catalog_object.kind == DECISION_KIND,
+        "decision_detail": decision_detail,
+        "decision_form": decision_form,
+        "decision_docs_rows": decision_docs_rows,
+        "decision_statuses": DECISION_STATUS_VALUES,
+        "decision_source_types": DECISION_SOURCE_TYPE_VALUES,
         "supports_installed_software": (
             catalog_object.kind in INSTALLED_SOFTWARE_KINDS
         ),
@@ -838,6 +894,7 @@ def _detail_navigation_context(
         "service-information",
         "installed-software",
         "device",
+        "decision",
         "network",
         "access",
         "permissions",
@@ -1417,6 +1474,8 @@ def save_object(
                 error=(
                     str(exc.detail)
                     if isinstance(exc, HTTPException)
+                    else _decision_form_error(request, exc)
+                    if kind == DECISION_KIND
                     else _safe_error_message(exc)
                 ),
                 show_create_form=True,
@@ -1456,6 +1515,25 @@ def save_root(
     device_model: Annotated[str | None, Form()] = None,
     status: Annotated[str, Form()] = "active",
     summary: Annotated[str, Form()] = "",
+    decision_status: Annotated[str | None, Form()] = None,
+    decision_context: Annotated[str | None, Form(alias="context")] = None,
+    decision: Annotated[str | None, Form()] = None,
+    rationale: Annotated[str | None, Form()] = None,
+    alternatives: Annotated[str | None, Form()] = None,
+    consequences: Annotated[str | None, Form()] = None,
+    decided_at: Annotated[str | None, Form()] = None,
+    effective_at: Annotated[str | None, Form()] = None,
+    review_after: Annotated[str | None, Form()] = None,
+    applies_to: Annotated[str | None, Form()] = None,
+    related_projects: Annotated[str | None, Form()] = None,
+    related_runbooks: Annotated[str | None, Form()] = None,
+    related_decisions: Annotated[str | None, Form()] = None,
+    supersedes: Annotated[str | None, Form()] = None,
+    superseded_by: Annotated[str | None, Form()] = None,
+    doc_source_type: Annotated[list[str] | None, Form()] = None,
+    doc_title: Annotated[list[str] | None, Form()] = None,
+    doc_url: Annotated[list[str] | None, Form()] = None,
+    doc_published_at: Annotated[list[str] | None, Form()] = None,
     idempotency_key: Annotated[str, Form(max_length=128)] = "",
 ):
     access = read_access_from_request(request)
@@ -1469,7 +1547,30 @@ def save_root(
                 permission=Permission.CREATE_CHILD,
             ),
         )
-    form = {
+    decision_values = {
+        "decision_status": decision_status,
+        "context": decision_context,
+        "decision": decision,
+        "rationale": rationale,
+        "alternatives": alternatives,
+        "consequences": consequences,
+        "decided_at": decided_at,
+        "effective_at": effective_at,
+        "review_after": review_after,
+        "applies_to": applies_to,
+        "related_projects": related_projects,
+        "related_runbooks": related_runbooks,
+        "related_decisions": related_decisions,
+        "supersedes": supersedes,
+        "superseded_by": superseded_by,
+    }
+    decision_docs = _decision_submitted_docs(
+        doc_source_type,
+        doc_title,
+        doc_url,
+        doc_published_at,
+    )
+    form: dict[str, Any] = {
         "id": object_id,
         "kind": kind,
         "label": label or "",
@@ -1483,9 +1584,14 @@ def save_root(
         "status": status,
         "summary": summary,
         "idempotency_key": idempotency_key,
+        **{key: value or "" for key, value in decision_values.items()},
+        "decision_docs": decision_docs or _empty_form()["decision_docs"],
     }
     try:
         data: dict[str, Any] = {}
+        if kind == DECISION_KIND:
+            _apply_decision_form_data(data, decision_values, decision_docs)
+            _reject_secret_shaped_form_data(data)
         ui_schema = get_ui_schema(kind)
         label_values = _split_label_values(labels)
         if label_values:
@@ -1524,6 +1630,9 @@ def save_root(
             ),
         )
     except (HTTPException, ValidationError, ValueError) as exc:
+        if kind == DECISION_KIND:
+            form.update(_safe_decision_form_values(decision_values))
+            form["decision_docs"] = _safe_decision_form_docs(decision_docs)
         read_model = query_catalog_browse(
             session,
             read_access_from_request(request),
@@ -1541,6 +1650,8 @@ def save_root(
                 error=(
                     str(exc.detail)
                     if isinstance(exc, HTTPException)
+                    else _decision_form_error(request, exc)
+                    if kind == DECISION_KIND
                     else _safe_error_message(exc)
                 ),
                 show_create_form=False,
@@ -1872,6 +1983,25 @@ def update_object(
     device_model: Annotated[str | None, Form()] = None,
     service_sources: Annotated[str | None, Form()] = None,
     service_running_version: Annotated[str | None, Form()] = None,
+    decision_status: Annotated[str | None, Form()] = None,
+    decision_context: Annotated[str | None, Form(alias="context")] = None,
+    decision: Annotated[str | None, Form()] = None,
+    rationale: Annotated[str | None, Form()] = None,
+    alternatives: Annotated[str | None, Form()] = None,
+    consequences: Annotated[str | None, Form()] = None,
+    decided_at: Annotated[str | None, Form()] = None,
+    effective_at: Annotated[str | None, Form()] = None,
+    review_after: Annotated[str | None, Form()] = None,
+    applies_to: Annotated[str | None, Form()] = None,
+    related_projects: Annotated[str | None, Form()] = None,
+    related_runbooks: Annotated[str | None, Form()] = None,
+    related_decisions: Annotated[str | None, Form()] = None,
+    supersedes: Annotated[str | None, Form()] = None,
+    superseded_by: Annotated[str | None, Form()] = None,
+    doc_source_type: Annotated[list[str] | None, Form()] = None,
+    doc_title: Annotated[list[str] | None, Form()] = None,
+    doc_url: Annotated[list[str] | None, Form()] = None,
+    doc_published_at: Annotated[list[str] | None, Form()] = None,
     data_json: Annotated[str | None, Form()] = None,
     if_match: Annotated[str, Form()] = "",
 ):
@@ -1913,6 +2043,33 @@ def update_object(
             device_manufacturer,
             device_model,
         )
+    )
+    decision_values = {
+        "decision_status": decision_status,
+        "context": decision_context,
+        "decision": decision,
+        "rationale": rationale,
+        "alternatives": alternatives,
+        "consequences": consequences,
+        "decided_at": decided_at,
+        "effective_at": effective_at,
+        "review_after": review_after,
+        "applies_to": applies_to,
+        "related_projects": related_projects,
+        "related_runbooks": related_runbooks,
+        "related_decisions": related_decisions,
+        "supersedes": supersedes,
+        "superseded_by": superseded_by,
+    }
+    decision_docs = _decision_submitted_docs(
+        doc_source_type,
+        doc_title,
+        doc_url,
+        doc_published_at,
+    )
+    submitted_decision = any(value is not None for value in decision_values.values()) or any(
+        value is not None
+        for value in (doc_source_type, doc_title, doc_url, doc_published_at)
     )
     try:
         existing_object = get_object(session, object_id)
@@ -2009,6 +2166,14 @@ def update_object(
                     else None
                 ),
             )
+        if target_kind == DECISION_KIND and submitted_decision:
+            _apply_decision_form_data(
+                data,
+                decision_values,
+                decision_docs,
+                concealed_references=_concealed_decision_references(data, access),
+                preserve_legacy_docs=_decision_has_legacy_docs(data),
+            )
         _reject_secret_shaped_form_data(data)
         payload = CatalogObjectIn(
             id=object_id,
@@ -2049,10 +2214,14 @@ def update_object(
             error=(
                 str(exc.detail)
                 if isinstance(exc, HTTPException)
+                else _decision_form_error(request, exc)
+                if submitted_decision
                 else _safe_error_message(exc)
             ),
             edit_section=(
-                "device"
+                "decision"
+                if submitted_decision
+                else "device"
                 if submitted_device
                 else "service-information"
                 if submitted_service_information
@@ -2061,6 +2230,12 @@ def update_object(
             can_write_enabled=True,
             data_json_override=SAFE_DATA_JSON_FALLBACK,
             form_rows=(
+                {
+                    "decision_form": [_safe_decision_form_values(decision_values)],
+                    "decision_docs": _safe_decision_form_docs(decision_docs),
+                }
+                if submitted_decision
+                else
                 {
                     "device_fields": [
                         {
@@ -2732,8 +2907,8 @@ def _validated_port(
     return port
 
 
-def _empty_form() -> dict[str, str]:
-    return {
+def _empty_form() -> dict[str, Any]:
+    form: dict[str, Any] = {
         "id": "",
         "kind": "system",
         "label": "",
@@ -2752,6 +2927,23 @@ def _empty_form() -> dict[str, str]:
         "relation_type": "hosts",
         "idempotency_key": uuid4().hex,
     }
+    form.update(
+        {
+            field_name: ""
+            for field_name in (
+                "decision_status",
+                *DECISION_TEXT_FIELDS,
+                *DECISION_TIMESTAMP_FIELDS,
+                *DECISION_TEXT_LIST_FIELDS,
+                *DECISION_REFERENCE_LIST_FIELDS,
+                "superseded_by",
+            )
+        }
+    )
+    form["decision_docs"] = [
+        {"source_type": "original", "title": "", "url": "", "published_at": ""}
+    ]
+    return form
 
 
 def _ui_expected_revision(
@@ -2787,6 +2979,239 @@ def _split_label_values(raw_labels: str) -> list[str]:
     return labels
 
 
+def _split_form_lines(value: str | None) -> list[str]:
+    if value is None:
+        return []
+    return [line for raw in value.splitlines() if (line := raw.strip())]
+
+
+def _decision_submitted_docs(
+    source_types: list[str] | None,
+    titles: list[str] | None,
+    urls: list[str] | None,
+    published_values: list[str] | None,
+) -> list[dict[str, str]]:
+    columns = [source_types or [], titles or [], urls or [], published_values or []]
+    count = max((len(column) for column in columns), default=0)
+    return [
+        {
+            "source_type": columns[0][index] if index < len(columns[0]) else "",
+            "title": columns[1][index] if index < len(columns[1]) else "",
+            "url": columns[2][index] if index < len(columns[2]) else "",
+            "published_at": columns[3][index] if index < len(columns[3]) else "",
+        }
+        for index in range(count)
+    ]
+
+
+def _safe_decision_form_values(
+    values: Mapping[str, str | None],
+) -> dict[str, str]:
+    return {
+        key: str(redact_secret_values(value or ""))
+        for key, value in values.items()
+    }
+
+
+def _safe_decision_form_docs(
+    rows: list[Mapping[str, Any]],
+) -> list[dict[str, str]]:
+    safe_rows: list[dict[str, str]] = []
+    for row in rows:
+        url = str(row.get("url") or "")
+        safe_rows.append(
+            {
+                "source_type": str(redact_secret_values(row.get("source_type") or "")),
+                "title": str(redact_secret_values(row.get("title") or "")),
+                "url": url if is_safe_external_http_url(url) else "",
+                "published_at": str(
+                    redact_secret_values(row.get("published_at") or "")
+                ),
+            }
+        )
+    return safe_rows
+
+
+def _apply_decision_form_data(
+    data: dict[str, Any],
+    values: Mapping[str, str | None],
+    docs_rows: list[Mapping[str, Any]],
+    *,
+    concealed_references: Mapping[str, list[str]] | None = None,
+    preserve_legacy_docs: bool = False,
+) -> None:
+    data["schema_version"] = 1
+    for field_name in ("decision_status", *DECISION_TEXT_FIELDS, *DECISION_TIMESTAMP_FIELDS):
+        value = str(values.get(field_name) or "").strip()
+        if value:
+            data[field_name] = value
+        else:
+            data.pop(field_name, None)
+    for field_name in (*DECISION_TEXT_LIST_FIELDS, *DECISION_REFERENCE_LIST_FIELDS):
+        items = _split_form_lines(values.get(field_name))
+        for reference in (concealed_references or {}).get(field_name, []):
+            if reference not in items:
+                items.append(reference)
+        if items:
+            data[field_name] = items
+        else:
+            data.pop(field_name, None)
+    successor = str(values.get("superseded_by") or "").strip()
+    concealed_successors = (concealed_references or {}).get("superseded_by", [])
+    if concealed_successors:
+        successor = concealed_successors[0]
+    if successor:
+        data["superseded_by"] = successor
+    else:
+        data.pop("superseded_by", None)
+    docs: list[dict[str, str]] = []
+    for row in docs_rows:
+        source_type = str(row.get("source_type") or "").strip()
+        title = str(row.get("title") or "").strip()
+        url = str(row.get("url") or "").strip()
+        published_at = str(row.get("published_at") or "").strip()
+        if not any((source_type, title, url, published_at)):
+            continue
+        entry = {"source_type": source_type, "title": title, "url": url}
+        if published_at:
+            entry["published_at"] = published_at
+        docs.append(entry)
+    if docs:
+        data["docs"] = docs
+    elif not preserve_legacy_docs:
+        data.pop("docs", None)
+
+
+def _decision_form_values(data: Mapping[str, Any]) -> dict[str, str]:
+    values = {
+        field_name: str(data.get(field_name) or "")
+        for field_name in (
+            "decision_status",
+            *DECISION_TEXT_FIELDS,
+            *DECISION_TIMESTAMP_FIELDS,
+            "superseded_by",
+        )
+    }
+    for field_name in (*DECISION_TEXT_LIST_FIELDS, *DECISION_REFERENCE_LIST_FIELDS):
+        raw = data.get(field_name)
+        values[field_name] = (
+            "\n".join(str(item) for item in raw if isinstance(item, str))
+            if isinstance(raw, list)
+            else ""
+        )
+    return values
+
+
+def _concealed_decision_references(
+    data: Mapping[str, Any],
+    access: ReadAccess,
+) -> dict[str, list[str]]:
+    concealed: dict[str, list[str]] = {}
+    for field_name in DECISION_REFERENCE_LIST_FIELDS:
+        raw = data.get(field_name)
+        if not isinstance(raw, list):
+            continue
+        hidden = [
+            value
+            for value in raw
+            if isinstance(value, str)
+            and ":" in value
+            and not access.policy.can(Permission.DISCOVER, value.split(":", 1)[1])
+        ]
+        if hidden:
+            concealed[field_name] = hidden
+    successor = data.get("superseded_by")
+    if (
+        isinstance(successor, str)
+        and ":" in successor
+        and not access.policy.can(Permission.DISCOVER, successor.split(":", 1)[1])
+    ):
+        concealed["superseded_by"] = [successor]
+    return concealed
+
+
+def _canonical_decision_doc(raw: Any) -> dict[str, str] | None:
+    try:
+        candidate = CatalogObjectIn(
+            id="decision-source-validation",
+            kind=DECISION_KIND,
+            label="Decision source validation",
+            data={"schema_version": 1, "decision_status": "proposed", "docs": [raw]},
+        )
+    except ValidationError:
+        return None
+    normalized = candidate.data["docs"][0]
+    return {
+        "source_type": str(normalized.get("source_type") or ""),
+        "title": str(normalized.get("title") or ""),
+        "url": str(normalized.get("url") or ""),
+        "published_at": str(normalized.get("published_at") or ""),
+        "safe_url": str(normalized.get("url") or ""),
+    }
+
+
+def _canonical_decision_docs(data: Mapping[str, Any]) -> list[dict[str, str]]:
+    rows: list[dict[str, str]] = []
+    raw_docs = data.get("docs")
+    if isinstance(raw_docs, list):
+        for raw in raw_docs:
+            canonical = _canonical_decision_doc(raw)
+            if canonical is not None:
+                rows.append(canonical)
+    return rows
+
+
+def _decision_has_legacy_docs(data: Mapping[str, Any]) -> bool:
+    raw_docs = data.get("docs")
+    return isinstance(raw_docs, list) and len(_canonical_decision_docs(data)) != len(raw_docs)
+
+
+def _decision_reference_display(
+    values: Any,
+    object_map: Mapping[str, Any],
+) -> list[dict[str, str]]:
+    if not isinstance(values, list):
+        return []
+    rendered: list[dict[str, str]] = []
+    for value in values:
+        if not isinstance(value, str):
+            continue
+        target = object_map.get(value)
+        if target is None:
+            continue
+        rendered.append(
+            {
+                "ref": value,
+                "id": str(getattr(target, "id", "")),
+                "label": str(getattr(target, "label", "")),
+            }
+        )
+    return rendered
+
+
+def _decision_detail_data(
+    data: Mapping[str, Any],
+    object_map: Mapping[str, Any],
+) -> dict[str, Any]:
+    form_values = _decision_form_values(data)
+    result: dict[str, Any] = {
+        **form_values,
+        "alternatives_list": _split_form_lines(form_values["alternatives"]),
+        "consequences_list": _split_form_lines(form_values["consequences"]),
+        "docs": _canonical_decision_docs(data),
+        "legacy_docs_blocked": _decision_has_legacy_docs(data),
+    }
+    for field_name in DECISION_REFERENCE_LIST_FIELDS:
+        result[f"{field_name}_links"] = _decision_reference_display(
+            data.get(field_name),
+            object_map,
+        )
+    successor = data.get("superseded_by")
+    successor_links = _decision_reference_display([successor], object_map)
+    result["superseded_by_link"] = successor_links[0] if successor_links else None
+    return result
+
+
 def _require_existing_ref(session: Session, ref: str) -> None:
     if ":" not in ref:
         raise HTTPException(status_code=422, detail="Invalid object reference")
@@ -2810,6 +3235,18 @@ def _safe_error_message(exc: Exception) -> str:
     if isinstance(exc, ValueError):
         return str(exc)
     return "Invalid catalog object payload."
+
+
+def _decision_form_error(request: Request, exc: Exception) -> str:
+    translator = translation_context(request)["t"]
+    if isinstance(exc, DecisionIntegrityError):
+        return translator("decision.validation.supersession")
+    match = re.search(r"data\.([a-z_]+)", str(exc))
+    field_name = match.group(1) if match is not None else "decision_status"
+    field_label = translator(f"decision.field.{field_name}.label")
+    if field_label == f"decision.field.{field_name}.label":
+        field_label = translator("decision.panel.title")
+    return translator("decision.validation.field", field=field_label)
 
 
 def _apply_primary_name(data: dict[str, Any], schema: Any, value: str) -> None:

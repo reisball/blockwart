@@ -107,6 +107,8 @@ The list accepts:
 - `status`: compatibility status
 - `lifecycle`: `planned`, `active`, or `retired`
 - `health`: `unknown`, `healthy`, `degraded`, `down`, or `maintenance`
+- `decision_status`: exact canonical Decision lifecycle value
+- `applies_to`: exact authorized asset `kind:id` in a Decision's canonical scope
 - `source_type`: `unknown`, `manual`, `import`, or `discovery`
 - `stale`: exact computed freshness state
 
@@ -114,6 +116,8 @@ Objects with `read` use the full summary. Objects with only `discover` use a
 strict stub containing identity, display label, released placement, and the
 caller's capabilities. Detail-field filters exclude stubs rather than probing
 their hidden values; text search on stubs uses only ID, kind, and label.
+Decision reference projections omit concealed targets, and `applies_to` returns
+no match when its target is not discoverable.
 Objects without `discover` are absent.
 
 The resolver loads one bounded catalog/relationship snapshot, applies the

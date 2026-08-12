@@ -17,6 +17,12 @@ from blockwart.domain.asset_state import (
 )
 from blockwart.domain.auth import ObjectVisibility, Permission
 from blockwart.domain.catalog_data import CatalogDataRead
+from blockwart.domain.decisions import (
+    DecisionStatus,
+    decision_matches_filters,
+    project_authorized_decision_data,
+    validate_applies_to_filter,
+)
 from blockwart.domain.interfaces import (
     InterfaceContractError,
     normalize_interface_data,
@@ -89,6 +95,8 @@ def query_agent_objects_page(
     protocol: str | None = None,
     exposure: str | None = None,
     status: str | None = None,
+    decision_status: DecisionStatus | None = None,
+    applies_to: str | None = None,
     lifecycle: AssetLifecycle | None = None,
     health: AssetHealth | None = None,
     source_type: SourceType | None = None,
@@ -112,6 +120,8 @@ def query_agent_objects_page(
         protocol=protocol,
         exposure=exposure,
         status=status,
+        decision_status=decision_status,
+        applies_to=applies_to,
         lifecycle=lifecycle,
         health=health,
         source_type=source_type,
@@ -146,6 +156,8 @@ def query_agent_context_page(
     protocol: str | None = None,
     exposure: str | None = None,
     status: str | None = None,
+    decision_status: DecisionStatus | None = None,
+    applies_to: str | None = None,
     lifecycle: AssetLifecycle | None = None,
     health: AssetHealth | None = None,
     source_type: SourceType | None = None,
@@ -169,6 +181,8 @@ def query_agent_context_page(
         protocol=protocol,
         exposure=exposure,
         status=status,
+        decision_status=decision_status,
+        applies_to=applies_to,
         lifecycle=lifecycle,
         health=health,
         source_type=source_type,
@@ -203,6 +217,8 @@ def search_agent_objects(
     protocol: str | None = None,
     exposure: str | None = None,
     status: str | None = None,
+    decision_status: DecisionStatus | None = None,
+    applies_to: str | None = None,
     lifecycle: AssetLifecycle | None = None,
     health: AssetHealth | None = None,
     source_type: SourceType | None = None,
@@ -221,6 +237,8 @@ def search_agent_objects(
         protocol=protocol,
         exposure=exposure,
         status=status,
+        decision_status=decision_status,
+        applies_to=applies_to,
         lifecycle=lifecycle,
         health=health,
         source_type=source_type,
@@ -312,6 +330,8 @@ def build_agent_context(
     protocol: str | None = None,
     exposure: str | None = None,
     status: str | None = None,
+    decision_status: DecisionStatus | None = None,
+    applies_to: str | None = None,
     lifecycle: AssetLifecycle | None = None,
     health: AssetHealth | None = None,
     source_type: SourceType | None = None,
@@ -330,6 +350,8 @@ def build_agent_context(
         protocol=protocol,
         exposure=exposure,
         status=status,
+        decision_status=decision_status,
+        applies_to=applies_to,
         lifecycle=lifecycle,
         health=health,
         source_type=source_type,
@@ -352,6 +374,8 @@ def _query_agent_rows_page(
     protocol: str | None,
     exposure: str | None,
     status: str | None,
+    decision_status: DecisionStatus | None,
+    applies_to: str | None,
     lifecycle: AssetLifecycle | None,
     health: AssetHealth | None,
     source_type: SourceType | None,
@@ -374,6 +398,8 @@ def _query_agent_rows_page(
         protocol=protocol,
         exposure=exposure,
         status=status,
+        decision_status=decision_status,
+        applies_to=applies_to,
         lifecycle=lifecycle,
         health=health,
         source_type=source_type,
@@ -404,6 +430,8 @@ def _query_agent_rows_page(
             "protocol": _normalized_filter(protocol),
             "q": query.strip().casefold() if query else None,
             "status": _normalized_filter(status),
+            "decision_status": decision_status,
+            "applies_to": applies_to,
             "source_type": source_type,
             "stale": stale,
         },
@@ -448,6 +476,8 @@ class _AgentCatalogResolver:
         protocol: str | None,
         exposure: str | None,
         status: str | None,
+        decision_status: DecisionStatus | None,
+        applies_to: str | None,
         lifecycle: AssetLifecycle | None,
         health: AssetHealth | None,
         source_type: SourceType | None,
@@ -457,6 +487,14 @@ class _AgentCatalogResolver:
         matches: list[CatalogObject] = []
         normalized_query = query.strip() if query else ""
         query_term = normalized_query.casefold() if normalized_query else None
+        parsed_applies_to = (
+            validate_applies_to_filter(applies_to) if applies_to is not None else None
+        )
+        if parsed_applies_to is not None and not self.access.policy.can(
+            Permission.DISCOVER,
+            parsed_applies_to.object_id,
+        ):
+            return []
         candidate_ids = self._candidate_ids(
             kind=kind,
         )
@@ -468,6 +506,14 @@ class _AgentCatalogResolver:
             if obj.id not in candidate_ids:
                 continue
             data = _safe_object_data(obj)
+            if obj.kind == "decision" and can_read:
+                data = project_authorized_decision_data(
+                    data,
+                    can_discover=lambda object_id: self.access.policy.can(
+                        Permission.DISCOVER,
+                        object_id,
+                    ),
+                )
             state = state_from_record(
                 kind=obj.kind,
                 status=obj.status,
@@ -483,6 +529,8 @@ class _AgentCatalogResolver:
             if (
                 (
                     status
+                    or decision_status
+                    or applies_to
                     or lifecycle
                     or health
                     or ip
@@ -498,6 +546,13 @@ class _AgentCatalogResolver:
                 continue
             if status and obj.status.casefold() != status.casefold():
                 continue
+            if decision_status is not None or applies_to is not None:
+                if obj.kind != "decision" or not decision_matches_filters(
+                    data,
+                    decision_status=decision_status,
+                    applies_to=applies_to,
+                ):
+                    continue
             if lifecycle and (state is None or state.lifecycle != lifecycle):
                 continue
             if health and (state is None or state.health != health):
@@ -556,6 +611,17 @@ class _AgentCatalogResolver:
             return self.stub(obj)
         record = _safe_object_record(obj)
         data = record.data
+        projected_decision_data = (
+            project_authorized_decision_data(
+                data,
+                can_discover=lambda object_id: self.access.policy.can(
+                    Permission.DISCOVER,
+                    object_id,
+                ),
+            )
+            if obj.kind == "decision"
+            else {}
+        )
         state = state_from_record(
             kind=obj.kind,
             status=obj.status,
@@ -587,6 +653,20 @@ class _AgentCatalogResolver:
             primary_endpoint=endpoints[0] if endpoints else None,
             lifecycle=state.lifecycle if state is not None else None,
             health=state.health if state is not None else None,
+            decision_status=(
+                projected_decision_data.get("decision_status")
+                if obj.kind == "decision"
+                else None
+            ),
+            applies_to=(
+                [
+                    value
+                    for value in projected_decision_data.get("applies_to", [])
+                    if isinstance(value, str)
+                ]
+                if isinstance(projected_decision_data.get("applies_to"), list)
+                else []
+            ),
             placement_state=resolved_placement_state,
             record_state=record.record_state,
             diagnostics=[
@@ -618,6 +698,14 @@ class _AgentCatalogResolver:
         recent_comments: dict[str, list[CommentOut]],
     ) -> AgentCatalogObjectContext:
         data = _safe_object_data(obj)
+        if obj.kind == "decision":
+            data = project_authorized_decision_data(
+                data,
+                can_discover=lambda object_id: self.access.policy.can(
+                    Permission.DISCOVER,
+                    object_id,
+                ),
+            )
         object_ref = _object_ref(obj)
         relationships = [
             AgentRelationshipOut(
