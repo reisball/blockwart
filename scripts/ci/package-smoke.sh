@@ -87,4 +87,7 @@ fi
   --source-root "$SOURCE_DIR/examples/knowledge-plan/sources" \
   --implementation-commit 1111111111111111111111111111111111111111 \
   --implementation-tree 2222222222222222222222222222222222222222
+"$TEMP_DIR/venv/bin/blockwart-knowledge-apply" --print-schema apply-result >/dev/null
+"$TEMP_DIR/venv/bin/blockwart-knowledge-apply" --print-schema backup-receipt >/dev/null
+"$TEMP_DIR/venv/bin/blockwart-knowledge-apply" --print-schema rollback-result >/dev/null
 echo "package_smoke=passed"

@@ -12,6 +12,8 @@ deleted by this classification.
 - [Markdown import](markdown-import.md) and [canonical English/UI
   localization](internationalization.md)
 - [Write-free Knowledge planning](knowledge-planning.md)
+- [Reviewed Knowledge apply and rollback](knowledge-apply.md) / [Geprüftes
+  Knowledge-Apply und Rollback](knowledge-apply.de.md)
 
 ## Active API Documentation
 

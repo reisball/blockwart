@@ -46,6 +46,7 @@ blockwart-start = "blockwart.cli.start:main"
 blockwart-mcp = "blockwart.mcp.server:main"
 blockwart-import-markdown = "blockwart.cli.import_markdown:main"
 blockwart-knowledge-plan = "blockwart.cli.knowledge_plan:main"
+blockwart-knowledge-apply = "blockwart.cli.knowledge_apply:main"
 blockwart-seed = "blockwart.cli.seed:main"
 blockwart-schema-overrides = "blockwart.cli.schema_overrides:main"
 

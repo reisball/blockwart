@@ -49,6 +49,7 @@ automatically.
 | Object comments | Human and agent operational history, separate from audit | [Object comments](docs/object-comments.md) |
 | Import CLI | Reviewed TOOLS.md/YAML ingestion without resolving secrets | [Markdown import](docs/markdown-import.md) |
 | Knowledge plan CLI | Deterministic private-source classification with no catalog writes | [Knowledge planning](docs/knowledge-planning.md) |
+| Knowledge apply CLI | Offline digest-bound reviewed apply and paired SQLite rollback | [Knowledge apply](docs/knowledge-apply.md) |
 
 ## Agent quick start
 
