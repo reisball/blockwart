@@ -9,12 +9,27 @@
     <span class="state-badge"><i></i>{{ asset.decision_status or t("asset.no_value") }}</span>
   {% elif asset.kind == "project" %}
     <span class="state-badge"><i></i>{{ asset.project_status or t("asset.no_value") }}</span>
+  {% elif asset.kind == "runbook" %}
+    <span class="state-badge"><i></i>{{ asset.runbook_status or t("asset.no_value") }}</span>
   {% else %}
     {% set health = asset.health or "unknown" %}
     <span class="state-badge state-{{ health }}">
       <i></i>{{ t("health." ~ health) }}
     </span>
   {% endif %}
+{%- endmacro %}
+
+{% macro runbook_create_table(table, columns, prefix) -%}
+  <fieldset data-create-field="{{ table }}" {% if table not in form_ui_schema.create_fields %}hidden{% endif %}>
+    <legend>{{ create_fields_by_key[table].label }}</legend>
+    <p class="meta">{{ create_fields_by_key[table].placeholder }}</p>
+    <div class="table-wrap"><table class="table edit-table"><thead><tr>{% for column in columns %}<th>{{ t("runbook.entry." ~ column) }}</th>{% endfor %}<th><span class="visually-hidden">{{ t("runbook.collection.actions") }}</span></th></tr></thead>
+      <tbody data-row-list="runbook-{{ table }}-create">
+      {% for row in form.runbook_rows[table] %}<tr>{% for column in columns %}<td>{% if column == "source_type" %}<select name="{{ prefix }}_{{ column }}">{% for source_type in runbook_source_types %}<option value="{{ source_type }}"{% if row[column] == source_type %} selected{% endif %}>{{ t("runbook.source_type." ~ source_type) }}</option>{% endfor %}</select>{% elif column in ["description", "command", "expected_effect", "success_expectation"] %}<textarea name="{{ prefix }}_{{ column }}" spellcheck="false">{{ row[column] }}</textarea>{% else %}<input name="{{ prefix }}_{{ column }}" value="{{ row[column] }}" autocomplete="off" />{% endif %}</td>{% endfor %}<td><button class="button button-small button-muted" type="button" data-remove-row>{{ t("runbook.collection.remove") }}</button></td></tr>{% endfor %}
+      </tbody></table></div>
+    <template data-row-template="runbook-{{ table }}-create"><tr>{% for column in columns %}<td>{% if column == "source_type" %}<select name="{{ prefix }}_{{ column }}">{% for source_type in runbook_source_types %}<option value="{{ source_type }}">{{ t("runbook.source_type." ~ source_type) }}</option>{% endfor %}</select>{% elif column in ["description", "command", "expected_effect", "success_expectation"] %}<textarea name="{{ prefix }}_{{ column }}" spellcheck="false"></textarea>{% else %}<input name="{{ prefix }}_{{ column }}" value="" autocomplete="off" />{% endif %}</td>{% endfor %}<td><button class="button button-small button-muted" type="button" data-remove-row>{{ t("runbook.collection.remove") }}</button></td></tr></template>
+    <button class="button button-small button-muted" type="button" data-add-row="runbook-{{ table }}-create">{{ t("runbook.collection.add") }}</button>
+  </fieldset>
 {%- endmacro %}
 
 {% macro tree_toggle(tree_id, label) -%}
@@ -278,6 +293,23 @@
             <label data-create-field="summary"><span data-field-label="summary">{{ create_fields_by_key.summary.label }}</span>
               <textarea class="summary-input" name="summary" data-field-input="summary" placeholder="{{ create_fields_by_key.summary.placeholder }}" {% if create_fields_by_key.summary.required %}required{% endif %}>{{ form.summary }}</textarea>
             </label>
+            {% for field in ui_schemas.runbook.create_field_definitions if field.storage_path.startswith("data_json.") and field.key not in ["prerequisites", "steps", "verification", "rollback", "recovery", "sources"] %}
+              <label data-create-field="{{ field.key }}" {% if field.key not in form_ui_schema.create_fields %}hidden{% endif %}><span data-field-label="{{ field.key }}">{{ field.label }}</span>
+                {% if field.key == "runbook_status" %}<select name="runbook_status" required>{% for option in runbook_statuses %}<option value="{{ option }}"{% if form.runbook_status == option %} selected{% endif %}>{{ t("runbook.status." ~ option) }}</option>{% endfor %}</select>
+                {% elif field.key == "risk_level" %}<select name="risk_level"><option value="">{{ t("asset.no_value") }}</option>{% for option in runbook_risks %}<option value="{{ option }}"{% if form.risk_level == option %} selected{% endif %}>{{ t("runbook.risk." ~ option) }}</option>{% endfor %}</select>
+                {% elif field.key == "approval_required" %}<select name="approval_required" required><option value="false"{% if form.approval_required != "true" %} selected{% endif %}>{{ t("runbook.approval.no") }}</option><option value="true"{% if form.approval_required == "true" %} selected{% endif %}>{{ t("runbook.approval.yes") }}</option></select>
+                {% elif field.key == "change_fallback" %}<select name="change_fallback"><option value="">{{ t("asset.no_value") }}</option>{% for option in runbook_change_fallbacks %}<option value="{{ option }}"{% if form.change_fallback == option %} selected{% endif %}>{{ t("runbook.fallback." ~ option) }}</option>{% endfor %}</select>
+                {% elif field.input_type in ["textarea", "list", "reference-list"] %}<textarea name="{{ field.key }}" autocomplete="off" placeholder="{{ field.placeholder }}">{{ form[field.key] }}</textarea>
+                {% else %}<input name="{{ field.key }}" value="{{ form[field.key] }}" autocomplete="off" placeholder="{{ field.placeholder }}" />{% endif %}
+                <span class="meta">{{ field.placeholder }}</span>
+              </label>
+            {% endfor %}
+            {{ runbook_create_table("prerequisites", ["id", "description"], "prerequisite") }}
+            {{ runbook_create_table("steps", ["id", "title", "description", "command", "expected_effect"], "step") }}
+            {{ runbook_create_table("verification", ["id", "description", "success_expectation"], "verification") }}
+            {{ runbook_create_table("rollback", ["id", "title", "description", "command", "expected_effect"], "rollback") }}
+            {{ runbook_create_table("recovery", ["id", "title", "description", "command", "expected_effect"], "recovery") }}
+            {{ runbook_create_table("sources", ["id", "source_type", "title", "url", "author", "publisher", "published_at", "retrieved_at"], "runbook_source") }}
             {% for field in ui_schemas.project.create_field_definitions if field.storage_path.startswith("data_json.") %}
               <label data-create-field="{{ field.key }}" {% if field.key not in form_ui_schema.create_fields %}hidden{% endif %}><span data-field-label="{{ field.key }}">{{ field.label }}</span>
                 {% if field.key == "category" %}
@@ -358,7 +390,7 @@
             <input type="hidden" name="idempotency_key" value="{{ form.idempotency_key }}" />
             <label data-create-field="kind"><span data-field-label="kind">{{ create_fields_by_key.kind.label }}</span>
               <select name="kind" data-kind-select>
-                {% for object_kind in object_kinds if object_kind not in ["decision", "project"] %}
+                {% for object_kind in object_kinds if object_kind not in ["runbook", "decision", "project"] %}
                   <option value="{{ object_kind }}" {% if object_kind == form.kind %}selected{% endif %}>{{ t("kind." ~ object_kind) }}</option>
                 {% endfor %}
               </select>
@@ -554,6 +586,12 @@
                         </td>
                       </tr>
                       {% for device in explorer.devices %}{{ asset_row(device, 1, "devices", 1) }}{% endfor %}
+                    {% endif %}
+                    {% if explorer.runbooks %}
+                      <tr class="group-row secondary-group" data-tree-node="runbooks" data-tree-label="{{ t('kind.runbook') }}" data-tree-depth="0">
+                        <td colspan="8">{{ tree_toggle("runbooks", t("kind.runbook")) }}<span class="node-icon runbook">▤</span><strong>{{ t("kind.runbook") }}</strong><span class="group-count">{{ t("catalog.asset_count", count=explorer.runbooks|length) }}</span></td>
+                      </tr>
+                      {% for runbook in explorer.runbooks %}{{ asset_row(runbook, 1, "runbooks", 1) }}{% endfor %}
                     {% endif %}
                     {% if explorer.projects %}
                       <tr class="group-row secondary-group" data-tree-node="projects" data-tree-label="{{ t('kind.project') }}" data-tree-depth="0">

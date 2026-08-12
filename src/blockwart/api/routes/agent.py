@@ -19,6 +19,7 @@ from blockwart.domain.projects import (
     ProjectStatus,
 )
 from blockwart.domain.provenance import SourceType
+from blockwart.domain.runbooks import RunbookRisk, RunbookStatus
 from blockwart.schemas.agent import AgentContextOut, AgentSearchOut
 from blockwart.schemas.catalog import ObjectKind
 from blockwart.schemas.v1 import V1NetworkTopologyOut
@@ -63,6 +64,8 @@ def agent_search(
             description="Exact authorized asset kind:id Decision scope",
         ),
     ] = None,
+    runbook_status: RunbookStatus | None = None,
+    runbook_risk: RunbookRisk | None = None,
     project_category: ProjectCategory | None = None,
     project_status: ProjectStatus | None = None,
     related_object: Annotated[
@@ -70,7 +73,7 @@ def agent_search(
         Query(
             max_length=RELATED_OBJECT_MAX_LENGTH,
             pattern=RELATED_OBJECT_PATTERN,
-            description="Exact authorized kind:id Project relationship target",
+            description="Exact authorized kind:id Project or Runbook relationship target",
         ),
     ] = None,
     lifecycle: AssetLifecycle | None = None,
@@ -92,6 +95,8 @@ def agent_search(
         status=status,
         decision_status=decision_status,
         applies_to=applies_to,
+        runbook_status=runbook_status,
+        runbook_risk=runbook_risk,
         project_category=project_category,
         project_status=project_status,
         related_object=related_object,
@@ -171,6 +176,8 @@ def agent_context(
             description="Exact authorized asset kind:id Decision scope",
         ),
     ] = None,
+    runbook_status: RunbookStatus | None = None,
+    runbook_risk: RunbookRisk | None = None,
     project_category: ProjectCategory | None = None,
     project_status: ProjectStatus | None = None,
     related_object: Annotated[
@@ -178,7 +185,7 @@ def agent_context(
         Query(
             max_length=RELATED_OBJECT_MAX_LENGTH,
             pattern=RELATED_OBJECT_PATTERN,
-            description="Exact authorized kind:id Project relationship target",
+            description="Exact authorized kind:id Project or Runbook relationship target",
         ),
     ] = None,
     lifecycle: AssetLifecycle | None = None,
@@ -200,6 +207,8 @@ def agent_context(
         status=status,
         decision_status=decision_status,
         applies_to=applies_to,
+        runbook_status=runbook_status,
+        runbook_risk=runbook_risk,
         project_category=project_category,
         project_status=project_status,
         related_object=related_object,
@@ -236,6 +245,8 @@ def _active_filters(
     status: str | None,
     decision_status: DecisionStatus | None,
     applies_to: str | None,
+    runbook_status: RunbookStatus | None,
+    runbook_risk: RunbookRisk | None,
     project_category: ProjectCategory | None,
     project_status: ProjectStatus | None,
     related_object: str | None,
@@ -254,6 +265,8 @@ def _active_filters(
         "status": status,
         "decision_status": decision_status,
         "applies_to": applies_to,
+        "runbook_status": runbook_status,
+        "runbook_risk": runbook_risk,
         "project_category": project_category,
         "project_status": project_status,
         "related_object": related_object,

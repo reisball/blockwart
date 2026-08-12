@@ -248,7 +248,11 @@ def test_every_schema_rule_publishes_a_contract() -> None:
             assert entry["description"]
 
     assert [rule["rule"] for rule in kinds["runbook"]["data"]["rules"]] == [
-        "validate_runbook_approval"
+        "reject_credential_value_keys",
+        "require_runbook_conditional_fields",
+        "reject_runbook_contradictions",
+        "validate_runbook_entries",
+        "validate_runbook_timestamp_order",
     ]
     assert [rule["rule"] for rule in kinds["credential_reference"]["data"]["rules"]] == [
         "reject_credential_value_keys"

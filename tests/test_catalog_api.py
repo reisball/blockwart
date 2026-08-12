@@ -367,9 +367,16 @@ def test_delete_catalog_object_writes_audit_event(session_factory) -> None:
                     summary="Credential rotation procedure.",
                     data={
                         "schema_version": 1,
-                        "risk_level": "safe-change",
+                        "runbook_status": "draft",
+                        "risk_level": "read-only",
                         "approval_required": False,
-                        "steps": [{"order": 1, "title": "Open referenced vault item"}],
+                        "steps": [
+                            {
+                                "id": "inspect-reference",
+                                "title": "Open referenced vault item",
+                                "expected_effect": "The reference metadata is visible.",
+                            }
+                        ],
                         "credential_references": ["credential_reference:vaultwarden-api"],
                     },
                 ),

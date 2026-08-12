@@ -109,6 +109,23 @@ from blockwart.ui.project_forms import (
     safe_project_form_values,
     split_form_lines,
 )
+from blockwart.ui.runbook_forms import (
+    RUNBOOK_CHANGE_FALLBACK_OPTIONS,
+    RUNBOOK_REFERENCE_LIST_FIELDS,
+    RUNBOOK_RISK_OPTIONS,
+    RUNBOOK_SOURCE_TYPE_OPTIONS,
+    RUNBOOK_STATUS_OPTIONS,
+    RUNBOOK_TABLES,
+    RUNBOOK_TEXT_LIST_FIELDS,
+    RunbookForm,
+    apply_runbook_form_data,
+    blank_runbook_rows,
+    canonical_runbook_rows,
+    runbook_form_values,
+    runbook_has_legacy_rows,
+    safe_runbook_form_rows,
+    safe_runbook_form_values,
+)
 from blockwart.ui.security import (
     AUTH_CSRF_COOKIE_NAME,
     read_access_from_request,
@@ -124,7 +141,8 @@ router = APIRouter(
     dependencies=[Depends(require_browser_read_access)],
 )
 
-OBJECT_KINDS = (*PUBLIC_OBJECT_KINDS, "decision", "project")
+OBJECT_KINDS = (*PUBLIC_OBJECT_KINDS, "runbook", "decision", "project")
+RUNBOOK_KIND = "runbook"
 DECISION_KIND = "decision"
 PROJECT_KIND = "project"
 DECISION_TEXT_FIELDS = ("context", "decision", "rationale")
@@ -138,6 +156,7 @@ DECISION_REFERENCE_LIST_FIELDS = (
     "supersedes",
 )
 PROJECT_FORM_KEYS = tuple(project_form_values({}))
+RUNBOOK_FORM_KEYS = tuple(runbook_form_values({}))
 OBJECT_STATUSES_UI = OBJECT_STATUSES
 RELATION_TYPES = RELATIONSHIP_TYPES
 PLATFORM_TYPES = ("LXC", "VM", "WSL")
@@ -387,6 +406,10 @@ def _index_template_context(
         "device_categories": sorted(DEVICE_CATEGORIES),
         "decision_statuses": DECISION_STATUS_VALUES,
         "decision_source_types": DECISION_SOURCE_TYPE_VALUES,
+        "runbook_statuses": RUNBOOK_STATUS_OPTIONS,
+        "runbook_risks": RUNBOOK_RISK_OPTIONS,
+        "runbook_change_fallbacks": RUNBOOK_CHANGE_FALLBACK_OPTIONS,
+        "runbook_source_types": RUNBOOK_SOURCE_TYPE_OPTIONS,
         "project_categories": PROJECT_CATEGORY_OPTIONS,
         "project_statuses": PROJECT_STATUS_OPTIONS,
         "project_source_types": PROJECT_SOURCE_TYPE_OPTIONS,
@@ -536,6 +559,10 @@ def index(
         minimal_project = minimal_object_data(PROJECT_KIND)
         form["category"] = str(minimal_project["category"])
         form["project_status"] = str(minimal_project["project_status"])
+    if normalized_kind == RUNBOOK_KIND:
+        minimal_runbook = minimal_object_data(RUNBOOK_KIND)
+        form["runbook_status"] = str(minimal_runbook["runbook_status"])
+        form["approval_required"] = "false"
     return templates.TemplateResponse(
         request,
         "index.html",
@@ -671,6 +698,23 @@ def _detail_template_context(
     can_edit_network_endpoints = catalog_object.kind in NETWORK_ENDPOINT_EDIT_KINDS
     can_edit_device = catalog_object.kind == DEVICE_OBJECT_KIND
     submitted_rows = form_rows or {}
+    runbook_detail = _runbook_detail_data(object_data, read_model.object_map)
+    runbook_form_state = runbook_form_values(object_data)
+    submitted_runbook_forms = submitted_rows.get("runbook_form") or []
+    if submitted_runbook_forms:
+        runbook_form_state.update(
+            {
+                str(key): str(value or "")
+                for key, value in submitted_runbook_forms[0].items()
+            }
+        )
+    runbook_table_rows = {
+        table: _mapping_rows_override(
+            submitted_rows.get(f"runbook_{table}"),
+            canonical_runbook_rows(object_data, table) or blank_runbook_rows(table),
+        )
+        for table in RUNBOOK_TABLES
+    }
     project_detail = _project_detail_data(object_data, read_model.object_map)
     project_form_state = project_form_values(object_data)
     submitted_project_forms = submitted_rows.get("project_form") or []
@@ -794,6 +838,14 @@ def _detail_template_context(
         "project_evidence_grades": PROJECT_EVIDENCE_GRADE_OPTIONS,
         "project_owner_kinds": PROJECT_MANAGED_BY_KIND_OPTIONS,
         "project_timeline_types": PROJECT_TIMELINE_TYPE_OPTIONS,
+        "supports_runbook": catalog_object.kind == RUNBOOK_KIND,
+        "runbook_detail": runbook_detail,
+        "runbook_form": runbook_form_state,
+        "runbook_table_rows": runbook_table_rows,
+        "runbook_statuses": RUNBOOK_STATUS_OPTIONS,
+        "runbook_risks": RUNBOOK_RISK_OPTIONS,
+        "runbook_change_fallbacks": RUNBOOK_CHANGE_FALLBACK_OPTIONS,
+        "runbook_source_types": RUNBOOK_SOURCE_TYPE_OPTIONS,
         "supports_decision": catalog_object.kind == DECISION_KIND,
         "decision_detail": decision_detail,
         "decision_form": decision_form,
@@ -967,6 +1019,7 @@ def _detail_navigation_context(
         "service-information",
         "installed-software",
         "device",
+        "runbook",
         "decision",
         "project",
         "network",
@@ -1578,6 +1631,7 @@ def save_root(
     request: Request,
     session: Annotated[Session, Depends(get_session)],
     project_form: Annotated[ProjectForm, Depends()],
+    runbook_form: Annotated[RunbookForm, Depends()],
     object_id: Annotated[str, Form()],
     kind: Annotated[str, Form()],
     label: Annotated[str | None, Form()] = None,
@@ -1661,6 +1715,12 @@ def save_root(
         "idempotency_key": idempotency_key,
         **{key: value or "" for key, value in decision_values.items()},
         "decision_docs": decision_docs or _empty_form()["decision_docs"],
+        **safe_runbook_form_values(runbook_form),
+        "runbook_rows": {
+            table: safe_runbook_form_rows(runbook_form, table)
+            or blank_runbook_rows(table)
+            for table in RUNBOOK_TABLES
+        },
     }
     try:
         data: dict[str, Any] = {}
@@ -1669,6 +1729,9 @@ def save_root(
             _reject_secret_shaped_form_data(data)
         if kind == PROJECT_KIND:
             apply_project_form_data(data, project_form)
+            _reject_secret_shaped_form_data(data)
+        if kind == RUNBOOK_KIND:
+            apply_runbook_form_data(data, runbook_form)
             _reject_secret_shaped_form_data(data)
         ui_schema = get_ui_schema(kind)
         label_values = _split_label_values(labels)
@@ -1713,6 +1776,13 @@ def save_root(
             form["decision_docs"] = _safe_decision_form_docs(decision_docs)
         if kind == PROJECT_KIND:
             form.update(safe_project_form_values(project_form))
+        if kind == RUNBOOK_KIND:
+            form.update(safe_runbook_form_values(runbook_form))
+            form["runbook_rows"] = {
+                table: safe_runbook_form_rows(runbook_form, table)
+                or blank_runbook_rows(table)
+                for table in RUNBOOK_TABLES
+            }
         read_model = query_catalog_browse(
             session,
             read_access_from_request(request),
@@ -1734,6 +1804,8 @@ def save_root(
                     if kind == DECISION_KIND
                     else _project_form_error(request, exc)
                     if kind == PROJECT_KIND
+                    else _runbook_form_error(request, exc)
+                    if kind == RUNBOOK_KIND
                     else _safe_error_message(exc)
                 ),
                 show_create_form=False,
@@ -2045,6 +2117,7 @@ def update_object(
     object_id: str,
     session: Annotated[Session, Depends(get_session)],
     project_form: Annotated[ProjectForm, Depends()],
+    runbook_form: Annotated[RunbookForm, Depends()],
     label: Annotated[str | None, Form()] = None,
     primary_name: Annotated[str | None, Form()] = None,
     kind: Annotated[str | None, Form()] = None,
@@ -2090,6 +2163,8 @@ def update_object(
 ):
     access = read_access_from_request(request)
     context = ui_write_context(request, access)
+    submitted_runbook = runbook_form.values.get("runbook_status") is not None
+    submitted_project = project_form.values.get("category") is not None
     execute_ui_command(
         session,
         context,
@@ -2249,12 +2324,19 @@ def update_object(
                     else None
                 ),
             )
-        if target_kind == PROJECT_KIND and project_form.submitted:
+        if target_kind == PROJECT_KIND and submitted_project:
             apply_project_form_data(
                 data,
                 project_form,
                 concealed_references=_concealed_project_references(data, access),
                 preserve_legacy_sources=project_has_legacy_rows(data, "sources"),
+            )
+        if target_kind == RUNBOOK_KIND and submitted_runbook:
+            apply_runbook_form_data(
+                data,
+                runbook_form,
+                concealed_references=_concealed_runbook_references(data, access),
+                preserve_legacy_sources=runbook_has_legacy_rows(data, "sources"),
             )
         if target_kind == DECISION_KIND and submitted_decision:
             _apply_decision_form_data(
@@ -2307,14 +2389,18 @@ def update_object(
                 else _decision_form_error(request, exc)
                 if submitted_decision
                 else _project_form_error(request, exc)
-                if project_form.submitted
+                if submitted_project
+                else _runbook_form_error(request, exc)
+                if submitted_runbook
                 else _safe_error_message(exc)
             ),
             edit_section=(
                 "decision"
                 if submitted_decision
                 else "project"
-                if project_form.submitted
+                if submitted_project
+                else "runbook"
+                if submitted_runbook
                 else "device"
                 if submitted_device
                 else "service-information"
@@ -2336,7 +2422,17 @@ def update_object(
                         for table in PROJECT_TABLES
                     },
                 }
-                if project_form.submitted
+                if submitted_project
+                else {
+                    "runbook_form": [safe_runbook_form_values(runbook_form)],
+                    **{
+                        f"runbook_{table}": safe_runbook_form_rows(
+                            runbook_form, table
+                        )
+                        for table in RUNBOOK_TABLES
+                    },
+                }
+                if submitted_runbook
                 else
                 {
                     "device_fields": [
@@ -3046,6 +3142,12 @@ def _empty_form() -> dict[str, Any]:
         {"source_type": "original", "title": "", "url": "", "published_at": ""}
     ]
     form.update(dict.fromkeys(PROJECT_FORM_KEYS, ""))
+    form.update(dict.fromkeys(RUNBOOK_FORM_KEYS, ""))
+    form["runbook_status"] = "draft"
+    form["approval_required"] = "false"
+    form["runbook_rows"] = {
+        table: blank_runbook_rows(table) for table in RUNBOOK_TABLES
+    }
     return form
 
 
@@ -3315,6 +3417,58 @@ def _decision_detail_data(
     return result
 
 
+def _concealed_runbook_references(
+    data: Mapping[str, Any], access: ReadAccess
+) -> dict[str, list[str]]:
+    concealed: dict[str, list[str]] = {}
+    for field_name in RUNBOOK_REFERENCE_LIST_FIELDS:
+        raw = data.get(field_name)
+        if not isinstance(raw, list):
+            continue
+        hidden = [
+            value
+            for value in raw
+            if isinstance(value, str)
+            and ":" in value
+            and not access.policy.can(Permission.DISCOVER, value.split(":", 1)[1])
+        ]
+        if hidden:
+            concealed[field_name] = hidden
+    successor = data.get("superseded_by")
+    if (
+        isinstance(successor, str)
+        and ":" in successor
+        and not access.policy.can(Permission.DISCOVER, successor.split(":", 1)[1])
+    ):
+        concealed["superseded_by"] = [successor]
+    return concealed
+
+
+def _runbook_detail_data(
+    data: Mapping[str, Any], object_map: Mapping[str, Any]
+) -> dict[str, Any]:
+    values = runbook_form_values(data)
+    result: dict[str, Any] = {
+        **values,
+        "approval_required": data.get("approval_required") is True,
+        "legacy_rows_blocked": sorted(
+            table for table in RUNBOOK_TABLES if runbook_has_legacy_rows(data, table)
+        ),
+    }
+    for field_name in RUNBOOK_TEXT_LIST_FIELDS:
+        result[f"{field_name}_list"] = _split_form_lines(values[field_name])
+    for field_name in RUNBOOK_REFERENCE_LIST_FIELDS:
+        result[f"{field_name}_links"] = _decision_reference_display(
+            data.get(field_name), object_map
+        )
+    successor = data.get("superseded_by")
+    successor_links = _decision_reference_display([successor], object_map)
+    result["superseded_by_link"] = successor_links[0] if successor_links else None
+    for table in RUNBOOK_TABLES:
+        result[table] = canonical_runbook_rows(data, table)
+    return result
+
+
 def _concealed_project_references(
     data: Mapping[str, Any],
     access: ReadAccess,
@@ -3370,6 +3524,16 @@ def _project_form_error(request: Request, exc: Exception) -> str:
     if field_label == f"project.field.{field_name}.label":
         field_label = translator("project.panel.title")
     return translator("project.validation.field", field=field_label)
+
+
+def _runbook_form_error(request: Request, exc: Exception) -> str:
+    translator = translation_context(request)["t"]
+    match = re.search(r"data\.([a-z_]+)", str(exc))
+    field_name = match.group(1) if match is not None else "runbook_status"
+    field_label = translator(f"runbook.field.{field_name}.label")
+    if field_label == f"runbook.field.{field_name}.label":
+        field_label = translator("runbook.panel.title")
+    return translator("runbook.validation.field", field=field_label)
 
 
 def _require_existing_ref(session: Session, ref: str) -> None:

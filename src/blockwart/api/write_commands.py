@@ -9,6 +9,7 @@ from blockwart.db.session import transaction
 from blockwart.domain.decisions import DecisionIntegrityError
 from blockwart.domain.placement import PlacementError
 from blockwart.domain.relationships import RelationshipIntegrityError
+from blockwart.domain.runbooks import RunbookIntegrityError
 from blockwart.services.commands import (
     CommandAuthorizationDenied,
     CommandConflict,
@@ -58,6 +59,7 @@ def execute_api_command[T](
     except (
         CommandConflict,
         DecisionIntegrityError,
+        RunbookIntegrityError,
         PlacementError,
         RelationshipIntegrityError,
     ) as exc:

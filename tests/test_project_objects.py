@@ -1245,7 +1245,7 @@ def test_rest_agent_and_mcp_share_project_filters(root_client, root_state) -> No
         rejected = root_client.get(
             path,
             headers=headers,
-            params={"related_object": "credential_reference:x"},
+            params={"related_object": "unsupported:x"},
         )
         assert rejected.status_code == 422, rejected.text
 

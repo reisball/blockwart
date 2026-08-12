@@ -49,7 +49,7 @@ def test_public_asset_kind_registries_are_exactly_equal() -> None:
     }
     for name, registry in registries.items():
         _assert_exact_registry(name, registry)
-    assert set(UI_SCHEMAS) == PUBLIC_ASSET_KINDS | {"decision", "project"}
+    assert set(UI_SCHEMAS) == PUBLIC_ASSET_KINDS | {"decision", "project", "runbook"}
 
     assert set(VALID_REFERENCE_KINDS) == object_kinds == set(BUILTIN_SCHEMAS)
     assert OBJECT_STATUSES == ("active", "inactive", "deleted")

@@ -79,7 +79,7 @@ assets, runs the relationship-integrity diagnostic, and exercises all 26
 tools through 32 read/write, coverage, comment, audit, and grant-management calls to the installed
 `blockwart-mcp` console command. It also runs the read-only service-interface
 normalization, placement-state, network-classification, and canonical-Project plans from outside
-the source tree.
+the source tree, plus the canonical-Runbook classification plan.
 
 The container smoke proves that an empty catalog fails the Owner invariant, then starts an
 explicitly bootstrapped candidate and a database at the historical Alembic baseline. Ready

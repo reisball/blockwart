@@ -44,12 +44,12 @@ from blockwart.domain.object_schema import (
     public_rule_name,
 )
 from blockwart.domain.projects import project_contract_projection
+from blockwart.domain.runbooks import runbook_contract_projection
 from blockwart.domain.security import FORBIDDEN_ACL_DATA_KEYS, FORBIDDEN_SECRET_KEYS
 
-# Version 4 additively publishes the canonical Project category, status,
-# evidence, ownership, source, and knowledge-layer contracts next to the
-# Decision contracts published by version 3.
-SCHEMA_PROJECTION_VERSION = 4
+# Version 5 additively publishes the canonical Runbook operating, recovery,
+# inert-command, relationship, and legacy-classification contracts.
+SCHEMA_PROJECTION_VERSION = 5
 SCHEMA_DATA_VERSION = 1
 OBJECT_STATUS_VALUES: tuple[str, ...] = get_args(LegacyObjectStatus)
 DEFAULT_OBJECT_STATUS = "active"
@@ -114,6 +114,7 @@ _EXAMPLE_TEXT = "example"
 _EXAMPLE_DATETIME = "2026-08-11T12:00:00Z"
 _HTTP_URL_PATTERN = r"^[Hh][Tt][Tt][Pp][Ss]?://"
 _PINNED_ENUM_EXAMPLES: Mapping[str, str] = {
+    "runbook_status": "draft",
     "decision_status": "proposed",
     "category": "implementation",
     "project_status": "planned",
@@ -214,6 +215,8 @@ def kind_schema_projection(kind: str) -> dict[str, Any]:
         projection["decision"] = decision_contract_projection()
     if kind == "project":
         projection["project"] = project_contract_projection()
+    if kind == "runbook":
+        projection["runbook"] = runbook_contract_projection()
     return projection
 
 

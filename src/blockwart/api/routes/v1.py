@@ -22,6 +22,7 @@ from blockwart.domain.projects import (
     ProjectStatus,
 )
 from blockwart.domain.provenance import SourceType
+from blockwart.domain.runbooks import RunbookRisk, RunbookStatus
 from blockwart.domain.source_coverage import SourceCoverageError
 from blockwart.schemas.agent import AgentCatalogContextRead
 from blockwart.schemas.catalog import CatalogObjectIn, ObjectKind, ObjectStatus
@@ -220,6 +221,8 @@ def list_v1_objects(
             description="Exact authorized asset kind:id Decision scope",
         ),
     ] = None,
+    runbook_status: RunbookStatus | None = None,
+    runbook_risk: RunbookRisk | None = None,
     project_category: ProjectCategory | None = None,
     project_status: ProjectStatus | None = None,
     related_object: Annotated[
@@ -227,7 +230,7 @@ def list_v1_objects(
         Query(
             max_length=RELATED_OBJECT_MAX_LENGTH,
             pattern=RELATED_OBJECT_PATTERN,
-            description="Exact authorized kind:id Project relationship target",
+            description="Exact authorized kind:id Project or Runbook relationship target",
         ),
     ] = None,
     lifecycle: AssetLifecycle | None = None,
@@ -261,6 +264,8 @@ def list_v1_objects(
             status=status,
             decision_status=decision_status,
             applies_to=applies_to,
+            runbook_status=runbook_status,
+            runbook_risk=runbook_risk,
             project_category=project_category,
             project_status=project_status,
             related_object=related_object,
@@ -307,6 +312,8 @@ def get_v1_context(
             description="Exact authorized asset kind:id Decision scope",
         ),
     ] = None,
+    runbook_status: RunbookStatus | None = None,
+    runbook_risk: RunbookRisk | None = None,
     project_category: ProjectCategory | None = None,
     project_status: ProjectStatus | None = None,
     related_object: Annotated[
@@ -314,7 +321,7 @@ def get_v1_context(
         Query(
             max_length=RELATED_OBJECT_MAX_LENGTH,
             pattern=RELATED_OBJECT_PATTERN,
-            description="Exact authorized kind:id Project relationship target",
+            description="Exact authorized kind:id Project or Runbook relationship target",
         ),
     ] = None,
     lifecycle: AssetLifecycle | None = None,
@@ -348,6 +355,8 @@ def get_v1_context(
             status=status,
             decision_status=decision_status,
             applies_to=applies_to,
+            runbook_status=runbook_status,
+            runbook_risk=runbook_risk,
             project_category=project_category,
             project_status=project_status,
             related_object=related_object,

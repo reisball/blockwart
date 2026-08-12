@@ -15,6 +15,10 @@ boundary; see [Canonical Decision objects](decisions.md). Any update must satisf
 Existing free-form Project rows without a canonical category have the same read-only boundary;
 see [Canonical Project knowledge](projects.md). Category and status are never inferred, and every
 updated Project must satisfy the canonical category-conditioned contract.
+Existing free-form Runbook rows have the same read-only boundary; see
+[Canonical Runbooks](runbooks.md). Status, risk, approval, commands, provenance,
+rollback, and recovery are never inferred, and every updated Runbook must satisfy
+the canonical structured contract.
 
 The registry covers the existing object kinds:
 
@@ -94,8 +98,10 @@ compatibility decision.
 
 Complex conditional rules remain explicit schema-bound postconditions. Current
 examples are the installed-software entry closure and required-field rules,
-the credential-reference raw-value rejection, and the mandatory approval rule
-for disruptive/destructive runbooks.
+credential-value rejection, and the Runbook lifecycle, approval, change fallback,
+ordered-entry identity, and timestamp rules. These executable rules and their
+public error contracts are projected into UI, OpenAPI, Agent API, and MCP instead
+of being restated by an interface.
 
 ## Secret Policy
 

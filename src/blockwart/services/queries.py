@@ -9,7 +9,7 @@ from typing import Any, Literal, NotRequired, TypedDict
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from blockwart.domain.asset_state import AssetHealth, AssetLifecycle
+from blockwart.domain.asset_state import AssetHealth, AssetLifecycle, is_asset_kind
 from blockwart.domain.auth import ObjectVisibility, Permission
 from blockwart.domain.decisions import project_authorized_decision_data
 from blockwart.domain.placement import PlacementGraph
@@ -18,6 +18,7 @@ from blockwart.domain.relationships import (
     NETWORK_DEVICE_CATEGORIES,
     relationship_metadata,
 )
+from blockwart.domain.runbooks import authorized_runbook_data
 from blockwart.domain.ui_schema import get_ui_schema
 from blockwart.models import Relationship
 from blockwart.schemas.catalog import (
@@ -39,9 +40,9 @@ from blockwart.services.read_access import ReadAccess
 
 PUBLIC_KIND_PRIORITY = {
     kind: index
-    for index, kind in enumerate((*PUBLIC_OBJECT_KINDS, "decision", "project"))
+    for index, kind in enumerate((*PUBLIC_OBJECT_KINDS, "runbook", "decision", "project"))
 }
-UI_VISIBLE_KINDS = frozenset((*PUBLIC_OBJECT_KINDS, "decision", "project"))
+UI_VISIBLE_KINDS = frozenset((*PUBLIC_OBJECT_KINDS, "runbook", "decision", "project"))
 
 
 class RelationshipReadModel(TypedDict):
@@ -173,6 +174,8 @@ class ExplorerAssetDetailReadModel(TypedDict):
     decision_status: NotRequired[str]
     project_category: NotRequired[str]
     project_status: NotRequired[str]
+    runbook_status: NotRequired[str]
+    runbook_risk: NotRequired[str]
 
 
 class ExplorerAssetStubReadModel(TypedDict):
@@ -243,6 +246,7 @@ class ExplorerReadModel(TypedDict):
     devices: list[ExplorerAssetReadModel]
     decisions: list[ExplorerAssetReadModel]
     projects: list[ExplorerAssetReadModel]
+    runbooks: list[ExplorerAssetReadModel]
     device_chains: list[ExplorerDeviceChainReadModel]
     network_path_groups: list[ExplorerNetworkPathGroupReadModel]
     assets: dict[str, ExplorerAssetReadModel]
@@ -366,6 +370,7 @@ def query_catalog_browse(
         str(catalog_object.health or "unknown")
         for catalog_object in public_objects
         if catalog_object.visibility == ObjectVisibility.DETAIL
+        and is_asset_kind(catalog_object.kind)
     )
     included_refs = (
         {
@@ -1115,6 +1120,11 @@ def build_explorer_read_model(
         for decision_ref in _refs_for_kind(objects, "decision")
         if is_included(decision_ref)
     ]
+    runbooks = [
+        assets[runbook_ref]
+        for runbook_ref in _refs_for_kind(objects, "runbook")
+        if is_included(runbook_ref)
+    ]
     projects = [
         assets[project_ref]
         for project_ref in _refs_for_kind(objects, "project")
@@ -1160,6 +1170,7 @@ def build_explorer_read_model(
     visible_refs.update(device["ref"] for device in devices)
     visible_refs.update(decision["ref"] for decision in decisions)
     visible_refs.update(project["ref"] for project in projects)
+    visible_refs.update(runbook["ref"] for runbook in runbooks)
     visible_refs.update(
         row["asset"]["ref"]
         for chain in device_chains
@@ -1180,6 +1191,7 @@ def build_explorer_read_model(
         "devices": devices,
         "decisions": decisions,
         "projects": projects,
+        "runbooks": runbooks,
         "device_chains": device_chains,
         "network_path_groups": network_path_groups,
         "assets": {
@@ -1918,6 +1930,14 @@ def _explorer_asset(
             value = catalog_object.data.get(source_key)
             if isinstance(value, str):
                 asset[asset_key] = value
+    if catalog_object.kind == "runbook":
+        for source_key, asset_key in (
+            ("runbook_status", "runbook_status"),
+            ("risk_level", "runbook_risk"),
+        ):
+            value = catalog_object.data.get(source_key)
+            if isinstance(value, str):
+                asset[asset_key] = value
     return asset
 
 
@@ -1955,6 +1975,8 @@ def _project_catalog_object(
             data = project_authorized_decision_data(data, can_discover=can_discover)
         elif catalog_object.kind == "project":
             data = project_authorized_data(data, can_discover=can_discover)
+        elif catalog_object.kind == "runbook":
+            data = authorized_runbook_data(data, can_discover=can_discover)
         return catalog_object.model_copy(
             update={
                 "visibility": ObjectVisibility.DETAIL,

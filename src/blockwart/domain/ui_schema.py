@@ -437,6 +437,70 @@ PROJECT_FIELD_OVERRIDES: dict[str, UiField] = {
     for field in PROJECT_DATA_FIELDS
 }
 
+
+def _runbook_ui_fields() -> tuple[FieldSpec, ...]:
+    return tuple(
+        field
+        for field in BUILTIN_SCHEMAS["runbook"].fields
+        if "." not in field.path
+        and "[]" not in field.path
+        and field.path != "schema_version"
+        and field.forbidden_message is None
+    )
+
+
+RUNBOOK_TABLE_INPUT_TYPES: dict[str, str] = {
+    "prerequisites": "prerequisite-list",
+    "steps": "procedure-list",
+    "verification": "verification-list",
+    "rollback": "procedure-list",
+    "recovery": "procedure-list",
+    "sources": "source-list",
+}
+RUNBOOK_REFERENCE_LIST_FIELDS = (
+    "applies_to",
+    "credential_references",
+    "related_decisions",
+    "related_projects",
+    "related_runbooks",
+    "supersedes",
+)
+
+
+def _runbook_input_type(field: FieldSpec) -> str:
+    if field.path in RUNBOOK_TABLE_INPUT_TYPES:
+        return RUNBOOK_TABLE_INPUT_TYPES[field.path]
+    if field.field_type == "enum":
+        return "select"
+    if field.field_type == "boolean":
+        return "checkbox"
+    if field.field_type == "datetime":
+        return "text"
+    if field.field_type == "reference":
+        return "reference"
+    if field.field_type == "array":
+        return (
+            "reference-list"
+            if field.path in RUNBOOK_REFERENCE_LIST_FIELDS
+            else "list"
+        )
+    return "textarea" if field.field_type == "text" else "text"
+
+
+RUNBOOK_DATA_FIELDS = _runbook_ui_fields()
+RUNBOOK_FIELD_OVERRIDES: dict[str, UiField] = {
+    field.path: UiField(
+        field.path,
+        f"runbook.field.{field.path}.label",
+        _runbook_input_type(field),
+        f"data_json.{field.path}",
+        required=field.required,
+        placeholder_key=f"runbook.field.{field.path}.help",
+        visible_in_create=True,
+    )
+    for field in RUNBOOK_DATA_FIELDS
+}
+
 COMMON_CREATE_FIELDS = (
     "kind",
     "object_id",
@@ -577,6 +641,22 @@ PROJECT_UI_PANELS = (
     UiPanel("audit", "panel.audit", "audit"),
 )
 
+RUNBOOK_SCHEMA_FIELDS = (
+    "kind",
+    "object_id",
+    "primary_name",
+    "status",
+    "summary",
+    *(field.path for field in RUNBOOK_DATA_FIELDS),
+)
+RUNBOOK_UI_PANELS = (
+    UiPanel("overview", "panel.overview", "overview"),
+    UiPanel("runbook", "runbook.panel.title", "runbook"),
+    UiPanel("relationships", "panel.relationships", "relationship-add"),
+    UiPanel("comment", "panel.comment", "comment"),
+    UiPanel("audit", "panel.audit", "audit"),
+)
+
 DECISION_UI_PANELS = (
     UiPanel("overview", "panel.overview", "overview"),
     UiPanel("decision", "decision.panel.title", "decision"),
@@ -641,6 +721,16 @@ UI_SCHEMAS: dict[str, UiTypeSchema] = {
         create_fields=DECISION_SCHEMA_FIELDS,
         panels=DECISION_UI_PANELS,
     ),
+    "runbook": UiTypeSchema(
+        kind="runbook",
+        primary_name_label_key="field.primary_name.runbook.label",
+        primary_name_storage="label",
+        supports_platform=False,
+        fields=RUNBOOK_SCHEMA_FIELDS,
+        create_fields=RUNBOOK_SCHEMA_FIELDS,
+        panels=RUNBOOK_UI_PANELS,
+        field_overrides=RUNBOOK_FIELD_OVERRIDES,
+    ),
     "project": UiTypeSchema(
         kind="project",
         primary_name_label_key="field.primary_name.project.label",
@@ -671,7 +761,7 @@ def ui_schema_payload() -> dict[str, dict[str, object]]:
     for kind in UI_SCHEMAS:
         schema = get_ui_schema(kind)
         schema_payload = schema.as_dict()
-        if kind in {"decision", "project"}:
+        if kind in {"runbook", "decision", "project"}:
             schema_payload["object_schema"] = kind_schema_projection(kind)
         schema_payload["schema_fields"] = schema_field_payload(schema)
         schema_payload["create_field_definitions"] = create_field_payload(schema)
