@@ -79,7 +79,10 @@ assets, runs the relationship-integrity diagnostic, and exercises all 26
 tools through 32 read/write, coverage, comment, audit, and grant-management calls to the installed
 `blockwart-mcp` console command. It also runs the read-only service-interface
 normalization, placement-state, network-classification, and canonical-Project plans from outside
-the source tree, plus the canonical-Runbook classification plan.
+the source tree, plus the canonical-Runbook classification plan, the write-free synthetic
+Knowledge plan, and the installed reviewed-apply machine schemas. Productive Knowledge apply is
+covered only with synthetic SQLite catalogs in pytest; package smoke never mutates its seeded
+catalog through this workflow.
 
 The container smoke proves that an empty catalog fails the Owner invariant, then starts an
 explicitly bootstrapped candidate and a database at the historical Alembic baseline. Ready

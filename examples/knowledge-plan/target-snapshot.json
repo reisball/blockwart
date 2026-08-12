@@ -1,0 +1,37 @@
+{
+  "schema_version": 1,
+  "planner_version": "1",
+  "implementation": {
+    "commit": "1111111111111111111111111111111111111111",
+    "tree": "2222222222222222222222222222222222222222"
+  },
+  "snapshot_digest": "9509c0dde96db95a4667c08358e295f197727cc2a837438ef52a69ad3395835a",
+  "objects": [
+    {
+      "ref": "system:demo-runtime",
+      "state": "present",
+      "revision": 7,
+      "object": {
+        "id": "demo-runtime",
+        "kind": "system",
+        "label": "Demo runtime",
+        "status": "active",
+        "lifecycle": "active",
+        "health": "unknown",
+        "summary": null,
+        "data": {"schema_version": 1},
+        "provenance": {"source_type": "manual", "manual_override": true}
+      }
+    },
+    {"ref": "runbook:demo-diagnosis", "state": "absent"}
+  ],
+  "relationships": [
+    {
+      "from_ref": "runbook:demo-diagnosis",
+      "relation_type": "documents",
+      "to_ref": "system:demo-runtime",
+      "metadata": {},
+      "present": false
+    }
+  ]
+}

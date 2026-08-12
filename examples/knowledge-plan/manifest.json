@@ -1,0 +1,93 @@
+{
+  "schema_version": 1,
+  "planner_version": "1",
+  "implementation": {
+    "commit": "1111111111111111111111111111111111111111",
+    "tree": "2222222222222222222222222222222222222222"
+  },
+  "source_snapshot": {
+    "schema_version": 1,
+    "bundle_digest": "ef8004448e773e639c57dd8f1551ca112daa53d211b86dde2bbe5c515aa85959",
+    "expected_document_count": 2,
+    "expected_entry_count": 2,
+    "closed_directories": [
+      {"relative_path": "references", "suffix": ".md"}
+    ],
+    "documents": [
+      {
+        "source_id": "synthetic-tools",
+        "relative_path": "TOOLS.md",
+        "sha256": "ca643dd05fbda9c121383fca2fd9461ab42ef56edd820b257825c869a0f26957",
+        "entry_ids": ["synthetic-tools-row-01"]
+      },
+      {
+        "source_id": "synthetic-operator-doc",
+        "relative_path": "references/OPERATOR.md",
+        "sha256": "9db536cd0757702a15cb10e003fd2108569c47f39c816d19a00ae32041795b8b",
+        "entry_ids": ["synthetic-operator-procedure"]
+      }
+    ]
+  },
+  "entries": [
+    {
+      "entry_id": "synthetic-tools-row-01",
+      "source_id": "synthetic-tools",
+      "disposition": "asset_fact",
+      "target": {"object_id": "demo-runtime", "kind": "system"},
+      "field_mappings": [
+        {
+          "source_locator": "table-row-01-version",
+          "target_path": "data.installed_software",
+          "evidence": "explicit",
+          "value": [{"name": "Synthetic Tool", "version": "1.0"}]
+        }
+      ],
+      "relations": [],
+      "provenance_state": "preserve_existing",
+      "ambiguity_state": "clear",
+      "conflict_state": "none",
+      "missing_requirements": [],
+      "unsafe_findings": [],
+      "review_rationale": "The synthetic version is an explicit asset inventory fact."
+    },
+    {
+      "entry_id": "synthetic-operator-procedure",
+      "source_id": "synthetic-operator-doc",
+      "disposition": "runbook",
+      "target": {"object_id": "demo-diagnosis", "kind": "runbook"},
+      "field_mappings": [
+        {"source_locator": "heading-title", "target_path": "label", "evidence": "explicit", "value": "Synthetic diagnosis"},
+        {"source_locator": "review-state", "target_path": "status", "evidence": "explicit", "value": "active"},
+        {"source_locator": "contract-version", "target_path": "data.schema_version", "evidence": "explicit", "value": 1},
+        {"source_locator": "review-state", "target_path": "data.runbook_status", "evidence": "explicit", "value": "active"},
+        {"source_locator": "purpose", "target_path": "data.purpose", "evidence": "explicit", "value": "Inspect a fictitious runtime without changing it."},
+        {"source_locator": "risk", "target_path": "data.risk_level", "evidence": "explicit", "value": "read-only"},
+        {"source_locator": "approval", "target_path": "data.approval_required", "evidence": "explicit", "value": false},
+        {"source_locator": "prerequisite-01", "target_path": "data.prerequisites", "evidence": "explicit", "value": [{"id": "access", "description": "Confirm approved read access."}]},
+        {"source_locator": "step-01", "target_path": "data.steps", "evidence": "explicit", "value": [{"id": "inspect", "description": "Inspect synthetic state.", "expected_effect": "A status is displayed and no state changes."}]},
+        {"source_locator": "verification-01", "target_path": "data.verification", "evidence": "explicit", "value": [{"id": "healthy", "description": "Review the synthetic status.", "success_expectation": "The runtime reports a current healthy state."}]},
+        {"source_locator": "scope", "target_path": "data.applies_to", "evidence": "explicit", "value": ["system:demo-runtime"]},
+        {"source_locator": "review-time", "target_path": "data.last_verified_at", "evidence": "explicit", "value": "2026-08-12T12:00:00Z"},
+        {"source_locator": "source-identity", "target_path": "provenance.source_type", "evidence": "explicit", "value": "import"},
+        {"source_locator": "source-identity", "target_path": "provenance.source_ref", "evidence": "explicit", "value": "example://knowledge-plan/operator"},
+        {"source_locator": "source-identity", "target_path": "provenance.manual_override", "evidence": "explicit", "value": false}
+      ],
+      "relations": [
+        {
+          "from_ref": "runbook:demo-diagnosis",
+          "relation_type": "documents",
+          "to_ref": "system:demo-runtime",
+          "metadata": {},
+          "source_locator": "scope",
+          "evidence": "explicit"
+        }
+      ],
+      "provenance_state": "explicit",
+      "ambiguity_state": "clear",
+      "conflict_state": "none",
+      "missing_requirements": [],
+      "unsafe_findings": [],
+      "review_rationale": "The synthetic source explicitly satisfies the canonical Runbook contract."
+    }
+  ]
+}
