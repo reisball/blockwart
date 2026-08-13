@@ -2723,6 +2723,165 @@ def test_service_detail_can_edit_service_information_fields(
     ]
 
 
+def test_service_components_detail_topology_editor_localization_and_noop(
+    client: TestClient,
+    session_factory,
+) -> None:
+    object_id = "service-component-ui"
+    with session_factory() as session:
+        upsert_object(
+            session,
+            CatalogObjectIn(
+                id=object_id,
+                kind="service",
+                label="Component UI service",
+                status="active",
+                summary="Service-local structure.",
+                data={
+                    "schema_version": 1,
+                    "placement": {
+                        "state": "unassigned",
+                        "reason": "UI component test has no placement parent.",
+                    },
+                    "components": {
+                        "items": [
+                            {
+                                "id": "database",
+                                "name": "Embedded database",
+                                "role": "database",
+                                "description": "Stores local records.",
+                            },
+                            {
+                                "id": "api",
+                                "name": "Public API",
+                                "role": "api",
+                                "description": "Handles HTTP requests.",
+                            },
+                        ],
+                        "dependencies": [
+                            {
+                                "component_id": "api",
+                                "depends_on": "database",
+                                "description": "Reads and writes records.",
+                            }
+                        ],
+                    },
+                },
+            ),
+        )
+
+    detail = client.get(f"/objects/{object_id}")
+    assert detail.status_code == 200
+    assert "Internal service components" in detail.text
+    assert "Embedded database" in detail.text
+    assert "Public API" in detail.text
+    assert "depends on" in detail.text
+    assert "Cycles are allowed" in detail.text
+
+    german = client.get(f"/objects/{object_id}?lang=de")
+    assert german.status_code == 200
+    assert "Interne Service-Komponenten" in german.text
+    assert "hängt ab von" in german.text
+
+    topology = client.get(f"/?lang=en&view=topology&q={object_id}&kind=service")
+    assert topology.status_code == 200
+    assert 'class="topology-components"' in topology.text
+    assert "Internal structure (2 components)" in topology.text
+    assert "Public API" in topology.text
+    assert "Embedded database" in topology.text
+    assert "service:service-component-ui" in topology.text
+
+    editor = client.get(f"/objects/{object_id}?edit=components")
+    assert editor.status_code == 200
+    assert 'name="component_id"' in editor.text
+    assert 'name="component_role"' in editor.text
+    assert 'name="depends_on"' in editor.text
+    assert "Remove component and incident dependencies" in editor.text
+
+    added = client.post(
+        f"/objects/{object_id}/components",
+        data={
+            "component_id": "worker",
+            "component_name": "Async worker",
+            "component_role": "worker",
+            "component_description": "Processes bounded background jobs.",
+        },
+        follow_redirects=False,
+    )
+    assert added.status_code == 303
+    dependency = client.post(
+        f"/objects/{object_id}/component-dependencies",
+        data={
+            "component_id": "worker",
+            "depends_on": "database",
+            "dependency_description": "Stores job results.",
+        },
+        follow_redirects=False,
+    )
+    assert dependency.status_code == 303
+
+    with session_factory() as session:
+        after_change = get_object(session, object_id)
+        audits_after_change = list(
+            session.scalars(
+                select(AuditEvent).where(
+                    AuditEvent.object_id == object_id,
+                    AuditEvent.action == "update",
+                )
+            )
+        )
+    assert after_change is not None
+    assert [
+        component["id"]
+        for component in after_change.data["components"]["items"]
+    ] == ["api", "database", "worker"]
+    assert after_change.data["components"]["dependencies"][-1] == {
+        "component_id": "worker",
+        "depends_on": "database",
+        "description": "Stores job results.",
+    }
+
+    repeated = client.post(
+        f"/objects/{object_id}/component-dependencies",
+        data={
+            "component_id": "worker",
+            "depends_on": "database",
+            "dependency_description": " Stores job results. ",
+        },
+        follow_redirects=False,
+    )
+    assert repeated.status_code == 303
+    with session_factory() as session:
+        after_noop = get_object(session, object_id)
+        audits_after_noop = list(
+            session.scalars(
+                select(AuditEvent).where(
+                    AuditEvent.object_id == object_id,
+                    AuditEvent.action == "update",
+                )
+            )
+        )
+    assert after_noop is not None
+    assert after_noop.revision == after_change.revision
+    assert [event.id for event in audits_after_noop] == [
+        event.id for event in audits_after_change
+    ]
+
+    leaked = "postgresql://operator:do-not-echo@db.internal/catalog"
+    rejected = client.post(
+        f"/objects/{object_id}/components",
+        data={
+            "component_id": "bad",
+            "component_name": "Bad component",
+            "component_role": "database",
+            "component_description": leaked,
+        },
+    )
+    assert rejected.status_code == 422
+    assert leaked not in rejected.text
+    assert "do-not-echo" not in rejected.text
+
+
 @pytest.mark.parametrize("kind", ["host", "system", "network"])
 def test_public_network_edit_exposes_and_updates_endpoints(
     client: TestClient,

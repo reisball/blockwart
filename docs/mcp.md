@@ -152,6 +152,13 @@ deletion leaves no object or successor ETag to read. Discover-only stubs
 contain neither field, so they cannot be used to infer or attempt a write
 precondition.
 
+For `service`, the same generic context and object write tools carry the
+canonical bounded `data.components` document. `blockwart.describe_schema`
+publishes its local identity, role, direction, cycle, limit, ordering, and
+inheritance contract. No component-specific MCP tool is added; discover-only
+stubs expose no component count or structure. See
+[Service-local components](service-components.md).
+
 For `host` and `system`, the generic object read/write tools preserve the
 ordered manual `data.installed_software` list byte-for-byte, including opaque
 version strings. `blockwart.describe_schema` publishes its closed entry shape,

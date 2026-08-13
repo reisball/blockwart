@@ -32,6 +32,8 @@ deleted by this classification.
 
 - [Asset domain model](domain-model.md) and [relationship
   integrity](relationship-integrity.md)
+- [Service-local components](service-components.md), including local identity,
+  directed dependencies, bounds, cycle semantics, and the global-service boundary
 - [Canonical Decision objects](decisions.md), including lifecycle, links, and
   dry-run-first legacy classification
 - [Canonical Project knowledge](projects.md), including category-specific results,

@@ -46,10 +46,11 @@ from blockwart.domain.object_schema import (
 from blockwart.domain.projects import project_contract_projection
 from blockwart.domain.runbooks import runbook_contract_projection
 from blockwart.domain.security import FORBIDDEN_ACL_DATA_KEYS, FORBIDDEN_SECRET_KEYS
+from blockwart.domain.service_components import service_component_contract_projection
 
-# Version 5 additively publishes the canonical Runbook operating, recovery,
-# inert-command, relationship, and legacy-classification contracts.
-SCHEMA_PROJECTION_VERSION = 5
+# Version 6 additively publishes bounded service-local components and their
+# directed dependency graph without changing global relationship semantics.
+SCHEMA_PROJECTION_VERSION = 6
 SCHEMA_DATA_VERSION = 1
 OBJECT_STATUS_VALUES: tuple[str, ...] = get_args(LegacyObjectStatus)
 DEFAULT_OBJECT_STATUS = "active"
@@ -217,6 +218,8 @@ def kind_schema_projection(kind: str) -> dict[str, Any]:
         projection["project"] = project_contract_projection()
     if kind == "runbook":
         projection["runbook"] = runbook_contract_projection()
+    if kind == "service":
+        projection["service_components"] = service_component_contract_projection()
     return projection
 
 

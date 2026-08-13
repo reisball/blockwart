@@ -119,6 +119,30 @@
   </button>
 {%- endmacro %}
 
+{% macro service_map_node(service) -%}
+  <div class="service-map-node">
+    {{ map_node(service, "service-node") }}
+    {% if service.visibility == "detail" and service.service_components and service.service_components["items"] %}
+      <details class="topology-components">
+        <summary>{{ t("components.topology_summary", count=service.service_components["items"]|length) }}</summary>
+        <ul>
+          {% for component in service.service_components["items"] %}
+            <li><span class="badge">{{ t("components.role." ~ component.role) }}</span> <strong>{{ component.name }}</strong> <code>{{ component.id }}</code></li>
+          {% endfor %}
+        </ul>
+        {% if service.service_components["dependencies"] %}
+          <p class="meta">{{ t("components.dependencies") }}</p>
+          <ul class="topology-component-dependencies">
+            {% for dependency in service.service_components["dependencies"] %}
+              <li><code>{{ dependency.component_id }}</code> {{ t("components.depends_on") }} <code>{{ dependency.depends_on }}</code></li>
+            {% endfor %}
+          </ul>
+        {% endif %}
+      </details>
+    {% endif %}
+  </div>
+{%- endmacro %}
+
 <!doctype html>
 <html lang="{{ locale }}" data-view="{{ view }}" data-page="{{ 'detail' if detail_mode else view }}">
   <head>
@@ -707,7 +731,7 @@
                       {{ map_node(branch.system, "host-node") }}
                       <div class="service-connector" aria-hidden="true"><i></i></div>
                       <div class="service-stack">
-                        {% for service in branch.services %}{{ map_node(service, "service-node") }}{% endfor %}
+                        {% for service in branch.services %}{{ service_map_node(service) }}{% endfor %}
                       </div>
                     </section>
                   {% endfor %}
@@ -716,7 +740,7 @@
                       <div class="direct-service-label">{{ t("topology.direct_service") }}</div>
                       <div class="service-connector" aria-hidden="true"><i></i></div>
                       <div class="service-stack">
-                        {% for service in cluster.direct_services %}{{ map_node(service, "service-node") }}{% endfor %}
+                        {% for service in cluster.direct_services %}{{ service_map_node(service) }}{% endfor %}
                       </div>
                     </section>
                   {% endif %}
@@ -741,7 +765,7 @@
                       {{ map_node(branch.system, "host-node") }}
                       <div class="service-connector" aria-hidden="true"><i></i></div>
                       <div class="service-stack">
-                        {% for service in branch.services %}{{ map_node(service, "service-node") }}{% endfor %}
+                        {% for service in branch.services %}{{ service_map_node(service) }}{% endfor %}
                       </div>
                     </section>
                   {% endfor %}
@@ -750,7 +774,7 @@
                       <div class="direct-service-label">{{ t("topology.direct_service") }}</div>
                       <div class="service-connector" aria-hidden="true"><i></i></div>
                       <div class="service-stack">
-                        {% for service in explorer.standalone_services %}{{ map_node(service, "service-node") }}{% endfor %}
+                        {% for service in explorer.standalone_services %}{{ service_map_node(service) }}{% endfor %}
                       </div>
                     </section>
                   {% endif %}

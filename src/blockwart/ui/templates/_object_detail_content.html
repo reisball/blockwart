@@ -880,6 +880,108 @@
           </section>
         {% endif %}
 
+        {% if supports_service_components %}
+          <section class="panel service-components-panel" aria-labelledby="service-components-title">
+            <div class="panel-head">
+              <div>
+                <h2 class="section-title" id="service-components-title">{{ t("components.title") }}</h2>
+                <p class="meta">{{ t("components.help") }}</p>
+              </div>
+              {% if can_write %}
+                {% if edit_section == "components" %}
+                  <a class="button button-small button-muted" href="{{ detail_href }}">{{ t("detail.cancel") }}</a>
+                {% else %}
+                  <a class="button button-small button-muted" href="{{ detail_edit_hrefs.components }}">{{ t("detail.edit") }}</a>
+                {% endif %}
+              {% endif %}
+            </div>
+            {% if edit_section == "components" %}
+              {% if error %}<div class="error" role="alert">{{ error }}</div>{% endif %}
+              <h3>{{ t("components.items") }}</h3>
+              {% for component in service_components["items"] %}
+                <div class="component-editor-card">
+                  <form class="form-grid" method="post" action="{{ detail_post_urls.components }}">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+                    <input type="hidden" name="if_match" value="{{ object_etag }}" />
+                    <input type="hidden" name="previous_id" value="{{ component.id }}" />
+                    <label>{{ t("components.id") }}<input name="component_id" value="{{ component.id }}" maxlength="64" pattern="[a-z0-9][a-z0-9_-]*" required autocomplete="off" /></label>
+                    <label>{{ t("components.name") }}<input name="component_name" value="{{ component.name }}" maxlength="128" required autocomplete="off" /></label>
+                    <label>{{ t("components.role") }}<select name="component_role" required>{% for role in service_component_roles %}<option value="{{ role }}"{% if component.role == role %} selected{% endif %}>{{ t("components.role." ~ role) }}</option>{% endfor %}</select></label>
+                    <label>{{ t("components.description") }}<textarea name="component_description" maxlength="512" required>{{ component.description }}</textarea></label>
+                    <div class="button-row"><button type="submit">{{ t("detail.save") }}</button></div>
+                  </form>
+                  <form method="post" action="{{ detail_post_urls.component_remove }}">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+                    <input type="hidden" name="if_match" value="{{ object_etag }}" />
+                    <input type="hidden" name="component_id" value="{{ component.id }}" />
+                    <button class="button button-small button-muted" type="submit" aria-label="{{ t('components.remove_named', name=component.name) }}">{{ t("components.remove") }}</button>
+                  </form>
+                </div>
+              {% else %}
+                <p class="meta">{{ t("components.empty") }}</p>
+              {% endfor %}
+              <details class="component-add-form" open>
+                <summary>{{ t("components.add") }}</summary>
+                <form class="form-grid" method="post" action="{{ detail_post_urls.components }}">
+                  <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+                  <input type="hidden" name="if_match" value="{{ object_etag }}" />
+                  <label>{{ t("components.id") }}<input name="component_id" maxlength="64" pattern="[a-z0-9][a-z0-9_-]*" required autocomplete="off" /></label>
+                  <label>{{ t("components.name") }}<input name="component_name" maxlength="128" required autocomplete="off" /></label>
+                  <label>{{ t("components.role") }}<select name="component_role" required>{% for role in service_component_roles %}<option value="{{ role }}">{{ t("components.role." ~ role) }}</option>{% endfor %}</select></label>
+                  <label>{{ t("components.description") }}<textarea name="component_description" maxlength="512" required></textarea></label>
+                  <div class="button-row"><button type="submit">{{ t("components.add") }}</button></div>
+                </form>
+              </details>
+              <h3>{{ t("components.dependencies") }}</h3>
+              {% for dependency in service_components["dependencies"] %}
+                <div class="component-dependency-row">
+                  <span><strong>{{ service_component_names.get(dependency.component_id, dependency.component_id) }}</strong> {{ t("components.depends_on") }} <strong>{{ service_component_names.get(dependency.depends_on, dependency.depends_on) }}</strong>{% if dependency.description %} — {{ dependency.description }}{% endif %}</span>
+                  <form method="post" action="{{ detail_post_urls.component_dependency_remove }}">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+                    <input type="hidden" name="if_match" value="{{ object_etag }}" />
+                    <input type="hidden" name="component_id" value="{{ dependency.component_id }}" />
+                    <input type="hidden" name="depends_on" value="{{ dependency.depends_on }}" />
+                    <button class="button button-small button-muted" type="submit">{{ t("components.remove_dependency") }}</button>
+                  </form>
+                </div>
+              {% else %}
+                <p class="meta">{{ t("components.dependencies_empty") }}</p>
+              {% endfor %}
+              {% if service_components["items"]|length >= 2 %}
+                <form class="form-grid component-dependency-form" method="post" action="{{ detail_post_urls.component_dependencies }}">
+                  <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+                  <input type="hidden" name="if_match" value="{{ object_etag }}" />
+                  <label>{{ t("components.source") }}<select name="component_id" required>{% for component in service_components["items"] %}<option value="{{ component.id }}">{{ component.name }} · {{ component.id }}</option>{% endfor %}</select></label>
+                  <label>{{ t("components.depends_on_target") }}<select name="depends_on" required>{% for component in service_components["items"] %}<option value="{{ component.id }}">{{ component.name }} · {{ component.id }}</option>{% endfor %}</select></label>
+                  <label>{{ t("components.dependency_description") }} <span class="field-optional">{{ t("form.optional") }}</span><textarea name="dependency_description" maxlength="512"></textarea></label>
+                  <div class="button-row"><button type="submit">{{ t("components.add_dependency") }}</button></div>
+                </form>
+              {% endif %}
+            {% else %}
+              {% if service_components["items"] %}
+                <div class="component-grid">
+                  {% for component in service_components["items"] %}
+                    <article class="component-card">
+                      <div><span class="badge">{{ t("components.role." ~ component.role) }}</span> <code>{{ component.id }}</code></div>
+                      <h3>{{ component.name }}</h3>
+                      <p>{{ component.description }}</p>
+                    </article>
+                  {% endfor %}
+                </div>
+              {% else %}<p class="meta">{{ t("components.empty") }}</p>{% endif %}
+              <h3>{{ t("components.dependencies") }}</h3>
+              {% if service_components["dependencies"] %}
+                <ul class="component-dependency-list">
+                  {% for dependency in service_components["dependencies"] %}
+                    <li><strong>{{ service_component_names.get(dependency.component_id, dependency.component_id) }}</strong> <span aria-hidden="true">→</span> <span class="visually-hidden">{{ t("components.depends_on") }}</span> <strong>{{ service_component_names.get(dependency.depends_on, dependency.depends_on) }}</strong>{% if dependency.description %}<span> — {{ dependency.description }}</span>{% endif %}</li>
+                  {% endfor %}
+                </ul>
+              {% else %}<p class="meta">{{ t("components.dependencies_empty") }}</p>{% endif %}
+              <p class="meta">{{ t("components.cycle_help") }}</p>
+            {% endif %}
+          </section>
+        {% endif %}
+
         {% if can_edit_device %}
           <section class="panel" aria-labelledby="device-details-title">
             <div class="panel-head">

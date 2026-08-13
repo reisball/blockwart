@@ -15047,6 +15047,19 @@
             },
             {
               "json_types": [
+                "object"
+              ],
+              "normalization": [],
+              "path": "components",
+              "reason": "is supported only for service objects",
+              "requirement": "forbidden",
+              "type": "object",
+              "violations": [
+                "field_not_allowed"
+              ]
+            },
+            {
+              "json_types": [
                 "array"
               ],
               "normalization": [],
@@ -15794,6 +15807,19 @@
               "type": "url",
               "violations": [
                 "invalid_format"
+              ]
+            },
+            {
+              "json_types": [
+                "object"
+              ],
+              "normalization": [],
+              "path": "components",
+              "reason": "is supported only for service objects",
+              "requirement": "forbidden",
+              "type": "object",
+              "violations": [
+                "field_not_allowed"
               ]
             },
             {
@@ -16560,6 +16586,19 @@
                 "type_mismatch",
                 "value_too_long"
               ]
+            },
+            {
+              "json_types": [
+                "object"
+              ],
+              "normalization": [],
+              "path": "components",
+              "reason": "is supported only for service objects",
+              "requirement": "forbidden",
+              "type": "object",
+              "violations": [
+                "field_not_allowed"
+              ]
             }
           ],
           "rules": [],
@@ -17236,6 +17275,19 @@
                 "reference_kind_not_allowed",
                 "type_mismatch"
               ]
+            },
+            {
+              "json_types": [
+                "object"
+              ],
+              "normalization": [],
+              "path": "components",
+              "reason": "is supported only for service objects",
+              "requirement": "forbidden",
+              "type": "object",
+              "violations": [
+                "field_not_allowed"
+              ]
             }
           ],
           "rules": [],
@@ -17688,6 +17740,234 @@
               ]
             },
             {
+              "additional_properties": false,
+              "allowed_keys": [
+                "dependencies",
+                "items"
+              ],
+              "json_types": [
+                "object"
+              ],
+              "normalization": [],
+              "path": "components",
+              "requirement": "optional",
+              "type": "object",
+              "violations": [
+                "field_not_allowed",
+                "type_mismatch"
+              ]
+            },
+            {
+              "json_types": [
+                "array"
+              ],
+              "max_items": 100,
+              "normalization": [],
+              "path": "components.items",
+              "requirement": "optional",
+              "type": "array",
+              "violations": [
+                "type_mismatch",
+                "value_out_of_range"
+              ]
+            },
+            {
+              "additional_properties": false,
+              "allowed_keys": [
+                "description",
+                "id",
+                "name",
+                "role"
+              ],
+              "json_types": [
+                "object"
+              ],
+              "normalization": [],
+              "path": "components.items[]",
+              "requirement": "optional",
+              "type": "object",
+              "violations": [
+                "field_not_allowed",
+                "type_mismatch"
+              ]
+            },
+            {
+              "json_types": [
+                "string"
+              ],
+              "max_length": 64,
+              "min_length": 1,
+              "normalization": [
+                "strip_whitespace"
+              ],
+              "path": "components.items[].id",
+              "required_scope": "containing_array_item",
+              "requirement": "required",
+              "type": "string",
+              "violations": [
+                "required_field_missing",
+                "type_mismatch",
+                "value_too_long",
+                "value_too_short"
+              ]
+            },
+            {
+              "json_types": [
+                "string"
+              ],
+              "max_length": 128,
+              "min_length": 1,
+              "normalization": [
+                "strip_whitespace"
+              ],
+              "path": "components.items[].name",
+              "required_scope": "containing_array_item",
+              "requirement": "required",
+              "type": "string",
+              "violations": [
+                "required_field_missing",
+                "type_mismatch",
+                "value_too_long",
+                "value_too_short"
+              ]
+            },
+            {
+              "enum": [
+                "api",
+                "application",
+                "cache",
+                "database",
+                "other",
+                "queue",
+                "worker"
+              ],
+              "json_types": [
+                "string"
+              ],
+              "normalization": [],
+              "path": "components.items[].role",
+              "required_scope": "containing_array_item",
+              "requirement": "required",
+              "type": "enum",
+              "violations": [
+                "required_field_missing",
+                "value_not_allowed"
+              ]
+            },
+            {
+              "format": "multiline-text",
+              "json_types": [
+                "string"
+              ],
+              "max_length": 512,
+              "min_length": 1,
+              "normalization": [
+                "strip_whitespace"
+              ],
+              "path": "components.items[].description",
+              "required_scope": "containing_array_item",
+              "requirement": "required",
+              "type": "text",
+              "violations": [
+                "required_field_missing",
+                "type_mismatch",
+                "value_too_long",
+                "value_too_short"
+              ]
+            },
+            {
+              "json_types": [
+                "array"
+              ],
+              "max_items": 400,
+              "normalization": [],
+              "path": "components.dependencies",
+              "requirement": "optional",
+              "type": "array",
+              "violations": [
+                "type_mismatch",
+                "value_out_of_range"
+              ]
+            },
+            {
+              "additional_properties": false,
+              "allowed_keys": [
+                "component_id",
+                "depends_on",
+                "description"
+              ],
+              "json_types": [
+                "object"
+              ],
+              "normalization": [],
+              "path": "components.dependencies[]",
+              "requirement": "optional",
+              "type": "object",
+              "violations": [
+                "field_not_allowed",
+                "type_mismatch"
+              ]
+            },
+            {
+              "json_types": [
+                "string"
+              ],
+              "max_length": 64,
+              "min_length": 1,
+              "normalization": [
+                "strip_whitespace"
+              ],
+              "path": "components.dependencies[].component_id",
+              "required_scope": "containing_array_item",
+              "requirement": "required",
+              "type": "string",
+              "violations": [
+                "required_field_missing",
+                "type_mismatch",
+                "value_too_long",
+                "value_too_short"
+              ]
+            },
+            {
+              "json_types": [
+                "string"
+              ],
+              "max_length": 64,
+              "min_length": 1,
+              "normalization": [
+                "strip_whitespace"
+              ],
+              "path": "components.dependencies[].depends_on",
+              "required_scope": "containing_array_item",
+              "requirement": "required",
+              "type": "string",
+              "violations": [
+                "required_field_missing",
+                "type_mismatch",
+                "value_too_long",
+                "value_too_short"
+              ]
+            },
+            {
+              "format": "multiline-text",
+              "json_types": [
+                "string"
+              ],
+              "max_length": 512,
+              "min_length": 1,
+              "normalization": [
+                "strip_whitespace"
+              ],
+              "path": "components.dependencies[].description",
+              "requirement": "optional",
+              "type": "text",
+              "violations": [
+                "type_mismatch",
+                "value_too_long",
+                "value_too_short"
+              ]
+            },
+            {
               "json_types": [
                 "array"
               ],
@@ -17911,7 +18191,13 @@
               ]
             }
           ],
-          "rules": [],
+          "rules": [
+            {
+              "description": "data.components is a closed service-only document with required items and dependencies arrays. Component ids are unique lowercase local ids; dependency endpoints must name components in the same service; self references and duplicate directed pairs are rejected. Directed cycles are allowed and consumers must honor the published traversal bounds.",
+              "rule": "validate_service_components",
+              "violation": "value_not_allowed"
+            }
+          ],
           "secret_policy": "global_enforced",
           "unknown_properties": "allow"
         },
@@ -17951,6 +18237,60 @@
           "kind": "service",
           "label": "Example service",
           "status": "active"
+        },
+        "service_components": {
+          "cross_service_references_allowed": false,
+          "cycles": {
+            "allowed": true,
+            "reason": "Matches the generic global depends_on graph semantics."
+          },
+          "dependency_direction": "component_id depends_on depends_on",
+          "deterministic_order": {
+            "dependencies": [
+              "component_id",
+              "depends_on",
+              "description"
+            ],
+            "items": [
+              "id",
+              "name",
+              "role",
+              "description"
+            ]
+          },
+          "duplicate_component_ids_allowed": false,
+          "duplicate_dependency_pairs_allowed": false,
+          "identity_scope": "parent_service",
+          "inheritance": {
+            "audit": true,
+            "etag_cas": true,
+            "independent_identity_or_grants": false,
+            "lifecycle": true,
+            "rbac": true,
+            "revision": true,
+            "visibility": true
+          },
+          "limits": {
+            "components": 100,
+            "dependencies": 400,
+            "traversal_edges": 400,
+            "traversal_nodes": 100
+          },
+          "local_id": {
+            "max_length": 64,
+            "pattern": "^[a-z0-9](?:[a-z0-9_-]{0,62}[a-z0-9])?$"
+          },
+          "roles": [
+            "application",
+            "api",
+            "database",
+            "worker",
+            "cache",
+            "queue",
+            "other"
+          ],
+          "self_references_allowed": false,
+          "storage_path": "data.components"
         },
         "status": {
           "default": "active",
@@ -18376,6 +18716,19 @@
               "reason": "is supported only for host and system objects",
               "requirement": "forbidden",
               "type": "array",
+              "violations": [
+                "field_not_allowed"
+              ]
+            },
+            {
+              "json_types": [
+                "object"
+              ],
+              "normalization": [],
+              "path": "components",
+              "reason": "is supported only for service objects",
+              "requirement": "forbidden",
+              "type": "object",
               "violations": [
                 "field_not_allowed"
               ]
@@ -19699,6 +20052,19 @@
               "violations": [
                 "field_not_allowed"
               ]
+            },
+            {
+              "json_types": [
+                "object"
+              ],
+              "normalization": [],
+              "path": "components",
+              "reason": "is supported only for service objects",
+              "requirement": "forbidden",
+              "type": "object",
+              "violations": [
+                "field_not_allowed"
+              ]
             }
           ],
           "rules": [
@@ -20376,6 +20742,19 @@
               "type": "datetime",
               "violations": [
                 "invalid_format"
+              ]
+            },
+            {
+              "json_types": [
+                "object"
+              ],
+              "normalization": [],
+              "path": "components",
+              "reason": "is supported only for service objects",
+              "requirement": "forbidden",
+              "type": "object",
+              "violations": [
+                "field_not_allowed"
               ]
             }
           ],
@@ -22145,6 +22524,19 @@
                 "type_mismatch",
                 "value_too_long"
               ]
+            },
+            {
+              "json_types": [
+                "object"
+              ],
+              "normalization": [],
+              "path": "components",
+              "reason": "is supported only for service objects",
+              "requirement": "forbidden",
+              "type": "object",
+              "violations": [
+                "field_not_allowed"
+              ]
             }
           ],
           "rules": [
@@ -22410,7 +22802,7 @@
       "raw_secret_values_rejected": true
     },
     "source": "blockwart.domain.object_schema",
-    "version": 5,
+    "version": 6,
     "violation_policy": {
       "description": "A rejected write names the canonical public data path, one violation code, and the published rule when a schema postcondition rejected it. Rejected values are never returned.",
       "detail_fields": [

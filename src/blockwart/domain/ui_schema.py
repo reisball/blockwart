@@ -99,6 +99,7 @@ STORAGE_CONVENTIONS: dict[str, str] = {
     "catalog_objects.*": "Core identity, state, and summary fields.",
     "data_json.network.*": "Network hostnames, addresses, and interface data.",
     "data_json.hardware.*": "Hardware and resource data for hosts and systems.",
+    "data_json.components.*": "Bounded service-local components and dependencies.",
     "data_json.*": "Flexible kind-specific data.",
     "relationships.*": "Relationships stored independently from catalog objects.",
 }
@@ -129,6 +130,7 @@ INSTALLED_SOFTWARE_UI_PANELS = (
 SERVICE_UI_PANELS = (
     UiPanel("overview", "panel.overview", "overview"),
     UiPanel("service_information", "panel.service_information", "service-information"),
+    UiPanel("components", "components.title", "components"),
     UiPanel("network", "panel.network", "network"),
     UiPanel("access", "panel.access", "access"),
     UiPanel("relationships", "panel.relationships", "relationship-add"),
