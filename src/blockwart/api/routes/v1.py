@@ -36,6 +36,7 @@ from blockwart.schemas.v1 import (
     MAX_BATCH_RESPONSE_BYTES,
     CoverageScopeValue,
     CoverageStateValue,
+    McpContractMetadataOut,
     ObjectSortField,
     SortDirection,
     SourceClassificationValue,
@@ -106,6 +107,24 @@ router = APIRouter(
     tags=["api-v1-readonly"],
     responses=API_ERROR_RESPONSES,
 )
+
+
+@router.get(
+    "/mcp-contract",
+    response_model=McpContractMetadataOut,
+    summary="Read non-secret MCP wrapper contract metadata",
+)
+def get_mcp_contract_metadata(
+    request: Request,
+    _: Annotated[ReadAccess, Depends(require_api_read_access)],
+) -> McpContractMetadataOut:
+    # This stays independent from readiness: a stale external wrapper must
+    # never cause the service's database/readiness contract to fail.
+    from blockwart.mcp.server import local_contract_metadata
+
+    return McpContractMetadataOut.model_validate(
+        local_contract_metadata(build_revision=request.app.state.settings.build_revision)
+    )
 
 QueryText = Annotated[
     str | None,

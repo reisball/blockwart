@@ -34,6 +34,19 @@ skipped equal-sort rows.
 count. Set `include_total=true` when an exact authorized matching count is
 needed.
 
+## MCP contract metadata
+
+### `GET /api/v1/mcp-contract`
+
+Returns the non-secret API build revision plus the explicit MCP contract
+version, canonical wrapper-manifest SHA-256 digest, and tool count. It uses
+the ordinary authenticated service-account read boundary and returns no
+catalog records, token, header, endpoint/configuration, principal, agent, or
+host data. Consumers compare build revision, contract version, and digest;
+tool count is only evidence. The digest is not a signature or supply-chain
+proof. See [MCP server](mcp.md) for local wrapper diagnostics and the scoped
+runtime-catalog refresh contract.
+
 ## Source coverage
 
 ### `GET /api/v1/source-coverage`

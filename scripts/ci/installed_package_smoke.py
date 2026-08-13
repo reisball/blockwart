@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import subprocess
 import sysconfig
 import time
 from datetime import timedelta
@@ -623,6 +624,11 @@ def main() -> None:
     with urlopen(f"{BASE_URL}/static/app.css", timeout=7) as response:
         static_content_type = response.headers.get_content_type()
     openapi = fetch_json("/openapi.json")
+    mcp_entrypoint = Path(sysconfig.get_path("scripts")) / "blockwart-mcp"
+    wrapper_metadata = json.loads(
+        subprocess.check_output([str(mcp_entrypoint), "--metadata"], text=True)
+    )
+    api_contract_metadata = fetch_json("/api/v1/mcp-contract", token=api_token)
     search = fetch_json("/api/agent/search?limit=1", token=api_token)
     service = fetch_json(
         "/api/agent/objects/n8n-web-ui",
@@ -638,6 +644,7 @@ def main() -> None:
     )
     assert search["count"] == 1
     assert service["endpoints"]
+    assert wrapper_metadata == api_contract_metadata
     assert {
         "id",
         "type",
@@ -655,7 +662,8 @@ def main() -> None:
     print(
         "installed_package=ok "
         f"cwd={Path.cwd()} revision={readiness['revision']} "
-        f"openapi_paths={len(openapi['paths'])} mcp_protocol={protocol} mcp_calls=32"
+        f"openapi_paths={len(openapi['paths'])} mcp_protocol={protocol} mcp_calls=32 "
+        "mcp_contract=compatible"
     )
 
 

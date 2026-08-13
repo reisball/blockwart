@@ -10,6 +10,7 @@ from blockwart.api.deps import get_session
 from blockwart.config import Settings
 from blockwart.db.session import transaction
 from blockwart.main import create_app
+from blockwart.mcp.server import local_contract_metadata
 from blockwart.models import SecurityEvent, ServiceToken, ServiceTokenFailureBucket
 from blockwart.services.identity import create_service_account, issue_service_token, utc_now
 
@@ -118,6 +119,23 @@ def test_openapi_publishes_http_bearer_without_write_surface(
         {"HTTPBearer": []}
     ]
     assert set(openapi["paths"]["/api/objects"]) == {"get"}
+
+
+def test_mcp_contract_metadata_is_authorized_and_matches_the_local_wrapper(
+    api_auth_client: TestClient,
+    api_auth_state,
+) -> None:
+    _, _, token = api_auth_state
+
+    denied = api_auth_client.get("/api/v1/mcp-contract")
+    response = api_auth_client.get(
+        "/api/v1/mcp-contract",
+        headers={"Authorization": f"Bearer {token.value}"},
+    )
+
+    assert denied.status_code == 401
+    assert response.status_code == 200
+    assert response.json() == local_contract_metadata(build_revision="unknown")
 
 
 @pytest.mark.parametrize("state", ["revoked", "expired"])

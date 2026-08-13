@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import argparse
 import asyncio
 import ipaddress
 import json
@@ -21,6 +22,7 @@ from jsonschema.protocols import Validator
 from jsonschema.validators import validator_for
 from mcp.server.lowlevel import NotificationOptions, Server
 
+from blockwart.config import Settings
 from blockwart.domain.asset_state import ASSET_KINDS
 from blockwart.domain.decisions import (
     APPLIES_TO_MAX_LENGTH,
@@ -64,6 +66,11 @@ from blockwart.domain.validation_errors import (
     order_public_details,
     public_detail,
     sanitize_public_details,
+)
+from blockwart.mcp.manifest import (
+    contract_metadata,
+    diagnose_contract,
+    runtime_catalog_evidence,
 )
 from blockwart.schemas.catalog import ObjectKind
 
@@ -887,6 +894,14 @@ TOOLS: list[JSON] = [
 TOOL_DEFINITIONS: dict[str, JSON] = {tool["name"]: tool for tool in TOOLS}
 
 
+def local_contract_metadata(*, build_revision: str | None = None) -> JSON:
+    """Return public wrapper build/contract metadata without using MCP transport."""
+    return contract_metadata(
+        TOOLS,
+        build_revision=build_revision if build_revision is not None else Settings().build_revision,
+    )
+
+
 def describe_schema_payload(kind: str | None = None) -> JSON:
     """Project the canonical domain object and relationship registries for MCP clients.
 
@@ -1655,7 +1670,81 @@ async def run_server() -> None:
         )
 
 
+def _runtime_catalog_evidence(path: str) -> JSON | None:
+    """Read a supplied materialized MCP tool list without returning its contents."""
+    try:
+        parsed = json.loads(Path(path).read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError):
+        return None
+    tools = parsed.get("tools") if isinstance(parsed, dict) else parsed
+    if not isinstance(tools, list) or not all(isinstance(tool, dict) for tool in tools):
+        return None
+    try:
+        return runtime_catalog_evidence(tools)
+    except (TypeError, ValueError):
+        return None
+
+
+def doctor_contract(*, runtime_catalog_path: str | None = None) -> JSON:
+    """Compare the local wrapper with the authorized API metadata when reachable."""
+    local = local_contract_metadata()
+    try:
+        api: JSON | None = fetch_json("/api/v1/mcp-contract", {})
+    except UpstreamError:
+        api = None
+    runtime_catalog = (
+        _runtime_catalog_evidence(runtime_catalog_path)
+        if runtime_catalog_path is not None
+        else None
+    )
+    return diagnose_contract(local, api=api, runtime_catalog=runtime_catalog)
+
+
+def validate_runtime_catalog(path: str) -> JSON:
+    """Compare one supplied materialized tool catalog with this wrapper source."""
+    runtime_catalog = _runtime_catalog_evidence(path)
+    return diagnose_contract(local_contract_metadata(), runtime_catalog=runtime_catalog)
+
+
+def _print_diagnostic(payload: JSON) -> None:
+    print(json.dumps(payload, ensure_ascii=True, separators=(",", ":"), sort_keys=True))
+
+
 def main() -> None:
+    parser = argparse.ArgumentParser(description="Run or inspect the Blockwart MCP wrapper.")
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument(
+        "--metadata",
+        action="store_true",
+        help="Print local non-secret wrapper build and MCP contract metadata.",
+    )
+    mode.add_argument(
+        "--doctor",
+        action="store_true",
+        help="Compare this wrapper with authorized API contract metadata.",
+    )
+    mode.add_argument(
+        "--validate-runtime-catalog",
+        metavar="PATH",
+        help="Compare a supplied materialized MCP tool catalog with this wrapper.",
+    )
+    parser.add_argument(
+        "--runtime-catalog",
+        metavar="PATH",
+        help="Optional materialized MCP tool catalog evidence for --doctor.",
+    )
+    args = parser.parse_args()
+    if args.runtime_catalog and not args.doctor:
+        parser.error("--runtime-catalog requires --doctor")
+    if args.metadata:
+        _print_diagnostic(local_contract_metadata())
+        return
+    if args.doctor:
+        _print_diagnostic(doctor_contract(runtime_catalog_path=args.runtime_catalog))
+        return
+    if args.validate_runtime_catalog:
+        _print_diagnostic(validate_runtime_catalog(args.validate_runtime_catalog))
+        return
     asyncio.run(run_server())
 
 

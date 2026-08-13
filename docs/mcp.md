@@ -3,6 +3,65 @@
 Blockwart ships a local MCP stdio server named `blockwart-mcp`. Transport and protocol lifecycle
 are implemented by the official Python MCP SDK.
 
+## Wrapper/API contract evidence and controlled refresh
+
+The registered `TOOLS` source produces one canonical manifest. It contains
+only the tool name, description, input schema, and MCP annotations; tool and
+JSON-object order are canonically serialized before its SHA-256 digest is
+calculated. The explicit MCP contract version is currently `1`. The manifest
+contains no token, header, API base URL, private endpoint parameter, principal,
+agent, catalog record, credential, host, environment value, or timestamp.
+The digest is an equality check, not a signature, provenance attestation, or
+supply-chain proof.
+
+The authenticated `GET /api/v1/mcp-contract` read returns the API build
+revision, contract version, manifest digest, and tool count. The local wrapper
+publishes the same four non-secret fields without extending MCP itself:
+
+```bash
+blockwart-mcp --metadata
+blockwart-mcp --doctor
+```
+
+`--doctor` uses the wrapper's already-configured authorized API connection and
+prints one JSON diagnostic with exactly one `status`: `compatible`,
+`incompatible`, or `unknown`. Compatibility is determined by build revision,
+contract version, and manifest digest; tool count is evidence only. An
+unavailable or malformed API metadata response is `unknown`, and does not
+affect API readiness or normal MCP tool use.
+
+To verify a separately materialized runtime tool list without exposing its
+contents in the output, save its MCP `tools/list` result or its `tools` array
+to a protected local file and run:
+
+```bash
+blockwart-mcp --validate-runtime-catalog /protected/path/mcp-tools.json
+blockwart-mcp --doctor --runtime-catalog /protected/path/mcp-tools.json
+```
+
+The verifier outputs only the runtime manifest digest/count. It labels an API
+versus local mismatch as `wrapper_drift`; if the local wrapper agrees with the
+API but the materialized list differs, it labels `stale_runtime_catalog`.
+This catches a reduced catalog before normal tool use and does not infer
+compatibility from matching counts.
+
+Controlled rollout is intentionally narrow:
+
+1. Build/install the approved API and wrapper from the same revision, then
+   run `blockwart-mcp --doctor` using the affected wrapper's existing protected
+   token source.
+2. If the wrapper is compatible but its materialized runtime list is stale,
+   invalidate and refresh only that affected agent-scoped tool catalog. Keep
+   the Telegram/OpenClaw conversation; `/new` and `/reset` are not required.
+3. Re-run the diagnostic. Do not restart the global Gateway, Blockwart API,
+   or other agents. If the scoped hot reload does not reach a long-lived
+   process, restarting only the affected agent's Codex app server is the
+   documented last-resort fallback.
+
+This repository supplies the evidence and verifier only. It does not edit
+OpenClaw configuration, refresh a foreign runtime, restart a process, deploy,
+or obtain cross-agent rights.
+
 It wraps the object-authorized v1 API:
 
 - blockwart.describe_schema -> local projection of the canonical domain object and

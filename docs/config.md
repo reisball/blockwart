@@ -5,6 +5,7 @@ Blockwart configuration uses environment variables prefixed with `BLOCKWART_`.
 Current local keys:
 
 - `BLOCKWART_ENV`
+- `BLOCKWART_BUILD_REVISION` (non-secret build evidence exposed by health and MCP contract metadata)
 - `BLOCKWART_DATABASE_URL`
 - `BLOCKWART_SECRET_REFERENCE`
 - `BLOCKWART_IDEMPOTENCY_TTL_SECONDS` (default `86400`, allowed
