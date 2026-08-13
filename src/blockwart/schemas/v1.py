@@ -47,6 +47,15 @@ MappingRoleValue = Literal[MAPPING_ROLES]
 EntryPresenceValue = Literal[ENTRY_PRESENCES]
 DecisionReasonValue = Literal[DECISION_REASONS]
 CoverageScopeValue = Literal["mapped", "all"]
+
+
+class McpContractMetadataOut(BaseModel):
+    """Non-secret evidence used to compare an MCP wrapper with this API build."""
+
+    build_revision: str = Field(min_length=1, max_length=128)
+    contract_version: str = Field(min_length=1, max_length=32)
+    manifest_digest: str = Field(pattern=r"^[0-9a-f]{64}$")
+    tool_count: int = Field(ge=0)
 # The relationship vocabulary and its link enums are projected from the domain
 # registry, so the published REST contract cannot carry a second, drifting copy.
 RelationType = Literal[RELATIONSHIP_TYPES]

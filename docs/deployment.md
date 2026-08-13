@@ -376,3 +376,8 @@ to a new protected output file, atomically replace the runtime secret file, and
 verify `blockwart.list_comments` plus one explicitly approved idempotent
 `blockwart.add_comment` smoke. Token rotation and runtime injection remain
 separate deployment approvals; migration does not rotate live credentials.
+
+Before a scoped wrapper rollout, run `blockwart-mcp --doctor` and follow the
+[MCP wrapper/API contract evidence and controlled refresh](mcp.md#wrapperapi-contract-evidence-and-controlled-refresh)
+procedure. The verifier is read-only: it does not alter OpenClaw configuration,
+perform a deployment, or restart Blockwart, Gateway, or another agent.

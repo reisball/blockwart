@@ -2344,6 +2344,41 @@
         "title": "HealthOut",
         "type": "object"
       },
+      "McpContractMetadataOut": {
+        "description": "Non-secret evidence used to compare an MCP wrapper with this API build.",
+        "properties": {
+          "build_revision": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Build Revision",
+            "type": "string"
+          },
+          "contract_version": {
+            "maxLength": 32,
+            "minLength": 1,
+            "title": "Contract Version",
+            "type": "string"
+          },
+          "manifest_digest": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Manifest Digest",
+            "type": "string"
+          },
+          "tool_count": {
+            "minimum": 0.0,
+            "title": "Tool Count",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "build_revision",
+          "contract_version",
+          "manifest_digest",
+          "tool_count"
+        ],
+        "title": "McpContractMetadataOut",
+        "type": "object"
+      },
       "PasswordResetIn": {
         "properties": {
           "current_admin_password": {
@@ -9996,6 +10031,132 @@
           }
         ],
         "summary": "Get V1 Context",
+        "tags": [
+          "api-v1-readonly"
+        ]
+      }
+    },
+    "/api/v1/mcp-contract": {
+      "get": {
+        "operationId": "get_mcp_contract_metadata_api_v1_mcp_contract_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/McpContractMetadataOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Authentication required"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Permission denied"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Resource not found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "412": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Precondition failed"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Request validation failed"
+          },
+          "428": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Precondition required"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Internal server error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Service unavailable"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Read non-secret MCP wrapper contract metadata",
         "tags": [
           "api-v1-readonly"
         ]
