@@ -43,10 +43,10 @@ from blockwart.services.audit import add_audit_event
 from blockwart.services.catalog import (
     RevisionConflict,
     create_relationship,
-    current_endpoint_descriptors,
     delete_object,
     delete_relationship,
     get_object,
+    relationship_endpoint_descriptors,
     upsert_object,
 )
 from blockwart.services.identity import record_security_event
@@ -775,7 +775,14 @@ def _replace_relationship_metadata(
     ]
     validate_relationship_collection(
         candidate_rows,
-        current_endpoint_descriptors(session),
+        relationship_endpoint_descriptors(
+            session,
+            candidate_rows,
+            validate_catalog_schema_for=(
+                relationship.from_ref,
+                relationship.to_ref,
+            ),
+        ),
     )
     relationship.metadata_json = replacement_json
     peer_revision = _bump_object_revision(session, peer.id)

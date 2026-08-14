@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import re
 from collections import Counter
-from collections.abc import Callable, Iterable, Mapping
+from collections.abc import Callable, Collection, Iterable, Mapping
 from dataclasses import dataclass
 from types import MappingProxyType
 from typing import Any, Literal
@@ -420,7 +420,20 @@ def endpoint_descriptor_map(
     objects: Iterable[Any],
     *,
     validate_catalog_schema: bool = True,
+    validate_catalog_schema_for: Collection[str] | None = None,
 ) -> dict[str, EndpointDescriptor]:
+    """Build relationship-safe endpoint data from stored catalog objects.
+
+    JSON object shape, normalization, and category-sensitive endpoint fields
+    remain fail-closed for every supplied object. ``validate_catalog_schema_for``
+    narrows only the full canonical write-schema check; ``None`` retains the
+    historical all-object behavior.
+    """
+    schema_validated_ids = (
+        None
+        if validate_catalog_schema_for is None
+        else frozenset(validate_catalog_schema_for)
+    )
     descriptors: dict[str, EndpointDescriptor] = {}
     for obj in objects:
         object_id = str(_record_value(obj, "id"))
@@ -442,7 +455,9 @@ def endpoint_descriptor_map(
             )
         try:
             canonical_data = normalize_object_data(kind, raw_data)
-            if validate_catalog_schema:
+            if validate_catalog_schema and (
+                schema_validated_ids is None or object_id in schema_validated_ids
+            ):
                 validate_object_data(
                     kind,
                     canonical_data,

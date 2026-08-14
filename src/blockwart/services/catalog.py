@@ -1,9 +1,10 @@
 import json
-from collections.abc import Mapping
+from collections.abc import Collection, Iterable, Mapping
 from datetime import UTC, datetime
 
 from sqlalchemy import select, update
 from sqlalchemy.orm import Session
+from sqlalchemy.sql import Select
 
 from blockwart.domain.asset_state import (
     AssetHealth,
@@ -313,14 +314,7 @@ def create_relationship(
     write_audit: bool = True,
     touch_revisions: bool = True,
 ) -> dict[str, str]:
-    endpoints = current_endpoint_descriptors(session)
     metadata_json = canonical_relationship_metadata_json(relation_type, metadata)
-    validate_relationship(
-        from_ref=from_ref,
-        relation_type=relation_type,
-        to_ref=to_ref,
-        endpoints=endpoints,
-    )
     existing = session.scalar(
         select(Relationship).where(
             Relationship.from_ref == from_ref,
@@ -328,18 +322,7 @@ def create_relationship(
             Relationship.to_ref == to_ref,
         )
     )
-    if existing is not None and existing.metadata_json != metadata_json:
-        raise RelationshipIntegrityError(
-            "relationship_metadata_conflict",
-            "relationship already exists with different metadata",
-        )
-    if relation_type == CANONICAL_PLACEMENT_RELATION_TYPE:
-        _validate_placement_relationship(
-            session,
-            parent_ref=from_ref,
-            child_ref=to_ref,
-        )
-    relationship_rows = list(
+    relationship_rows: list[Relationship | dict[str, object]] = list(
         session.scalars(
             select(Relationship).order_by(
                 Relationship.id,
@@ -357,6 +340,28 @@ def create_relationship(
                 "to_ref": to_ref,
                 "metadata_json": metadata_json,
             }
+        )
+    endpoints = relationship_endpoint_descriptors(
+        session,
+        relationship_rows,
+        validate_catalog_schema_for=(from_ref, to_ref),
+    )
+    validate_relationship(
+        from_ref=from_ref,
+        relation_type=relation_type,
+        to_ref=to_ref,
+        endpoints=endpoints,
+    )
+    if existing is not None and existing.metadata_json != metadata_json:
+        raise RelationshipIntegrityError(
+            "relationship_metadata_conflict",
+            "relationship already exists with different metadata",
+        )
+    if relation_type == CANONICAL_PLACEMENT_RELATION_TYPE:
+        _validate_placement_relationship(
+            session,
+            parent_ref=from_ref,
+            child_ref=to_ref,
         )
     validate_relationship_collection(relationship_rows, endpoints)
     changed_at = _now()
@@ -914,9 +919,67 @@ def current_object_kinds(session: Session) -> dict[str, str]:
     return {str(object_id): str(kind) for object_id, kind in rows}
 
 
-def current_endpoint_descriptors(session: Session) -> dict[str, EndpointDescriptor]:
-    rows = session.scalars(select(CatalogObject).order_by(CatalogObject.id)).all()
-    return endpoint_descriptor_map(rows)
+def current_endpoint_descriptors(
+    session: Session,
+    *,
+    object_ids: Collection[str] | None = None,
+    validate_catalog_schema_for: Collection[str] | None = None,
+) -> dict[str, EndpointDescriptor]:
+    rows = session.scalars(_endpoint_descriptor_rows_statement(object_ids)).all()
+    return endpoint_descriptor_map(
+        rows,
+        validate_catalog_schema_for=validate_catalog_schema_for,
+    )
+
+
+def relationship_endpoint_descriptors(
+    session: Session,
+    relationships: Iterable[Relationship | Mapping[str, object]],
+    *,
+    validate_catalog_schema_for: Iterable[str],
+) -> dict[str, EndpointDescriptor]:
+    """Load only candidate-collection endpoints and schema-check direct refs."""
+    relationship_rows = list(relationships)
+    return current_endpoint_descriptors(
+        session,
+        object_ids=_relationship_endpoint_object_ids(relationship_rows),
+        validate_catalog_schema_for=_typed_reference_object_ids(
+            validate_catalog_schema_for
+        ),
+    )
+
+
+def _endpoint_descriptor_rows_statement(
+    object_ids: Collection[str] | None = None,
+) -> Select[tuple[CatalogObject]]:
+    statement = select(CatalogObject)
+    if object_ids is not None:
+        statement = statement.where(CatalogObject.id.in_(sorted(set(object_ids))))
+    return statement.order_by(CatalogObject.id)
+
+
+def _typed_reference_object_ids(references: Iterable[str]) -> set[str]:
+    object_ids: set[str] = set()
+    for reference in references:
+        parts = reference.split(":", 1)
+        if len(parts) == 2:
+            object_ids.add(parts[1])
+    return object_ids
+
+
+def _relationship_endpoint_object_ids(
+    relationships: Iterable[Relationship | Mapping[str, object]],
+) -> set[str]:
+    references = (
+        str(
+            relationship[field]
+            if isinstance(relationship, Mapping)
+            else getattr(relationship, field)
+        )
+        for relationship in relationships
+        for field in ("from_ref", "to_ref")
+    )
+    return _typed_reference_object_ids(references)
 
 
 def ensure_kind_change_allowed(

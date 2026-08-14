@@ -346,11 +346,25 @@ def test_create_attached_device_rolls_back_invalid_endpoint_atomically(
         )
 
 
-def test_relationship_create_and_metadata_replace_bump_endpoints(
+def test_relationship_create_and_metadata_replace_ignore_unrelated_legacy_decision(
     device_command_client: TestClient,
     device_command_state,
 ) -> None:
-    _, _, token = device_command_state
+    session_factory, _, token = device_command_state
+    legacy_data = {"schema_version": 1, "decision": "preserve without a status"}
+    with session_factory() as session:
+        with transaction(session):
+            session.add(
+                CatalogObject(
+                    id="unrelated-device-command-decision",
+                    kind="decision",
+                    label="Unrelated device command Decision",
+                    status="active",
+                    lifecycle=None,
+                    health=None,
+                    data_json=json.dumps(legacy_data, sort_keys=True),
+                )
+            )
     auth = _auth(token)
     parent = device_command_client.get("/api/v1/objects/host-device-parent", headers=auth)
     assert parent.status_code == 200
@@ -418,7 +432,7 @@ def test_relationship_create_and_metadata_replace_bump_endpoints(
     assert no_op.json()["changed"] is False
     assert no_op.json()["metadata"] == {"link_kind": "wifi", "primary": True}
 
-    with device_command_state[0]() as session:
+    with session_factory() as session:
         events = session.scalars(
             select(AuditEvent)
             .where(AuditEvent.object_id == "host-device-parent")
@@ -437,6 +451,9 @@ def test_relationship_create_and_metadata_replace_bump_endpoints(
             "link_kind": "wifi",
             "primary": True,
         }
+        legacy = session.get(CatalogObject, "unrelated-device-command-decision")
+        assert legacy is not None
+        assert json.loads(legacy.data_json) == legacy_data
 
 
 def test_relationship_metadata_replace_revalidates_primary_and_rolls_back(
