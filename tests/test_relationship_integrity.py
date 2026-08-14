@@ -410,6 +410,45 @@ def test_service_rejects_invalid_relationships_with_stable_codes(
     assert error.value.code == code
 
 
+def test_relationship_write_ignores_unrelated_legacy_decision_but_validates_direct_endpoint(
+    session: Session,
+) -> None:
+    _add_object(session, "hardware", "host")
+    _add_object(session, "api", "service")
+    _add_object(
+        session,
+        "legacy-decision",
+        "decision",
+        {"schema_version": 1, "decision": "preserve without guessing a status"},
+    )
+    session.flush()
+
+    created = create_relationship(
+        session,
+        from_ref="host:hardware",
+        relation_type="hosts",
+        to_ref="service:api",
+    )
+
+    assert created == {
+        "from_ref": "host:hardware",
+        "relation_type": "hosts",
+        "to_ref": "service:api",
+    }
+    with pytest.raises(RelationshipIntegrityError) as error:
+        create_relationship(
+            session,
+            from_ref="decision:legacy-decision",
+            relation_type="related_to",
+            to_ref="service:api",
+        )
+    assert error.value.code == "invalid_endpoint_data"
+    assert json.loads(session.get(CatalogObject, "legacy-decision").data_json) == {
+        "schema_version": 1,
+        "decision": "preserve without guessing a status",
+    }
+
+
 def test_service_is_idempotent_but_database_prevents_duplicate_triplets(
     session: Session,
 ) -> None:

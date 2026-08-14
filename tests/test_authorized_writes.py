@@ -340,11 +340,25 @@ def test_service_component_api_errors_are_field_safe_and_secret_safe(
     assert "do-not-echo" not in secret.text
 
 
-def test_create_child_is_atomic_audited_and_idempotent(
+def test_create_child_ignores_unrelated_legacy_decision_and_stays_atomic(
     authorized_write_client: TestClient,
     authorized_write_state,
 ) -> None:
     session_factory, principal_id, token = authorized_write_state
+    legacy_data = {"schema_version": 1, "decision": "preserve without a status"}
+    with session_factory() as session:
+        with transaction(session):
+            session.add(
+                CatalogObject(
+                    id="unrelated-legacy-decision",
+                    kind="decision",
+                    label="Unrelated legacy Decision",
+                    status="active",
+                    lifecycle=None,
+                    health=None,
+                    data_json=json.dumps(legacy_data, sort_keys=True),
+                )
+            )
     headers = {
         **_authorization(token),
         "Idempotency-Key": "create-child-key-0001",
@@ -399,6 +413,9 @@ def test_create_child_is_atomic_audited_and_idempotent(
         record = session.scalar(select(IdempotencyRecord))
         assert record is not None
         assert "create-child-key-0001" not in record.key_hash
+        legacy = session.get(CatalogObject, "unrelated-legacy-decision")
+        assert legacy is not None
+        assert json.loads(legacy.data_json) == legacy_data
     assert "create-child-key-0001" not in record.response_json
 
 

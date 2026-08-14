@@ -23,6 +23,7 @@ from pathlib import Path
 import pytest
 from alembic import command
 from sqlalchemy import create_engine, inspect, text
+from sqlalchemy.dialects import postgresql, sqlite
 from sqlalchemy.engine import Engine
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
@@ -35,6 +36,7 @@ from blockwart.models import (
     IdempotencyRecord,
     ServiceTokenFailureBucket,
 )
+from blockwart.services.catalog import _endpoint_descriptor_rows_statement
 from blockwart.services.decision_migration import (
     apply_decision_migration_plan,
     build_decision_migration_plan,
@@ -203,6 +205,22 @@ def migrated_pg_engine(pg_database_name: str) -> Iterator[Engine]:
 # Review blocker 1: SQLite migration path stays green
 # Review blocker 4: model DDL is PostgreSQL-compatible
 # ---------------------------------------------------------------------------
+
+
+def test_scoped_relationship_endpoint_query_compiles_for_sqlite_and_postgresql() -> None:
+    statement = _endpoint_descriptor_rows_statement(
+        {"direct-endpoint", "graph-endpoint"}
+    )
+
+    for dialect in (sqlite.dialect(), postgresql.dialect()):
+        compiled = str(
+            statement.compile(
+                dialect=dialect,
+                compile_kwargs={"literal_binds": True},
+            )
+        )
+        assert "catalog_objects.id IN ('direct-endpoint', 'graph-endpoint')" in compiled
+        assert "ORDER BY catalog_objects.id" in compiled
 
 
 def test_sqlite_fresh_migrations_match_model_schema(tmp_path: Path) -> None:
