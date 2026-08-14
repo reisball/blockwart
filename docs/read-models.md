@@ -22,6 +22,10 @@ Catalog browse and detail queries additionally resolve these internal models:
 - the canonical host → system → service topology;
 - relationship cards used by the existing HTML templates.
 
+Readable service nodes may project their bounded embedded component document for
+the detail and expandable topology views. Stub nodes never receive this field,
+so component names, counts, and edges cannot become discover-only hints.
+
 The query module does not import FastAPI requests, responses, templates, or form
 types. Routers parse transport input and render a response; they do not query
 relationships or build placement graphs themselves.

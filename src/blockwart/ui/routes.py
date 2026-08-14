@@ -39,6 +39,14 @@ from blockwart.domain.relationships import (
 )
 from blockwart.domain.schema_projection import minimal_object_data
 from blockwart.domain.security import find_secret_violations, redact_secret_values
+from blockwart.domain.service_components import (
+    SERVICE_COMPONENT_ROLE_VALUES,
+    put_service_component,
+    put_service_component_dependency,
+    remove_service_component,
+    remove_service_component_dependency,
+    service_components_view,
+)
 from blockwart.domain.ui_schema import (
     get_ui_schema,
     schema_field_payload,
@@ -693,6 +701,11 @@ def _detail_template_context(
         service_information,
     )
     installed_software = _installed_software_summary(object_data)
+    service_components = service_components_view(object_data)
+    service_component_names = {
+        str(component.get("id")): str(component.get("name") or component.get("id"))
+        for component in service_components["items"]
+    }
     can_edit_network_addresses = catalog_object.kind in NETWORK_ADDRESS_EDIT_KINDS
     can_edit_network_ports = catalog_object.kind in NETWORK_PORT_EDIT_KINDS
     can_edit_network_endpoints = catalog_object.kind in NETWORK_ENDPOINT_EDIT_KINDS
@@ -828,6 +841,10 @@ def _detail_template_context(
         "supports_service_information": (
             catalog_object.kind in SERVICE_INFORMATION_OBJECT_KINDS
         ),
+        "supports_service_components": catalog_object.kind == "service",
+        "service_components": service_components,
+        "service_component_names": service_component_names,
+        "service_component_roles": SERVICE_COMPONENT_ROLE_VALUES,
         "supports_project": catalog_object.kind == PROJECT_KIND,
         "project_detail": project_detail,
         "project_form": project_form_state,
@@ -1017,6 +1034,7 @@ def _detail_navigation_context(
         "overview",
         "hardware",
         "service-information",
+        "components",
         "installed-software",
         "device",
         "runbook",
@@ -1046,6 +1064,16 @@ def _detail_navigation_context(
             "network": f"/objects/{object_id}/network?{detail_query_string}",
             "installed_software": (
                 f"/objects/{object_id}/installed-software?{detail_query_string}"
+            ),
+            "components": f"/objects/{object_id}/components?{detail_query_string}",
+            "component_remove": (
+                f"/objects/{object_id}/components/remove?{detail_query_string}"
+            ),
+            "component_dependencies": (
+                f"/objects/{object_id}/component-dependencies?{detail_query_string}"
+            ),
+            "component_dependency_remove": (
+                f"/objects/{object_id}/component-dependencies/remove?{detail_query_string}"
             ),
             "access": f"/objects/{object_id}/access?{detail_query_string}",
             "grants": (
@@ -2557,6 +2585,193 @@ async def update_installed_software(
 
 
 @router.post(
+    "/objects/{object_id}/components",
+    response_class=HTMLResponse,
+    dependencies=[Depends(require_browser_write_csrf)],
+)
+def update_service_component_from_ui(
+    request: Request,
+    object_id: str,
+    session: Annotated[Session, Depends(get_session)],
+    component_id: Annotated[str, Form()],
+    component_name: Annotated[str, Form()],
+    component_role: Annotated[str, Form()],
+    component_description: Annotated[str, Form()],
+    previous_id: Annotated[str, Form()] = "",
+    if_match: Annotated[str, Form()] = "",
+):
+    return _execute_service_component_ui_update(
+        request,
+        session,
+        object_id,
+        if_match=if_match,
+        transform=lambda data: put_service_component(
+            data,
+            component_id=component_id,
+            name=component_name,
+            role=component_role,
+            description=component_description,
+            previous_id=previous_id or None,
+        ),
+    )
+
+
+@router.post(
+    "/objects/{object_id}/components/remove",
+    response_class=HTMLResponse,
+    dependencies=[Depends(require_browser_write_csrf)],
+)
+def remove_service_component_from_ui(
+    request: Request,
+    object_id: str,
+    session: Annotated[Session, Depends(get_session)],
+    component_id: Annotated[str, Form()],
+    if_match: Annotated[str, Form()] = "",
+):
+    return _execute_service_component_ui_update(
+        request,
+        session,
+        object_id,
+        if_match=if_match,
+        transform=lambda data: remove_service_component(
+            data,
+            component_id=component_id,
+        ),
+    )
+
+
+@router.post(
+    "/objects/{object_id}/component-dependencies",
+    response_class=HTMLResponse,
+    dependencies=[Depends(require_browser_write_csrf)],
+)
+def update_service_component_dependency_from_ui(
+    request: Request,
+    object_id: str,
+    session: Annotated[Session, Depends(get_session)],
+    component_id: Annotated[str, Form()],
+    depends_on: Annotated[str, Form()],
+    dependency_description: Annotated[str, Form()] = "",
+    if_match: Annotated[str, Form()] = "",
+):
+    return _execute_service_component_ui_update(
+        request,
+        session,
+        object_id,
+        if_match=if_match,
+        transform=lambda data: put_service_component_dependency(
+            data,
+            component_id=component_id,
+            depends_on=depends_on,
+            description=dependency_description or None,
+        ),
+    )
+
+
+@router.post(
+    "/objects/{object_id}/component-dependencies/remove",
+    response_class=HTMLResponse,
+    dependencies=[Depends(require_browser_write_csrf)],
+)
+def remove_service_component_dependency_from_ui(
+    request: Request,
+    object_id: str,
+    session: Annotated[Session, Depends(get_session)],
+    component_id: Annotated[str, Form()],
+    depends_on: Annotated[str, Form()],
+    if_match: Annotated[str, Form()] = "",
+):
+    return _execute_service_component_ui_update(
+        request,
+        session,
+        object_id,
+        if_match=if_match,
+        transform=lambda data: remove_service_component_dependency(
+            data,
+            component_id=component_id,
+            depends_on=depends_on,
+        ),
+    )
+
+
+def _execute_service_component_ui_update(
+    request: Request,
+    session: Session,
+    object_id: str,
+    *,
+    if_match: str,
+    transform: Any,
+) -> HTMLResponse:
+    """Apply one safe form mutation through the parent service write command."""
+
+    access = read_access_from_request(request)
+    context = ui_write_context(request, access)
+    execute_ui_command(
+        session,
+        context,
+        lambda: authorize_object_command(
+            session,
+            context,
+            object_id=object_id,
+            permission=Permission.WRITE,
+        ),
+    )
+    existing_object = get_object(session, object_id)
+    if existing_object is None:
+        raise HTTPException(status_code=404, detail="Catalog object not found")
+    if existing_object.kind != "service":
+        raise HTTPException(
+            status_code=422,
+            detail="Components are supported only for service objects",
+        )
+    try:
+        data = transform(_editable_data_copy(existing_object.data))
+        _reject_secret_shaped_form_data(data)
+        payload = CatalogObjectIn(
+            id=existing_object.id,
+            kind=existing_object.kind,
+            label=existing_object.label,
+            status=existing_object.status,
+            lifecycle=existing_object.lifecycle,
+            health=existing_object.health,
+            summary=existing_object.summary,
+            data=data,
+        )
+        execute_ui_command(
+            session,
+            context,
+            lambda: update_catalog_object(
+                session,
+                context,
+                object_id=object_id,
+                payload=payload,
+                expected_revision=_ui_expected_revision(
+                    request,
+                    if_match,
+                    existing_object.revision,
+                ),
+            ),
+        )
+    except (HTTPException, ValidationError, ValueError) as exc:
+        return _detail_form_error_response(
+            request,
+            session,
+            object_id,
+            error=(
+                str(exc.detail)
+                if isinstance(exc, HTTPException)
+                else _safe_error_message(exc)
+            ),
+            edit_section="components",
+            status_code=exc.status_code if isinstance(exc, HTTPException) else 422,
+        )
+    return RedirectResponse(
+        url=_detail_redirect_url(request, object_id),
+        status_code=303,
+    )
+
+
+@router.post(
     "/objects/{object_id}/network",
     response_class=HTMLResponse,
     dependencies=[Depends(require_browser_write_csrf)],
@@ -2840,7 +3055,8 @@ def _detail_form_error_response(
     *,
     error: str,
     edit_section: str,
-    form_rows: Mapping[str, list[Mapping[str, Any]]],
+    form_rows: Mapping[str, list[Mapping[str, Any]]] | None = None,
+    status_code: int = 422,
 ):
     read_model = query_catalog_detail(
         session,
@@ -2858,7 +3074,7 @@ def _detail_form_error_response(
         edit_section=edit_section,
         can_write_enabled=True,
         form_rows=form_rows,
-        status_code=422,
+        status_code=status_code,
     )
 
 

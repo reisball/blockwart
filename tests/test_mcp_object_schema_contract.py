@@ -156,6 +156,29 @@ def test_device_and_network_categories_come_from_the_canonical_registry() -> Non
         )
 
 
+def test_service_components_are_published_without_a_special_mcp_tool() -> None:
+    kinds = _projected_kinds(describe_schema_payload())
+    service = kinds["service"]
+    contract = service["service_components"]
+    fields = _fields(service)
+
+    assert contract["storage_path"] == "data.components"
+    assert contract["identity_scope"] == "parent_service"
+    assert contract["dependency_direction"] == "component_id depends_on depends_on"
+    assert contract["cycles"]["allowed"] is True
+    assert contract["limits"] == {
+        "components": 100,
+        "dependencies": 400,
+        "traversal_nodes": 100,
+        "traversal_edges": 400,
+    }
+    assert fields["components.items"]["max_items"] == 100
+    assert fields["components.dependencies"]["max_items"] == 400
+    tool_names = set(TOOL_DEFINITIONS)
+    assert not any("component" in name for name in tool_names)
+    assert "blockwart.update_object" in tool_names
+
+
 def test_required_nested_paths_are_published_and_enforced() -> None:
     kinds = _projected_kinds(describe_schema_payload())
 

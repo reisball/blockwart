@@ -19,6 +19,7 @@ automatically.
 ## What Blockwart can do
 
 - model infrastructure as typed catalog objects and validated relationships;
+- describe bounded internal service components and their local dependencies;
 - record canonical Decisions with explicit lifecycle, asset scope, related knowledge, and
   cycle-safe supersession links;
 - keep canonical Project research, experiments, migrations, implementations, and incident

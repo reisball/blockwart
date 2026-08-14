@@ -239,6 +239,10 @@ fields, and URL formats use the standard field-accurate validation details.
 The URL field combines `format: uri` with a JSON Schema `pattern` restricted to
 case-insensitive `http://` and `https://` prefixes.
 
+Service payloads may include the bounded canonical `data.components` document.
+It is written only through this parent-object command and returned only in full
+readable parent detail/context; see [Service-local components](service-components.md).
+
 ### `DELETE /api/v1/objects/{object_id}`
 
 Requires the separate `delete` permission plus current `If-Match`. Referenced

@@ -17,6 +17,10 @@ Blockwart version 1 models concrete infrastructure assets:
 
 `network`, `device`, and the non-public catalog kinds are not placement levels.
 
+A service may additionally contain bounded local components and directed local
+dependencies. They are embedded parts of that parent service rather than catalog
+objects; see [Service-local components](service-components.md).
+
 Decision is a structured knowledge object rather than an asset or placement level. Its separate
 closed lifecycle, typed links, and cycle-safe supersession graph are documented in
 [Canonical Decision objects](decisions.md).

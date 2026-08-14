@@ -46,6 +46,7 @@ def _asset(
     kind: str = "service",
     label: str | None = None,
     summary: str | None = None,
+    data: dict | None = None,
 ) -> CatalogObjectIn:
     return CatalogObjectIn(
         id=object_id,
@@ -54,7 +55,7 @@ def _asset(
         lifecycle="active",
         health="healthy",
         summary=summary,
-        data={"schema_version": 1},
+        data=data or {"schema_version": 1},
     )
 
 
@@ -67,7 +68,26 @@ def authorized_write_state(alembic_session_factory):
                 _asset("write-parent", kind="host", label="Write Parent"),
             )
             editable = upsert_object(session, _asset("editable", summary="before"))
-            peer = upsert_object(session, _asset("peer"))
+            peer = upsert_object(
+                session,
+                _asset(
+                    "peer",
+                    data={
+                        "schema_version": 1,
+                        "components": {
+                            "items": [
+                                {
+                                    "id": "hidden-api",
+                                    "name": "Hidden component name",
+                                    "role": "api",
+                                    "description": "Must remain parent-read-only.",
+                                }
+                            ],
+                            "dependencies": [],
+                        },
+                    },
+                ),
+            )
             deletable = upsert_object(session, _asset("deletable"))
             principal = create_service_account(
                 session,
@@ -141,6 +161,183 @@ def _successful_mcp_fetcher(client: TestClient, token: str):
         return response.json()
 
     return fetch
+
+
+def test_service_components_use_parent_rest_agent_mcp_cas_audit_and_visibility(
+    authorized_write_client: TestClient,
+    authorized_write_state,
+) -> None:
+    session_factory, principal_id, token = authorized_write_state
+    headers = _authorization(token)
+    before = authorized_write_client.get(
+        "/api/v1/objects/editable",
+        headers=headers,
+    )
+    assert before.status_code == 200
+    component_document = {
+        "items": [
+            {
+                "id": "database",
+                "name": "Embedded database",
+                "role": "database",
+                "description": "Stores this deployment's records.",
+            },
+            {
+                "id": "api",
+                "name": "Public API",
+                "role": "api",
+                "description": "Handles the HTTP boundary.",
+            },
+        ],
+        "dependencies": [
+            {
+                "component_id": "api",
+                "depends_on": "database",
+                "description": "Reads and writes records.",
+            }
+        ],
+    }
+    payload = _asset(
+        "editable",
+        summary="before",
+        data={"schema_version": 1, "components": component_document},
+    ).model_dump(mode="json")
+    changed = authorized_write_client.put(
+        "/api/v1/objects/editable",
+        headers={**headers, "If-Match": before.headers["etag"]},
+        json=payload,
+    )
+
+    assert changed.status_code == 200, changed.text
+    assert changed.json()["changed"] is True
+    assert [
+        item["id"]
+        for item in changed.json()["catalog_object"]["data"]["components"]["items"]
+    ] == ["api", "database"]
+
+    rest_context = authorized_write_client.get(
+        "/api/v1/objects/editable",
+        headers=headers,
+    )
+    agent_context = authorized_write_client.get(
+        "/api/agent/objects/editable",
+        headers=headers,
+    )
+    assert agent_context.status_code == 200
+    assert agent_context.json()["objects"][0]["data"]["components"] == (
+        rest_context.json()["data"]["components"]
+    )
+    mcp_context = call_tool(
+        "blockwart.get_object_context",
+        {"object_id": "editable"},
+        fetcher=_successful_mcp_fetcher(authorized_write_client, token),
+    )
+    assert json.loads(mcp_context["content"][0]["text"])["objects"][0]["data"][
+        "components"
+    ] == rest_context.json()["data"]["components"]
+
+    # Input order is not business state: the canonical parent write is a real no-op.
+    payload["data"]["components"]["items"].reverse()
+    repeated = authorized_write_client.put(
+        "/api/v1/objects/editable",
+        headers={**headers, "If-Match": rest_context.headers["etag"]},
+        json=payload,
+    )
+    assert repeated.status_code == 200, repeated.text
+    assert repeated.json()["changed"] is False
+    assert repeated.headers["etag"] == rest_context.headers["etag"]
+
+    discover_only = authorized_write_client.get(
+        "/api/v1/objects/peer",
+        headers=headers,
+    )
+    assert discover_only.status_code == 200
+    assert discover_only.json()["visibility"] == "stub"
+    assert "data" not in discover_only.json()
+    assert "Hidden component name" not in discover_only.text
+    assert "components" not in discover_only.text
+    agent_stub = authorized_write_client.get(
+        "/api/agent/objects/peer",
+        headers=headers,
+    )
+    assert agent_stub.status_code == 200
+    assert agent_stub.json()["objects"][0]["visibility"] == "stub"
+    assert "components" not in agent_stub.text
+    mcp_stub = call_tool(
+        "blockwart.get_object_context",
+        {"object_id": "peer"},
+        fetcher=_successful_mcp_fetcher(authorized_write_client, token),
+    )
+    assert "components" not in mcp_stub["content"][0]["text"]
+    assert "Hidden component name" not in mcp_stub["content"][0]["text"]
+
+    with session_factory() as session:
+        update_events = list(
+            session.scalars(
+                select(AuditEvent).where(
+                    AuditEvent.object_id == "editable",
+                    AuditEvent.action == "update",
+                    AuditEvent.actor == principal_id,
+                )
+            )
+        )
+        row = session.get(CatalogObject, "editable")
+    assert len(update_events) == 1
+    assert row is not None
+    assert row.revision == changed.json()["catalog_object"]["revision"]
+
+
+def test_service_component_api_errors_are_field_safe_and_secret_safe(
+    authorized_write_client: TestClient,
+    authorized_write_state,
+) -> None:
+    _, _, token = authorized_write_state
+    before = authorized_write_client.get(
+        "/api/v1/objects/editable",
+        headers=_authorization(token),
+    )
+    base = _asset("editable", summary="before").model_dump(mode="json")
+    base["data"]["components"] = {
+        "items": [
+            {
+                "id": "api",
+                "name": "API",
+                "role": "api",
+                "description": "Safe description",
+            }
+        ],
+        "dependencies": [
+            {"component_id": "api", "depends_on": "service:concealed-target"}
+        ],
+    }
+    invalid_reference = authorized_write_client.put(
+        "/api/v1/objects/editable",
+        headers={
+            **_authorization(token),
+            "If-Match": before.headers["etag"],
+        },
+        json=base,
+    )
+    assert invalid_reference.status_code == 422
+    assert invalid_reference.json()["error"]["details"][0]["path"] == (
+        "data.components.dependencies[0].depends_on"
+    )
+    assert "concealed-target" not in invalid_reference.text
+
+    base["data"]["components"]["dependencies"] = []
+    leaked = "postgresql://operator:do-not-echo@db.internal/catalog"
+    base["data"]["components"]["items"][0]["description"] = leaked
+    secret = authorized_write_client.put(
+        "/api/v1/objects/editable",
+        headers={
+            **_authorization(token),
+            "If-Match": before.headers["etag"],
+        },
+        json=base,
+    )
+    assert secret.status_code == 422
+    assert leaked not in secret.text
+    assert "do-not-echo" not in secret.text
 
 
 def test_create_child_is_atomic_audited_and_idempotent(

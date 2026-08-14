@@ -103,6 +103,12 @@ ordered-entry identity, and timestamp rules. These executable rules and their
 public error contracts are projected into UI, OpenAPI, Agent API, and MCP instead
 of being restated by an interface.
 
+Service writes may carry the closed `data.components` document documented in
+[Service-local components](service-components.md). Its item/edge shapes, local
+references, duplicates, self-reference, bounds, canonical ordering, and cycle
+semantics are validated and projected from the same registry. Every other kind
+rejects `data.components` explicitly.
+
 ## Secret Policy
 
 Secret rejection is global and runs independently before the object-kind

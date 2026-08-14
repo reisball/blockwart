@@ -12,6 +12,16 @@ from urllib.parse import parse_qsl, urlsplit
 from blockwart.domain.interfaces import CANONICAL_EXPOSURES, CANONICAL_TRANSPORTS
 from blockwart.domain.references import TypedReference
 from blockwart.domain.security import FORBIDDEN_SECRET_KEYS
+from blockwart.domain.service_components import (
+    COMPONENT_DEPENDENCY_KEYS,
+    COMPONENT_DOCUMENT_KEYS,
+    COMPONENT_ITEM_KEYS,
+    MAX_SERVICE_COMPONENT_DEPENDENCIES,
+    MAX_SERVICE_COMPONENTS,
+    SERVICE_COMPONENT_ROLES,
+    normalize_service_components,
+    service_component_violations,
+)
 
 FieldType = Literal[
     "array",
@@ -346,6 +356,8 @@ def normalize_object_data(kind: str, data: Mapping[str, Any]) -> dict[str, Any]:
             _normalize_string_field(normalized, field.path.split("."))
         if field.field_type == "datetime":
             _normalize_datetime_field(normalized, field.path.split("."))
+    if kind == "service":
+        normalized = normalize_service_components(normalized)
     return normalized
 
 
@@ -1066,6 +1078,67 @@ SERVICE_FIELDS = (
     _field("owner", "string"),
     _field("auth", "object"),
     *_reference_list("auth.credential_references", "credential_reference"),
+    _field("components", "object", allowed_keys=COMPONENT_DOCUMENT_KEYS),
+    _field(
+        "components.items",
+        "array",
+        max_items=MAX_SERVICE_COMPONENTS,
+    ),
+    _field(
+        "components.items[]",
+        "object",
+        allowed_keys=COMPONENT_ITEM_KEYS,
+    ),
+    _entry_id("components.items[].id"),
+    _field(
+        "components.items[].name",
+        "string",
+        required_in_item=True,
+        strip_whitespace=True,
+        min_length=1,
+        max_length=128,
+    ),
+    _field(
+        "components.items[].role",
+        "enum",
+        required_in_item=True,
+        enum_values=SERVICE_COMPONENT_ROLES,
+    ),
+    _field(
+        "components.items[].description",
+        "text",
+        required_in_item=True,
+        strip_whitespace=True,
+        min_length=1,
+        max_length=512,
+    ),
+    _field(
+        "components.dependencies",
+        "array",
+        max_items=MAX_SERVICE_COMPONENT_DEPENDENCIES,
+    ),
+    _field(
+        "components.dependencies[]",
+        "object",
+        allowed_keys=COMPONENT_DEPENDENCY_KEYS,
+    ),
+    _entry_id("components.dependencies[].component_id"),
+    _entry_id("components.dependencies[].depends_on"),
+    _field(
+        "components.dependencies[].description",
+        "text",
+        strip_whitespace=True,
+        min_length=1,
+        max_length=512,
+    ),
+)
+
+SERVICE_COMPONENTS_FORBIDDEN_FIELDS = (
+    _field(
+        "components",
+        "object",
+        forbidden_message="is supported only for service objects",
+    ),
 )
 
 CREDENTIAL_REFERENCE_FIELDS = (
@@ -2166,6 +2239,21 @@ def _reject_installed_software_extra_fields(data: Mapping[str, Any]) -> None:
             )
 
 
+def _validate_service_components(data: Mapping[str, Any]) -> None:
+    """Enforce local identity and graph integrity after field-shape checks."""
+
+    violations = service_component_violations(data)
+    if not violations:
+        return
+    violation = violations[0]
+    raise ObjectSchemaError(
+        violation.path,
+        violation.message,
+        violation=violation.violation,
+        rule=public_rule_name(_validate_service_components),
+    )
+
+
 # Published description for every schema-bound postcondition, keyed by the rule
 # callable's name. Rules stay executable in one place; the projection publishes
 # them instead of restating conditional validation in a second contract.
@@ -2234,6 +2322,13 @@ SCHEMA_RULE_CONTRACTS: Mapping[str, str] = MappingProxyType(
         "_reject_installed_software_extra_fields": (
             "Installed-software entries may contain only name, version, and url."
         ),
+        "_validate_service_components": (
+            "data.components is a closed service-only document with required items "
+            "and dependencies arrays. Component ids are unique lowercase local ids; "
+            "dependency endpoints must name components in the same service; self "
+            "references and duplicate directed pairs are rejected. Directed cycles "
+            "are allowed and consumers must honor the published traversal bounds."
+        ),
     }
 )
 
@@ -2255,6 +2350,7 @@ SCHEMA_RULE_VIOLATIONS: Mapping[str, str] = MappingProxyType(
         "_require_installed_software_fields": VIOLATION_REQUIRED_FIELD_MISSING,
         "_reject_empty_installed_software_fields": VIOLATION_VALUE_TOO_SHORT,
         "_reject_installed_software_extra_fields": VIOLATION_FIELD_NOT_ALLOWED,
+        "_validate_service_components": VIOLATION_VALUE_NOT_ALLOWED,
     }
 )
 
@@ -2302,6 +2398,7 @@ BUILTIN_SCHEMAS: Mapping[str, TypeSchema] = MappingProxyType(
             *INTERFACE_FIELDS,
             *NETWORK_FIELDS,
             *INSTALLED_SOFTWARE_FIELDS,
+            *SERVICE_COMPONENTS_FORBIDDEN_FIELDS,
             *REFERENCE_FIELDS,
             rules=(
                 _require_installed_software_fields,
@@ -2314,6 +2411,7 @@ BUILTIN_SCHEMAS: Mapping[str, TypeSchema] = MappingProxyType(
             *INTERFACE_FIELDS,
             *NETWORK_FIELDS,
             *INSTALLED_SOFTWARE_FIELDS,
+            *SERVICE_COMPONENTS_FORBIDDEN_FIELDS,
             *REFERENCE_FIELDS,
             rules=(
                 _require_installed_software_fields,
@@ -2327,6 +2425,7 @@ BUILTIN_SCHEMAS: Mapping[str, TypeSchema] = MappingProxyType(
             *INTERFACE_FIELDS,
             *NETWORK_FIELDS,
             *NETWORK_OBJECT_FIELDS,
+            *SERVICE_COMPONENTS_FORBIDDEN_FIELDS,
         ),
         "device": _schema(
             "device",
@@ -2334,6 +2433,7 @@ BUILTIN_SCHEMAS: Mapping[str, TypeSchema] = MappingProxyType(
             *INTERFACE_FIELDS,
             *DEVICE_FIELDS,
             *REFERENCE_FIELDS,
+            *SERVICE_COMPONENTS_FORBIDDEN_FIELDS,
         ),
         "service": _schema(
             "service",
@@ -2341,17 +2441,20 @@ BUILTIN_SCHEMAS: Mapping[str, TypeSchema] = MappingProxyType(
             *SERVICE_FIELDS,
             *REFERENCE_FIELDS,
             *INSTALLED_SOFTWARE_FORBIDDEN_FIELDS,
+            rules=(_validate_service_components,),
         ),
         "credential_reference": _schema(
             "credential_reference",
             *CREDENTIAL_REFERENCE_FIELDS,
             *INSTALLED_SOFTWARE_FORBIDDEN_FIELDS,
+            *SERVICE_COMPONENTS_FORBIDDEN_FIELDS,
             rules=(_reject_credential_value_keys,),
         ),
         "runbook": _schema(
             "runbook",
             *RUNBOOK_FIELDS,
             *INSTALLED_SOFTWARE_FORBIDDEN_FIELDS,
+            *SERVICE_COMPONENTS_FORBIDDEN_FIELDS,
             rules=(
                 _reject_credential_value_keys,
                 _require_runbook_conditional_fields,
@@ -2364,12 +2467,14 @@ BUILTIN_SCHEMAS: Mapping[str, TypeSchema] = MappingProxyType(
             "decision",
             *INSTALLED_SOFTWARE_FORBIDDEN_FIELDS,
             *DECISION_FIELDS,
+            *SERVICE_COMPONENTS_FORBIDDEN_FIELDS,
             rules=(_validate_decision_lifecycle,),
         ),
         "project": _schema(
             "project",
             *INSTALLED_SOFTWARE_FORBIDDEN_FIELDS,
             *PROJECT_FIELDS,
+            *SERVICE_COMPONENTS_FORBIDDEN_FIELDS,
             rules=(
                 _require_project_conditional_fields,
                 _reject_project_contradictory_fields,

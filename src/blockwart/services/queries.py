@@ -19,6 +19,7 @@ from blockwart.domain.relationships import (
     relationship_metadata,
 )
 from blockwart.domain.runbooks import authorized_runbook_data
+from blockwart.domain.service_components import service_components_view
 from blockwart.domain.ui_schema import get_ui_schema
 from blockwart.models import Relationship
 from blockwart.schemas.catalog import (
@@ -176,6 +177,7 @@ class ExplorerAssetDetailReadModel(TypedDict):
     project_status: NotRequired[str]
     runbook_status: NotRequired[str]
     runbook_risk: NotRequired[str]
+    service_components: NotRequired[dict[str, list[dict[str, Any]]]]
 
 
 class ExplorerAssetStubReadModel(TypedDict):
@@ -1922,6 +1924,8 @@ def _explorer_asset(
         decision_status = catalog_object.data.get("decision_status")
         if isinstance(decision_status, str):
             asset["decision_status"] = decision_status
+    if catalog_object.kind == "service":
+        asset["service_components"] = service_components_view(catalog_object.data)
     if catalog_object.kind == "project":
         for source_key, asset_key in (
             ("category", "project_category"),

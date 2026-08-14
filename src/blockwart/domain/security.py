@@ -27,6 +27,10 @@ SECRET_VALUE_PATTERNS = [
     re.compile(r"Bearer\s+[A-Za-z0-9._~+/=-]{20,}", re.IGNORECASE),
     re.compile(r"ghp_[A-Za-z0-9_]{20,}"),
     re.compile(r"eyJ[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{10,}"),
+    re.compile(
+        r"\b(?:amqps?|mariadb|mongodb(?:\+srv)?|mssql|mysql|postgres(?:ql)?|rediss?)://\S+",
+        re.IGNORECASE,
+    ),
 ]
 REDACTED_SECRET_VALUE = "[redacted-secret-field]"
 

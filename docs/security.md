@@ -5,6 +5,8 @@ Blockwart stores operational knowledge and credential references. It does not st
 The global secret-shape validator runs before the fixed catalog object-schema
 registry and cannot be disabled by a kind or field declaration. The registry
 also refuses to declare raw secret/value paths; see `object-validation.md`.
+Common database, cache, queue, and broker connection-string shapes are rejected
+as secret-like values even when they do not visibly include a password.
 
 Agents may read canonical records through API/MCP in the MVP. Agents must not receive raw credential values through prompts, issues, Markdown, exports, fixtures, logs, or screenshots.
 
