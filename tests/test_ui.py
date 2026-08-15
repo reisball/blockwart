@@ -724,6 +724,27 @@ def test_create_modal_offers_only_types_and_parents_the_rules_allow(
     ]
 
 
+def test_create_entry_is_hidden_without_an_eligible_authorized_parent(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # `create_child` can be granted on an object that cannot parent any of the
+    # supported create-flow kinds.  The UI must not turn that generic grant
+    # into a dead-end button and an all-disabled modal.
+    monkeypatch.setattr(
+        "blockwart.ui.routes._create_child_kinds_for_parent",
+        lambda _target: (),
+    )
+
+    catalog = client.get("/")
+    requested_modal = client.get("/?create=1")
+
+    assert catalog.status_code == requested_modal.status_code == 200
+    assert "Add asset" not in catalog.text
+    assert 'action="/objects"' not in requested_modal.text
+    assert 'id="create-object-title"' not in requested_modal.text
+
+
 def test_create_modal_falls_back_to_a_placeable_type(client: TestClient) -> None:
     # Knowledge kinds and root-only kinds are not part of the child create flow,
     # so the form opens on a type it can actually place.

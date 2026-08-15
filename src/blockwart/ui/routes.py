@@ -387,6 +387,11 @@ def _index_template_context(
         create_parents,
         read_model.display_names,
     )
+    # `create_child` is a generic object grant.  A principal can therefore
+    # hold it on an object such as a service or an ordinary network segment
+    # that no supported create-flow kind may actually use as its parent.  Do
+    # not advertise or open a dead-end create flow in that case.
+    show_create_form = show_create_form and bool(create_parent_options)
     create_kind_options = _create_kind_options(
         create_parent_options,
         localized_schemas,
@@ -506,7 +511,7 @@ def _index_template_context(
             )
         ),
         "can_write": can_write_enabled,
-        "can_create": bool(create_parents),
+        "can_create": bool(create_parent_options),
         "can_create_root": is_catalog_owner,
         "show_create_root_form": show_create_root_form and is_catalog_owner,
         "csrf_token": request.cookies.get(AUTH_CSRF_COOKIE_NAME, ""),
