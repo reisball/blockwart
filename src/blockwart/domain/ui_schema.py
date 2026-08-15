@@ -2,11 +2,17 @@ import json
 import os
 import tempfile
 from dataclasses import dataclass, field
+from functools import cache
 from pathlib import Path
 from typing import Any, Literal
 
 from blockwart.config import get_settings
 from blockwart.domain.object_schema import BUILTIN_SCHEMAS, INSTALLED_SOFTWARE_KINDS, FieldSpec
+from blockwart.domain.placement import (
+    CANONICAL_PLACEMENT_RELATION_TYPE,
+    SUPPORTED_PLACEMENT_PAIRS,
+)
+from blockwart.domain.relationships import ASSET_KINDS, allowed_endpoint_pairs
 from blockwart.domain.schema_projection import kind_schema_projection
 
 PrimaryNameStorage = Literal["label", "network_hostname"]
@@ -67,6 +73,62 @@ class UiPanel:
             "label_key": self.label_key,
             "route_section": self.route_section,
             "always_visible": self.always_visible,
+        }
+
+
+# The asset kinds the `/objects` create flow exposes, in hierarchy order.
+CREATE_KIND_ORDER: tuple[str, ...] = ("host", "system", "network", "device", "service")
+ATTACHMENT_RELATION_TYPE = "attached_to"
+# Devices are the one kind the create flow attaches instead of placing.
+ATTACHMENT_CREATE_KINDS = frozenset({"device"})
+
+if set(CREATE_KIND_ORDER) != set(ASSET_KINDS):  # pragma: no cover - import-time parity guard
+    raise RuntimeError("create-flow UI kinds drift from the domain asset kinds")
+
+
+@dataclass(frozen=True)
+class UiCreateGuide:
+    """Presentation data explaining one asset kind in the child create flow.
+
+    Everything here is derived from the domain rules the create flow already
+    enforces: the canonical placement pairs, the attachment relationship rule,
+    and the difference between the kind's create fields and its full schema.
+    The guide adds no rule of its own, so it cannot drift into a second,
+    weaker copy of the domain contract.
+    """
+
+    kind: str
+    relation_type: str
+    parent_kinds: tuple[str, ...]
+    deferred_fields: tuple[str, ...]
+
+    @property
+    def purpose_key(self) -> str:
+        return f"create.kind.{self.kind}.purpose"
+
+    @property
+    def placement_key(self) -> str:
+        if not self.parent_kinds:
+            return "create.placement.root_only"
+        return f"create.placement.{self.relation_type}"
+
+    @property
+    def parent_note_key(self) -> str:
+        # Only attachment narrows its parent kinds further by stored data: a
+        # network qualifies as an attachment parent only as a network device.
+        if self.relation_type == ATTACHMENT_RELATION_TYPE and "network" in self.parent_kinds:
+            return "create.placement.attached_to.note"
+        return ""
+
+    def as_dict(self) -> dict[str, object]:
+        return {
+            "kind": self.kind,
+            "relation_type": self.relation_type,
+            "parent_kinds": list(self.parent_kinds),
+            "deferred_fields": list(self.deferred_fields),
+            "purpose_key": self.purpose_key,
+            "placement_key": self.placement_key,
+            "parent_note_key": self.parent_note_key,
         }
 
 
@@ -767,8 +829,45 @@ def ui_schema_payload() -> dict[str, dict[str, object]]:
             schema_payload["object_schema"] = kind_schema_projection(kind)
         schema_payload["schema_fields"] = schema_field_payload(schema)
         schema_payload["create_field_definitions"] = create_field_payload(schema)
+        if kind in CREATE_KIND_ORDER:
+            schema_payload["create_guide"] = create_guide(schema).as_dict()
         payload[kind] = schema_payload
     return payload
+
+
+def create_guide(schema: UiTypeSchema) -> UiCreateGuide:
+    """Derive how one asset kind enters the catalog and what it defers."""
+
+    relation_type = (
+        ATTACHMENT_RELATION_TYPE
+        if schema.kind in ATTACHMENT_CREATE_KINDS
+        else CANONICAL_PLACEMENT_RELATION_TYPE
+    )
+    return UiCreateGuide(
+        kind=schema.kind,
+        relation_type=relation_type,
+        parent_kinds=create_parent_kinds(schema.kind),
+        deferred_fields=deferred_create_fields(schema),
+    )
+
+
+@cache
+def create_parent_kinds(kind: str) -> tuple[str, ...]:
+    """Return the parent kinds the create flow accepts for one child kind."""
+
+    if kind in ATTACHMENT_CREATE_KINDS:
+        pairs = allowed_endpoint_pairs(ATTACHMENT_RELATION_TYPE)
+        parents = {target for source, target in pairs if source == kind}
+    else:
+        parents = {parent for parent, child in SUPPORTED_PLACEMENT_PAIRS if child == kind}
+    return tuple(parent for parent in CREATE_KIND_ORDER if parent in parents)
+
+
+def deferred_create_fields(schema: UiTypeSchema) -> tuple[str, ...]:
+    """Return the schema fields this kind maintains after creation."""
+
+    create_fields = set(schema.create_fields)
+    return tuple(key for key in schema.fields if key not in create_fields)
 
 
 def primary_name_storage_path(schema: UiTypeSchema) -> str:

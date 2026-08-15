@@ -367,6 +367,60 @@
   const relationTargetSelect = document.querySelector("[data-relation-target-select]");
   const relationTypeInput = document.querySelector("[data-relation-type-input]");
   const createFields = Array.from(document.querySelectorAll("[data-create-field]"));
+  const createGuide = document.querySelector("[data-create-guide]");
+  const createParentSummary = document.querySelector("[data-create-parent-summary]");
+
+  function optionChildKinds(option) {
+    return (option.dataset.childKinds || "").split(" ").filter(Boolean);
+  }
+
+  function updateCreateGuide(guide) {
+    if (!createGuide || !guide) {
+      return;
+    }
+    const texts = {
+      "[data-create-guide-purpose]": guide.purpose,
+      "[data-create-guide-relation]": guide.relation_label,
+      "[data-create-guide-placement]": guide.placement,
+      "[data-create-guide-later-summary]": guide.deferred_summary,
+      "[data-create-guide-later-hint]": guide.deferred_hint,
+      "[data-create-guide-panels]": guide.panels,
+    };
+    for (const [selector, text] of Object.entries(texts)) {
+      const target = createGuide.querySelector(selector);
+      if (target) {
+        target.textContent = text || "";
+      }
+    }
+    const note = createGuide.querySelector("[data-create-guide-note]");
+    if (note) {
+      note.textContent = guide.parent_note || "";
+      note.hidden = !guide.parent_note;
+    }
+    const deferredList = createGuide.querySelector("[data-create-guide-later-list]");
+    if (deferredList) {
+      deferredList.replaceChildren(...(guide.deferred_labels || []).map((label) => {
+        const item = document.createElement("li");
+        item.textContent = label;
+        return item;
+      }));
+    }
+  }
+
+  function updateCreateParentSummary(relationType) {
+    if (!createParentSummary) {
+      return;
+    }
+    const selected = relationTargetSelect?.selectedOptions[0];
+    const template = copy.createParent || {};
+    if (!selected || selected.disabled) {
+      createParentSummary.textContent = template.none || "";
+      return;
+    }
+    const parent = `${selected.dataset.parentLabel || selected.textContent.trim()} · ${selected.value}`;
+    createParentSummary.textContent = (template[relationType] || "{parent}")
+      .replace("{parent}", parent);
+  }
 
   function setFieldEnabled(field, enabled) {
     field.hidden = !enabled;
@@ -379,8 +433,11 @@
     if (!createKindSelect) {
       return;
     }
-    const schema = uiSchemas[createKindSelect.value] || {};
-    const createsDevice = createKindSelect.value === "device";
+    const selectedKind = createKindSelect.value;
+    const schema = uiSchemas[selectedKind] || {};
+    const guide = schema.create_guide || null;
+    const relationType = guide?.relation_type || "hosts";
+    const attaches = relationType === "attached_to";
     const allowedFields = new Set(schema.create_fields || []);
     const fieldDefinitions = new Map(
       (schema.create_field_definitions || []).map((field) => [field.key, field]),
@@ -410,16 +467,16 @@
       platformField.hidden = !allowedFields.has("platform");
     }
     if (relationshipLabel) {
-      relationshipLabel.textContent = createsDevice
+      relationshipLabel.textContent = attaches
         ? (copy.attachmentParent || relationshipLabel.textContent)
         : (copy.placementParent || relationshipLabel.textContent);
     }
     if (relationTypeInput) {
-      relationTypeInput.value = createsDevice ? "attached_to" : "hosts";
+      relationTypeInput.value = relationType;
     }
     if (relationTargetSelect) {
       for (const option of relationTargetSelect.options) {
-        option.disabled = createsDevice && option.dataset.deviceParent !== "true";
+        option.disabled = !optionChildKinds(option).includes(selectedKind);
       }
       if (relationTargetSelect.selectedOptions[0]?.disabled) {
         const firstEnabled = Array.from(relationTargetSelect.options).find(
@@ -430,8 +487,14 @@
         }
       }
     }
+    updateCreateGuide(guide);
+    updateCreateParentSummary(relationType);
   }
 
   createKindSelect?.addEventListener("change", updateCreateFields);
+  relationTargetSelect?.addEventListener("change", () => {
+    const schema = uiSchemas[createKindSelect?.value] || {};
+    updateCreateParentSummary(schema.create_guide?.relation_type || "hosts");
+  });
   updateCreateFields();
 })();

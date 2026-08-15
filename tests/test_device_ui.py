@@ -211,7 +211,13 @@ def test_device_catalog_create_detail_filter_and_localized_chain_are_complete(
     assert 'data-create-field="device_category"' in create_form.text
     assert 'name="device_category" data-field-input="device_category" required' in create_form.text
     assert 'data-relation-type-input' in create_form.text
-    assert 'data-device-parent="false"' in create_form.text
+    # The attachment boundary decides the offered parents: hardware carries
+    # devices, a service and a plain network segment never do.
+    assert 'value="host:fabrik-device-root" data-child-kinds="system device service"' in (
+        create_form.text
+    )
+    assert 'value="service:device-target-service"' not in create_form.text
+    assert 'value="network:device-target-segment"' not in create_form.text
 
     assert detail.status_code == edit.status_code == 200
     assert "Pilot sensor" in detail.text

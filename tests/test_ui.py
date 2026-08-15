@@ -14,9 +14,12 @@ from blockwart.api.deps import get_session
 from blockwart.config import Settings
 from blockwart.db.session import transaction
 from blockwart.domain.ui_schema import (
+    CREATE_KIND_ORDER,
     FIELD_DEFINITIONS,
     UI_SCHEMAS,
     create_field_payload,
+    create_parent_kinds,
+    deferred_create_fields,
     schema_field_payload,
     ui_schema_payload,
 )
@@ -567,6 +570,241 @@ def test_create_form_schema_gates_fields_by_type(client: TestClient) -> None:
         assert "object_id" in schema.create_fields
         assert "primary_name" in schema.create_fields
         assert "summary" in schema.create_fields
+
+
+def _kind_option_attributes(document: str, kind: str) -> str:
+    match = re.search(rf'<option value="{kind}"([^>]*)>', document)
+    assert match is not None, kind
+    return match[1]
+
+
+def _browser_ui_schemas(document: str) -> dict:
+    match = re.search(r"window\.BLOCKWART_UI_SCHEMAS = (.*);", document)
+    assert match is not None
+    return json.loads(match[1])
+
+
+def test_create_guide_is_derived_from_the_placement_and_attachment_rules() -> None:
+    payload = ui_schema_payload()
+
+    assert set(CREATE_KIND_ORDER) == set(PUBLIC_OBJECT_KINDS)
+    for kind in CREATE_KIND_ORDER:
+        schema = UI_SCHEMAS[kind]
+        guide = payload[kind]["create_guide"]
+        deferred = guide["deferred_fields"]
+
+        assert guide["kind"] == kind
+        assert guide["parent_kinds"] == list(create_parent_kinds(kind))
+        assert deferred == list(deferred_create_fields(schema))
+        # Nothing is announced as deferred that the create form already asks for.
+        assert not set(deferred) & set(schema.create_fields)
+        assert set(deferred) | set(schema.create_fields) == set(schema.fields)
+
+    # Placement follows the canonical placement pairs, attachment the device rule.
+    assert payload["service"]["create_guide"]["relation_type"] == "hosts"
+    assert payload["service"]["create_guide"]["parent_kinds"] == ["host", "system"]
+    assert payload["system"]["create_guide"]["parent_kinds"] == ["host"]
+    assert payload["host"]["create_guide"]["parent_kinds"] == []
+    assert payload["network"]["create_guide"]["parent_kinds"] == []
+    assert payload["device"]["create_guide"]["relation_type"] == "attached_to"
+    assert payload["device"]["create_guide"]["parent_kinds"] == [
+        "host",
+        "system",
+        "network",
+        "device",
+    ]
+    for kind in ("host", "system", "network", "service"):
+        assert payload[kind]["create_guide"]["placement_key"] != "create.placement.attached_to"
+
+
+def test_create_modal_explains_type_purpose_placement_and_deferred_details(
+    client: TestClient,
+) -> None:
+    response = client.get("/?create=1")
+
+    assert response.status_code == 200
+    # The type select is described by the guide, and the guide announces itself
+    # when the type changes without moving focus.
+    assert 'data-kind-select aria-describedby="create-type-guide"' in response.text
+    assert 'id="create-type-guide" aria-live="polite"' in response.text
+    assert 'aria-describedby="create-parent-summary"' in response.text
+    assert 'id="create-parent-summary" aria-live="polite"' in response.text
+
+    # Only the seeded systems can parent a child, so service is the default type.
+    assert "selected" in _kind_option_attributes(response.text, "service")
+    assert "A running application or workload that hardware or a host provides." in response.text
+    assert (
+        "Placed with the hosts relationship under an authorized parent of type: Hardware, Host."
+        in response.text
+    )
+    assert "Placed under: brieftraeger · system:brieftraeger" in response.text
+    assert 'name="relation_type" value="hosts"' in response.text
+    guide = response.text.split("data-create-guide>", 1)[1].split("</div>", 1)[0]
+    assert "<strong data-create-guide-relation>Placement</strong>" in guide
+    assert "attached_to" not in guide
+
+    # Detail data that creation intentionally defers is named, together with the
+    # panels that maintain it. No raw JSON is offered anywhere in the form.
+    assert "Maintained after creation (5)" in response.text
+    assert "<li>Running version</li>" in response.text
+    assert "<li>Endpoint URL</li>" in response.text
+    assert "Detail panels: Overview, Service information" in response.text
+    assert (
+        "These fields are not part of creation. You maintain them in the detail "
+        "panels of the new object, never as raw JSON." in response.text
+    )
+    assert 'name="data_json"' not in response.text
+
+    # Every supported child type stays explained, including the ones this flow
+    # cannot place.
+    assert "All asset types of this form" in response.text
+    assert "A physical machine that carries hosts and services." in response.text
+    assert (
+        "An operating-system instance such as a virtual machine or container that runs services."
+        in response.text
+    )
+    assert (
+        "A network segment or a network device such as a switch, router, or access point."
+        in response.text
+    )
+    assert (
+        "A peripheral or network-attached device such as a sensor, antenna, or camera."
+        in response.text
+    )
+    assert "This type has no placement parent. It is created as a catalog root." in response.text
+
+
+def test_create_modal_offers_only_types_and_parents_the_rules_allow(
+    client: TestClient,
+    session_factory,
+) -> None:
+    with session_factory() as session:
+        upsert_object(
+            session,
+            CatalogObjectIn(
+                id="ui-guide-hardware",
+                kind="host",
+                label="Guide hardware",
+                data={"schema_version": 1},
+            ),
+        )
+
+    response = client.get("/?create=1")
+
+    assert response.status_code == 200
+    # Hardware and networks have no placement parent at all, so they can never be
+    # created here; the reason travels with the option.
+    assert "disabled" in _kind_option_attributes(response.text, "host")
+    assert "disabled" in _kind_option_attributes(response.text, "network")
+    assert "Hardware · catalog root only" in response.text
+    assert "Network · catalog root only" in response.text
+    # The new hardware parent makes hosts creatable and is the default again.
+    assert "disabled" not in _kind_option_attributes(response.text, "system")
+    assert "selected" in _kind_option_attributes(response.text, "system")
+    assert "disabled" not in _kind_option_attributes(response.text, "service")
+    assert "disabled" not in _kind_option_attributes(response.text, "device")
+    assert (
+        'value="host:ui-guide-hardware" data-child-kinds="system device service"'
+        in response.text
+    )
+    # A system parent cannot carry another system, and a service parents nothing.
+    assert 'value="system:fabrik" data-child-kinds="device service"' in response.text
+    assert 'value="service:n8n-web-ui"' not in response.text
+    assert "Placed under: Guide hardware · host:ui-guide-hardware" in response.text
+
+    browser_schemas = _browser_ui_schemas(response.text)
+    assert browser_schemas["system"]["create_guide"]["relation_type"] == "hosts"
+    assert browser_schemas["device"]["create_guide"]["relation_type"] == "attached_to"
+    assert browser_schemas["service"]["create_guide"]["deferred_labels"] == [
+        "Sources",
+        "Running version",
+        "Endpoint type",
+        "Endpoint URL",
+        "Port",
+    ]
+
+
+def test_create_modal_falls_back_to_a_placeable_type(client: TestClient) -> None:
+    # Knowledge kinds and root-only kinds are not part of the child create flow,
+    # so the form opens on a type it can actually place.
+    for requested_kind in ("runbook", "host"):
+        response = client.get(f"/?create=1&kind={requested_kind}")
+
+        assert response.status_code == 200
+        assert "selected" in _kind_option_attributes(response.text, "service")
+        assert 'name="relation_type" value="hosts"' in response.text
+        assert "Placed under: brieftraeger · system:brieftraeger" in response.text
+
+
+def test_create_modal_switches_placement_wording_for_attached_devices(
+    client: TestClient,
+) -> None:
+    response = client.get("/?create=1&kind=device")
+
+    assert response.status_code == 200
+    assert "selected" in _kind_option_attributes(response.text, "device")
+    assert 'name="relation_type" value="attached_to"' in response.text
+    assert "Attachment parent" in response.text
+    assert (
+        "Attached with the attached_to relationship to an authorized parent of type: "
+        "Hardware, Host, Network, Device." in response.text
+    )
+    assert (
+        "A network counts as an attachment parent only when it is classified as a "
+        "network device." in response.text
+    )
+    assert "Attached to: brieftraeger · system:brieftraeger" in response.text
+    assert 'data-create-field="device_category" data-device-field="category" hidden' not in (
+        response.text
+    )
+
+
+def test_create_modal_type_guidance_is_localized_in_german(client: TestClient) -> None:
+    response = client.get("/?create=1&lang=de")
+    device_response = client.get("/?create=1&kind=device&lang=de")
+
+    assert response.status_code == device_response.status_code == 200
+    assert "Hardware · nur als Katalogwurzel" in response.text
+    assert "Host · kein berechtigtes Elternobjekt des benötigten Typs" in response.text
+    assert (
+        "Eine laufende Anwendung oder Arbeitslast, die eine Hardware oder ein Host "
+        "bereitstellt." in response.text
+    )
+    assert (
+        "Wird mit der Beziehung hosts unter einem berechtigten Elternobjekt dieser "
+        "Typen platziert: Hardware, Host." in response.text
+    )
+    assert "Platziert unter: brieftraeger · system:brieftraeger" in response.text
+    assert "Nach dem Anlegen pflegbar (5)" in response.text
+    assert "Detailbereiche: Überblick, Dienstinformationen" in response.text
+    assert "Alle Objekttypen dieses Formulars" in response.text
+    assert (
+        "Wird mit der Beziehung attached_to an ein berechtigtes Elternobjekt dieser "
+        "Typen angehängt: Hardware, Host, Netzwerk, Gerät." in device_response.text
+    )
+    assert "Angehängt an: brieftraeger · system:brieftraeger" in device_response.text
+    assert (
+        "Ein Netzwerk zählt nur dann als Anschlussobjekt, wenn es als Netzwerkgerät "
+        "klassifiziert ist." in device_response.text
+    )
+
+
+def test_create_guide_stays_readable_on_small_screens(client: TestClient) -> None:
+    stylesheet = client.get("/static/explorer.css")
+
+    assert stylesheet.status_code == 200
+    guide_rule = re.search(r"\.create-guide\s*\{(?P<body>[^}]*)\}", stylesheet.text)
+    guide_text_rule = re.search(r"\.create-guide p\s*\{(?P<body>[^}]*)\}", stylesheet.text)
+    assert guide_rule is not None
+    assert guide_text_rule is not None
+    # Long relationship and reference copy must wrap instead of widening the modal.
+    assert "overflow-wrap: anywhere;" in guide_text_rule["body"]
+    mobile_block = stylesheet.text.split("@media (max-width: 820px) {", 1)[1].split(
+        "\n@media",
+        1,
+    )[0]
+    assert ".create-guide {" in mobile_block
+    assert ".create-types {" in mobile_block
 
 
 def test_schema_settings_page_shows_selected_type_schema(client: TestClient) -> None:
@@ -1238,7 +1476,7 @@ def test_catalog_tree_toggle_overrides_global_button_minimum_size(
     stylesheet_response = client.get("/static/explorer.css")
 
     assert catalog_response.status_code == 200
-    assert '/static/explorer.css?v=010"' in catalog_response.text
+    assert '/static/explorer.css?v=011"' in catalog_response.text
     assert stylesheet_response.status_code == 200
     tree_toggle_rule = re.search(
         r"\.tree-toggle\s*\{(?P<body>[^}]*)\}",

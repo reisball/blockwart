@@ -156,7 +156,7 @@
       }
     </script>
     <link rel="stylesheet" href="/static/app.css?v=062" />
-    <link rel="stylesheet" href="/static/explorer.css?v=010" />
+    <link rel="stylesheet" href="/static/explorer.css?v=011" />
     <script>
       window.BLOCKWART_UI_SCHEMAS = {{ ui_schemas|tojson }};
       window.BLOCKWART_EXPLORER_ASSETS = {{ explorer.assets|tojson }};
@@ -171,6 +171,11 @@
         details: {{ t("asset.details")|tojson }},
         placementParent: {{ create_fields_by_key.relationship.label|tojson }},
         attachmentParent: {{ t("device.attachment_parent")|tojson }},
+        createParent: {
+          "hosts": {{ t("create.parent.hosts", parent="{parent}")|tojson }},
+          "attached_to": {{ t("create.parent.attached_to", parent="{parent}")|tojson }},
+          "none": {{ t("create.parent.none")|tojson }}
+        },
         tree: {
           expand: {{ t("tree.expand", label="{label}")|tojson }},
           collapse: {{ t("tree.collapse", label="{label}")|tojson }}
@@ -202,7 +207,7 @@
       };
     </script>
     <script src="/static/theme.js?v=054" defer></script>
-    <script src="/static/index.js?v=063" defer></script>
+    <script src="/static/index.js?v=064" defer></script>
     <script src="/static/detail.js?v=002" defer></script>
   </head>
   <body class="explorer-body explorer-{{ view }}">
@@ -413,12 +418,34 @@
             <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
             <input type="hidden" name="idempotency_key" value="{{ form.idempotency_key }}" />
             <label data-create-field="kind"><span data-field-label="kind">{{ create_fields_by_key.kind.label }}</span>
-              <select name="kind" data-kind-select>
-                {% for object_kind in object_kinds if object_kind not in ["runbook", "decision", "project"] %}
-                  <option value="{{ object_kind }}" {% if object_kind == form.kind %}selected{% endif %}>{{ t("kind." ~ object_kind) }}</option>
+              <select name="kind" data-kind-select aria-describedby="create-type-guide">
+                {% for option in create_kind_options %}
+                  <option value="{{ option.kind }}" {% if not option.enabled %}disabled{% endif %} {% if option.kind == form_ui_schema.kind %}selected{% endif %}>{{ option.label }}{% if option.reason %} · {{ option.reason }}{% endif %}</option>
                 {% endfor %}
               </select>
             </label>
+            <div class="create-guide" id="create-type-guide" aria-live="polite" data-create-guide>
+              <p class="create-guide-purpose" data-create-guide-purpose>{{ create_guide.purpose }}</p>
+              <p class="create-guide-placement"><strong data-create-guide-relation>{{ create_guide.relation_label }}</strong> <span data-create-guide-placement>{{ create_guide.placement }}</span></p>
+              <p class="meta" data-create-guide-note {% if not create_guide.parent_note %}hidden{% endif %}>{{ create_guide.parent_note }}</p>
+              <details class="create-guide-later">
+                <summary data-create-guide-later-summary>{{ create_guide.deferred_summary }}</summary>
+                <p class="meta" data-create-guide-later-hint>{{ create_guide.deferred_hint }}</p>
+                <ul class="create-guide-later-list" data-create-guide-later-list>
+                  {% for label in create_guide.deferred_labels %}<li>{{ label }}</li>{% endfor %}
+                </ul>
+                <p class="meta" data-create-guide-panels>{{ create_guide.panels }}</p>
+              </details>
+            </div>
+            <details class="create-types">
+              <summary>{{ t("create.types.title") }}</summary>
+              <dl class="create-type-list">
+                {% for option in create_kind_options %}
+                  <dt>{{ option.label }}{% if option.reason %} <span class="create-type-reason">{{ option.reason }}</span>{% endif %}</dt>
+                  <dd>{{ option.purpose }} {{ option.placement }}</dd>
+                {% endfor %}
+              </dl>
+            </details>
             <label data-create-field="object_id"><span data-field-label="object_id">{{ create_fields_by_key.object_id.label }}</span>
               <input name="object_id" data-field-input="object_id" value="{{ form.id }}" placeholder="{{ create_fields_by_key.object_id.placeholder }}" autocomplete="off" spellcheck="false" {% if create_fields_by_key.object_id.required %}required{% endif %} />
             </label>
@@ -457,15 +484,15 @@
                 {% endfor %}
               </select>
             </label>
-            <label data-create-field="relationship"><span data-field-label="relationship" data-relationship-label>{{ t("device.attachment_parent") if form.kind == "device" else create_fields_by_key.relationship.label }}</span>
-              <select name="relation_target_ref" data-relation-target-select required>
-                {% for target in relation_targets %}
-                  {% set target_ref = target.kind ~ ":" ~ target.id %}
-                  <option value="{{ target_ref }}" data-device-parent="{{ 'true' if target_ref in device_parent_refs else 'false' }}" {% if form.kind == "device" and target_ref not in device_parent_refs %}disabled{% endif %} {% if target_ref == form.relation_target_ref or target.id == form.hosted_on_system_id %}selected{% endif %}>{{ display_names[target.id] }} · {{ target_ref }}</option>
+            <label data-create-field="relationship"><span data-field-label="relationship" data-relationship-label>{{ t("device.attachment_parent") if form_ui_schema.kind == "device" else create_fields_by_key.relationship.label }}</span>
+              <select name="relation_target_ref" data-relation-target-select aria-describedby="create-parent-summary" required>
+                {% for option in create_parent_options %}
+                  <option value="{{ option.ref }}" data-child-kinds="{{ option.child_kinds|join(' ') }}" data-parent-label="{{ option.label }}" {% if form_ui_schema.kind not in option.child_kinds %}disabled{% endif %} {% if option.ref == selected_create_parent_ref %}selected{% endif %}>{{ option.label }} · {{ option.ref }}</option>
                 {% endfor %}
               </select>
             </label>
-            <input type="hidden" name="relation_type" value="{{ 'attached_to' if form.kind == 'device' else 'hosts' }}" data-relation-type-input />
+            <p class="create-guide-parent" id="create-parent-summary" aria-live="polite" data-create-parent-summary>{{ create_parent_summary }}</p>
+            <input type="hidden" name="relation_type" value="{{ create_guide.relation_type }}" data-relation-type-input />
             <label data-create-field="summary"><span data-field-label="summary">{{ create_fields_by_key.summary.label }}</span>
               <textarea class="summary-input" name="summary" data-field-input="summary" placeholder="{{ create_fields_by_key.summary.placeholder }}" {% if create_fields_by_key.summary.required %}required{% endif %}>{{ form.summary }}</textarea>
             </label>
