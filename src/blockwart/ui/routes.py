@@ -28,7 +28,7 @@ from blockwart.domain.object_schema import (
     is_absolute_http_url,
     is_safe_external_http_url,
 )
-from blockwart.domain.placement import PlacementError
+from blockwart.domain.placement import CANONICAL_PLACEMENT_RELATION_TYPE, PlacementError
 from blockwart.domain.projects import project_category_fields
 from blockwart.domain.relationships import (
     LINK_KINDS,
@@ -48,6 +48,8 @@ from blockwart.domain.service_components import (
     service_components_view,
 )
 from blockwart.domain.ui_schema import (
+    CREATE_KIND_ORDER,
+    create_parent_kinds,
     get_ui_schema,
     schema_field_payload,
     ui_schema_payload,
@@ -381,11 +383,51 @@ def _index_template_context(
         for target in read_model.relation_targets
         if Permission.CREATE_CHILD in target.capabilities
     ]
-    device_parent_refs = {
-        f"{target.kind}:{target.id}"
-        for target in create_parents
-        if _supports_device_attachment_parent(target)
-    }
+    create_parent_options = _create_parent_options(
+        create_parents,
+        read_model.display_names,
+    )
+    # `create_child` is a generic object grant.  A principal can therefore
+    # hold it on an object such as a service or an ordinary network segment
+    # that no supported create-flow kind may actually use as its parent.  Do
+    # not advertise or open a dead-end create flow in that case.
+    show_create_form = show_create_form and bool(create_parent_options)
+    create_kind_options = _create_kind_options(
+        create_parent_options,
+        localized_schemas,
+        translator,
+    )
+    creatable_kinds = [
+        str(option["kind"]) for option in create_kind_options if option["enabled"]
+    ]
+    if show_create_form and selected_form_kind not in creatable_kinds:
+        # Never open the child create form on a type this principal cannot
+        # place. Canonical placement wins over attachment so the ordinary case
+        # stays the default, and an empty catalog still falls back to a kind the
+        # form can explain.
+        selected_form_kind = next(
+            (
+                kind
+                for kind in creatable_kinds
+                if localized_schemas[kind]["create_guide"]["relation_type"]
+                == CANONICAL_PLACEMENT_RELATION_TYPE
+            ),
+            next(iter(creatable_kinds), CREATE_KIND_ORDER[0]),
+        )
+    selected_create_parent = _selected_create_parent(
+        create_parent_options,
+        form,
+        selected_form_kind,
+    )
+    create_guide = localized_schemas[selected_form_kind].get("create_guide")
+    create_parent_summary = (
+        translator(
+            f"create.parent.{create_guide['relation_type']}",
+            parent=f"{selected_create_parent['label']} · {selected_create_parent['ref']}",
+        )
+        if create_guide is not None and selected_create_parent is not None
+        else translator("create.parent.none")
+    )
     default_detail_params = [
         ("view", view),
         ("q", q),
@@ -445,8 +487,13 @@ def _index_template_context(
         "error": error,
         "form": form,
         "systems": read_model.systems,
-        "relation_targets": create_parents,
-        "device_parent_refs": device_parent_refs,
+        "create_parent_options": create_parent_options,
+        "create_kind_options": create_kind_options,
+        "create_guide": create_guide,
+        "selected_create_parent_ref": (
+            selected_create_parent["ref"] if selected_create_parent else ""
+        ),
+        "create_parent_summary": create_parent_summary,
         "relation_types": RELATION_TYPES,
         "show_create_form": show_create_form,
         "index_relationships": read_model.index_relationships,
@@ -464,12 +511,119 @@ def _index_template_context(
             )
         ),
         "can_write": can_write_enabled,
-        "can_create": bool(create_parents),
+        "can_create": bool(create_parent_options),
         "can_create_root": is_catalog_owner,
         "show_create_root_form": show_create_root_form and is_catalog_owner,
         "csrf_token": request.cookies.get(AUTH_CSRF_COOKIE_NAME, ""),
         **i18n,
     }
+
+
+def _create_parent_options(
+    create_parents: list[Any],
+    display_names: dict[str, str],
+) -> list[dict[str, Any]]:
+    """Describe every authorized parent the child create flow can actually use.
+
+    A parent that no supported child kind accepts is left out entirely: it can
+    only produce a rejected write, so offering it would misrepresent the
+    `create_child` boundary instead of explaining it.
+    """
+
+    options: list[dict[str, Any]] = []
+    for target in create_parents:
+        child_kinds = _create_child_kinds_for_parent(target)
+        if not child_kinds:
+            continue
+        options.append(
+            {
+                "ref": f"{target.kind}:{target.id}",
+                "id": target.id,
+                "kind": target.kind,
+                "label": display_names.get(target.id, target.id),
+                "child_kinds": child_kinds,
+            }
+        )
+    return options
+
+
+def _create_child_kinds_for_parent(target: Any) -> tuple[str, ...]:
+    """Return the child kinds one authorized parent object accepts."""
+
+    accepted: list[str] = []
+    for kind in CREATE_KIND_ORDER:
+        parent_kinds = create_parent_kinds(kind)
+        if target.kind not in parent_kinds:
+            continue
+        if kind == DEVICE_OBJECT_KIND and not _supports_device_attachment_parent(target):
+            continue
+        accepted.append(kind)
+    return tuple(accepted)
+
+
+def _selected_create_parent(
+    create_parent_options: list[dict[str, Any]],
+    form: dict[str, str],
+    selected_kind: str,
+) -> dict[str, Any] | None:
+    """Resolve the parent the create form shows as selected."""
+
+    submitted_ref = form.get("relation_target_ref", "")
+    submitted_system = form.get("hosted_on_system_id", "")
+    submitted = next(
+        (
+            option
+            for option in create_parent_options
+            if option["ref"] == submitted_ref
+            or (submitted_system and option["id"] == submitted_system)
+        ),
+        None,
+    )
+    if submitted is not None and selected_kind in submitted["child_kinds"]:
+        return submitted
+    return next(
+        (
+            option
+            for option in create_parent_options
+            if selected_kind in option["child_kinds"]
+        ),
+        None,
+    )
+
+
+def _create_kind_options(
+    create_parent_options: list[dict[str, Any]],
+    localized_schemas: dict[str, dict[str, Any]],
+    translator: Any,
+) -> list[dict[str, Any]]:
+    """Describe the asset types of the create form, including why one is off."""
+
+    available_kinds = {
+        child_kind
+        for option in create_parent_options
+        for child_kind in option["child_kinds"]
+    }
+    options: list[dict[str, Any]] = []
+    for kind in CREATE_KIND_ORDER:
+        guide = localized_schemas[kind]["create_guide"]
+        enabled = kind in available_kinds
+        if enabled:
+            reason = ""
+        elif not guide["parent_kinds"]:
+            reason = translator("create.kind.reason.root_only")
+        else:
+            reason = translator("create.kind.reason.no_parent")
+        options.append(
+            {
+                "kind": kind,
+                "label": translator(f"kind.{kind}"),
+                "enabled": enabled,
+                "reason": reason,
+                "purpose": guide["purpose"],
+                "placement": guide["placement"],
+            }
+        )
+    return options
 
 
 def _localized_ui_schema_payload(
@@ -516,7 +670,44 @@ def _localized_ui_schema_payload(
         for panel in schema["panels"]:
             panel["label"] = translator(str(panel["label_key"]))
             panel.pop("label_key", None)
+        if "create_guide" in schema:
+            _localize_create_guide(schema, translator)
     return payload
+
+
+def _localize_create_guide(schema: dict[str, Any], translator: Any) -> None:
+    """Resolve one create guide into the copy the page and the browser render."""
+
+    guide = schema["create_guide"]
+    parent_kind_labels = [translator(f"kind.{kind}") for kind in guide["parent_kinds"]]
+    guide["purpose"] = translator(str(guide["purpose_key"]))
+    guide["placement"] = translator(
+        str(guide["placement_key"]),
+        parents=_joined_labels(parent_kind_labels),
+    )
+    guide["parent_note"] = (
+        translator(str(guide["parent_note_key"])) if guide["parent_note_key"] else ""
+    )
+    guide["relation_label"] = translator(f"create.relation.{guide['relation_type']}")
+    field_labels = {
+        str(field["key"]): str(field["label"]) for field in schema["schema_fields"]
+    }
+    deferred = [field_labels[key] for key in guide["deferred_fields"]]
+    guide["deferred_labels"] = deferred
+    guide["deferred_summary"] = translator("create.detail.later", count=len(deferred))
+    guide["deferred_hint"] = translator(
+        "create.detail.later_hint" if deferred else "create.detail.none"
+    )
+    guide["panels"] = translator(
+        "create.detail.panels",
+        panels=_joined_labels([str(panel["label"]) for panel in schema["panels"]]),
+    )
+    for internal_key in ("purpose_key", "placement_key", "parent_note_key"):
+        guide.pop(internal_key, None)
+
+
+def _joined_labels(labels: list[str]) -> str:
+    return ", ".join(labels)
 
 
 @router.get("/", response_class=HTMLResponse)

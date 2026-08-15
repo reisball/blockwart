@@ -1751,6 +1751,73 @@ button.map-node {
   background: var(--explorer-panel);
 }
 
+.create-guide {
+  display: grid;
+  gap: 6px;
+  margin: -4px 0 2px;
+  padding: 11px 13px;
+  border: 1px solid var(--explorer-border-soft);
+  border-radius: 9px;
+  background: var(--explorer-raised);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.create-guide p {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.create-guide-placement strong {
+  margin-right: 5px;
+}
+
+.create-guide-later summary,
+.create-types summary {
+  cursor: pointer;
+  font-weight: 700;
+}
+
+.create-guide-later-list {
+  display: grid;
+  gap: 2px;
+  margin: 6px 0;
+  padding-left: 18px;
+}
+
+.create-guide-parent {
+  margin: -6px 0 2px;
+  color: var(--explorer-muted);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.create-types {
+  font-size: 12px;
+}
+
+.create-type-list {
+  display: grid;
+  gap: 3px;
+  margin: 8px 0 0;
+}
+
+.create-type-list dt {
+  font-weight: 700;
+}
+
+.create-type-list dd {
+  margin: 0 0 7px;
+  color: var(--explorer-muted);
+  overflow-wrap: anywhere;
+}
+
+.create-type-reason {
+  color: var(--explorer-faint);
+  font-weight: 400;
+  text-transform: lowercase;
+}
+
 .integrated-detail .notice {
   margin: -8px 0 18px;
   padding: 10px 12px;
@@ -1997,6 +2064,20 @@ button.map-node {
 
   .asset-create-short {
     display: inline;
+  }
+
+  .create-guide {
+    padding: 9px 10px;
+    font-size: 11px;
+  }
+
+  .create-guide-later-list {
+    padding-left: 15px;
+  }
+
+  .create-guide-parent,
+  .create-types {
+    font-size: 11px;
   }
 
   .catalog-shell {
