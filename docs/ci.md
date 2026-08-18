@@ -51,6 +51,11 @@ compares them byte for byte with the committed locks. `pip` and `pip-tools` may 
 Review the complete dependency diff, run the full proof below, and commit `pyproject.toml` and both
 generated files together. A dependency update is not a deployment.
 
+Routine version updates are reviewed and initiated deliberately; this
+repository does not schedule Dependabot version-update pull requests.
+Repository-level Dependabot alerts and security updates may still open a
+focused pull request for a dependency with a known vulnerability.
+
 ## Contract Proof
 
 The Gitea and GitHub workflows in `.gitea/workflows/ci.yml` and

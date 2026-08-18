@@ -34,6 +34,10 @@ def test_ci_is_host_neutral_least_privilege_and_immutably_pinned() -> None:
     assert all(re.fullmatch(r"[0-9a-f]{40}", revision) for revision in uses)
 
 
+def test_version_update_bots_are_not_scheduled() -> None:
+    assert not (ROOT / ".github" / "dependabot.yml").exists()
+
+
 def test_markdown_import_defaults_are_workspace_relative() -> None:
     assert DEFAULT_TOOLS_PATH == Path("TOOLS.md")
     assert DEFAULT_REFERENCES_ROOT == Path(".")
