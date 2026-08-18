@@ -41,6 +41,20 @@ from blockwart.domain.relationships import (
 )
 
 PUBLIC_DETAIL_FIELDS: tuple[str, ...] = ("code", "location", "message", "path", "rule")
+# One narrowly scoped extension of the published detail, used only for a
+# rejected search page size. It adds the searched field name, the server-side
+# allowed range, and the received value re-derived as a bounded integer. Every
+# other rejection keeps exactly `PUBLIC_DETAIL_FIELDS`, so the global
+# validation contract is not widened and no arbitrary input is echoed.
+SEARCH_LIMIT_FIELD = "limit"
+SEARCH_LIMIT_DETAIL_FIELDS: tuple[str, ...] = (
+    *PUBLIC_DETAIL_FIELDS,
+    "field",
+    "maximum",
+    "minimum",
+    "received",
+)
+MAX_ECHOED_SCALAR = 1_000_000
 _DETAIL_SORT_FIELDS: tuple[str, ...] = ("location", "path", "code", "rule")
 DATA_PATH_ROOT = "data"
 _BODY_LOCATION_ROOT = "body"
@@ -52,6 +66,7 @@ MAX_PUBLIC_DETAILS = 20
 _MAX_PATH_SEGMENTS = 12
 _MAX_SCANNED_DETAILS = 64
 _SEGMENT_PATTERN = re.compile(r"^[A-Za-z0-9_-]{1,64}(?:\[[0-9]{1,6}\])?$")
+_BOUNDED_INTEGER_PATTERN = re.compile(r"^-?[0-9]{1,9}$")
 
 # Boundary validation types mapped onto the published domain violations. Types
 # without an entry fall back to the type-mismatch family or the generic
@@ -162,6 +177,44 @@ def public_detail(
     }
 
 
+def bounded_scalar(value: object) -> int | None:
+    """Return one safely echoable integer, or ``None`` for anything else.
+
+    Only a plain integer, or a compact decimal string of one, is echoed, and
+    only while its magnitude stays inside the published bound. A float, a
+    boolean, a long digit run, and any other rejected value are dropped rather
+    than reflected back to the caller.
+    """
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        candidate = value
+    elif isinstance(value, str) and _BOUNDED_INTEGER_PATTERN.fullmatch(value.strip()):
+        candidate = int(value.strip())
+    else:
+        return None
+    return candidate if abs(candidate) <= MAX_ECHOED_SCALAR else None
+
+
+def search_limit_detail(
+    *,
+    location: object,
+    code: object,
+    received: object,
+    minimum: int,
+    maximum: int,
+) -> dict[str, str | int | None]:
+    """Build the field-accurate detail of one rejected search page size."""
+    detail: dict[str, str | int | None] = dict(
+        public_detail(location=location, code=code)
+    )
+    detail["field"] = SEARCH_LIMIT_FIELD
+    detail["minimum"] = minimum
+    detail["maximum"] = maximum
+    detail["received"] = bounded_scalar(received)
+    return detail
+
+
 def detail_from_relationship_error(
     error: RelationshipIntegrityError,
     *,
@@ -258,7 +311,7 @@ def sanitize_public_details(
     details: object,
     *,
     limit: int = MAX_PUBLIC_DETAILS,
-) -> list[dict[str, str | None]]:
+) -> list[dict[str, str | int | None]]:
     """Re-derive publishable details from an untrusted structured error.
 
     Only a published violation code, a canonical path, and a published rule
@@ -267,14 +320,14 @@ def sanitize_public_details(
     """
     if not isinstance(details, Sequence) or isinstance(details, (str, bytes)):
         return []
-    published: list[dict[str, str | None]] = []
+    published: list[dict[str, str | int | None]] = []
     for detail in details[:_MAX_SCANNED_DETAILS]:
         if not isinstance(detail, Mapping):
             continue
         code = detail.get("code")
         if not isinstance(code, str) or code not in SCHEMA_VIOLATION_CONTRACTS:
             continue
-        published.append(
+        republished: dict[str, str | int | None] = dict(
             public_detail(
                 location=detail.get("location"),
                 code=code,
@@ -282,6 +335,21 @@ def sanitize_public_details(
                 rule=detail.get("rule"),
             )
         )
+        minimum = bounded_scalar(detail.get("minimum"))
+        maximum = bounded_scalar(detail.get("maximum"))
+        if (
+            detail.get("field") == SEARCH_LIMIT_FIELD
+            and minimum is not None
+            and maximum is not None
+        ):
+            # The one narrowly scoped extension survives re-derivation, with
+            # every value validated as a bounded integer here rather than
+            # trusted from the upstream body.
+            republished["field"] = SEARCH_LIMIT_FIELD
+            republished["minimum"] = minimum
+            republished["maximum"] = maximum
+            republished["received"] = bounded_scalar(detail.get("received"))
+        published.append(republished)
     return order_public_details(published, limit=limit)
 
 

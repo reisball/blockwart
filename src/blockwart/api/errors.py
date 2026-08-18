@@ -14,9 +14,17 @@ from sqlalchemy.exc import SQLAlchemyError
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from blockwart.db.session import DatabaseTransactionError
+from blockwart.domain.search import (
+    AGENT_SEARCH_LIMIT_MAX,
+    CONTEXT_LIMIT_MAX,
+    SEARCH_LIMIT_MAX,
+    SEARCH_LIMIT_MIN,
+)
 from blockwart.domain.validation_errors import (
     detail_from_validation_error,
     order_public_details,
+    search_limit_detail,
+    violation_for_validation_type,
 )
 from blockwart.schemas.errors import ApiErrorResponse
 from blockwart.schemas.v1 import MAX_BATCH_REQUEST_BODY_BYTES
@@ -37,6 +45,17 @@ API_ERROR_RESPONSES = {
 
 _CORRELATION_ID_PATTERN = re.compile(r"^[A-Za-z0-9._-]{1,64}$")
 _BATCH_OBJECT_CONTEXTS_PATH = "/api/v1/object-contexts"
+# The closed set of search resources whose rejected page size publishes the
+# narrowly scoped field-accurate detail, with the exact range each route
+# declares. No other parameter and no other resource is enriched, so the global
+# validation contract keeps publishing exactly the canonical detail fields.
+_SEARCH_LIMIT_RANGES: dict[str, tuple[int, int]] = {
+    "/api/v1/objects": (SEARCH_LIMIT_MIN, SEARCH_LIMIT_MAX),
+    "/api/v1/context": (SEARCH_LIMIT_MIN, CONTEXT_LIMIT_MAX),
+    "/api/agent/search": (SEARCH_LIMIT_MIN, AGENT_SEARCH_LIMIT_MAX),
+    "/api/agent/context": (SEARCH_LIMIT_MIN, CONTEXT_LIMIT_MAX),
+}
+_SEARCH_LIMIT_LOCATION = ("query", "limit")
 logger = logging.getLogger(__name__)
 
 
@@ -194,7 +213,7 @@ def install_api_error_contract(app: FastAPI) -> None:
         # carries only the published fields (code, location, message, path,
         # rule), matching the schema projection's violation contract exactly.
         details = order_public_details(
-            detail_from_validation_error(error) for error in exc.errors()
+            _api_validation_detail(request, error) for error in exc.errors()
         )
         return _error_response(
             status_code=422,
@@ -258,6 +277,30 @@ def install_api_error_contract(app: FastAPI) -> None:
             message="Database is unavailable.",
             correlation_id=correlation_id,
         )
+
+
+def _api_validation_detail(
+    request: Request,
+    error: dict[str, object],
+) -> dict[str, str | int | None]:
+    """Project one rejected request value onto its published detail.
+
+    A rejected search page size additionally publishes the field name, the
+    server-declared allowed range, and the received value re-derived as a
+    bounded integer. Every other rejection keeps the unchanged canonical
+    detail, so no other input is echoed.
+    """
+    bounds = _SEARCH_LIMIT_RANGES.get(request.url.path)
+    if bounds is not None and tuple(error.get("loc", ())) == _SEARCH_LIMIT_LOCATION:
+        minimum, maximum = bounds
+        return search_limit_detail(
+            location=".".join(_SEARCH_LIMIT_LOCATION),
+            code=violation_for_validation_type(error.get("type")),
+            received=error.get("input"),
+            minimum=minimum,
+            maximum=maximum,
+        )
+    return detail_from_validation_error(error)
 
 
 def install_request_context(app: FastAPI) -> None:
@@ -333,7 +376,7 @@ def _error_response(
     code: str,
     message: str,
     correlation_id: str,
-    details: list[dict[str, str | None]] | None = None,
+    details: list[dict[str, str | int | None]] | None = None,
     headers: dict[str, str] | None = None,
 ) -> JSONResponse:
     error: dict[str, object] = {

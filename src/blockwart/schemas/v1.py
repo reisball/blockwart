@@ -38,7 +38,7 @@ from blockwart.schemas.agent import (
 )
 from blockwart.schemas.catalog import CatalogObjectIn, CatalogObjectOut, ObjectKind
 
-ObjectSortField = Literal["id", "label", "kind", "updated_at"]
+ObjectSortField = Literal["id", "label", "kind", "relevance", "updated_at"]
 SortDirection = Literal["asc", "desc"]
 SourceClassificationValue = Literal[SOURCE_CLASSIFICATIONS]
 CoverageStateValue = Literal[COVERAGE_STATES]

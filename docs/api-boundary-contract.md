@@ -50,6 +50,21 @@ canonical published fields, in this order:
 - `rule`: the published schema-rule name when a schema postcondition rejected
   the write (for example `reject_credential_value_keys`), or `null` otherwise.
 
+One narrowly scoped exception exists for a rejected search page size on
+`/api/v1/objects`, `/api/v1/context`, `/api/agent/search`,
+`/api/agent/context`, `blockwart.search`, and `blockwart.get_context`. That
+single detail keeps all canonical fields above and adds:
+
+- `field`: always the literal `limit`;
+- `minimum` and `maximum`: the server-declared allowed range of that resource;
+- `received`: the sent value re-derived as a bounded integer, or `null` when it
+  is not a plain integer within the published bound.
+
+Nothing else is enriched. Every other rejected value — including a rejected
+search term, filter, or cursor on the same request — keeps exactly the
+canonical fields and is never echoed, so the global validation contract is
+unchanged.
+
 These are the same fields `blockwart.describe_schema` publishes in its
 `violation_policy` and in the `rejection_policy` of its `relationships`
 contract, so a client contract cannot drift from what the server actually
@@ -129,6 +144,9 @@ exactly the canonical fields above (`code`, `location`, `message`, `path`, `rule
 Arbitrary upstream details, raw inputs, secret values, internal validation context,
 and database diagnostics are never forwarded; an upstream detail that does not name a
 published violation code is dropped. Read tools keep their
-opaque `invalid_arguments` shape without `details`. MCP sends its validated or
+opaque `invalid_arguments` shape without `details`; the single exception is the
+rejected search `limit` of `blockwart.search` and `blockwart.get_context`,
+which publishes exactly the narrowly scoped limit detail above and describes no
+other argument. MCP sends its validated or
 generated ID on every outgoing API request. Legacy or malformed upstream errors remain
 the generic `upstream_http_error`.

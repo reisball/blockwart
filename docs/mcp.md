@@ -128,7 +128,8 @@ Choose the smallest tool that directly answers the intent:
   endpoint, state, or provenance and return their full authorized details in the
   same call.
 - Use `blockwart.search` when a compact candidate list is preferable to full
-  detail payloads.
+  detail payloads. With a `q` term, pass `sort=relevance` to receive the
+  published rank ladder instead of the default `id` order.
 - Use `blockwart.get_source_coverage` to inspect the latest recorded inventory
   coverage/drift snapshot. Its default mapped scope follows object visibility;
   the full source-only scope requires platform-admin authority.
@@ -199,7 +200,7 @@ means it deliberately bundles lower-level API concerns behind one agent call.
 | Tool | Primary agent intent | Assessment | Rationale |
 |---|---|---|---|
 | `describe_schema` | Read the writable object and relationship contract | `directly sufficient` | Projects the canonical domain schema and relationship registries locally with no catalog data, so the published contract cannot drift from server-side validation. |
-| `search` | Find compact candidates | `directly sufficient` | Avoids full detail payloads when selecting an object. |
+| `search` | Find compact candidates | `directly sufficient` | Avoids full detail payloads when selecting an object; the shared search contract adds exact ref/label modes, the operational filter, and the published relevance ladder. |
 | `get_object_context` | Read one known object | `directly sufficient` | Returns full authorized catalog context and its write-ready ETag by ID. |
 | `get_object_contexts` | Read several known objects | `directly sufficient` | One bounded roundtrip for up to 20 known IDs; each detail item is field-equivalent to `get_object_context`, stubs and concealed/missing IDs keep the exact single-read concealment rules, and comments/objects/relationships are loaded in bounded snapshots. |
 | `list_comments` | Read an object's operational timeline | `directly sufficient` | Preserves the dedicated newest-first, opaque-cursor resource. |
@@ -227,6 +228,33 @@ means it deliberately bundles lower-level API concerns behind one agent call.
 
 `blockwart.search` and `blockwart.get_context` accept every catalog kind, including `runbook`,
 `decision`, and `project`.
+
+Both tools share one typed search contract with REST v1 and the Agent API. The
+`q` term is at most 200 characters and is compared only against the closed
+server-defined projection: the canonical `kind:id` reference, the id, the
+label, structured domain fields, the top-level summary, and explicitly
+allowlisted bounded fields. The serialized data document, the provenance
+header, and imported source or migration metadata are never searched, so
+generic boilerplate cannot match or outrank a useful record.
+
+`match` selects `normal` (default), `exact_ref` for an exact canonical
+`kind:id` or exact id, or `exact_label` for an exact normalized label (Unicode
+NFKC, collapsed whitespace, trimmed, case-folded). `operational_only=true`
+excludes inactive and deleted status, the retired asset lifecycle, and the
+retired canonical Runbook, Decision, and Project states; it is a detail filter
+and therefore excludes discover-only stubs. `sort` additionally accepts
+`relevance`, whose precedence is exact ref/id, exact label, identity,
+structured domain field, summary, and other allowlisted field, with the label
+and then the id as the stable tie-breaker. The default sort stays `id`, so an
+existing call keeps its order. Readable results carry the bounded
+`search_snippet` documented in `api-v1.md`; discover-only stubs never do.
+
+Both tools publish hard page-size bounds in their schema: `search` accepts
+`limit` 1..50 (default 10) and `get_context` accepts 1..20 (default 5). A
+rejected `limit` returns the narrowly scoped field-accurate error described in
+`api-boundary-contract.md`, carrying the field name, the allowed range, and the
+received value as a bounded integer. Every other rejected read argument keeps
+the opaque `invalid_arguments` shape and is never echoed.
 Both tools also forward v1's structured `parent`, `ip`, `port`,
 `endpoint_type`, `protocol`, `exposure`, `status`, `lifecycle`, `health`,
 canonical `decision_status`, and authorized Decision `applies_to`

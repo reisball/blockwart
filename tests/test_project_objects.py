@@ -22,6 +22,7 @@ from blockwart.domain.projects import (
     project_category_fields,
 )
 from blockwart.domain.schema_projection import kind_schema_projection
+from blockwart.domain.search import SearchQuery
 from blockwart.domain.ui_schema import ui_schema_payload
 from blockwart.mcp.server import QUERY_FILTER_PROPERTIES, describe_schema_payload
 from blockwart.models import AuditEvent, CatalogObject
@@ -805,8 +806,10 @@ def test_authorized_context_and_filters_conceal_reference_targets(
             for item in search_agent_objects(
                 session,
                 access,
-                project_category="research",
-                related_object="system:visible-asset",
+                search=SearchQuery(
+                    project_category="research",
+                    related_object="system:visible-asset",
+                ),
             )
         ] == ["scoped-project"]
         # A concealed target is never turned into an existence oracle.
@@ -814,11 +817,13 @@ def test_authorized_context_and_filters_conceal_reference_targets(
             search_agent_objects(
                 session,
                 access,
-                related_object="system:concealed-asset",
+                search=SearchQuery(related_object="system:concealed-asset"),
             )
             == []
         )
-        assert search_agent_objects(session, access, query="concealed-asset") == []
+        assert search_agent_objects(
+            session, access, search=SearchQuery(query="concealed-asset")
+        ) == []
 
 
 def test_discover_only_stubs_never_expose_category_status_or_evidence(
@@ -861,8 +866,12 @@ def test_discover_only_stubs_never_expose_category_status_or_evidence(
         assert getattr(stub, "project_category", None) is None
 
         # Attribute filters require detail visibility, so a stub never matches.
-        assert search_agent_objects(session, access, project_category="research") == []
-        assert search_agent_objects(session, access, project_status="active") == []
+        assert search_agent_objects(
+            session, access, search=SearchQuery(project_category="research")
+        ) == []
+        assert search_agent_objects(
+            session, access, search=SearchQuery(project_status="active")
+        ) == []
 
         context = get_agent_object_context(session, "secret-research", access)
         assert context is not None and context.visibility == "stub"

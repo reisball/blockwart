@@ -44,7 +44,9 @@ IPs/hostnames, primary endpoint, lifecycle, and health where those values are av
 
 Query parameters:
 
-- q: optional search term
+- q: optional search term, at most 200 characters
+- match: optional `normal` (default), `exact_ref`, or `exact_label`
+- operational_only: optional flag that excludes non-operational records
 - kind: optional object kind filter
 - parent: optional typed ancestor reference such as `host:fabrik-01`
 - ip: optional exact resolved IP address
@@ -65,6 +67,32 @@ Query parameters:
 - source_type: optional exact `unknown`, `manual`, `import`, or `discovery`
 - stale: optional exact computed freshness state
 - limit: optional result limit, 1..50, default 10
+
+Results with a search term are ordered by the shared relevance ladder
+documented in `api-v1.md`: exact canonical `kind:id` or ID, exact normalized
+label, the term inside the ID or label, a structured domain field, the
+top-level summary, and finally another allowlisted bounded field, with the
+label and then the ID as the stable tie-breaker. A request without a term keeps
+its historical kind grouping. The serialized data document, the provenance
+header, and imported source or migration metadata are never searched, so
+generic boilerplate cannot match or outrank a useful record. This namespace
+publishes no sort parameter; new clients that need an explicit ordering knob
+use `/api/v1/objects?sort=relevance`.
+
+`match=exact_ref` accepts only the exact canonical `kind:id` reference or the
+exact ID; `match=exact_label` accepts only the exactly normalized label
+(Unicode NFKC, collapsed whitespace, trimmed, case-folded).
+`operational_only=true` removes inactive and deleted status, the retired asset
+lifecycle, and the retired canonical Runbook, Decision, and Project states. It
+is a detail filter and therefore excludes discover-only stubs; the default
+result set is unchanged. Both parameters appear in the response `filters`
+object only when they leave their default, so an unchanged request keeps its
+historical response body.
+
+Readable summaries also carry the bounded `search_snippet` described in
+`api-v1.md`: the top-level summary, or the authorized Runbook `purpose`,
+Decision `decision`, or Project `current_summary` when no summary exists.
+Discover-only stubs never carry it.
 
 The parent filter matches the complete canonical parent path, not only the immediate parent.
 Lifecycle and health are canonical catalog columns, not free-form object-data fields. Asset writes
@@ -127,7 +155,8 @@ Returns a small context bundle for a search query.
 
 Query parameters:
 
-- q: optional search term
+- q: optional search term, at most 200 characters
+- match, operational_only: same search modes as search
 - kind: optional object kind filter
 - parent, ip, port, endpoint_type, protocol, exposure, status, lifecycle,
   health, decision_status, applies_to, runbook_status, runbook_risk,

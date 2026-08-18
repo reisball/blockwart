@@ -23,6 +23,7 @@ from blockwart.domain.object_schema import (
 )
 from blockwart.domain.runbooks import RUNBOOK_RISKS, RunbookIntegrityError
 from blockwart.domain.schema_projection import kind_schema_projection
+from blockwart.domain.search import SearchQuery
 from blockwart.domain.ui_schema import ui_schema_payload
 from blockwart.main import create_app
 from blockwart.mcp.server import QUERY_FILTER_PROPERTIES, describe_schema_payload
@@ -428,13 +429,17 @@ def test_filters_and_stubs_do_not_leak_runbook_contract_fields(
             for item in search_agent_objects(
                 session,
                 detail_access,
-                runbook_status="active",
-                runbook_risk="read-only",
-                related_object="system:visible-target",
+                search=SearchQuery(
+                    runbook_status="active",
+                    runbook_risk="read-only",
+                    related_object="system:visible-target",
+                ),
             )
         ] == ["private-runbook"]
         assert search_agent_objects(
-            session, detail_access, related_object="system:concealed-target"
+            session,
+            detail_access,
+            search=SearchQuery(related_object="system:concealed-target"),
         ) == []
 
         stub_access = _reader(
@@ -451,10 +456,10 @@ def test_filters_and_stubs_do_not_leak_runbook_contract_fields(
         ):
             assert leaked not in rendered
         assert search_agent_objects(
-            session, stub_access, runbook_status="active"
+            session, stub_access, search=SearchQuery(runbook_status="active")
         ) == []
         assert search_agent_objects(
-            session, stub_access, runbook_risk="read-only"
+            session, stub_access, search=SearchQuery(runbook_risk="read-only")
         ) == []
 
 

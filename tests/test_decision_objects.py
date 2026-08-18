@@ -23,6 +23,7 @@ from blockwart.domain.decisions import (
 )
 from blockwart.domain.object_schema import BUILTIN_SCHEMAS
 from blockwart.domain.schema_projection import kind_schema_projection
+from blockwart.domain.search import SearchQuery
 from blockwart.domain.ui_schema import ui_schema_payload
 from blockwart.main import create_app
 from blockwart.mcp.server import call_tool, describe_schema_payload
@@ -418,18 +419,20 @@ def test_authorized_decision_context_and_filters_conceal_reference_targets(
         assert [item.id for item in search_agent_objects(
             session,
             access,
-            decision_status="proposed",
-            applies_to="system:visible-scope",
+            search=SearchQuery(
+                decision_status="proposed",
+                applies_to="system:visible-scope",
+            ),
         )] == ["scoped-decision"]
         assert search_agent_objects(
             session,
             access,
-            applies_to="system:concealed-scope",
+            search=SearchQuery(applies_to="system:concealed-scope"),
         ) == []
         assert search_agent_objects(
             session,
             access,
-            query="concealed-scope",
+            search=SearchQuery(query="concealed-scope"),
         ) == []
 
 

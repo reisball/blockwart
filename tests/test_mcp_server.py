@@ -527,7 +527,8 @@ def test_mcp_client_completes_handshake_and_calls_every_read_only_tool() -> None
     assert invalid_arguments.isError is True
     assert json.loads(invalid_content.text)["error"]["code"] == "invalid_arguments"
 
-    for result in schema_invalid_arguments.values():
+    for case in ("invalid_kind", "unknown_field"):
+        result = schema_invalid_arguments[case]
         content = result.content[0]
         assert isinstance(content, mcp_types.TextContent)
         assert result.isError is True
@@ -537,6 +538,31 @@ def test_mcp_client_completes_handshake_and_calls_every_read_only_tool() -> None
                 "message": "Tool arguments are invalid.",
             }
         }
+
+    # A rejected search page size is the one read argument published
+    # field-accurately: the field, the allowed range, and the bounded received
+    # value. Nothing else about the request is described.
+    for case, received in (("limit_zero", 0), ("limit_above_maximum", 51)):
+        result = schema_invalid_arguments[case]
+        content = result.content[0]
+        assert isinstance(content, mcp_types.TextContent)
+        assert result.isError is True
+        payload = json.loads(content.text)
+        assert payload["error"]["code"] == "invalid_arguments"
+        published = ("code", "field", "location", "maximum", "minimum", "received")
+        assert [
+            {key: detail[key] for key in published}
+            for detail in payload["error"]["details"]
+        ] == [
+            {
+                "code": "value_out_of_range",
+                "field": "limit",
+                "location": "limit",
+                "maximum": 50,
+                "minimum": 1,
+                "received": received,
+            }
+        ]
 
     unknown_content = unknown_tool.content[0]
     assert isinstance(unknown_content, mcp_types.TextContent)
