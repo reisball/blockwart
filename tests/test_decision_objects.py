@@ -878,7 +878,7 @@ def test_rest_and_ui_write_canonical_decisions(
         "/api/v1/roots",
         headers={
             "Authorization": f"Bearer {root_state['owner_token']}",
-            "Idempotency-Key": "decision-api-root-0001",
+            "Idempotency-Key": "test-test-test-six",
         },
         json={
             "id": "api-root-decision",
@@ -1007,7 +1007,7 @@ def test_structured_ui_create_detail_noop_edit_and_supersession_round_trip(
     )
     decision_form = {
         "csrf_token": root_state["owner_session"].csrf_token,
-        "idempotency_key": "decision-ui-accepted-0001",
+        "idempotency_key": "test-test-test-seven",
         "object_id": "deploy-blue-green",
         "kind": "decision",
         "primary_name": "Use blue-green deployment",

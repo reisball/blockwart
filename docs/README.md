@@ -27,6 +27,7 @@ deleted by this classification.
 - [Authentication and object authorization](auth-rbac.md)
 - [Security policy](security.md)
 - [Catalog object validation](object-validation.md)
+- [Public release readiness](public-release.md)
 
 ## Active Architecture And Data Documentation
 

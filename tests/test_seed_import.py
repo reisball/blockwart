@@ -77,7 +77,7 @@ def test_import_pilot_seed_into_fresh_db(session: Session) -> None:
     assert valid is True
     assert provenance.source_type == "import"
     assert provenance.source_ref == str(SEED_PATH)
-    assert provenance.managed_by == "Kai + Zoe"
+    assert provenance.managed_by == "Example Operators"
     assert provenance.observed_at == "2026-05-16T00:00:00.000000Z"
     assert provenance.verified_at == "2026-05-16T00:00:00.000000Z"
     assert provenance.manual_override is False

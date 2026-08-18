@@ -55,7 +55,7 @@ from blockwart.mcp.server import (
     handle_call_tool,
 )
 
-SECRET_MARKER = "slice-b-secret-marker-0123456789abcdef"
+SECRET_MARKER = "test-marker-test-marker"
 
 
 # ---------------------------------------------------------------------------

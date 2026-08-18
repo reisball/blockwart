@@ -27,7 +27,7 @@ def test_build_tools_import_plan_parses_infrastructure_rows(tmp_path: Path) -> N
                 "| System | Typ | IP:Port | Status | Access | Auth | Nutzung | Ref | Skill |",
                 "|--------|-----|---------|--------|--------|------|---------|-----|-------|",
                 (
-                    "| Demo Box | CT 200 | 192.168.50.200:22 · :8080 | ✅ | "
+                    "| Demo Box | CT 200 | 10.23.4.200:22 · :8080 | ✅ | "
                     "SSH(key): demo · Web | SSH key-only; Web login in Vaultwarden | "
                     "Demo service host | [Details](references/demo.md) | - |"
                 ),
@@ -68,7 +68,13 @@ def test_build_tools_import_plan_parses_infrastructure_rows(tmp_path: Path) -> N
     )
     assert "platform" not in service["data"]
     assert "system_id" not in service["data"]
-    assert system["data"]["network"]["addresses"][0]["ip"] == "192.168.50.200"
+    assert system["data"]["network"]["addresses"][0] == {
+        "ip": "10.23.4.200",
+        "family": "ipv4",
+        "interface": "",
+        "network": "10.23.4.0/24",
+        "scope": "lan",
+    }
     assert {item["port"] for item in system["data"]["ports"]} == {22}
     assert {item["port"] for item in service["data"]["endpoints"]} == {8080}
     assert "credential_references" not in system["data"]

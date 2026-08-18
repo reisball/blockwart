@@ -22,8 +22,8 @@ writes.
 
 ~~~bash
 blockwart-import-markdown \
-  --tools /home/zoe/.openclaw/workspace/TOOLS.md \
-  --references-root /home/zoe/.openclaw/workspace \
+  --tools /path/to/workspace/TOOLS.md \
+  --references-root /path/to/workspace \
   --network-mapping seeds/pilot_network_mapping.yaml
 ~~~
 
@@ -52,8 +52,8 @@ incompatible with `--apply`:
 ~~~bash
 blockwart-import-markdown \
   --database-url "$BLOCKWART_DATABASE_URL" \
-  --tools /home/zoe/.openclaw/workspace/TOOLS.md \
-  --references-root /home/zoe/.openclaw/workspace \
+  --tools /path/to/workspace/TOOLS.md \
+  --references-root /path/to/workspace \
   --source-uri workspace://TOOLS.md \
   --create-schema --record-coverage
 ~~~
@@ -76,8 +76,8 @@ database is under /opt/blockwart-data/blockwart.sqlite3.
 ~~~bash
 blockwart-import-markdown \
   --database-url "$BLOCKWART_DATABASE_URL" \
-  --tools /home/zoe/.openclaw/workspace/TOOLS.md \
-  --references-root /home/zoe/.openclaw/workspace \
+  --tools /path/to/workspace/TOOLS.md \
+  --references-root /path/to/workspace \
   --network-mapping seeds/pilot_network_mapping.yaml \
   --create-schema --apply
 ~~~

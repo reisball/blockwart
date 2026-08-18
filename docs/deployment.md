@@ -240,8 +240,8 @@ catalog writes:
 
 ```bash
 blockwart-import-markdown \
-  --tools /home/zoe/.openclaw/workspace/TOOLS.md \
-  --references-root /home/zoe/.openclaw/workspace \
+  --tools /path/to/workspace/TOOLS.md \
+  --references-root /path/to/workspace \
   --network-mapping seeds/pilot_network_mapping.yaml
 ```
 

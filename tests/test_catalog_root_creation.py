@@ -695,7 +695,7 @@ def test_rest_create_root_dangling_reference_conflicts(
         "/api/v1/roots",
         headers={
             **_authorization(root_state["owner_token"]),
-            "Idempotency-Key": "dangling-ref-key-01",
+            "Idempotency-Key": "test-test-test-one",
         },
         json=_asset(
             "dangling-root",
@@ -797,7 +797,7 @@ def test_rest_create_root_channel_and_audience_must_match(
         "/api/v1/roots",
         headers={
             **_authorization(root_state["owner_token"]),
-            "Idempotency-Key": "audience-mismatch-1",
+            "Idempotency-Key": "test-test-test-two",
             "X-Blockwart-Channel": "mcp",
         },
         json=_asset("audience-mismatch-root").model_dump(mode="json"),
@@ -808,7 +808,7 @@ def test_rest_create_root_channel_and_audience_must_match(
         "/api/v1/roots",
         headers={
             **_authorization(root_state["owner_mcp_token"]),
-            "Idempotency-Key": "audience-mismatch-2",
+            "Idempotency-Key": "test-test-test-three",
         },
         json=_asset("audience-mismatch-root").model_dump(mode="json"),
     )
@@ -818,7 +818,7 @@ def test_rest_create_root_channel_and_audience_must_match(
         "/api/v1/roots",
         headers={
             **_authorization(root_state["owner_mcp_token"]),
-            "Idempotency-Key": "audience-match-00001",
+            "Idempotency-Key": "test-test-test-four",
             "X-Blockwart-Channel": "mcp",
         },
         json=_asset("mcp-channel-root").model_dump(mode="json"),
@@ -1478,7 +1478,7 @@ def test_rest_ui_mcp_create_root_channels_produce_equal_outcomes(
     mcp_result = call_tool(
         "blockwart.create_root",
         {
-            "idempotency_key": "parity-mcp-key-0001",
+            "idempotency_key": "test-test-test-five",
             "object": {
                 "id": "parity-mcp",
                 "kind": "host",

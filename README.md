@@ -9,9 +9,9 @@ keys, or other secret values.
 
 ## Current status
 
-The current Development/Staging pilot is deployed and accepted. The private
-GitHub repository `reisball/blockwart` and its `main` branch are canonical;
-the former Gitea repository is retained only as a read-only rollback source.
+The current Development/Staging pilot is deployed and accepted. The GitHub
+repository `reisball/blockwart` and its `main` branch are canonical; the former
+Gitea repository is retained only as a read-only rollback source.
 
 The pilot is not a production service and this repository does not deploy it
 automatically.
@@ -95,3 +95,9 @@ security, operations, architecture, data, and historical migration material.
 
 For development checks and build contracts, see [CI](docs/ci.md).
 Questions and tracked work belong in this repository's GitHub Issues.
+
+## License
+
+Blockwart is licensed under the [Apache License 2.0](LICENSE). It may be used,
+modified, and distributed for private or commercial purposes under that
+license's terms.

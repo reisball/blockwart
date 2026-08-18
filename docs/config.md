@@ -26,10 +26,11 @@ admin operations select it server-side. Existing tokens migrate as `api`; an
 approved MCP comment writer needs a deliberately rotated `mcp` token. The MCP
 wrapper still receives only that opaque value through its protected token file.
 
-## Pilot Seed Import
+## Example Seed Import
 
-The pilot catalog seed lives at `seeds/pilot_objects.yaml`. Use the packaged CLI for local or
-deployment-prep initialization:
+The example catalog seed lives at `seeds/pilot_objects.yaml`. Its hostnames,
+addresses, identities, and credential references are fictional. Use the
+packaged CLI for local or deployment-prep initialization:
 
 ```bash
 blockwart-seed --create-schema --seed seeds/pilot_objects.yaml

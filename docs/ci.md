@@ -98,8 +98,11 @@ python scripts/update_openapi_contract.py
 ```
 
 CI uses no live Blockwart instance, production database, or production secret. On both hosts, a
-trusted Linux runner labeled `ubuntu-latest` must support `actions/checkout@v4`,
-`actions/setup-python@v5`, Python 3.12, `curl`, and a working Docker daemon. Before installing
+trusted Linux runner labeled `ubuntu-latest` must support the immutable
+`actions/checkout` v4.4.0 and `actions/setup-python` v5.6.0 commit pins, Python
+3.12, `curl`, and a working Docker daemon. The workflow grants only read access
+to repository contents and never exposes a repository secret to pull requests.
+Before installing
 dependencies, the workflow records load average, Linux pressure-stall information,
 root-filesystem usage, and a compact Docker summary so host-level resource starvation can be
 distinguished from product failures. Runner provisioning and automated deployment are separate

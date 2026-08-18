@@ -1,5 +1,7 @@
+# Fictional example catalog. Addresses use RFC 5737 documentation space,
+# domains use the reserved .invalid suffix, and no live credential is named.
 schema_version: 1
-owner: Kai + Zoe
+owner: Example Operators
 last_verified: "2026-05-16"
 created_at: "2026-05-16T00:00:00Z"
 updated_at: "2026-05-16T00:00:00Z"
@@ -17,22 +19,22 @@ objects:
       purpose: Proxmox host and central virtualization platform for pilot infrastructure.
       tags: [proxmox, host, fabrik, pilot]
       source_references:
-        - {label: TOOLS.md, uri: /home/zoe/.openclaw/workspace/TOOLS.md}
-        - {label: references/fabrik.md, uri: /home/zoe/.openclaw/workspace/references/fabrik.md}
+        - {label: TOOLS.md, uri: /example/workspace/TOOLS.md}
+        - {label: references/fabrik.md, uri: /example/workspace/references/fabrik.md}
       network:
         hostnames: [fabrik]
         addresses:
-          - {ip: 192.168.50.20, family: ipv4, interface: vmbr0, network: 192.168.50.0/24, scope: lan}
+          - {ip: 192.0.2.20, family: ipv4, interface: vmbr0, network: 192.0.2.0/24, scope: lan}
       ports:
         - {port: 22, protocol: tcp, purpose: SSH, exposure: lan}
         - {port: 8006, protocol: tcp, purpose: Proxmox Web UI/API, exposure: lan}
       public_exposure: {exposed: false, urls: [], notes: LAN-only Proxmox management endpoint.}
       access_methods:
-        - {type: ssh, endpoint: "ssh://zoe@192.168.50.20:22", auth_mode: key, credential_references: [credential_reference:fabrik-zoe-ssh-key]}
-        - {type: web, endpoint: "https://192.168.50.20:8006", auth_mode: password, credential_references: [credential_reference:fabrik-proxmox-login]}
-        - {type: api, endpoint: "https://192.168.50.20:8006/api2/json", auth_mode: password, credential_references: [credential_reference:fabrik-proxmox-login]}
+        - {type: ssh, endpoint: "ssh://operator@192.0.2.20:22", auth_mode: key, credential_references: [credential_reference:fabrik-operator-ssh-key]}
+        - {type: web, endpoint: "https://192.0.2.20:8006", auth_mode: password, credential_references: [credential_reference:fabrik-proxmox-login]}
+        - {type: api, endpoint: "https://192.0.2.20:8006/api2/json", auth_mode: password, credential_references: [credential_reference:fabrik-proxmox-login]}
       related_services: [service:fabrik-proxmox]
-      credential_references: [credential_reference:fabrik-zoe-ssh-key, credential_reference:fabrik-proxmox-login]
+      credential_references: [credential_reference:fabrik-operator-ssh-key, credential_reference:fabrik-proxmox-login]
       dependencies:
         upstream: []
         downstream: [system:ollama, system:vaultwarden, system:paperless-ngx, system:n8n, system:splunk]
@@ -51,20 +53,20 @@ objects:
       purpose: OpenClaw gateway, SMB project share, and main workspace host.
       tags: [openclaw, gateway, host, pilot]
       source_references:
-        - {label: TOOLS.md, uri: /home/zoe/.openclaw/workspace/TOOLS.md}
-        - {label: references/denkstube.md, uri: /home/zoe/.openclaw/workspace/references/denkstube.md}
+        - {label: TOOLS.md, uri: /example/workspace/TOOLS.md}
+        - {label: references/denkstube.md, uri: /example/workspace/references/denkstube.md}
       network:
         hostnames: [denkstube]
         addresses:
-          - {ip: 192.168.50.30, family: ipv4, interface: "", network: 192.168.50.0/24, scope: lan}
+          - {ip: 192.0.2.30, family: ipv4, interface: "", network: 192.0.2.0/24, scope: lan}
       ports:
         - {port: 22, protocol: tcp, purpose: SSH, exposure: lan}
         - {port: 18789, protocol: tcp, purpose: OpenClaw Gateway, exposure: lan}
       access_methods:
-        - {type: ssh, endpoint: "ssh://zoe@192.168.50.30:22", auth_mode: key, credential_references: [credential_reference:denkstube-zoe-ssh-key]}
-        - {type: smb, endpoint: "//denkstube/projects", auth_mode: password, credential_references: [credential_reference:denkstube-projects-smb-kai]}
+        - {type: ssh, endpoint: "ssh://operator@192.0.2.30:22", auth_mode: key, credential_references: [credential_reference:denkstube-operator-ssh-key]}
+        - {type: smb, endpoint: "//denkstube/projects", auth_mode: password, credential_references: [credential_reference:denkstube-projects-smb-owner]}
       related_services: [service:denkstube-openclaw-gateway, service:denkstube-projects-smb]
-      credential_references: [credential_reference:denkstube-zoe-ssh-key, credential_reference:denkstube-projects-smb-kai]
+      credential_references: [credential_reference:denkstube-operator-ssh-key, credential_reference:denkstube-projects-smb-owner]
       dependencies:
         upstream: [service:ollama-api]
         downstream: [service:n8n-web-ui]
@@ -82,23 +84,23 @@ objects:
       purpose: Workflow automation and integration experiments with Ollama and OpenClaw.
       tags: [n8n, workflow, docker, pilot]
       source_references:
-        - {label: TOOLS.md, uri: /home/zoe/.openclaw/workspace/TOOLS.md}
-        - {label: references/n8n.md, uri: /home/zoe/.openclaw/workspace/references/n8n.md}
+        - {label: TOOLS.md, uri: /example/workspace/TOOLS.md}
+        - {label: references/n8n.md, uri: /example/workspace/references/n8n.md}
       network:
         hostnames: [n8n]
         addresses:
-          - {ip: 192.168.50.83, family: ipv4, interface: "", network: 192.168.50.0/24, scope: lan}
+          - {ip: 192.0.2.83, family: ipv4, interface: "", network: 192.0.2.0/24, scope: lan}
         mac_addresses:
-          - {value: "02:42:AC:11:00:7F", interface: ""}
+          - {value: "02:00:00:00:00:7f", interface: ""}
       ports:
         - {port: 22, protocol: tcp, purpose: SSH, exposure: lan}
         - {port: 5678, protocol: tcp, purpose: n8n Web UI/API/webhooks, exposure: lan}
       public_exposure: {exposed: false, urls: [], notes: No public exposure documented.}
       access_methods:
-        - {type: ssh, endpoint: "ssh://zoe@192.168.50.83:22", auth_mode: key, credential_references: [credential_reference:n8n-zoe-ssh-key]}
-        - {type: web, endpoint: "http://192.168.50.83:5678", auth_mode: mixed, credential_references: [credential_reference:n8n-owner-account, credential_reference:n8n-api-credential]}
+        - {type: ssh, endpoint: "ssh://operator@192.0.2.83:22", auth_mode: key, credential_references: [credential_reference:n8n-operator-ssh-key]}
+        - {type: web, endpoint: "http://192.0.2.83:5678", auth_mode: mixed, credential_references: [credential_reference:n8n-owner-account, credential_reference:n8n-api-credential]}
       related_services: [service:n8n-web-ui, service:n8n-brieftraeger-status-webhook, service:n8n-brieftraeger-process-webhook]
-      credential_references: [credential_reference:n8n-zoe-ssh-key, credential_reference:n8n-owner-account, credential_reference:n8n-api-credential, credential_reference:n8n-local-env]
+      credential_references: [credential_reference:n8n-operator-ssh-key, credential_reference:n8n-owner-account, credential_reference:n8n-api-credential, credential_reference:n8n-local-env]
       dependencies:
         upstream: [system:fabrik, service:ollama-api, system:brieftraeger]
         downstream: []
@@ -117,20 +119,20 @@ objects:
       purpose: Samsung Scan-to-PC and ScanSnap iX500 scanner workflows feeding Paperless.
       tags: [scanner, raspberry-pi, paperless, pilot]
       source_references:
-        - {label: TOOLS.md, uri: /home/zoe/.openclaw/workspace/TOOLS.md}
-        - {label: references/brieftraeger.md, uri: /home/zoe/.openclaw/workspace/references/brieftraeger.md}
+        - {label: TOOLS.md, uri: /example/workspace/TOOLS.md}
+        - {label: references/brieftraeger.md, uri: /example/workspace/references/brieftraeger.md}
       network:
         hostnames: [brieftraeger]
         addresses:
-          - {ip: 192.168.50.150, family: ipv4, interface: wlan0, network: 192.168.50.0/24, scope: lan}
-          - {ip: 192.168.50.149, family: ipv4, interface: eth0, network: 192.168.50.0/24, scope: lan}
+          - {ip: 192.0.2.150, family: ipv4, interface: wlan0, network: 192.0.2.0/24, scope: lan}
+          - {ip: 192.0.2.149, family: ipv4, interface: eth0, network: 192.0.2.0/24, scope: lan}
         mac_addresses:
-          - {value: "88:a2:9e:b7:47:e3", interface: wlan0}
-          - {value: "88:a2:9e:b7:47:e2", interface: eth0}
+          - {value: "02:00:00:00:01:50", interface: wlan0}
+          - {value: "02:00:00:00:01:49", interface: eth0}
       ports:
         - {port: 22, protocol: tcp, purpose: SSH, exposure: lan}
       access_methods:
-        - {type: ssh, endpoint: "ssh://brieftraeger@192.168.50.150:22", auth_mode: password, credential_references: [credential_reference:brieftraeger-ssh-login]}
+        - {type: ssh, endpoint: "ssh://brieftraeger@192.0.2.150:22", auth_mode: password, credential_references: [credential_reference:brieftraeger-ssh-login]}
       related_services: [service:brieftraeger-samsung-scantopc, service:brieftraeger-ix500-button-poller, service:brieftraeger-ocr-worker]
       credential_references: [credential_reference:brieftraeger-ssh-login, credential_reference:brieftraeger-paperless-upload-credential, credential_reference:brieftraeger-paperless-worker-credential]
       dependencies:
@@ -150,21 +152,21 @@ objects:
       purpose: Document management, OCR, and document ingestion target for scanner workflows.
       tags: [paperless, documents, docker, pilot]
       source_references:
-        - {label: TOOLS.md, uri: /home/zoe/.openclaw/workspace/TOOLS.md}
-        - {label: references/paperless-ngx.md, uri: /home/zoe/.openclaw/workspace/references/paperless-ngx.md}
+        - {label: TOOLS.md, uri: /example/workspace/TOOLS.md}
+        - {label: references/paperless-ngx.md, uri: /example/workspace/references/paperless-ngx.md}
       network:
         hostnames: [paperless]
         addresses:
-          - {ip: 192.168.50.62, family: ipv4, interface: "", network: 192.168.50.0/24, scope: lan}
+          - {ip: 192.0.2.62, family: ipv4, interface: "", network: 192.0.2.0/24, scope: lan}
         mac_addresses:
-          - {value: "02:42:AC:11:00:6A", interface: ""}
+          - {value: "02:00:00:00:00:6a", interface: ""}
       ports:
         - {port: 8000, protocol: tcp, purpose: Paperless Web UI/API, exposure: lan}
       access_methods:
-        - {type: web, endpoint: "http://192.168.50.62:8000", auth_mode: password, credential_references: [credential_reference:paperless-kai-login]}
-        - {type: ssh, endpoint: "ssh://root@192.168.50.62:22", auth_mode: password, credential_references: [credential_reference:paperless-root-ssh]}
+        - {type: web, endpoint: "http://192.0.2.62:8000", auth_mode: password, credential_references: [credential_reference:paperless-owner-login]}
+        - {type: ssh, endpoint: "ssh://root@192.0.2.62:22", auth_mode: password, credential_references: [credential_reference:paperless-root-ssh]}
       related_services: [service:paperless-web-ui, service:paperless-api]
-      credential_references: [credential_reference:paperless-kai-login, credential_reference:paperless-root-ssh, credential_reference:paperless-compose-env]
+      credential_references: [credential_reference:paperless-owner-login, credential_reference:paperless-root-ssh, credential_reference:paperless-compose-env]
       dependencies:
         upstream: [service:ollama-api]
         downstream: [system:brieftraeger]
@@ -183,22 +185,22 @@ objects:
       purpose: Secret storage for credentials referenced by Blockwart, without importing values.
       tags: [vaultwarden, secrets, credential-reference, pilot]
       source_references:
-        - {label: TOOLS.md, uri: /home/zoe/.openclaw/workspace/TOOLS.md}
-        - {label: references/vaultwarden.md, uri: /home/zoe/.openclaw/workspace/references/vaultwarden.md}
+        - {label: TOOLS.md, uri: /example/workspace/TOOLS.md}
+        - {label: references/vaultwarden.md, uri: /example/workspace/references/vaultwarden.md}
       network:
         hostnames: [vaultwarden]
         addresses:
-          - {ip: 192.168.50.60, family: ipv4, interface: "", network: 192.168.50.0/24, scope: lan}
+          - {ip: 192.0.2.60, family: ipv4, interface: "", network: 192.0.2.0/24, scope: lan}
         mac_addresses:
-          - {value: "02:42:AC:11:00:67", interface: ""}
+          - {value: "02:00:00:00:00:67", interface: ""}
       ports:
         - {port: 8443, protocol: tcp, purpose: Vaultwarden HTTPS, exposure: lan}
       access_methods:
-        - {type: web, endpoint: "https://192.168.50.60:8443", auth_mode: password, credential_references: [credential_reference:vaultwarden-zoe-account]}
-        - {type: api, endpoint: "https://192.168.50.60:8443", auth_mode: token, credential_references: [credential_reference:vaultwarden-api-credentials]}
-        - {type: ssh, endpoint: "ssh://root@192.168.50.60:22", auth_mode: password, credential_references: [credential_reference:vaultwarden-root-ssh]}
+        - {type: web, endpoint: "https://192.0.2.60:8443", auth_mode: password, credential_references: [credential_reference:vaultwarden-operator-account]}
+        - {type: api, endpoint: "https://192.0.2.60:8443", auth_mode: token, credential_references: [credential_reference:vaultwarden-api-credentials]}
+        - {type: ssh, endpoint: "ssh://root@192.0.2.60:22", auth_mode: password, credential_references: [credential_reference:vaultwarden-root-ssh]}
       related_services: [service:vaultwarden-web-ui, service:vaultwarden-cli-api]
-      credential_references: [credential_reference:vaultwarden-zoe-account, credential_reference:vaultwarden-api-credentials, credential_reference:vaultwarden-root-ssh]
+      credential_references: [credential_reference:vaultwarden-operator-account, credential_reference:vaultwarden-api-credentials, credential_reference:vaultwarden-root-ssh]
       dependencies:
         upstream: [system:fabrik]
         downstream: [system:brieftraeger, system:splunk, system:ollama]
@@ -217,22 +219,22 @@ objects:
       purpose: Local LLM and embedding model serving for OpenClaw, Paperless, n8n, and experiments.
       tags: [ollama, llm, embedding, rocm, pilot]
       source_references:
-        - {label: TOOLS.md, uri: /home/zoe/.openclaw/workspace/TOOLS.md}
-        - {label: references/ollama-fabrik.md, uri: /home/zoe/.openclaw/workspace/references/ollama-fabrik.md}
+        - {label: TOOLS.md, uri: /example/workspace/TOOLS.md}
+        - {label: references/ollama-fabrik.md, uri: /example/workspace/references/ollama-fabrik.md}
       network:
         hostnames: [ollama-fabrik]
         addresses:
-          - {ip: 192.168.50.50, family: ipv4, interface: "", network: 192.168.50.0/24, scope: lan}
+          - {ip: 192.0.2.50, family: ipv4, interface: "", network: 192.0.2.0/24, scope: lan}
         mac_addresses:
-          - {value: "BC:24:11:1E:E6:A5", interface: ""}
+          - {value: "02:00:00:00:00:50", interface: ""}
       ports:
         - {port: 22, protocol: tcp, purpose: SSH, exposure: lan}
         - {port: 11434, protocol: tcp, purpose: Ollama API, exposure: lan}
       access_methods:
-        - {type: api, endpoint: "http://192.168.50.50:11434", auth_mode: none, credential_references: []}
-        - {type: ssh, endpoint: "ssh://sunday@192.168.50.50:22", auth_mode: key, credential_references: [credential_reference:ollama-sunday-ssh-key]}
+        - {type: api, endpoint: "http://192.0.2.50:11434", auth_mode: none, credential_references: []}
+        - {type: ssh, endpoint: "ssh://automation@192.0.2.50:22", auth_mode: key, credential_references: [credential_reference:ollama-automation-ssh-key]}
       related_services: [service:ollama-api]
-      credential_references: [credential_reference:ollama-sunday-ssh-key, credential_reference:ollama-root-fallback]
+      credential_references: [credential_reference:ollama-automation-ssh-key, credential_reference:ollama-root-fallback]
       dependencies:
         upstream: [system:fabrik]
         downstream: [system:denkstube, system:n8n, system:paperless-ngx]
@@ -251,14 +253,14 @@ objects:
       purpose: SIEM/search platform and Splunk integration lab.
       tags: [splunk, siem, search, pilot]
       source_references:
-        - {label: TOOLS.md, uri: /home/zoe/.openclaw/workspace/TOOLS.md}
-        - {label: references/splunk.md, uri: /home/zoe/.openclaw/workspace/references/splunk.md}
+        - {label: TOOLS.md, uri: /example/workspace/TOOLS.md}
+        - {label: references/splunk.md, uri: /example/workspace/references/splunk.md}
       network:
         hostnames: [splunk]
         addresses:
-          - {ip: 192.168.50.71, family: ipv4, interface: "", network: 192.168.50.0/24, scope: lan}
+          - {ip: 192.0.2.71, family: ipv4, interface: "", network: 192.0.2.0/24, scope: lan}
         mac_addresses:
-          - {value: "02:42:AC:11:00:6C", interface: ""}
+          - {value: "02:00:00:00:00:6c", interface: ""}
       ports:
         - {port: 22, protocol: tcp, purpose: SSH, exposure: lan}
         - {port: 8000, protocol: tcp, purpose: Splunk Web, exposure: public}
@@ -266,15 +268,15 @@ objects:
         - {port: 9997, protocol: tcp, purpose: Splunk forwarder receiving, exposure: lan}
       public_exposure:
         exposed: true
-        urls: ["https://splunk.hinterhof.dyndns.org", "https://api.splunk.hinterhof.dyndns.org"]
+        urls: ["https://splunk.example.invalid", "https://api.splunk.example.invalid"]
         notes: Public exposure is through Caddy; HEC 8088 is not exposed.
       access_methods:
-        - {type: web, endpoint: "http://192.168.50.71:8000", auth_mode: password, credential_references: [credential_reference:splunk-admin-login]}
-        - {type: api, endpoint: "https://api.splunk.hinterhof.dyndns.org", auth_mode: token, credential_references: [credential_reference:splunk-zoe-api-credential]}
-        - {type: ssh, endpoint: "ssh://splunk@192.168.50.71:22", auth_mode: password, credential_references: [credential_reference:splunk-os-user-login]}
-        - {type: ssh, endpoint: "ssh://sunday@192.168.50.71:22", auth_mode: password, credential_references: [credential_reference:splunk-sunday-login]}
+        - {type: web, endpoint: "http://192.0.2.71:8000", auth_mode: password, credential_references: [credential_reference:splunk-admin-login]}
+        - {type: api, endpoint: "https://api.splunk.example.invalid", auth_mode: token, credential_references: [credential_reference:splunk-operator-api-credential]}
+        - {type: ssh, endpoint: "ssh://splunk@192.0.2.71:22", auth_mode: password, credential_references: [credential_reference:splunk-os-user-login]}
+        - {type: ssh, endpoint: "ssh://automation@192.0.2.71:22", auth_mode: password, credential_references: [credential_reference:splunk-automation-login]}
       related_services: [service:splunk-web, service:splunk-management-api, service:splunk-receiving]
-      credential_references: [credential_reference:splunk-admin-login, credential_reference:splunk-zoe-api-credential, credential_reference:splunk-os-user-login, credential_reference:splunk-sunday-login]
+      credential_references: [credential_reference:splunk-admin-login, credential_reference:splunk-operator-api-credential, credential_reference:splunk-os-user-login, credential_reference:splunk-automation-login]
       dependencies:
         upstream: [system:fabrik]
         downstream: []
@@ -285,37 +287,37 @@ objects:
     label: Fabrik Proxmox
     status: active
     summary: Proxmox Web UI and API for CT/VM administration.
-    data: {schema_version: 1, protocol: https, endpoints: [{type: Web, url: "https://192.168.50.20:8006", host: 192.168.50.20, port: 8006, path: /, exposure: lan}], auth: {mode: password, credential_references: [credential_reference:fabrik-proxmox-login]}, dependencies: {upstream: [], downstream: [system:ollama, system:vaultwarden, system:paperless-ngx, system:n8n, system:splunk]}}
+    data: {schema_version: 1, protocol: https, endpoints: [{type: Web, url: "https://192.0.2.20:8006", host: 192.0.2.20, port: 8006, path: /, exposure: lan}], auth: {mode: password, credential_references: [credential_reference:fabrik-proxmox-login]}, dependencies: {upstream: [], downstream: [system:ollama, system:vaultwarden, system:paperless-ngx, system:n8n, system:splunk]}}
   - id: denkstube-openclaw-gateway
     kind: service
     label: Denkstube OpenClaw Gateway
     status: active
     summary: OpenClaw gateway service bound to LAN.
-    data: {schema_version: 1, protocol: http, endpoints: [{type: REST API, url: "http://192.168.50.30:18789", host: 192.168.50.30, port: 18789, path: /, exposure: lan}], auth: {mode: unknown, credential_references: []}, dependencies: {upstream: [service:ollama-api], downstream: []}}
+    data: {schema_version: 1, protocol: http, endpoints: [{type: REST API, url: "http://192.0.2.30:18789", host: 192.0.2.30, port: 18789, path: /, exposure: lan}], auth: {mode: unknown, credential_references: []}, dependencies: {upstream: [service:ollama-api], downstream: []}}
   - id: denkstube-projects-smb
     kind: service
     label: Denkstube Projects SMB
     status: active
     summary: SMB access to the shared project workspace.
-    data: {schema_version: 1, protocol: smb, endpoints: [{type: Web, url: "smb://denkstube/projects", host: denkstube, port: 445, path: /projects, exposure: lan}], auth: {mode: password, credential_references: [credential_reference:denkstube-projects-smb-kai]}}
+    data: {schema_version: 1, protocol: smb, endpoints: [{type: Web, url: "smb://denkstube/projects", host: denkstube, port: 445, path: /projects, exposure: lan}], auth: {mode: password, credential_references: [credential_reference:denkstube-projects-smb-owner]}}
   - id: n8n-web-ui
     kind: service
     label: n8n Web UI
     status: active
     summary: n8n user interface, API, and webhook runtime.
-    data: {schema_version: 1, protocol: http, endpoints: [{type: Web, url: "http://192.168.50.83:5678", host: 192.168.50.83, port: 5678, path: /, exposure: lan}], auth: {mode: mixed, credential_references: [credential_reference:n8n-owner-account, credential_reference:n8n-api-credential, credential_reference:n8n-local-env]}, dependencies: {upstream: [service:ollama-api], downstream: [service:n8n-brieftraeger-status-webhook, service:n8n-brieftraeger-process-webhook]}}
+    data: {schema_version: 1, protocol: http, endpoints: [{type: Web, url: "http://192.0.2.83:5678", host: 192.0.2.83, port: 5678, path: /, exposure: lan}], auth: {mode: mixed, credential_references: [credential_reference:n8n-owner-account, credential_reference:n8n-api-credential, credential_reference:n8n-local-env]}, dependencies: {upstream: [service:ollama-api], downstream: [service:n8n-brieftraeger-status-webhook, service:n8n-brieftraeger-process-webhook]}}
   - id: n8n-brieftraeger-status-webhook
     kind: service
     label: n8n Brieftraeger Status Webhook
     status: active
     summary: Read-only status endpoint for Brieftraeger scanner services and queues.
-    data: {schema_version: 1, protocol: http, endpoints: [{type: REST API, url: "http://192.168.50.83:5678/webhook/brieftraeger/status", host: 192.168.50.83, port: 5678, path: /webhook/brieftraeger/status, exposure: lan}], auth: {mode: mixed, credential_references: [credential_reference:n8n-brieftraeger-ssh-credential]}, dependencies: {upstream: [service:n8n-web-ui, system:brieftraeger], downstream: []}}
+    data: {schema_version: 1, protocol: http, endpoints: [{type: REST API, url: "http://192.0.2.83:5678/webhook/brieftraeger/status", host: 192.0.2.83, port: 5678, path: /webhook/brieftraeger/status, exposure: lan}], auth: {mode: mixed, credential_references: [credential_reference:n8n-brieftraeger-ssh-credential]}, dependencies: {upstream: [service:n8n-web-ui, system:brieftraeger], downstream: []}}
   - id: n8n-brieftraeger-process-webhook
     kind: service
     label: n8n Brieftraeger Process Webhook
     status: active
     summary: Read-only process mapping endpoint for the Brieftraeger document pipeline.
-    data: {schema_version: 1, protocol: http, endpoints: [{type: REST API, url: "http://192.168.50.83:5678/webhook/brieftraeger/prozess", host: 192.168.50.83, port: 5678, path: /webhook/brieftraeger/prozess, exposure: lan}], auth: {mode: mixed, credential_references: [credential_reference:n8n-brieftraeger-ssh-credential]}, dependencies: {upstream: [service:n8n-web-ui, system:brieftraeger], downstream: []}}
+    data: {schema_version: 1, protocol: http, endpoints: [{type: REST API, url: "http://192.0.2.83:5678/webhook/brieftraeger/prozess", host: 192.0.2.83, port: 5678, path: /webhook/brieftraeger/prozess, exposure: lan}], auth: {mode: mixed, credential_references: [credential_reference:n8n-brieftraeger-ssh-credential]}, dependencies: {upstream: [service:n8n-web-ui, system:brieftraeger], downstream: []}}
   - id: brieftraeger-samsung-scantopc
     kind: service
     label: Brieftraeger Samsung Scan-to-PC
@@ -339,80 +341,80 @@ objects:
     label: Paperless Web UI
     status: active
     summary: Browser UI for document management.
-    data: {schema_version: 1, protocol: http, endpoints: [{type: Web, url: "http://192.168.50.62:8000", host: 192.168.50.62, port: 8000, path: /, exposure: lan}], auth: {mode: password, credential_references: [credential_reference:paperless-kai-login]}}
+    data: {schema_version: 1, protocol: http, endpoints: [{type: Web, url: "http://192.0.2.62:8000", host: 192.0.2.62, port: 8000, path: /, exposure: lan}], auth: {mode: password, credential_references: [credential_reference:paperless-owner-login]}}
   - id: paperless-api
     kind: service
     label: Paperless API
     status: active
     summary: Paperless API used by scanner upload workflows and integrations.
-    data: {schema_version: 1, protocol: http, endpoints: [{type: REST API, url: "http://192.168.50.62:8000/api/", host: 192.168.50.62, port: 8000, path: /api/, exposure: lan}], auth: {mode: token, credential_references: [credential_reference:paperless-kai-login, credential_reference:brieftraeger-paperless-upload-credential, credential_reference:brieftraeger-paperless-worker-credential]}, dependencies: {upstream: [service:ollama-api], downstream: [system:brieftraeger]}}
+    data: {schema_version: 1, protocol: http, endpoints: [{type: REST API, url: "http://192.0.2.62:8000/api/", host: 192.0.2.62, port: 8000, path: /api/, exposure: lan}], auth: {mode: token, credential_references: [credential_reference:paperless-owner-login, credential_reference:brieftraeger-paperless-upload-credential, credential_reference:brieftraeger-paperless-worker-credential]}, dependencies: {upstream: [service:ollama-api], downstream: [system:brieftraeger]}}
   - id: vaultwarden-web-ui
     kind: service
     label: Vaultwarden Web UI
     status: active
     summary: Human web access to the credential vault.
-    data: {schema_version: 1, protocol: https, endpoints: [{type: Web, url: "https://192.168.50.60:8443", host: 192.168.50.60, port: 8443, path: /, exposure: lan}], auth: {mode: password, credential_references: [credential_reference:vaultwarden-zoe-account]}}
+    data: {schema_version: 1, protocol: https, endpoints: [{type: Web, url: "https://192.0.2.60:8443", host: 192.0.2.60, port: 8443, path: /, exposure: lan}], auth: {mode: password, credential_references: [credential_reference:vaultwarden-operator-account]}}
   - id: vaultwarden-cli-api
     kind: service
     label: Vaultwarden CLI/API
     status: active
     summary: API/CLI credential retrieval path used by agents when explicitly allowed.
-    data: {schema_version: 1, protocol: https, endpoints: [{type: REST API, url: "https://192.168.50.60:8443", host: 192.168.50.60, port: 8443, path: /, exposure: lan}], auth: {mode: token, credential_references: [credential_reference:vaultwarden-api-credentials]}}
+    data: {schema_version: 1, protocol: https, endpoints: [{type: REST API, url: "https://192.0.2.60:8443", host: 192.0.2.60, port: 8443, path: /, exposure: lan}], auth: {mode: token, credential_references: [credential_reference:vaultwarden-api-credentials]}}
   - id: ollama-api
     kind: service
     label: Ollama API
     status: active
     summary: Ollama chat, generation, embedding, tags, and model process API.
-    data: {schema_version: 1, protocol: http, endpoints: [{type: REST API, url: "http://192.168.50.50:11434", host: 192.168.50.50, port: 11434, path: /, exposure: lan}], auth: {mode: none, credential_references: []}, health_check: {type: http, target: "http://192.168.50.50:11434/api/tags", expected: HTTP response with installed model list.}, dependencies: {upstream: [system:fabrik], downstream: [service:denkstube-openclaw-gateway, service:n8n-web-ui, service:paperless-api]}}
+    data: {schema_version: 1, protocol: http, endpoints: [{type: REST API, url: "http://192.0.2.50:11434", host: 192.0.2.50, port: 11434, path: /, exposure: lan}], auth: {mode: none, credential_references: []}, health_check: {type: http, target: "http://192.0.2.50:11434/api/tags", expected: HTTP response with installed model list.}, dependencies: {upstream: [system:fabrik], downstream: [service:denkstube-openclaw-gateway, service:n8n-web-ui, service:paperless-api]}}
   - id: splunk-web
     kind: service
     label: Splunk Web
     status: active
     summary: Splunk Enterprise Web UI.
-    data: {schema_version: 1, protocol: http, endpoints: [{type: Web, url: "http://192.168.50.71:8000", host: 192.168.50.71, port: 8000, path: /, exposure: lan}, {type: Web, url: "https://splunk.hinterhof.dyndns.org", host: splunk.hinterhof.dyndns.org, port: 443, path: /, exposure: public}], auth: {mode: password, credential_references: [credential_reference:splunk-admin-login]}}
+    data: {schema_version: 1, protocol: http, endpoints: [{type: Web, url: "http://192.0.2.71:8000", host: 192.0.2.71, port: 8000, path: /, exposure: lan}, {type: Web, url: "https://splunk.example.invalid", host: splunk.example.invalid, port: 443, path: /, exposure: public}], auth: {mode: password, credential_references: [credential_reference:splunk-admin-login]}}
   - id: splunk-management-api
     kind: service
     label: Splunk Management API
     status: active
     summary: Splunk REST management API.
-    data: {schema_version: 1, protocol: https, endpoints: [{type: REST API, url: "https://192.168.50.71:8089", host: 192.168.50.71, port: 8089, path: /, exposure: lan}, {type: REST API, url: "https://api.splunk.hinterhof.dyndns.org", host: api.splunk.hinterhof.dyndns.org, port: 443, path: /, exposure: public}], auth: {mode: token, credential_references: [credential_reference:splunk-zoe-api-credential]}}
+    data: {schema_version: 1, protocol: https, endpoints: [{type: REST API, url: "https://192.0.2.71:8089", host: 192.0.2.71, port: 8089, path: /, exposure: lan}, {type: REST API, url: "https://api.splunk.example.invalid", host: api.splunk.example.invalid, port: 443, path: /, exposure: public}], auth: {mode: token, credential_references: [credential_reference:splunk-operator-api-credential]}}
   - id: splunk-receiving
     kind: service
     label: Splunk Forwarder Receiving
     status: active
     summary: Default Splunk receiving port for forwarders.
-    data: {schema_version: 1, protocol: tcp, endpoints: [{type: HEC, url: "tcp://192.168.50.71:9997", host: 192.168.50.71, port: 9997, path: "", exposure: lan}], auth: {mode: unknown, credential_references: []}}
+    data: {schema_version: 1, protocol: tcp, endpoints: [{type: HEC, url: "tcp://192.0.2.71:9997", host: 192.0.2.71, port: 9997, path: "", exposure: lan}], auth: {mode: unknown, credential_references: []}}
 
-  - id: fabrik-zoe-ssh-key
+  - id: fabrik-operator-ssh-key
     kind: credential_reference
-    label: Fabrik Zoe SSH key
+    label: Fabrik operator SSH key
     status: active
     summary: Key-only SSH access reference; private key material is not imported.
-    data: &local_ssh_ref {schema_version: 1, provider: local_file, reference: {item_hint: "local SSH private key location not imported"}, scope: {account_or_user: zoe, systems: [system:fabrik], services: [], access_type: ssh}, risk_level: medium, handling_rules: {telegram_allowed: false, markdown_secret_allowed: false, agents_may_read_value: false}, secret_value_stored: false}
+    data: &local_ssh_ref {schema_version: 1, provider: local_file, reference: {item_hint: "local SSH private key location not imported"}, scope: {account_or_user: operator, systems: [system:fabrik], services: [], access_type: ssh}, risk_level: medium, handling_rules: {telegram_allowed: false, markdown_secret_allowed: false, agents_may_read_value: false}, secret_value_stored: false}
   - id: fabrik-proxmox-login
     kind: credential_reference
     label: Fabrik Proxmox login
     status: active
     summary: Reference to Proxmox Web/API login material; no credential value stored.
-    data: {schema_version: 1, provider: secrets_json, reference: {key: "proxmox.apiPassword"}, scope: {account_or_user: "zoe@pve", systems: [system:fabrik], services: [service:fabrik-proxmox], access_type: web}, risk_level: high, handling_rules: {telegram_allowed: false, markdown_secret_allowed: false, agents_may_read_value: false}, secret_value_stored: false}
-  - id: denkstube-zoe-ssh-key
+    data: {schema_version: 1, provider: secrets_json, reference: {key: "virtualization.admin"}, scope: {account_or_user: "operator@example", systems: [system:fabrik], services: [service:fabrik-proxmox], access_type: web}, risk_level: high, handling_rules: {telegram_allowed: false, markdown_secret_allowed: false, agents_may_read_value: false}, secret_value_stored: false}
+  - id: denkstube-operator-ssh-key
     kind: credential_reference
-    label: Denkstube Zoe SSH key
+    label: Denkstube operator SSH key
     status: active
     summary: Key-only SSH access reference; private key material is not imported.
-    data: {<<: *local_ssh_ref, scope: {account_or_user: zoe, systems: [system:denkstube], services: [], access_type: ssh}}
-  - id: denkstube-projects-smb-kai
+    data: {<<: *local_ssh_ref, scope: {account_or_user: operator, systems: [system:denkstube], services: [], access_type: ssh}}
+  - id: denkstube-projects-smb-owner
     kind: credential_reference
     label: Denkstube projects SMB account
     status: active
-    summary: SMB credential reference for Kai; password is not documented here.
-    data: {schema_version: 1, provider: external, reference: {item_hint: "SMB credential for //denkstube/projects"}, scope: {account_or_user: kai, systems: [system:denkstube], services: [service:denkstube-projects-smb], access_type: smb}, risk_level: medium, handling_rules: {telegram_allowed: false, markdown_secret_allowed: false, agents_may_read_value: false}, secret_value_stored: false}
-  - id: n8n-zoe-ssh-key
+    summary: SMB credential reference for an example owner; no password is stored.
+    data: {schema_version: 1, provider: external, reference: {item_hint: "SMB credential for //denkstube/projects"}, scope: {account_or_user: owner, systems: [system:denkstube], services: [service:denkstube-projects-smb], access_type: smb}, risk_level: medium, handling_rules: {telegram_allowed: false, markdown_secret_allowed: false, agents_may_read_value: false}, secret_value_stored: false}
+  - id: n8n-operator-ssh-key
     kind: credential_reference
-    label: n8n Zoe SSH key
+    label: n8n operator SSH key
     status: active
     summary: Key-only SSH access reference; private key material is not imported.
-    data: {<<: *local_ssh_ref, scope: {account_or_user: zoe, systems: [system:n8n], services: [], access_type: ssh}}
+    data: {<<: *local_ssh_ref, scope: {account_or_user: operator, systems: [system:n8n], services: [], access_type: ssh}}
   - id: n8n-api-credential
     kind: credential_reference
     label: n8n API credential
@@ -448,19 +450,19 @@ objects:
     label: Brieftraeger Paperless upload credential
     status: active
     summary: secrets.json reference for Paperless upload credential subset; no values imported.
-    data: {schema_version: 1, provider: secrets_json, reference: {item_hint: "/home/brieftraeger/.openclaw/secrets.json Paperless subset"}, scope: {account_or_user: service, systems: [system:brieftraeger, system:paperless-ngx], services: [service:brieftraeger-samsung-scantopc, service:paperless-api], access_type: token}, risk_level: high, handling_rules: {telegram_allowed: false, markdown_secret_allowed: false, agents_may_read_value: false}, secret_value_stored: false}
+    data: {schema_version: 1, provider: secrets_json, reference: {item_hint: "/protected/example/secrets.json Paperless subset"}, scope: {account_or_user: service, systems: [system:brieftraeger, system:paperless-ngx], services: [service:brieftraeger-samsung-scantopc, service:paperless-api], access_type: token}, risk_level: high, handling_rules: {telegram_allowed: false, markdown_secret_allowed: false, agents_may_read_value: false}, secret_value_stored: false}
   - id: brieftraeger-paperless-worker-credential
     kind: credential_reference
     label: Brieftraeger Paperless worker credential
     status: active
     summary: Environment-file reference for OCR worker upload credential.
     data: {schema_version: 1, provider: env_file, reference: {path: /data/secrets/paperless.env}, scope: {account_or_user: service, systems: [system:brieftraeger, system:paperless-ngx], services: [service:brieftraeger-ocr-worker, service:paperless-api], access_type: token}, risk_level: high, handling_rules: {telegram_allowed: false, markdown_secret_allowed: false, agents_may_read_value: false}, secret_value_stored: false}
-  - id: paperless-kai-login
+  - id: paperless-owner-login
     kind: credential_reference
-    label: Paperless Kai login
+    label: Paperless owner login
     status: active
-    summary: Reference to Paperless Kai account; exact key is intentionally unresolved.
-    data: {schema_version: 1, provider: secrets_json, reference: {item_hint: "Paperless kai login key unknown"}, scope: {account_or_user: kai, systems: [system:paperless-ngx], services: [service:paperless-web-ui, service:paperless-api], access_type: web}, risk_level: high, handling_rules: {telegram_allowed: false, markdown_secret_allowed: false, agents_may_read_value: false}, secret_value_stored: false}
+    summary: Reference to an example Paperless owner account.
+    data: {schema_version: 1, provider: secrets_json, reference: {item_hint: "example owner login reference"}, scope: {account_or_user: owner, systems: [system:paperless-ngx], services: [service:paperless-web-ui, service:paperless-api], access_type: web}, risk_level: high, handling_rules: {telegram_allowed: false, markdown_secret_allowed: false, agents_may_read_value: false}, secret_value_stored: false}
   - id: paperless-root-ssh
     kind: credential_reference
     label: Paperless root SSH credential
@@ -473,12 +475,12 @@ objects:
     status: active
     summary: Reference to Paperless service environment file.
     data: {schema_version: 1, provider: env_file, reference: {path: /opt/paperless-ngx/docker-compose.env}, scope: {account_or_user: service, systems: [system:paperless-ngx], services: [service:paperless-web-ui, service:paperless-api], access_type: other}, risk_level: high, handling_rules: {telegram_allowed: false, markdown_secret_allowed: false, agents_may_read_value: false}, secret_value_stored: false}
-  - id: vaultwarden-zoe-account
+  - id: vaultwarden-operator-account
     kind: credential_reference
-    label: Vaultwarden Zoe account
+    label: Vaultwarden operator account
     status: active
     summary: Reference to Vaultwarden account fields only.
-    data: {schema_version: 1, provider: secrets_json, reference: {item_hint: "vaultwarden account fields"}, scope: {account_or_user: zoe, systems: [system:vaultwarden], services: [service:vaultwarden-web-ui], access_type: web}, risk_level: critical, handling_rules: {telegram_allowed: false, markdown_secret_allowed: false, agents_may_read_value: false}, secret_value_stored: false}
+    data: {schema_version: 1, provider: secrets_json, reference: {item_hint: "example vault account fields"}, scope: {account_or_user: operator, systems: [system:vaultwarden], services: [service:vaultwarden-web-ui], access_type: web}, risk_level: critical, handling_rules: {telegram_allowed: false, markdown_secret_allowed: false, agents_may_read_value: false}, secret_value_stored: false}
   - id: vaultwarden-api-credentials
     kind: credential_reference
     label: Vaultwarden API credentials
@@ -491,12 +493,12 @@ objects:
     status: active
     summary: External reference for Vaultwarden CT root SSH credential.
     data: {schema_version: 1, provider: external, reference: {item_hint: "Vaultwarden CT root SSH credential"}, scope: {account_or_user: root, systems: [system:vaultwarden], services: [], access_type: ssh}, risk_level: high, handling_rules: {telegram_allowed: false, markdown_secret_allowed: false, agents_may_read_value: false}, secret_value_stored: false}
-  - id: ollama-sunday-ssh-key
+  - id: ollama-automation-ssh-key
     kind: credential_reference
-    label: Ollama sunday SSH key
+    label: Ollama automation SSH key
     status: active
     summary: Key-only SSH reference for the Ollama container.
-    data: {<<: *local_ssh_ref, scope: {account_or_user: sunday, systems: [system:ollama], services: [], access_type: ssh}}
+    data: {<<: *local_ssh_ref, scope: {account_or_user: automation, systems: [system:ollama], services: [], access_type: ssh}}
   - id: ollama-root-fallback
     kind: credential_reference
     label: Ollama root fallback credential
@@ -509,24 +511,24 @@ objects:
     status: active
     summary: Reference to Splunk admin Web credential; exact canonical storage needs cleanup.
     data: {schema_version: 1, provider: secrets_json, reference: {item_hint: "Splunk admin key unknown or Vaultwarden item"}, scope: {account_or_user: admin, systems: [system:splunk], services: [service:splunk-web], access_type: web}, risk_level: critical, handling_rules: {telegram_allowed: false, markdown_secret_allowed: false, agents_may_read_value: false}, secret_value_stored: false}
-  - id: splunk-zoe-api-credential
+  - id: splunk-operator-api-credential
     kind: credential_reference
-    label: Splunk Zoe API credential
+    label: Splunk operator API credential
     status: active
     summary: Vaultwarden custom-field reference for Splunk API credential only.
-    data: {schema_version: 1, provider: vaultwarden, reference: {name: Splunk, item_hint: "custom field apiToken"}, scope: {account_or_user: zoe, systems: [system:splunk], services: [service:splunk-management-api], access_type: api}, risk_level: critical, handling_rules: {telegram_allowed: false, markdown_secret_allowed: false, agents_may_read_value: false}, secret_value_stored: false}
+    data: {schema_version: 1, provider: vaultwarden, reference: {name: Splunk, item_hint: "API credential field"}, scope: {account_or_user: operator, systems: [system:splunk], services: [service:splunk-management-api], access_type: api}, risk_level: critical, handling_rules: {telegram_allowed: false, markdown_secret_allowed: false, agents_may_read_value: false}, secret_value_stored: false}
   - id: splunk-os-user-login
     kind: credential_reference
     label: Splunk OS user login
     status: active
     summary: External reference for Splunk OS user SSH credential.
     data: {schema_version: 1, provider: external, reference: {item_hint: "secrets/Vault reference for Splunk OS user"}, scope: {account_or_user: splunk, systems: [system:splunk], services: [], access_type: ssh}, risk_level: critical, handling_rules: {telegram_allowed: false, markdown_secret_allowed: false, agents_may_read_value: false}, secret_value_stored: false}
-  - id: splunk-sunday-login
+  - id: splunk-automation-login
     kind: credential_reference
-    label: Splunk sunday login
+    label: Splunk automation login
     status: active
-    summary: External reference for Kai-provided sunday SSH credential; value is not imported.
-    data: {schema_version: 1, provider: external, reference: {item_hint: "Kai-provided credential; move or rotate into Vaultwarden if long-lived"}, scope: {account_or_user: sunday, systems: [system:splunk], services: [], access_type: ssh}, risk_level: critical, handling_rules: {telegram_allowed: false, markdown_secret_allowed: false, agents_may_read_value: false}, secret_value_stored: false}
+    summary: External reference for an example automation credential; no value is imported.
+    data: {schema_version: 1, provider: external, reference: {item_hint: "Operator-provided credential; move or rotate into Vaultwarden if long-lived"}, scope: {account_or_user: automation, systems: [system:splunk], services: [], access_type: ssh}, risk_level: critical, handling_rules: {telegram_allowed: false, markdown_secret_allowed: false, agents_may_read_value: false}, secret_value_stored: false}
 
   - id: runbook-check-ollama-api
     kind: runbook
