@@ -59,7 +59,7 @@ PG_TEST_URL = os.environ.get(
 
 CATALOG_OWNER_REVISION = "20260806_0015"
 SOURCE_COVERAGE_REVISION = "20260811_0016"
-HEAD_REVISION = "20260818_0017"
+HEAD_REVISION = "20260818_0018"
 
 
 def _pg_url(database: str) -> str:
@@ -130,6 +130,30 @@ def _table_rows(engine: Engine, tables: set[str]) -> dict[str, list[tuple[object
                 key=repr,
             )
             for table in sorted(tables)
+        }
+
+
+def _table_rows_for_columns(
+    engine: Engine,
+    columns_by_table: dict[str, list[str]],
+) -> dict[str, list[tuple[object, ...]]]:
+    """Capture pre-existing columns after an additive migration."""
+    with engine.connect() as connection:
+        return {
+            table: sorted(
+                (
+                    tuple(row)
+                    for row in connection.execute(
+                        text(
+                            "SELECT "
+                            + ", ".join(f'\"{column}\"' for column in columns)
+                            + f' FROM "{table}"'
+                        )
+                    )
+                ),
+                key=repr,
+            )
+            for table, columns in sorted(columns_by_table.items())
         }
 
 
@@ -455,7 +479,12 @@ def test_postgresql_populated_0015_source_coverage_upgrade_and_downgrade(
                     "object_created_at": object_created_at,
                 },
             )
-        existing_tables = set(inspect(engine).get_table_names()) - {"alembic_version"}
+        before_inspector = inspect(engine)
+        existing_tables = set(before_inspector.get_table_names()) - {"alembic_version"}
+        existing_columns = {
+            table: [column["name"] for column in before_inspector.get_columns(table)]
+            for table in existing_tables
+        }
         before = _table_rows(engine, existing_tables)
     finally:
         engine.dispose()
@@ -463,7 +492,15 @@ def test_postgresql_populated_0015_source_coverage_upgrade_and_downgrade(
     _upgrade_to(database_url, HEAD_REVISION)
     engine = build_engine(database_url)
     try:
-        assert _table_rows(engine, existing_tables) == before
+        assert _table_rows_for_columns(engine, existing_columns) == before
+        with engine.connect() as connection:
+            assert connection.execute(
+                text(
+                    "SELECT project_chronology_kind FROM object_comments "
+                    "WHERE id = :id"
+                ),
+                {"id": preserved_comment},
+            ).scalar_one_or_none() is None
         command.check(build_alembic_config(database_url))
         inspector = inspect(engine)
         assert {

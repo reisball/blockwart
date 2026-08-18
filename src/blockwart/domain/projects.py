@@ -11,6 +11,7 @@ from blockwart.domain.object_schema import (
     PROJECT_CATEGORY_VALUES,
     PROJECT_COMMON_ONLY_CATEGORY_FIELD_NAMES,
     PROJECT_EVIDENCE_GRADE_VALUES,
+    PROJECT_EXTERNAL_REFERENCE_KIND_VALUES,
     PROJECT_MANAGED_BY_KIND_VALUES,
     PROJECT_TIMELINE_REFERENCE_TYPE_VALUES,
 )
@@ -174,6 +175,7 @@ def project_contract_projection() -> dict[str, Any]:
             "secret_query_parameters_allowed": False,
             "live_fetch": False,
             "full_text_import": False,
+            "reference_kind_values": list(PROJECT_EXTERNAL_REFERENCE_KIND_VALUES),
         },
         "ownership": {
             "path": "data.managed_by",

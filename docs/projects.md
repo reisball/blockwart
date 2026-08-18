@@ -30,7 +30,7 @@ Every canonical Project requires `schema_version: 1`, one closed `category`, and
 | `related_projects` | typed-reference array | Existing `project` targets |
 | `sources` | source-entry array | Up to 50 closed, safe external references; Blockwart never fetches them |
 | `current_summary` | text | Current reviewed state, at most 4,000 characters |
-| `open_questions`, `recommendations`, `next_actions` | text arrays | Distinct machine-readable current knowledge and follow-up lists |
+| `open_questions`, `blockers`, `recommendations`, `next_actions` | text arrays | Distinct machine-readable current knowledge, impediments, and follow-up lists |
 | `lessons_learned` | text array | Retrospective knowledge shared by all categories |
 
 `planned` rejects `started_at` and `completed_at`. Active and paused work requires
@@ -46,8 +46,11 @@ path rather than retained as contradictory canonical content.
 ## Safe sources and evidence
 
 Each `sources` item requires a unique local `id`, `source_type`, `title`, and `url`. Source type is
-the #144 shared vocabulary: `original`, `documentation`, or `reference`. Optional provenance is
-`author`, `publisher`, `published_at`, and `retrieved_at`. Timestamps are timezone-aware;
+the #144 shared vocabulary: `original`, `documentation`, or `reference`. A Project source may
+also declare the optional closed `reference_kind`: `document`, `repository`, `issue`,
+`pull_request`, `commit`, or `deployment`. This remains descriptive metadata and never defines
+Project identity or triggers a fetch. Optional provenance is `author`, `publisher`,
+`published_at`, and `retrieved_at`. Timestamps are timezone-aware;
 retrieval cannot precede publication. Entries are closed, titles and provenance are bounded, and
 URLs must be absolute HTTP(S) URLs without embedded credentials or secret-shaped query
 parameters. Active-content schemes, executable/body fields, and secret-shaped keys or values at
@@ -101,6 +104,44 @@ the same fail-closed public result. Read projections remove concealed typed link
 discover-only stubs never expose or match hidden Project fields, evidence, source data, counts, or
 relationship targets. Compact stubs contain no comments, while detail context returns
 `recent_comments` separately from canonical `data`.
+
+## Focused workspace and professional chronology
+
+`/projects` is the authorized Project overview. It presents status, category, current summary,
+next action, and latest authorized professional activity, with exact status/category filters.
+Standalone roots and related Projects use the same projection. Filtering, activity lookup,
+counts, ordering, and pagination happen only after detail authorization; discover-only Projects
+do not appear or contribute a timestamp, count, relationship, or filter match.
+
+`/projects/{id}` is the focused work view for objective, in/out of scope, current summary, open
+questions, blockers, next actions, canonical typed object links, and safe external sources. Its
+editor changes only those reviewed canonical fields and preserves category-specific and additive
+extension fields. Catalog owners can create an unplaced Project through the normal root-creation
+form or `POST /api/v1/roots`, then manage it here without adding a parent.
+
+The Project professional chronology reuses `object_comments` and has exactly seven stable kinds:
+`intent`, `implementation`, `result`, `decision`, `milestone`, `blocker`, and `note`. Each entry
+retains its immutable ID, author snapshot, server-derived origin, source format, source text, and
+timestamp. It is append-only and idempotent. The UI makes the common
+**intent → implementation → result** sequence explicit, but no chronology entry is automatically
+promoted into a canonical Project field. The immutable technical object-audit timeline remains a
+separate resource and stores only minimized append metadata, never entry text.
+
+REST v1 exposes the overview at `GET /api/v1/projects` and chronology at
+`GET|POST /api/v1/projects/{id}/chronology`. Agent detail/context includes the five newest
+authorized entries as `recent_project_chronology`. MCP maps the same contract through
+`blockwart.list_projects`, `blockwart.list_project_chronology`, and
+`blockwart.add_project_chronology`.
+
+The compatibility rule is explicit and non-destructive. Revision `20260818_0018` adds a nullable
+kind column and a closed database constraint. A Project comment whose kind is null—including all
+pre-0018 Project comments and comments appended through the unchanged generic comment API—is
+projected as `note`; its text and all immutable metadata remain untouched. Existing Project rows
+remain readable with absent optional workspace fields. Non-Project comments retain their existing
+schema, response, authorization, idempotency, and audit contracts and are never projected as
+Project chronology. SQLite rebuilds preserve and recreate the direct update/delete guards;
+PostgreSQL uses an additive column and check constraint. Downgrade refuses while typed chronology
+exists, preventing semantic data loss.
 
 ## Research example
 

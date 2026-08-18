@@ -88,6 +88,8 @@ Returns one object as agent context:
 - canonical provenance and computed freshness
 - extracted credential-reference IDs
 - the five newest authorized object comments as exact source plus format
+- for Projects, the five newest professional chronology entries with their
+  stable semantic kind; non-Projects return this additive field as null
 
 Placement resolution uses only canonical `hosts` relationships. It supports
 `host -> system -> service` as well as a service placed directly on a host. The
@@ -147,6 +149,11 @@ Readable contexts expose `recent_comments`; discover-only stubs do not. The
 complete timeline and append command live only in REST v1 and MCP. Agent
 responses return Markdown or legacy plain-text source, never rendered HTML;
 see `object-comments.md`.
+
+Readable Project contexts also expose `recent_project_chronology`. Its kinds
+are `intent`, `implementation`, `result`, `decision`, `milestone`, `blocker`,
+and `note`; legacy or generic Project comments project as `note`. It is absent
+from strict stubs, and chronology never changes canonical `data` automatically.
 
 All Agent timestamps use RFC3339 UTC with `Z`. Every summary and context object also exposes
 `record_state` plus `diagnostics`. A damaged `data_json` row remains discoverable by ID, label, or

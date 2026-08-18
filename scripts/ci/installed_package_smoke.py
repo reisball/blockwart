@@ -17,7 +17,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from blockwart.db.session import build_engine, transaction
-from blockwart.domain.auth import GrantScope, PlatformRole, Role
+from blockwart.domain.auth import CatalogRole, GrantScope, PlatformRole, Role
 from blockwart.models import CatalogObject
 from blockwart.services.access import create_object_grant
 from blockwart.services.identity import (
@@ -62,6 +62,7 @@ def prepare_authorized_readers() -> tuple[str, str, str]:
                     login="package-smoke.service",
                     display_name="Package Smoke Service",
                     platform_role=PlatformRole.ADMIN,
+                    catalog_role=CatalogRole.CATALOG_OWNER,
                 )
                 browser_principal = create_human_principal(
                     session,
@@ -136,6 +137,9 @@ async def check_mcp(
                 "blockwart.search",
                 "blockwart.get_object_context",
                 "blockwart.get_object_contexts",
+                "blockwart.list_projects",
+                "blockwart.list_project_chronology",
+                "blockwart.add_project_chronology",
                 "blockwart.list_comments",
                 "blockwart.list_audit_events",
                 "blockwart.add_comment",
@@ -169,6 +173,8 @@ async def check_mcp(
                         "blockwart.search",
                         "blockwart.get_object_context",
                         "blockwart.get_object_contexts",
+                        "blockwart.list_projects",
+                        "blockwart.list_project_chronology",
                         "blockwart.list_comments",
                         "blockwart.list_audit_events",
                         "blockwart.get_context",
@@ -337,6 +343,48 @@ async def check_mcp(
             batch_payload = _tool_payload(read_results[2])
             assert batch_payload["count"] == 1
             assert batch_payload["objects"][0]["id"] == object_id
+            standalone_project = await session.call_tool(
+                "blockwart.create_root",
+                {
+                    "idempotency_key": "package-smoke-project-0001",
+                    "object": {
+                        "id": "package-smoke-project",
+                        "kind": "project",
+                        "label": "Package Smoke Project",
+                        "data": {
+                            "schema_version": 1,
+                            "category": "implementation",
+                            "project_status": "planned",
+                            "objective": "Prove the installed standalone Project path.",
+                        },
+                    },
+                },
+            )
+            standalone_payload = _tool_payload(standalone_project)
+            assert standalone_payload["catalog_object"]["parent_path"] == []
+            project_entry = await session.call_tool(
+                "blockwart.add_project_chronology",
+                {
+                    "object_id": "package-smoke-project",
+                    "kind": "intent",
+                    "body": "Record the installed-package proof intent.",
+                    "idempotency_key": "package-smoke-project-entry-0001",
+                },
+            )
+            assert _tool_payload(project_entry)["entry"]["kind"] == "intent"
+            project_chronology = await session.call_tool(
+                "blockwart.list_project_chronology",
+                {"object_id": "package-smoke-project", "include_total": True},
+            )
+            assert _tool_payload(project_chronology)["total"] == 1
+            project_overview = await session.call_tool(
+                "blockwart.list_projects",
+                {"project_status": "planned", "include_total": True},
+            )
+            assert any(
+                item["id"] == "package-smoke-project"
+                for item in _tool_payload(project_overview)["items"]
+            )
             comment_created = await session.call_tool(
                 "blockwart.add_comment",
                 {
@@ -635,7 +683,7 @@ def main() -> None:
         token=api_token,
     )["objects"][0]
 
-    assert readiness["revision"] == "20260818_0017"
+    assert readiness["revision"] == "20260818_0018"
     assert "Blockwart" in index
     assert static_content_type == "text/css"
     assert not any(
@@ -662,7 +710,7 @@ def main() -> None:
     print(
         "installed_package=ok "
         f"cwd={Path.cwd()} revision={readiness['revision']} "
-        f"openapi_paths={len(openapi['paths'])} mcp_protocol={protocol} mcp_calls=32 "
+        f"openapi_paths={len(openapi['paths'])} mcp_protocol={protocol} mcp_calls=36 "
         "mcp_contract=compatible"
     )
 

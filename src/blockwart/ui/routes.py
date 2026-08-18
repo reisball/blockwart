@@ -30,7 +30,7 @@ from blockwart.domain.object_schema import (
     is_safe_external_http_url,
 )
 from blockwart.domain.placement import CANONICAL_PLACEMENT_RELATION_TYPE, PlacementError
-from blockwart.domain.projects import project_category_fields
+from blockwart.domain.projects import ProjectCategory, ProjectStatus, project_category_fields
 from blockwart.domain.relationships import (
     LINK_KINDS,
     NETWORK_DEVICE_CATEGORIES,
@@ -87,6 +87,11 @@ from blockwart.services.grant_management import (
     update_managed_grant,
 )
 from blockwart.services.pagination import InvalidCursor
+from blockwart.services.project_chronology import (
+    add_project_chronology_entry,
+    query_project_chronology_page,
+    query_project_overview_page,
+)
 from blockwart.services.queries import (
     CatalogBrowseReadModel,
     RelatedRelationshipReadModel,
@@ -104,6 +109,7 @@ from blockwart.ui.project_forms import (
     PROJECT_CATEGORY_OPTIONS,
     PROJECT_EVIDENCE_GRADE_OPTIONS,
     PROJECT_MANAGED_BY_KIND_OPTIONS,
+    PROJECT_REFERENCE_KIND_OPTIONS,
     PROJECT_REFERENCE_LIST_FIELDS,
     PROJECT_SOURCE_TYPE_OPTIONS,
     PROJECT_STATUS_OPTIONS,
@@ -112,6 +118,7 @@ from blockwart.ui.project_forms import (
     PROJECT_TIMELINE_TYPE_OPTIONS,
     ProjectForm,
     apply_project_form_data,
+    apply_project_workspace_form_data,
     blank_project_rows,
     canonical_project_rows,
     project_form_values,
@@ -464,6 +471,7 @@ def _index_template_context(
         "project_categories": PROJECT_CATEGORY_OPTIONS,
         "project_statuses": PROJECT_STATUS_OPTIONS,
         "project_source_types": PROJECT_SOURCE_TYPE_OPTIONS,
+        "project_reference_kinds": PROJECT_REFERENCE_KIND_OPTIONS,
         "project_evidence_grades": PROJECT_EVIDENCE_GRADE_OPTIONS,
         "project_owner_kinds": PROJECT_MANAGED_BY_KIND_OPTIONS,
         "project_timeline_types": PROJECT_TIMELINE_TYPE_OPTIONS,
@@ -784,6 +792,293 @@ def index(
     )
 
 
+@router.get("/projects", response_class=HTMLResponse)
+def project_overview(
+    request: Request,
+    session: Annotated[Session, Depends(get_session)],
+    project_category: ProjectCategory | None = None,
+    project_status: ProjectStatus | None = None,
+    cursor: str | None = None,
+):
+    access = read_access_from_request(request)
+    try:
+        page = query_project_overview_page(
+            session,
+            access,
+            project_category=project_category,
+            project_status=project_status,
+            limit=100,
+            cursor=cursor,
+            sort="last_activity",
+            direction="desc",
+            include_total=False,
+        )
+    except InvalidCursor as exc:
+        raise HTTPException(status_code=400, detail="Invalid pagination cursor") from exc
+    params = {
+        "project_category": project_category,
+        "project_status": project_status,
+        "cursor": page.next_cursor,
+    }
+    next_url = (
+        f"/projects?{urlencode({key: value for key, value in params.items() if value})}"
+        if page.next_cursor
+        else None
+    )
+    i18n = translation_context(request)
+    return templates.TemplateResponse(
+        request,
+        "projects.html",
+        context={
+            "title": i18n["t"]("project.workspace.overview_title"),
+            "projects": page.items,
+            "selected_category": project_category or "",
+            "selected_status": project_status or "",
+            "project_categories": PROJECT_CATEGORY_OPTIONS,
+            "project_statuses": PROJECT_STATUS_OPTIONS,
+            "next_url": next_url,
+            "can_create_root": access.principal.is_catalog_owner,
+            **i18n,
+        },
+    )
+
+
+def _project_workspace_response(
+    request: Request,
+    session: Session,
+    object_id: str,
+    *,
+    error: str | None = None,
+    edit: bool = False,
+    submitted_form: ProjectForm | None = None,
+    status_code: int = 200,
+) -> HTMLResponse:
+    access = read_access_from_request(request)
+    read_model = query_catalog_detail(session, object_id, access)
+    if read_model is None or read_model.catalog_object.kind != PROJECT_KIND:
+        raise HTTPException(status_code=404, detail="Catalog object not found")
+    project = read_model.catalog_object
+    i18n = translation_context(request)
+    if project.visibility == "stub":
+        context = {
+            "title": f"{project.label} - Blockwart",
+            "object": project,
+            "is_stub": True,
+            "can_write": False,
+            "error": None,
+            **i18n,
+        }
+    else:
+        can_write = Permission.WRITE in project.capabilities
+        chronology_page = query_project_chronology_page(
+            session,
+            access,
+            object_id=object_id,
+            limit=100,
+            cursor=None,
+            include_total=False,
+        )
+        chronology = [] if chronology_page is None else [
+            {
+                **entry.model_dump(),
+                "rendered_html": render_comment_source(entry.body, entry.format),
+            }
+            for entry in chronology_page.items
+        ]
+        detail = _project_detail_data(project.data, read_model.object_map)
+        form_values = project_form_values(project.data)
+        source_rows = canonical_project_rows(project.data, "sources") or blank_project_rows(
+            "sources"
+        )
+        if submitted_form is not None:
+            form_values.update(safe_project_form_values(submitted_form))
+            source_rows = safe_project_form_rows(submitted_form, "sources") or source_rows
+        context = {
+            "title": f"{project.label} - Blockwart",
+            "object": project,
+            "is_stub": False,
+            "can_write": can_write,
+            "edit": edit and can_write,
+            "error": error,
+            "project": detail,
+            "project_form": form_values,
+            "source_rows": source_rows,
+            "project_source_types": PROJECT_SOURCE_TYPE_OPTIONS,
+            "project_reference_kinds": PROJECT_REFERENCE_KIND_OPTIONS,
+            "chronology": chronology,
+            "chronology_kinds": (
+                "intent",
+                "implementation",
+                "result",
+                "decision",
+                "milestone",
+                "blocker",
+                "note",
+            ),
+            "object_etag": revision_etag(project.revision),
+            "chronology_idempotency_key": f"ui-project-chronology-{uuid4().hex}",
+            "csrf_token": request.cookies.get(AUTH_CSRF_COOKIE_NAME, ""),
+            **i18n,
+        }
+    response = templates.TemplateResponse(
+        request,
+        "project_workspace.html",
+        context=context,
+        status_code=status_code,
+    )
+    if project.visibility == "detail":
+        response.headers["ETag"] = revision_etag(project.revision)
+    return response
+
+
+@router.get("/projects/{object_id}", response_class=HTMLResponse)
+def project_workspace(
+    request: Request,
+    object_id: str,
+    session: Annotated[Session, Depends(get_session)],
+    edit: bool = False,
+):
+    return _project_workspace_response(
+        request,
+        session,
+        object_id,
+        edit=edit,
+    )
+
+
+@router.post(
+    "/projects/{object_id}/work",
+    response_class=HTMLResponse,
+    dependencies=[Depends(require_browser_write_csrf)],
+)
+def update_project_workspace(
+    request: Request,
+    object_id: str,
+    session: Annotated[Session, Depends(get_session)],
+    project_form: Annotated[ProjectForm, Depends()],
+    if_match: Annotated[str, Form()] = "",
+):
+    access = read_access_from_request(request)
+    context = ui_write_context(request, access)
+    execute_ui_command(
+        session,
+        context,
+        lambda: authorize_object_command(
+            session,
+            context,
+            object_id=object_id,
+            permission=Permission.WRITE,
+        ),
+    )
+    try:
+        existing = get_object(session, object_id)
+        if existing is None or existing.kind != PROJECT_KIND:
+            raise HTTPException(status_code=404, detail="Catalog object not found")
+        data = _editable_data_copy(existing.data)
+        apply_project_workspace_form_data(
+            data,
+            project_form,
+            concealed_references=_concealed_project_references(data, access),
+            preserve_legacy_sources=project_has_legacy_rows(data, "sources"),
+        )
+        _reject_secret_shaped_form_data(data)
+        payload = CatalogObjectIn(
+            id=object_id,
+            kind=PROJECT_KIND,
+            label=existing.label,
+            status=existing.status,
+            summary=existing.summary,
+            data=data,
+        )
+        execute_ui_command(
+            session,
+            context,
+            lambda: update_catalog_object(
+                session,
+                context,
+                object_id=object_id,
+                payload=payload,
+                expected_revision=_ui_expected_revision(
+                    request,
+                    if_match,
+                    existing.revision,
+                ),
+            ),
+        )
+    except (HTTPException, ValidationError, ValueError) as exc:
+        return _project_workspace_response(
+            request,
+            session,
+            object_id,
+            error=(
+                str(exc.detail)
+                if isinstance(exc, HTTPException)
+                else _project_form_error(request, exc)
+            ),
+            edit=True,
+            submitted_form=project_form,
+            status_code=400,
+        )
+    return RedirectResponse(f"/projects/{object_id}", status_code=303)
+
+
+@router.post(
+    "/projects/{object_id}/chronology",
+    response_class=HTMLResponse,
+    dependencies=[Depends(require_browser_write_csrf)],
+)
+def append_project_chronology_from_ui(
+    request: Request,
+    object_id: str,
+    session: Annotated[Session, Depends(get_session)],
+    chronology_kind: Annotated[str, Form(max_length=24)],
+    body: Annotated[str, Form(max_length=4000)],
+    idempotency_key: Annotated[str, Form(max_length=128)],
+):
+    if chronology_kind not in {
+        "intent",
+        "implementation",
+        "result",
+        "decision",
+        "milestone",
+        "blocker",
+        "note",
+    }:
+        return _project_workspace_response(
+            request,
+            session,
+            object_id,
+            error="Invalid Project chronology kind",
+            status_code=400,
+        )
+    access = read_access_from_request(request)
+    context = ui_write_context(request, access)
+    settings = request.app.state.settings
+    try:
+        execute_ui_command(
+            session,
+            context,
+            lambda: add_project_chronology_entry(
+                session,
+                context,
+                object_id=object_id,
+                kind=chronology_kind,
+                body=body,
+                idempotency_key=idempotency_key,
+                idempotency_ttl_seconds=settings.idempotency_ttl_seconds,
+            ),
+        )
+    except (HTTPException, ValueError) as exc:
+        return _project_workspace_response(
+            request,
+            session,
+            object_id,
+            error=_safe_error_message(exc),
+            status_code=400,
+        )
+    return RedirectResponse(f"/projects/{object_id}#chronology", status_code=303)
+
+
 @router.get("/settings/schema", response_class=HTMLResponse)
 def schema_settings(
     request: Request,
@@ -1072,6 +1367,7 @@ def _detail_template_context(
         "project_categories": PROJECT_CATEGORY_OPTIONS,
         "project_statuses": PROJECT_STATUS_OPTIONS,
         "project_source_types": PROJECT_SOURCE_TYPE_OPTIONS,
+        "project_reference_kinds": PROJECT_REFERENCE_KIND_OPTIONS,
         "project_evidence_grades": PROJECT_EVIDENCE_GRADE_OPTIONS,
         "project_owner_kinds": PROJECT_MANAGED_BY_KIND_OPTIONS,
         "project_timeline_types": PROJECT_TIMELINE_TYPE_OPTIONS,

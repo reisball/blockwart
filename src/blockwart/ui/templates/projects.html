@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="{{ locale }}">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>{{ title }}</title>
+    <link rel="stylesheet" href="/static/app.css" />
+  </head>
+  <body>
+    <main class="page stack">
+      <header class="integrated-detail-heading">
+        <a class="detail-back-button" href="/">← {{ t("project.workspace.catalog") }}</a>
+        <div>
+          <p class="eyebrow">{{ t("project.workspace.eyebrow") }}</p>
+          <h1>{{ t("project.workspace.overview_title") }}</h1>
+          <span>{{ t("project.workspace.overview_help") }}</span>
+        </div>
+        {% if can_create_root %}
+          <a class="button" href="/?kind=project&create_root=1">{{ t("project.workspace.create") }}</a>
+        {% endif %}
+      </header>
+
+      <section class="panel">
+        <form class="form-grid" method="get" action="/projects">
+          <div class="project-filter-grid">
+            <label>{{ t("project.field.category.label") }}
+              <select name="project_category">
+                <option value="">{{ t("project.workspace.all_categories") }}</option>
+                {% for option in project_categories %}<option value="{{ option }}"{% if selected_category == option %} selected{% endif %}>{{ t("project.category." ~ option) }}</option>{% endfor %}
+              </select>
+            </label>
+            <label>{{ t("project.field.project_status.label") }}
+              <select name="project_status">
+                <option value="">{{ t("project.workspace.all_statuses") }}</option>
+                {% for option in project_statuses %}<option value="{{ option }}"{% if selected_status == option %} selected{% endif %}>{{ t("project.status." ~ option) }}</option>{% endfor %}
+              </select>
+            </label>
+          </div>
+          <div class="button-row"><button type="submit">{{ t("project.workspace.filter") }}</button><a class="button button-muted" href="/projects">{{ t("project.workspace.clear") }}</a></div>
+        </form>
+      </section>
+
+      <section class="panel">
+        {% if projects %}
+          <div class="table-wrap"><table class="table project-overview-table">
+            <thead><tr><th>{{ t("project.workspace.project") }}</th><th>{{ t("project.field.project_status.label") }}</th><th>{{ t("project.field.category.label") }}</th><th>{{ t("project.field.current_summary.label") }}</th><th>{{ t("project.workspace.next_action") }}</th><th>{{ t("project.workspace.last_activity") }}</th></tr></thead>
+            <tbody>
+              {% for project in projects %}
+                <tr>
+                  <td><a href="/projects/{{ project.id }}"><strong>{{ project.label }}</strong></a><br /><code>{{ project.ref }}</code></td>
+                  <td><span class="badge">{{ t("project.status." ~ project.project_status) if project.project_status else t("asset.no_value") }}</span></td>
+                  <td>{{ t("project.category." ~ project.category) if project.category else t("asset.no_value") }}</td>
+                  <td class="preserve-lines">{{ project.current_summary or t("asset.no_value") }}</td>
+                  <td>{{ project.next_action or t("asset.no_value") }}</td>
+                  <td>{% if project.last_professional_activity %}<span class="badge chronology-{{ project.last_professional_activity.kind }}">{{ t("project.chronology.kind." ~ project.last_professional_activity.kind) }}</span><br /><time>{{ project.last_professional_activity.created_at }}</time>{% else %}{{ t("project.workspace.no_activity") }}{% endif %}</td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table></div>
+        {% else %}
+          <p class="meta">{{ t("project.workspace.empty") }}</p>
+        {% endif %}
+        {% if next_url %}<div class="button-row"><a class="button button-muted" href="{{ next_url }}">{{ t("project.workspace.next_page") }}</a></div>{% endif %}
+      </section>
+    </main>
+  </body>
+</html>

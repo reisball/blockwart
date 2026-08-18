@@ -32,6 +32,13 @@ from blockwart.schemas.comments import (
     CommentPageOut,
 )
 from blockwart.schemas.errors import ApiErrorResponse
+from blockwart.schemas.projects import (
+    ProjectChronologyCommandOut,
+    ProjectChronologyCreateIn,
+    ProjectChronologyPageOut,
+    ProjectOverviewPageOut,
+    ProjectOverviewSort,
+)
 from blockwart.schemas.v1 import (
     MAX_BATCH_RESPONSE_BYTES,
     CoverageScopeValue,
@@ -89,6 +96,11 @@ from blockwart.services.grant_management import (
     update_managed_grant,
 )
 from blockwart.services.pagination import InvalidCursor
+from blockwart.services.project_chronology import (
+    add_project_chronology_entry,
+    query_project_chronology_page,
+    query_project_overview_page,
+)
 from blockwart.services.read_access import ReadAccess
 from blockwart.services.source_coverage import (
     CoverageAuthorityDenied,
@@ -309,6 +321,48 @@ def list_v1_objects(
     )
 
 
+@router.get(
+    "/projects",
+    response_model=ProjectOverviewPageOut,
+    summary="Read the authorized focused Project overview",
+)
+def list_v1_projects(
+    session: Annotated[Session, Depends(get_session)],
+    access: Annotated[ReadAccess, Depends(require_api_read_access)],
+    project_category: ProjectCategory | None = None,
+    project_status: ProjectStatus | None = None,
+    limit: PageLimit = 50,
+    cursor: CursorParameter = None,
+    sort: ProjectOverviewSort = "last_activity",
+    direction: SortDirection = "desc",
+    include_total: Annotated[
+        bool,
+        Query(description="Compute the authorized filtered Project count"),
+    ] = False,
+) -> ProjectOverviewPageOut:
+    try:
+        page = query_project_overview_page(
+            session,
+            access,
+            project_category=project_category,
+            project_status=project_status,
+            limit=limit,
+            cursor=cursor,
+            sort=sort,
+            direction=direction,
+            include_total=include_total,
+        )
+    except InvalidCursor as exc:
+        raise _invalid_cursor() from exc
+    return ProjectOverviewPageOut(
+        items=page.items,
+        next_cursor=page.next_cursor,
+        total=page.total,
+        sort=sort,
+        direction=direction,
+    )
+
+
 @router.get("/context", response_model=V1ContextPageOut)
 def get_v1_context(
     session: Annotated[Session, Depends(get_session)],
@@ -519,6 +573,85 @@ def create_v1_object_comment(
         response.status_code = 200
     return CommentCommandOut(
         comment=result.comment,
+        revision=result.revision,
+        etag=result.etag,
+        replayed=result.replayed,
+    )
+
+
+@router.get(
+    "/projects/{object_id}/chronology",
+    response_model=ProjectChronologyPageOut,
+    summary="Read one authorized Project professional chronology",
+)
+def list_v1_project_chronology(
+    object_id: str,
+    session: Annotated[Session, Depends(get_session)],
+    access: Annotated[ReadAccess, Depends(require_api_read_access)],
+    limit: Annotated[int, Query(ge=1, le=100)] = 20,
+    cursor: CursorParameter = None,
+    include_total: bool = False,
+) -> ProjectChronologyPageOut:
+    try:
+        page = query_project_chronology_page(
+            session,
+            access,
+            object_id=object_id,
+            limit=limit,
+            cursor=cursor,
+            include_total=include_total,
+        )
+    except InvalidCursor as exc:
+        raise _invalid_cursor() from exc
+    if page is None:
+        raise HTTPException(status_code=404, detail="Catalog object not found")
+    return ProjectChronologyPageOut(
+        items=page.items,
+        next_cursor=page.next_cursor,
+        total=page.total,
+    )
+
+
+@router.post(
+    "/projects/{object_id}/chronology",
+    response_model=ProjectChronologyCommandOut,
+    status_code=201,
+    summary="Append one curated Project chronology entry",
+)
+def create_v1_project_chronology(
+    object_id: str,
+    payload: ProjectChronologyCreateIn,
+    request: Request,
+    response: Response,
+    session: Annotated[Session, Depends(get_session)],
+    access: Annotated[ReadAccess, Depends(require_api_read_access)],
+    idempotency_key: Annotated[str | None, Header(alias="Idempotency-Key")] = None,
+) -> ProjectChronologyCommandOut:
+    if idempotency_key is None:
+        raise HTTPException(status_code=400, detail="Idempotency-Key is required")
+    context = api_write_context(request, access)
+    settings: Settings = request.app.state.settings
+    result = execute_api_command(
+        session,
+        context,
+        lambda: add_project_chronology_entry(
+            session,
+            context,
+            object_id=object_id,
+            kind=payload.kind,
+            body=payload.body,
+            idempotency_key=idempotency_key,
+            idempotency_ttl_seconds=settings.idempotency_ttl_seconds,
+        ),
+    )
+    response.headers["ETag"] = result.etag
+    response.headers["Location"] = (
+        f"/projects/{object_id}#chronology-{result.entry.id}"
+    )
+    if result.replayed:
+        response.status_code = 200
+    return ProjectChronologyCommandOut(
+        entry=result.entry,
         revision=result.revision,
         etag=result.etag,
         replayed=result.replayed,

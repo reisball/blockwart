@@ -210,6 +210,7 @@ def add_object_comment(
     body: str,
     idempotency_key: str,
     idempotency_ttl_seconds: int,
+    project_chronology_kind: str | None = None,
 ) -> CommentCommandResult:
     catalog_object = session.get(CatalogObject, object_id)
     visibility = context.policy.visibility_for(object_id)
@@ -227,22 +228,31 @@ def add_object_comment(
         raise CommandConflict(f"comment body must contain at most {MAX_COMMENT_LENGTH} characters")
     if find_secret_violations(body, path="comment"):
         raise CommandConflict("comment body contains secret-like content")
+    if project_chronology_kind is not None and catalog_object.kind != "project":
+        raise CommandConflict("project chronology entries require a Project")
 
     now = datetime.now(UTC).replace(tzinfo=None)
     instance_key = catalog_object.instance_id
+    request_payload = {
+        "body": body,
+        "format": "markdown",
+        "object_id": object_id,
+        "object_instance_id": catalog_object.instance_id,
+        "object_created_at": format_rfc3339_utc(catalog_object.created_at),
+        "origin": context.channel,
+    }
+    if project_chronology_kind is not None:
+        request_payload["project_chronology_kind"] = project_chronology_kind
     record, replay = reserve_idempotency_record(
         session,
         context,
         key=idempotency_key,
-        operation_context=f"object_comment_create:{object_id}:{instance_key}",
-        request_payload={
-            "body": body,
-            "format": "markdown",
-            "object_id": object_id,
-            "object_instance_id": catalog_object.instance_id,
-            "object_created_at": format_rfc3339_utc(catalog_object.created_at),
-            "origin": context.channel,
-        },
+        operation_context=(
+            f"project_chronology_create:{object_id}:{instance_key}"
+            if project_chronology_kind is not None
+            else f"object_comment_create:{object_id}:{instance_key}"
+        ),
+        request_payload=request_payload,
         ttl_seconds=idempotency_ttl_seconds,
         now=now,
     )
@@ -278,6 +288,7 @@ def add_object_comment(
         author_principal_type=context.principal.principal_type,
         origin=context.channel,
         format="markdown",
+        project_chronology_kind=project_chronology_kind,
         body=body,
         created_at=now,
     )
@@ -285,18 +296,21 @@ def add_object_comment(
     session.flush()
     revision = _bump_comment_revision(session, catalog_object)
     etag = revision_etag(revision)
+    audit_details: dict[str, object] = {
+        "comment_id": row.id,
+        "principal_id": context.principal.id,
+        "channel": context.channel,
+        "request_id": context.request_id,
+        "new_revision": revision,
+    }
+    if project_chronology_kind is not None:
+        audit_details["project_chronology_kind"] = project_chronology_kind
     add_audit_event(
         session,
         object_id=catalog_object.id,
         action="comment_create",
         actor=context.principal.id,
-        details={
-            "comment_id": row.id,
-            "principal_id": context.principal.id,
-            "channel": context.channel,
-            "request_id": context.request_id,
-            "new_revision": revision,
-        },
+        details=audit_details,
     )
     record.resource_id = row.id
     record.response_json = json.dumps(

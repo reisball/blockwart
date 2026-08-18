@@ -157,6 +157,11 @@ class ObjectComment(Base):
             name="ck_object_comments_format",
         ),
         CheckConstraint(
+            "project_chronology_kind IS NULL OR project_chronology_kind IN "
+            "('intent','implementation','result','decision','milestone','blocker','note')",
+            name="ck_object_comments_project_chronology_kind",
+        ),
+        CheckConstraint(
             "origin = 'legacy' OR length(body) > 0",
             name="ck_object_comments_body_nonempty",
         ),
@@ -193,6 +198,10 @@ class ObjectComment(Base):
     author_principal_type: Mapped[str | None] = mapped_column(String(32), nullable=True)
     origin: Mapped[str] = mapped_column(String(16), nullable=False)
     format: Mapped[str] = mapped_column(String(16), nullable=False)
+    project_chronology_kind: Mapped[str | None] = mapped_column(
+        String(24),
+        nullable=True,
+    )
     body: Mapped[str] = mapped_column(Text, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
 

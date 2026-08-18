@@ -197,6 +197,15 @@ PROJECT_STATUS_VALUES = (
 PROJECT_STATUSES = frozenset(PROJECT_STATUS_VALUES)
 PROJECT_EVIDENCE_GRADE_VALUES = ("source_backed", "observed", "inferred")
 PROJECT_EVIDENCE_GRADES = frozenset(PROJECT_EVIDENCE_GRADE_VALUES)
+PROJECT_EXTERNAL_REFERENCE_KIND_VALUES = (
+    "document",
+    "repository",
+    "issue",
+    "pull_request",
+    "commit",
+    "deployment",
+)
+PROJECT_EXTERNAL_REFERENCE_KINDS = frozenset(PROJECT_EXTERNAL_REFERENCE_KIND_VALUES)
 # `principal` names a Blockwart principal id as provenance only. Resolving it is
 # deliberately not attempted, so it can neither confer nor prove access.
 PROJECT_MANAGED_BY_KIND_VALUES = ("principal", "person", "team")
@@ -875,6 +884,7 @@ def _source_entries(
     max_items: int,
     identified: bool = False,
     retrieval_metadata: bool = False,
+    reference_kinds: frozenset[str] = frozenset(),
 ) -> tuple[FieldSpec, ...]:
     """Declare one safe structured external-source array.
 
@@ -937,6 +947,15 @@ def _source_entries(
                     max_length=200,
                 ),
                 _field(f"{path}[].retrieved_at", "datetime"),
+            )
+        )
+    if reference_kinds:
+        keys.add("reference_kind")
+        fields.append(
+            _field(
+                f"{path}[].reference_kind",
+                "enum",
+                enum_values=reference_kinds,
             )
         )
     return (
@@ -1525,9 +1544,11 @@ PROJECT_COMMON_FIELDS = (
         max_items=50,
         identified=True,
         retrieval_metadata=True,
+        reference_kinds=PROJECT_EXTERNAL_REFERENCE_KINDS,
     ),
     _field("current_summary", "text", strip_whitespace=True, max_length=4000),
     *_text_list("open_questions"),
+    *_text_list("blockers"),
     *_text_list("recommendations"),
     *_text_list("next_actions"),
 )

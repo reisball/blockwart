@@ -42,7 +42,8 @@ OBJECT_COMMENTS_REVISION = "20260804_0014"
 CATALOG_OWNER_REVISION = "20260806_0015"
 SOURCE_COVERAGE_REVISION = "20260811_0016"
 SERVICE_MONITORING_REVISION = "20260818_0017"
-HEAD_REVISION = SERVICE_MONITORING_REVISION
+PROJECT_CHRONOLOGY_REVISION = "20260818_0018"
+HEAD_REVISION = PROJECT_CHRONOLOGY_REVISION
 PROJECT_ALEMBIC_CONFIG = Path(__file__).resolve().parents[1] / "alembic.ini"
 LEGACY_SNAPSHOT = Path(__file__).resolve().parent / "fixtures" / "legacy_snapshot.sql"
 
@@ -302,6 +303,12 @@ def test_device_foundation_rebuilds_preserve_rows_hashes_constraints_and_restore
 
     connection = sqlite3.connect(database_path)
     try:
+        connection.execute(
+            "INSERT INTO principals "
+            "(id, principal_type, login, display_name, active, revision) "
+            "VALUES ('chronology-author', 'service_account', 'chronology.author', "
+            "'Chronology Author', 1, 1)"
+        )
         connection.execute(
             "INSERT INTO principals "
             "(id, principal_type, login, display_name, active, platform_role, revision) "
@@ -2204,6 +2211,96 @@ def test_object_comment_downgrade_is_allowed_only_while_timeline_is_empty(
     command.upgrade(config, HEAD_REVISION)
     command.downgrade(config, DEVICE_FOUNDATION_REVISION)
     assert _revision(database_url) == DEVICE_FOUNDATION_REVISION
+
+
+def test_project_chronology_migration_preserves_rows_and_append_only_guards(
+    tmp_path: Path,
+) -> None:
+    database_path = tmp_path / "project-chronology.sqlite3"
+    database_url = _database_url(database_path)
+    config = build_alembic_config(database_url)
+    command.upgrade(config, SERVICE_MONITORING_REVISION)
+    connection = sqlite3.connect(database_path)
+    try:
+        connection.execute(
+            "INSERT INTO catalog_objects "
+            "(id, kind, label, status, lifecycle, health, data_json, provenance_json) "
+            "VALUES ('legacy-project', 'project', 'Legacy Project', 'active', "
+            "NULL, NULL, '{\"schema_version\":1}', '{}')"
+        )
+        connection.execute(
+            "INSERT INTO catalog_objects "
+            "(id, kind, label, status, lifecycle, health, data_json, provenance_json) "
+            "VALUES ('legacy-system', 'system', 'Legacy System', 'active', "
+            "'active', 'unknown', '{}', '{}')"
+        )
+        for object_id, body in (
+            ("legacy-project", "Project text remains exact."),
+            ("legacy-system", "System text remains exact."),
+        ):
+            connection.execute(
+                "INSERT INTO object_comments "
+                "(id, object_id, object_instance_id, object_created_at, origin, "
+                "format, body, created_at) "
+                "SELECT ?, id, instance_id, created_at, 'legacy', 'plain_text', ?, "
+                "'2026-08-17 12:00:00' FROM catalog_objects WHERE id=?",
+                (f"comment-{object_id}", body, object_id),
+            )
+        connection.commit()
+    finally:
+        connection.close()
+
+    command.upgrade(config, PROJECT_CHRONOLOGY_REVISION)
+    connection = sqlite3.connect(database_path)
+    try:
+        assert connection.execute(
+            "SELECT object_id, body, project_chronology_kind FROM object_comments "
+            "ORDER BY object_id"
+        ).fetchall() == [
+            ("legacy-project", "Project text remains exact.", None),
+            ("legacy-system", "System text remains exact.", None),
+        ]
+        with pytest.raises(sqlite3.IntegrityError):
+            connection.execute(
+                "UPDATE object_comments SET project_chronology_kind='note' "
+                "WHERE object_id='legacy-project'"
+            )
+        with pytest.raises(sqlite3.IntegrityError):
+            connection.execute(
+                "DELETE FROM object_comments WHERE object_id='legacy-system'"
+            )
+        with pytest.raises(sqlite3.IntegrityError):
+            connection.execute(
+                "INSERT INTO object_comments "
+                "(id, object_id, object_instance_id, object_created_at, origin, "
+                "format, body, created_at, project_chronology_kind, "
+                "author_principal_id, author_login, author_display_name, "
+                "author_principal_type) "
+                "SELECT 'invalid-kind', id, instance_id, created_at, 'api', "
+                "'markdown', 'Invalid', CURRENT_TIMESTAMP, 'progress', "
+                "'chronology-author', 'chronology.author', 'Chronology Author', "
+                "'service_account' "
+                "FROM catalog_objects WHERE id='legacy-project'"
+            )
+        connection.execute(
+            "INSERT INTO object_comments "
+            "(id, object_id, object_instance_id, object_created_at, origin, "
+            "format, body, created_at, project_chronology_kind, "
+            "author_principal_id, author_login, author_display_name, "
+            "author_principal_type) "
+            "SELECT 'typed-result', id, instance_id, created_at, 'api', "
+            "'markdown', 'Reviewed result.', CURRENT_TIMESTAMP, 'result', "
+            "'chronology-author', 'chronology.author', 'Chronology Author', "
+            "'service_account' "
+            "FROM catalog_objects WHERE id='legacy-project'"
+        )
+        connection.commit()
+    finally:
+        connection.close()
+
+    with pytest.raises(RuntimeError, match="paired pre-migration backup"):
+        command.downgrade(config, SERVICE_MONITORING_REVISION)
+    assert _revision(database_url) == PROJECT_CHRONOLOGY_REVISION
 
 
 def test_catalog_owner_migration_is_additive_and_guards_the_last_active_owner(

@@ -164,7 +164,11 @@ def test_project_source_contract_extends_decision_sources_without_weakening_them
             "author",
             "publisher",
             "retrieved_at",
+            "reference_kind",
         }
+    )
+    assert project_fields["sources[].reference_kind"].enum_values == frozenset(
+        {"document", "repository", "issue", "pull_request", "commit", "deployment"}
     )
     assert set(PROJECT_SOURCE_TYPE_VALUES) == set(
         decision_fields["docs[].source_type"].enum_values

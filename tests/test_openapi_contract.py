@@ -32,6 +32,8 @@ EXPECTED_OPERATIONS = {
     "/api/v1/objects/{parent_id}/children": {"post"},
     "/api/v1/objects/{object_id}": {"get", "put", "delete"},
     "/api/v1/objects/{object_id}/comments": {"get", "post"},
+    "/api/v1/projects": {"get"},
+    "/api/v1/projects/{object_id}/chronology": {"get", "post"},
     "/api/v1/objects/{object_id}/access": {"get"},
     "/api/v1/objects/{object_id}/access/grants": {"post"},
     "/api/v1/objects/{object_id}/access/grants/{grant_id}": {"put", "delete"},

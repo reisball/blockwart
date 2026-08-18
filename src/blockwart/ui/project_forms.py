@@ -19,6 +19,7 @@ from pydantic import ValidationError
 from blockwart.domain.object_schema import (
     PROJECT_CATEGORY_VALUES,
     PROJECT_EVIDENCE_GRADE_VALUES,
+    PROJECT_EXTERNAL_REFERENCE_KIND_VALUES,
     PROJECT_MANAGED_BY_KIND_VALUES,
     PROJECT_STATUS_VALUES,
     PROJECT_TIMELINE_REFERENCE_TYPE_VALUES,
@@ -54,6 +55,7 @@ PROJECT_TEXT_LIST_FIELDS = (
     "in_scope",
     "out_of_scope",
     "open_questions",
+    "blockers",
     "recommendations",
     "next_actions",
     "lessons_learned",
@@ -88,6 +90,7 @@ PROJECT_GROUP_FIELDS: Mapping[str, tuple[str, ...]] = {
 PROJECT_SOURCE_COLUMNS = (
     "id",
     "source_type",
+    "reference_kind",
     "title",
     "url",
     "author",
@@ -115,6 +118,7 @@ FINDING_LIST_COLUMNS = frozenset({"source_ids"})
 PROJECT_CATEGORY_OPTIONS = PROJECT_CATEGORY_VALUES
 PROJECT_STATUS_OPTIONS = PROJECT_STATUS_VALUES
 PROJECT_SOURCE_TYPE_OPTIONS = tuple(sorted(SOURCE_TYPE_VALUES))
+PROJECT_REFERENCE_KIND_OPTIONS = PROJECT_EXTERNAL_REFERENCE_KIND_VALUES
 PROJECT_EVIDENCE_GRADE_OPTIONS = PROJECT_EVIDENCE_GRADE_VALUES
 PROJECT_MANAGED_BY_KIND_OPTIONS = PROJECT_MANAGED_BY_KIND_VALUES
 PROJECT_TIMELINE_TYPE_OPTIONS = PROJECT_TIMELINE_REFERENCE_TYPE_VALUES
@@ -152,6 +156,7 @@ class ProjectForm:
         in_scope: _OPTIONAL_TEXT = None,
         out_of_scope: _OPTIONAL_TEXT = None,
         open_questions: _OPTIONAL_TEXT = None,
+        blockers: _OPTIONAL_TEXT = None,
         recommendations: _OPTIONAL_TEXT = None,
         next_actions: _OPTIONAL_TEXT = None,
         lessons_learned: _OPTIONAL_TEXT = None,
@@ -178,6 +183,7 @@ class ProjectForm:
         timeline_reference_note: _OPTIONAL_TEXT = None,
         source_id: _OPTIONAL_ROWS = None,
         source_source_type: _OPTIONAL_ROWS = None,
+        source_reference_kind: _OPTIONAL_ROWS = None,
         source_title: _OPTIONAL_ROWS = None,
         source_url: _OPTIONAL_ROWS = None,
         source_author: _OPTIONAL_ROWS = None,
@@ -305,6 +311,62 @@ def apply_project_form_data(
         elif table != "sources" or not preserve_legacy_sources:
             data.pop(table, None)
     _drop_foreign_category_fields(data, form.category)
+
+
+def apply_project_workspace_form_data(
+    data: dict[str, Any],
+    form: ProjectForm,
+    *,
+    concealed_references: Mapping[str, list[str]] | None = None,
+    preserve_legacy_sources: bool = False,
+) -> None:
+    """Patch only the focused work-state fields shown by the Project workspace.
+
+    Category-specific reviewed results and every unknown compatible extension
+    remain untouched. Concealed typed references are retained because a reader
+    cannot safely confirm or remove a target they cannot discover.
+    """
+    data["schema_version"] = 1
+    for field_name in ("objective", "current_summary"):
+        _assign(data, field_name, str(form.values.get(field_name) or "").strip())
+    for field_name in (
+        "in_scope",
+        "out_of_scope",
+        "open_questions",
+        "blockers",
+        "next_actions",
+        *PROJECT_REFERENCE_LIST_FIELDS,
+    ):
+        items = _deduplicated_lines(form.values.get(field_name))
+        for reference in (concealed_references or {}).get(field_name, []):
+            if reference not in items:
+                items.append(reference)
+        _assign(data, field_name, items)
+
+    sources: list[dict[str, Any]] = []
+    for row in form.tables["sources"]:
+        entry = {
+            column: raw
+            for column in PROJECT_SOURCE_COLUMNS
+            if (raw := str(row.get(column) or "").strip())
+        }
+        if entry:
+            sources.append(entry)
+    if sources:
+        data["sources"] = sources
+    elif not preserve_legacy_sources:
+        data.pop("sources", None)
+
+
+def _deduplicated_lines(value: str | None) -> list[str]:
+    result: list[str] = []
+    seen: set[str] = set()
+    for line in split_form_lines(value):
+        if line in seen:
+            continue
+        seen.add(line)
+        result.append(line)
+    return result
 
 
 def _drop_foreign_category_fields(data: dict[str, Any], category: str) -> None:

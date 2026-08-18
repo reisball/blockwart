@@ -84,7 +84,11 @@ def _agent_api_server():
                         "sort": "id",
                         "direction": "asc",
                     }
-                    if parsed.path in {"/api/v1/objects", "/api/v1/context"}
+                    if parsed.path in {
+                        "/api/v1/objects",
+                        "/api/v1/context",
+                        "/api/v1/projects",
+                    }
                     else item
                 )
                 body = json.dumps(payload).encode()
@@ -258,6 +262,14 @@ def test_mcp_client_completes_handshake_and_calls_every_read_only_tool() -> None
                             "blockwart.list_comments",
                             {"object_id": "host/fabrik", "limit": 3},
                         ),
+                        "blockwart.list_projects": await session.call_tool(
+                            "blockwart.list_projects",
+                            {"project_status": "active", "limit": 3},
+                        ),
+                        "blockwart.list_project_chronology": await session.call_tool(
+                            "blockwart.list_project_chronology",
+                            {"object_id": "project/demo", "limit": 3},
+                        ),
                         "blockwart.list_audit_events": await session.call_tool(
                             "blockwart.list_audit_events",
                             {
@@ -373,8 +385,11 @@ def test_mcp_client_completes_handshake_and_calls_every_read_only_tool() -> None
         "blockwart.get_object_context",
         "blockwart.get_object_contexts",
         "blockwart.list_comments",
+        "blockwart.list_projects",
+        "blockwart.list_project_chronology",
         "blockwart.list_audit_events",
         "blockwart.add_comment",
+        "blockwart.add_project_chronology",
         "blockwart.get_context",
         "blockwart.get_source_coverage",
         "blockwart.create_child",
@@ -403,6 +418,8 @@ def test_mcp_client_completes_handshake_and_calls_every_read_only_tool() -> None
             "blockwart.get_object_context",
             "blockwart.get_object_contexts",
             "blockwart.list_comments",
+            "blockwart.list_projects",
+            "blockwart.list_project_chronology",
             "blockwart.list_audit_events",
             "blockwart.get_context",
             "blockwart.get_source_coverage",
@@ -421,6 +438,7 @@ def test_mcp_client_completes_handshake_and_calls_every_read_only_tool() -> None
             "blockwart.create_child",
             "blockwart.create_root",
             "blockwart.add_comment",
+            "blockwart.add_project_chronology",
             "blockwart.update_object",
             "blockwart.delete_object",
             "blockwart.create_relationship",
@@ -452,6 +470,12 @@ def test_mcp_client_completes_handshake_and_calls_every_read_only_tool() -> None
     assert batch_payload["objects"][0]["visibility"] == "concealed"
     assert result_payloads["blockwart.list_audit_events"]["path"] == (
         "/api/v1/objects/host%2Ffabrik/audit-events"
+    )
+    assert result_payloads["blockwart.list_projects"]["items"][0]["path"] == (
+        "/api/v1/projects"
+    )
+    assert result_payloads["blockwart.list_project_chronology"]["path"] == (
+        "/api/v1/projects/project%2Fdemo/chronology"
     )
     assert result_payloads["blockwart.list_audit_events"]["query"] == {
         "include_total": ["True"],
@@ -523,13 +547,15 @@ def test_mcp_client_completes_handshake_and_calls_every_read_only_tool() -> None
         "GET",
         "GET",
         "POST",
-        *["GET"] * 12,
+        *["GET"] * 14,
     ]
     assert [request["path"] for request in requests] == [
         "/api/v1/objects",
         "/api/v1/objects/host%2Ffabrik",
         "/api/v1/object-contexts",
         "/api/v1/objects/host%2Ffabrik/comments",
+        "/api/v1/projects",
+        "/api/v1/projects/project%2Fdemo/chronology",
         "/api/v1/objects/host%2Ffabrik/audit-events",
         "/api/v1/context",
         "/api/v1/source-coverage",
@@ -1130,8 +1156,11 @@ def test_mcp_tools_publish_explicit_read_write_and_delete_hints() -> None:
         "blockwart.get_object_context",
         "blockwart.get_object_contexts",
         "blockwart.list_comments",
+        "blockwart.list_projects",
+        "blockwart.list_project_chronology",
         "blockwart.list_audit_events",
         "blockwart.add_comment",
+        "blockwart.add_project_chronology",
         "blockwart.get_context",
         "blockwart.get_source_coverage",
         "blockwart.create_child",
@@ -1161,6 +1190,8 @@ def test_mcp_tools_publish_explicit_read_write_and_delete_hints() -> None:
             "blockwart.get_object_context",
             "blockwart.get_object_contexts",
             "blockwart.list_comments",
+            "blockwart.list_projects",
+            "blockwart.list_project_chronology",
             "blockwart.list_audit_events",
             "blockwart.get_context",
             "blockwart.get_source_coverage",
@@ -1179,6 +1210,7 @@ def test_mcp_tools_publish_explicit_read_write_and_delete_hints() -> None:
     assert not tools["blockwart.update_object"]["annotations"]["destructiveHint"]
     assert not tools["blockwart.update_grant"]["annotations"]["destructiveHint"]
     assert not tools["blockwart.add_comment"]["annotations"]["destructiveHint"]
+    assert not tools["blockwart.add_project_chronology"]["annotations"]["destructiveHint"]
 
 
 def test_mcp_descriptions_route_fresh_agent_read_and_create_intents() -> None:

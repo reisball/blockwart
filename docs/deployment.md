@@ -245,6 +245,16 @@ monitoring` plan. Downgrade drops only the two monitoring tables; normal live
 recovery remains the verified pre-upgrade backup plus matching image. See
 [Service monitoring](service-monitoring.md).
 
+Revision `0018` adds the nullable Project chronology kind to the existing
+append-only `object_comments` table. Existing Project and non-Project rows are
+not rewritten; untyped Project comments project as `note` in the application.
+SQLite uses a batch rebuild and recreates the update/delete rejection triggers,
+while PostgreSQL adds the column and seven-value check constraint directly.
+Downgrade refuses when typed chronology exists. Prove a restored candidate by
+checking migration parity, direct update/delete rejection, legacy comment text,
+and the focused Project API before rollout; normal recovery remains the paired
+pre-upgrade backup and image.
+
 For a fresh Markdown import, bind the reviewed mapping directly to both the
 dry-run and apply commands. The importer requires exact coverage of all Network
 rows and rejects missing, unknown, or conflicting evidence before schema or
@@ -305,6 +315,11 @@ downgrade because its two SQLite rebuilds require the matching pre-migration bac
 `0014` likewise refuses downgrade while any comment exists, preventing silent timeline loss. Primary
 recovery remains the matching verified pre-upgrade database plus pinned old image. Never supply a
 retired global-bypass credential to an old image.
+
+Revision `0018` similarly refuses downgrade while any typed Project chronology
+entry exists. Untyped legacy rows can remain object comments across downgrade;
+typed semantic metadata requires the matching pre-upgrade backup rather than a
+lossy rollback.
 
 Downgrading `0016` drops only recorded coverage snapshots and mappings; it does
 not change catalog objects or their `CatalogProvenance.source_ref`. Treat those
