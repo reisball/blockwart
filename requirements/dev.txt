@@ -195,7 +195,7 @@ pip==26.1.2
     # via
     #   blockwart (pyproject.toml)
     #   pip-tools
-setuptools==83.0.0
+setuptools==84.0.0
     # via
     #   blockwart (pyproject.toml)
     #   pip-tools
