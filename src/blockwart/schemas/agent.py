@@ -56,8 +56,8 @@ class AgentServiceMonitoring(BaseModel):
     """
 
     enabled: bool
-    provider: MonitoringProvider
-    interval_seconds: int
+    provider: MonitoringProvider | None
+    interval_seconds: int | None
     interval_overridden: bool
     target: AgentMonitoringTarget | None = None
     diagnostic: MonitoringDiagnostic | None = None

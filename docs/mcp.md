@@ -168,6 +168,9 @@ Discover-only stubs receive no configuration, target, observation, freshness,
 timestamp, or count. Acquisition, force-check, allowlist mutation, and the
 future Gatus receiver are not MCP operations. See
 [Service monitoring](service-monitoring.md).
+A malformed present monitoring document uses the same redacted
+`invalid_monitoring_config` projection as REST and never falls back to a
+provider or interval.
 
 For `host` and `system`, the generic object read/write tools preserve the
 ordered manual `data.installed_software` list byte-for-byte, including opaque

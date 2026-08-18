@@ -904,6 +904,7 @@ def _detail_template_context(
         "provider": (
             str(monitoring["provider"])
             if monitoring is not None
+            and monitoring["provider"] in MONITORING_PROVIDER_VALUES
             else MONITORING_PROVIDER_VALUES[0]
         ),
         "interval_overridden": bool(
@@ -911,7 +912,9 @@ def _detail_template_context(
         ),
         "interval_seconds": (
             str(monitoring["interval_seconds"])
-            if monitoring is not None and monitoring["interval_overridden"]
+            if monitoring is not None
+            and monitoring["interval_overridden"]
+            and isinstance(monitoring["interval_seconds"], int)
             else ""
         ),
     }

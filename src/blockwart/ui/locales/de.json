@@ -170,6 +170,7 @@
   "monitoring.diagnostic.incomplete_endpoint": "Der HTTP(S)-Endpunkt enthält keinen einzelnen vollständigen Origin mit Port.",
   "monitoring.diagnostic.invalid_endpoints": "Das gespeicherte Endpunkt-Dokument ist ungültig und kann kein Health-Ziel liefern.",
   "monitoring.diagnostic.invalid_health_url": "Die explizite Health-URL ist keine kanonische unauthentifizierte HTTP(S)-URL.",
+  "monitoring.diagnostic.invalid_monitoring_config": "Die gespeicherte Monitoring-Konfiguration ist ungültig. Korrigiere sie, bevor Monitoring ausgeführt werden kann.",
   "monitoring.diagnostic.no_http_endpoint": "Für ein abgeleitetes /health-Ziel ist kein kanonischer HTTP(S)-Endpunkt vorhanden.",
   "monitoring.effective_health": "Effektiver Zustand",
   "monitoring.enabled": "Monitoring aktivieren",

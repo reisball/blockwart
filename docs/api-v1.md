@@ -180,6 +180,9 @@ health. The top-level `health` value uses that effective result for an enabled
 service; manual `maintenance` always wins. Pending/stale observations publish
 effective `unknown` while retaining the last observed state. Discover-only
 stubs and concealed objects expose none of these fields, counts, or timestamps.
+For a malformed present monitoring document, the authorized projection reports
+`invalid_monitoring_config` with null provider, interval, and target rather than
+applying configuration defaults or exposing the rejected value.
 The same projection is used by context pages and known-ID batches. See
 [Service monitoring](service-monitoring.md).
 

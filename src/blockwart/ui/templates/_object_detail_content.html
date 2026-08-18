@@ -918,8 +918,8 @@
               {% if monitoring.diagnostic %}<div class="error" role="status">{{ t("monitoring.diagnostic." ~ monitoring.diagnostic) }}</div>{% endif %}
               <dl class="fact-grid">
                 <div><dt>{{ t("monitoring.enabled") }}</dt><dd>{{ t("monitoring.yes") if monitoring.enabled else t("monitoring.no") }}</dd></div>
-                <div><dt>{{ t("monitoring.provider") }}</dt><dd>{{ t("monitoring.provider." ~ monitoring.provider) }}</dd></div>
-                <div><dt>{{ t("monitoring.interval_seconds") }}</dt><dd>{{ monitoring.interval_seconds }} s{% if not monitoring.interval_overridden %} · {{ t("monitoring.server_default") }}{% endif %}</dd></div>
+                <div><dt>{{ t("monitoring.provider") }}</dt><dd>{% if monitoring.provider %}{{ t("monitoring.provider." ~ monitoring.provider) }}{% else %}{{ t("asset.no_value") }}{% endif %}</dd></div>
+                <div><dt>{{ t("monitoring.interval_seconds") }}</dt><dd>{% if monitoring.interval_seconds is not none %}{{ monitoring.interval_seconds }} s{% if not monitoring.interval_overridden %} · {{ t("monitoring.server_default") }}{% endif %}{% else %}{{ t("asset.no_value") }}{% endif %}</dd></div>
                 <div><dt>{{ t("monitoring.effective_health") }}</dt><dd>{{ t("health." ~ (monitoring.effective_health or "unknown")) }}</dd></div>
                 <div><dt>{{ t("monitoring.state") }}</dt><dd>{{ t("monitoring.state." ~ monitoring.state) }}</dd></div>
                 <div><dt>{{ t("monitoring.observed_state") }}</dt><dd>{{ t("monitoring.state." ~ monitoring.observed_state) }}</dd></div>

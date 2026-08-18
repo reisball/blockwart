@@ -170,6 +170,7 @@
   "monitoring.diagnostic.incomplete_endpoint": "The HTTP(S) endpoint does not provide one complete origin and port.",
   "monitoring.diagnostic.invalid_endpoints": "The stored endpoint document is invalid and cannot produce a health target.",
   "monitoring.diagnostic.invalid_health_url": "The explicit health URL is not a canonical unauthenticated HTTP(S) URL.",
+  "monitoring.diagnostic.invalid_monitoring_config": "The stored monitoring configuration is invalid. Correct it before monitoring can run.",
   "monitoring.diagnostic.no_http_endpoint": "No canonical HTTP(S) endpoint is available for a derived /health target.",
   "monitoring.effective_health": "Effective health",
   "monitoring.enabled": "Enable monitoring",

@@ -30,7 +30,12 @@ from blockwart.domain.monitoring_policy import (
 )
 from blockwart.main import create_app
 from blockwart.mcp.server import call_tool
-from blockwart.models import AuditEvent, CatalogObject, ServiceObservation
+from blockwart.models import (
+    AuditEvent,
+    CatalogObject,
+    ServiceCheckLease,
+    ServiceObservation,
+)
 from blockwart.schemas.catalog import CatalogObjectIn
 from blockwart.services.agent import get_agent_object_context
 from blockwart.services.catalog import upsert_object
@@ -90,11 +95,21 @@ def _endpoint(
     return endpoint
 
 
+def _store_monitoring_document(
+    row: CatalogObject,
+    document: object,
+) -> None:
+    data = json.loads(row.data_json)
+    data["monitoring"] = document
+    row.data_json = json.dumps(data, ensure_ascii=False, sort_keys=True)
+
+
 def test_monitoring_configuration_is_opt_in_bounded_and_secret_safe() -> None:
     absent = read_monitoring_config({"schema_version": 1})
     assert absent.enabled is False
     assert absent.provider == "builtin_http"
     assert absent.interval_seconds == 300
+    assert absent.valid is True
     assert "monitoring" not in _service("legacy").data
 
     configured = _service(
@@ -127,6 +142,94 @@ def test_monitoring_configuration_is_opt_in_bounded_and_secret_safe() -> None:
                 _endpoint(health_url="https://example.invalid/health?token=forbidden")
             ],
         )
+
+
+@pytest.mark.parametrize(
+    "document",
+    [
+        {"enabled": True, "provider": "unknown"},
+        {"enabled": True, "provider": 7},
+        {"enabled": True, "interval_seconds": 59},
+        {"enabled": True, "interval_seconds": "60"},
+        {"enabled": True, "interval_seconds": True},
+        {"enabled": "true"},
+        {"enabled": True, "unexpected": "value"},
+    ],
+)
+def test_present_malformed_monitoring_configuration_has_one_fail_closed_view(
+    document,
+) -> None:
+    config = read_monitoring_config({"schema_version": 1, "monitoring": document})
+    assert config.valid is False
+    assert config.provider is None
+    assert config.interval_seconds is None
+
+    view = monitoring_view(
+        data={
+            "schema_version": 1,
+            "monitoring": document,
+            "endpoints": [_endpoint()],
+        },
+        object_id="malformed",
+        catalog_health="healthy",
+        record=None,
+        now=NOW,
+    )
+    assert view == {
+        "enabled": document.get("enabled") is True,
+        "provider": None,
+        "interval_seconds": None,
+        "interval_overridden": False,
+        "target": None,
+        "diagnostic": "invalid_monitoring_config",
+        "state": "check_error",
+        "observed_state": "unknown",
+        "freshness": "pending",
+        "http_status": None,
+        "latency_ms": None,
+        "error_code": None,
+        "last_checked_at": None,
+        "last_success_at": None,
+        "next_due_at": None,
+        "effective_health": (
+            "unknown" if document.get("enabled") is True else "healthy"
+        ),
+    }
+
+
+def test_absent_and_explicitly_disabled_monitoring_remain_valid_and_unscheduled(
+    alembic_session_factory,
+) -> None:
+    absent = read_monitoring_config({"schema_version": 1})
+    disabled = read_monitoring_config(
+        {"schema_version": 1, "monitoring": {"enabled": False}}
+    )
+    assert (absent.valid, absent.enabled, absent.provider, absent.interval_seconds) == (
+        True,
+        False,
+        "builtin_http",
+        300,
+    )
+    assert (disabled.valid, disabled.enabled, disabled.provider, disabled.interval_seconds) == (
+        True,
+        False,
+        "builtin_http",
+        300,
+    )
+
+    with alembic_session_factory() as session:
+        upsert_object(session, _service("absent"))
+        upsert_object(
+            session,
+            _service("disabled", monitoring={"enabled": False}),
+        )
+        session.commit()
+        assert synchronize_check_schedule(
+            session,
+            now=NOW,
+            settings=MonitoringSettings(jitter_seconds=0),
+        ) == 0
+        assert session.scalar(select(func.count(ServiceCheckLease.id))) == 0
 
 
 def test_target_resolution_is_explicit_then_exactly_one_complete_endpoint() -> None:
@@ -216,7 +319,7 @@ def test_freshness_and_maintenance_precedence_keep_last_observation() -> None:
     view = monitoring_view(
         data={
             "schema_version": 1,
-            "monitoring": {"enabled": True},
+            "monitoring": {"enabled": True, "interval_seconds": 60},
             "endpoints": [_endpoint()],
         },
         object_id="maintenance",
@@ -232,7 +335,7 @@ def test_freshness_and_maintenance_precedence_keep_last_observation() -> None:
     stale = monitoring_view(
         data={
             "schema_version": 1,
-            "monitoring": {"enabled": True},
+            "monitoring": {"enabled": True, "interval_seconds": 60},
             "endpoints": [_endpoint()],
         },
         object_id="stale",
@@ -712,6 +815,380 @@ def test_scheduler_records_invalid_config_without_acquisition_and_avoids_restart
             assert (row.revision, row.updated_at) == expected
 
 
+def test_malformed_enabled_rows_are_never_ingested_scheduled_claimed_or_acquired(
+    alembic_session_factory,
+    monkeypatch,
+) -> None:
+    settings = MonitoringSettings(
+        poller_enabled=True,
+        jitter_seconds=0,
+        max_concurrent_checks=3,
+    )
+    malformed = {
+        "bad-provider": {"enabled": True, "provider": "other"},
+        "bad-interval": {"enabled": True, "interval_seconds": "60"},
+        "bad-type": {"enabled": True, "provider": ["builtin_http"]},
+    }
+    with alembic_session_factory() as session:
+        instances: dict[str, str] = {}
+        for object_id in malformed:
+            upsert_object(
+                session,
+                _service(
+                    object_id,
+                    monitoring={"enabled": True},
+                    endpoints=[_endpoint()],
+                ),
+            )
+            row = session.get(CatalogObject, object_id)
+            assert row is not None
+            instances[object_id] = row.instance_id
+        session.commit()
+        assert synchronize_check_schedule(session, now=NOW, settings=settings) == 3
+        session.commit()
+
+        for object_id, document in malformed.items():
+            row = session.get(CatalogObject, object_id)
+            assert row is not None
+            _store_monitoring_document(row, document)
+        session.commit()
+        before = {
+            row.id: (row.revision, row.updated_at)
+            for row in session.scalars(select(CatalogObject)).all()
+        }
+        audit_count = session.scalar(select(func.count(AuditEvent.id)))
+
+        def forbidden_acquire(*_args, **_kwargs):
+            raise AssertionError("malformed configuration must never acquire")
+
+        monkeypatch.setattr(monitoring_service, "_acquire", forbidden_acquire)
+        result = run_due_service_checks(
+            session,
+            settings=settings,
+            now=NOW,
+            owner="fail-closed",
+        )
+        assert result.claimed == 0
+        assert result.completed == 0
+        assert session.scalar(select(func.count(ServiceCheckLease.id))) == 0
+        assert session.scalar(select(func.count(ServiceObservation.id))) == 0
+
+        for object_id, instance_id in instances.items():
+            assert record_service_observation(
+                session,
+                object_id=object_id,
+                object_instance_id=instance_id,
+                observation=MonitoringObservation(
+                    provider="builtin_http",
+                    state="healthy",
+                    checked_at=NOW,
+                    http_status=204,
+                ),
+                now=NOW,
+                settings=settings,
+            ) is None
+        session.commit()
+        assert session.scalar(select(func.count(ServiceObservation.id))) == 0
+        assert session.scalar(select(func.count(AuditEvent.id))) == audit_count
+        for object_id, expected in before.items():
+            row = session.get(CatalogObject, object_id)
+            assert row is not None
+            assert (row.revision, row.updated_at) == expected
+
+
+def test_interval_changes_reconcile_observation_and_lease_due_times_immediately(
+    alembic_session_factory,
+) -> None:
+    settings = MonitoringSettings(poller_enabled=True, jitter_seconds=0)
+    with alembic_session_factory() as session:
+        for object_id, interval in (("shorter", 600), ("longer", 60)):
+            upsert_object(
+                session,
+                _service(
+                    object_id,
+                    monitoring={"enabled": True, "interval_seconds": interval},
+                    endpoints=[_endpoint()],
+                ),
+            )
+            row = session.get(CatalogObject, object_id)
+            assert row is not None
+            assert record_service_observation(
+                session,
+                object_id=object_id,
+                object_instance_id=row.instance_id,
+                observation=MonitoringObservation(
+                    provider="builtin_http",
+                    state="healthy",
+                    checked_at=NOW,
+                    http_status=204,
+                ),
+                now=NOW,
+                settings=settings,
+            ) is not None
+        session.commit()
+        assert synchronize_check_schedule(
+            session,
+            now=NOW,
+            settings=settings,
+        ) == 2
+        session.commit()
+
+        shorter = session.get(CatalogObject, "shorter")
+        longer = session.get(CatalogObject, "longer")
+        assert shorter is not None and longer is not None
+        _store_monitoring_document(
+            shorter,
+            {"enabled": True, "interval_seconds": 60},
+        )
+        _store_monitoring_document(
+            longer,
+            {"enabled": True, "interval_seconds": 600},
+        )
+        session.commit()
+
+        synchronize_check_schedule(
+            session,
+            now=NOW + timedelta(seconds=100),
+            settings=settings,
+        )
+        session.commit()
+        leases = {
+            row.object_id: row
+            for row in session.scalars(select(ServiceCheckLease)).all()
+        }
+        observations = {
+            row.object_id: row
+            for row in session.scalars(select(ServiceObservation)).all()
+        }
+        assert leases["shorter"].due_at == (NOW + timedelta(seconds=60)).replace(
+            tzinfo=None
+        )
+        assert observations["shorter"].next_due_at == leases["shorter"].due_at
+        assert leases["longer"].due_at == (NOW + timedelta(seconds=600)).replace(
+            tzinfo=None
+        )
+        assert observations["longer"].next_due_at == leases["longer"].due_at
+
+        claims = claim_due_checks(
+            session,
+            owner="interval-worker",
+            now=NOW + timedelta(seconds=100),
+            settings=settings,
+        )
+        assert [claim.object_id for claim in claims] == ["shorter"]
+
+
+def test_default_interval_reconciles_only_services_without_an_override(
+    alembic_session_factory,
+) -> None:
+    old_settings = MonitoringSettings(
+        poller_enabled=True,
+        default_interval_seconds=300,
+        jitter_seconds=0,
+    )
+    new_settings = MonitoringSettings(
+        poller_enabled=True,
+        default_interval_seconds=600,
+        jitter_seconds=0,
+    )
+    with alembic_session_factory() as session:
+        for object_id, document in (
+            ("defaulted", {"enabled": True}),
+            ("overridden", {"enabled": True, "interval_seconds": 120}),
+        ):
+            upsert_object(
+                session,
+                _service(object_id, monitoring=document, endpoints=[_endpoint()]),
+            )
+            row = session.get(CatalogObject, object_id)
+            assert row is not None
+            record_service_observation(
+                session,
+                object_id=object_id,
+                object_instance_id=row.instance_id,
+                observation=MonitoringObservation(
+                    provider="builtin_http",
+                    state="healthy",
+                    checked_at=NOW,
+                    http_status=204,
+                ),
+                now=NOW,
+                settings=old_settings,
+            )
+        session.commit()
+        synchronize_check_schedule(session, now=NOW, settings=old_settings)
+        session.commit()
+
+        observations = load_observation_index(session)
+        defaulted = session.get(CatalogObject, "defaulted")
+        assert defaulted is not None
+        view = monitoring_projection(
+            kind="service",
+            object_id=defaulted.id,
+            data=json.loads(defaulted.data_json),
+            catalog_health=defaulted.health,
+            observations=observations,
+            now=NOW + timedelta(seconds=30),
+            settings=new_settings,
+        )
+        assert view is not None
+        assert view["next_due_at"] == "2026-08-18T12:10:00.000000Z"
+        assert view["freshness"] == "fresh"
+
+        synchronize_check_schedule(
+            session,
+            now=NOW + timedelta(seconds=30),
+            settings=new_settings,
+        )
+        session.commit()
+        due = {
+            row.object_id: row.due_at
+            for row in session.scalars(select(ServiceCheckLease)).all()
+        }
+        assert due["defaulted"] == (NOW + timedelta(seconds=600)).replace(tzinfo=None)
+        assert due["overridden"] == (NOW + timedelta(seconds=120)).replace(tzinfo=None)
+
+
+def test_post_claim_recheck_blocks_a_stale_short_interval_race(
+    alembic_session_factory,
+    monkeypatch,
+) -> None:
+    old_settings = MonitoringSettings(
+        poller_enabled=True,
+        jitter_seconds=0,
+    )
+    with alembic_session_factory() as session:
+        upsert_object(
+            session,
+            _service(
+                "claim-race",
+                monitoring={"enabled": True, "interval_seconds": 60},
+                endpoints=[_endpoint()],
+            ),
+        )
+        row = session.get(CatalogObject, "claim-race")
+        assert row is not None
+        record_service_observation(
+            session,
+            object_id=row.id,
+            object_instance_id=row.instance_id,
+            observation=MonitoringObservation(
+                provider="builtin_http",
+                state="healthy",
+                checked_at=NOW,
+                http_status=204,
+            ),
+            now=NOW,
+            settings=old_settings,
+        )
+        session.commit()
+        synchronize_check_schedule(session, now=NOW, settings=old_settings)
+        session.commit()
+
+        row = session.get(CatalogObject, "claim-race")
+        assert row is not None
+        _store_monitoring_document(
+            row,
+            {"enabled": True, "interval_seconds": 600},
+        )
+        session.commit()
+
+        # Simulate another process claiming the old due row immediately before
+        # this process's normal reconciliation commits.
+        monkeypatch.setattr(
+            monitoring_service,
+            "synchronize_check_schedule",
+            lambda *_args, **_kwargs: 0,
+        )
+
+        def empty_acquire(requests, *, max_workers):
+            assert requests == []
+            assert max_workers == old_settings.max_concurrent_checks
+            return []
+
+        monkeypatch.setattr(monitoring_service, "_acquire", empty_acquire)
+        result = run_due_service_checks(
+            session,
+            settings=old_settings,
+            now=NOW + timedelta(seconds=100),
+            owner="racing-process",
+        )
+        assert result.claimed == 1
+        assert result.completed == 0
+        lease = session.scalar(select(ServiceCheckLease))
+        observation = session.scalar(select(ServiceObservation))
+        expected = (NOW + timedelta(seconds=600)).replace(tzinfo=None)
+        assert lease is not None and lease.due_at == expected
+        assert lease.lease_owner is None
+        assert observation is not None and observation.next_due_at == expected
+
+
+def test_jittered_expired_schedule_is_restart_stable_and_has_one_winner(
+    alembic_database,
+) -> None:
+    settings = MonitoringSettings(poller_enabled=True, jitter_seconds=30)
+    with alembic_database.sessions() as session:
+        upsert_object(
+            session,
+            _service(
+                "stable-expired",
+                monitoring={"enabled": True, "interval_seconds": 60},
+                endpoints=[_endpoint()],
+            ),
+        )
+        row = session.get(CatalogObject, "stable-expired")
+        assert row is not None
+        record_service_observation(
+            session,
+            object_id=row.id,
+            object_instance_id=row.instance_id,
+            observation=MonitoringObservation(
+                provider="builtin_http",
+                state="healthy",
+                checked_at=NOW,
+                http_status=204,
+            ),
+            now=NOW,
+            settings=settings,
+        )
+        session.commit()
+        synchronize_check_schedule(
+            session,
+            now=NOW + timedelta(seconds=100),
+            settings=settings,
+        )
+        session.commit()
+        first_due = session.scalar(select(ServiceCheckLease.due_at))
+        assert first_due is not None
+        assert NOW + timedelta(seconds=60) <= first_due.replace(tzinfo=UTC)
+        assert first_due.replace(tzinfo=UTC) <= NOW + timedelta(seconds=90)
+
+    with alembic_database.sessions() as restarted:
+        synchronize_check_schedule(
+            restarted,
+            now=NOW + timedelta(seconds=100),
+            settings=settings,
+        )
+        restarted.commit()
+        assert restarted.scalar(select(ServiceCheckLease.due_at)) == first_due
+
+    with alembic_database.sessions() as first, alembic_database.sessions() as second:
+        first_claim = claim_due_checks(
+            first,
+            owner="process-one",
+            now=NOW + timedelta(seconds=100),
+            settings=settings,
+        )
+        second_claim = claim_due_checks(
+            second,
+            owner="process-two",
+            now=NOW + timedelta(seconds=100),
+            settings=settings,
+        )
+    assert [claim.object_id for claim in first_claim] == ["stable-expired"]
+    assert second_claim == []
+
+
 def test_database_lease_has_one_winner_across_sessions(alembic_database) -> None:
     settings = MonitoringSettings(poller_enabled=True, jitter_seconds=0)
     with alembic_database.sessions() as session:
@@ -821,6 +1298,22 @@ def test_agent_projection_uses_effective_health_without_leaking_to_stubs(
                 now=observed_at,
                 settings=MonitoringSettings(jitter_seconds=0),
             )
+        for object_id in ("malformed-readable", "malformed-stub"):
+            upsert_object(
+                session,
+                _service(
+                    object_id,
+                    monitoring={"enabled": True},
+                    endpoints=[_endpoint()],
+                    health="healthy",
+                ),
+            )
+            row = session.get(CatalogObject, object_id)
+            assert row is not None
+            _store_monitoring_document(
+                row,
+                {"enabled": True, "interval_seconds": "secret-invalid-value"},
+            )
         session.commit()
         principal = PrincipalContext(
             id="monitoring-reader",
@@ -835,6 +1328,10 @@ def test_agent_projection_uses_effective_health_without_leaking_to_stubs(
                 _permissions={
                     "readable": frozenset({Permission.DISCOVER, Permission.READ}),
                     "stub": frozenset({Permission.DISCOVER}),
+                    "malformed-readable": frozenset(
+                        {Permission.DISCOVER, Permission.READ}
+                    ),
+                    "malformed-stub": frozenset({Permission.DISCOVER}),
                 },
                 _grants={},
             ),
@@ -842,6 +1339,16 @@ def test_agent_projection_uses_effective_health_without_leaking_to_stubs(
         readable = get_agent_object_context(session, "readable", access)
         stub = get_agent_object_context(session, "stub", access)
         concealed = get_agent_object_context(session, "concealed", access)
+        malformed_readable = get_agent_object_context(
+            session,
+            "malformed-readable",
+            access,
+        )
+        malformed_stub = get_agent_object_context(
+            session,
+            "malformed-stub",
+            access,
+        )
 
     assert readable is not None and readable.visibility == "detail"
     assert readable.monitoring is not None
@@ -850,8 +1357,17 @@ def test_agent_projection_uses_effective_health_without_leaking_to_stubs(
     assert stub is not None and stub.visibility == "stub"
     assert "monitoring" not in stub.model_dump()
     assert concealed is None
+    assert malformed_readable is not None
+    assert malformed_readable.visibility == "detail"
+    assert malformed_readable.monitoring is not None
+    assert malformed_readable.monitoring.diagnostic == "invalid_monitoring_config"
+    assert malformed_readable.monitoring.state == "check_error"
+    assert malformed_readable.monitoring.provider is None
+    assert malformed_readable.monitoring.interval_seconds is None
+    assert malformed_stub is not None and malformed_stub.visibility == "stub"
+    assert "monitoring" not in malformed_stub.model_dump()
     assert observation_scopes
-    assert set(observation_scopes) == {("readable",)}
+    assert set(observation_scopes) == {("malformed-readable", "readable")}
 
 
 def test_monitoring_settings_keep_probe_and_lease_bounds_consistent() -> None:

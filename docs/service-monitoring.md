@@ -25,6 +25,13 @@ seconds by default). An absent document is exactly `enabled=false`. Migration
 `20260818_0017` does not rewrite catalog JSON, so every existing service stays
 byte-for-byte unchanged and disabled after upgrade.
 
+A present malformed monitoring document is not treated like an absent one.
+It projects the stable `invalid_monitoring_config` check-error diagnostic with
+no provider, interval, target, or observation details. It cannot create or
+claim a lease, invoke an adapter, or write an observation. The diagnostic never
+includes the rejected value or validation exception; correcting it still uses
+the ordinary authorized, conditional service write path.
+
 All writes use the ordinary parent service command. UI writes require browser
 CSRF, `write`, and the current ETag. REST and MCP use their existing `write`,
 ETag/CAS, schema, secret-rejection, audit, and channel rules. Polling never
@@ -122,9 +129,14 @@ acquisition, so local queueing cannot let a claim expire behind another check.
 New or newly selected polling configurations receive a jittered first due time.
 The schedule and observations survive process restarts, so startup does not make
 every enabled service immediately due. Expired leases are recoverable after a
-worker failure. Configuration is re-read after claim; a disabled service,
-changed provider, deleted instance, or invalid target cannot use a stale claim
-to discover another target.
+worker failure. Observation due times use deterministic bounded jitter. Every
+pass reconciles both the observation and lease from the current effective
+interval, including a changed server default for services without an override;
+shorter and longer intervals therefore take effect before the next claim.
+Configuration and the reconciled due time are checked again after claim to
+close a multi-process stale-row race. A disabled service, changed provider,
+deleted instance, malformed configuration, invalid target, or not-yet-due
+observation cannot use a stale claim to discover another target.
 
 Inspect without writes or network traffic:
 

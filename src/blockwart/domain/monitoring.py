@@ -25,6 +25,7 @@ from collections.abc import Mapping
 from copy import deepcopy
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
+from hashlib import sha256
 from typing import Any, Literal
 from urllib.parse import quote, urlsplit
 
@@ -45,6 +46,7 @@ MonitoringDiagnostic = Literal[
     "incomplete_endpoint",
     "invalid_endpoints",
     "invalid_health_url",
+    "invalid_monitoring_config",
     "no_http_endpoint",
 ]
 MonitoringErrorCode = Literal[
@@ -94,6 +96,7 @@ MONITORING_DIAGNOSTIC_VALUES: tuple[str, ...] = (
     "incomplete_endpoint",
     "invalid_endpoints",
     "invalid_health_url",
+    "invalid_monitoring_config",
     "no_http_endpoint",
 )
 MONITORING_DIAGNOSTICS = frozenset(MONITORING_DIAGNOSTIC_VALUES)
@@ -124,12 +127,13 @@ class MonitoringConfig:
     """The effective monitoring configuration of one service."""
 
     enabled: bool = False
-    provider: str = DEFAULT_MONITORING_PROVIDER
-    interval_seconds: int = DEFAULT_MONITORING_INTERVAL_SECONDS
+    provider: str | None = DEFAULT_MONITORING_PROVIDER
+    interval_seconds: int | None = DEFAULT_MONITORING_INTERVAL_SECONDS
     # True when the service stores an explicit interval override.  The server
     # default applies otherwise, so changing it moves every non-overriding
     # service without a catalog write.
     interval_overridden: bool = False
+    valid: bool = True
 
 
 @dataclass(frozen=True, slots=True)
@@ -207,6 +211,7 @@ class MonitoringRecord:
     last_checked_at: datetime | None
     last_success_at: datetime | None
     next_due_at: datetime | None
+    object_instance_id: str | None = None
 
 
 def read_monitoring_config(
@@ -216,29 +221,31 @@ def read_monitoring_config(
 ) -> MonitoringConfig:
     """Read one service's effective monitoring configuration.
 
-    Absent, non-mapping, or malformed configuration is equivalent to
-    ``enabled=false``: reads never fail on a legacy or hand-edited document.
+    An absent document is the backward-compatible disabled configuration.
+    A present malformed document is instead an explicit invalid configuration:
+    it receives no provider or interval fallback and can never become probe
+    work. Reads remain total for legacy or hand-edited database rows.
     """
 
-    document = data.get("monitoring")
-    if not isinstance(document, Mapping):
+    if "monitoring" not in data:
         return MonitoringConfig(
             interval_seconds=_bounded_interval(default_interval_seconds),
         )
-    enabled = document.get("enabled") is True
-    provider = document.get("provider")
-    if not isinstance(provider, str) or provider not in MONITORING_PROVIDERS:
-        provider = DEFAULT_MONITORING_PROVIDER
+    document = data.get("monitoring")
+    enabled = isinstance(document, Mapping) and document.get("enabled") is True
+    if not isinstance(document, Mapping) or not _valid_monitoring_document(document):
+        return MonitoringConfig(
+            enabled=enabled,
+            provider=None,
+            interval_seconds=None,
+            valid=False,
+        )
+    provider = document.get("provider", DEFAULT_MONITORING_PROVIDER)
+    assert isinstance(provider, str)
     raw_interval = document.get("interval_seconds")
-    overridden = (
-        isinstance(raw_interval, int)
-        and not isinstance(raw_interval, bool)
-        and MIN_MONITORING_INTERVAL_SECONDS
-        <= raw_interval
-        <= MAX_MONITORING_INTERVAL_SECONDS
-    )
+    overridden = raw_interval is not None
     interval = (
-        int(raw_interval)  # type: ignore[arg-type]
+        int(raw_interval)
         if overridden
         else _bounded_interval(default_interval_seconds)
     )
@@ -395,6 +402,36 @@ def freshness_for(
     return "fresh"
 
 
+def scheduled_next_due(
+    checked_at: datetime,
+    *,
+    object_id: str,
+    object_instance_id: str | None,
+    provider: str,
+    interval_seconds: int,
+    jitter_seconds: int,
+) -> datetime:
+    """Return the stable due time for one observation and current interval.
+
+    Jitter is derived from immutable observation identity instead of process
+    randomness. Every process therefore reconciles an interval change to the
+    same value, including after restart, while still spreading checks over the
+    configured bounded window.
+    """
+
+    checked = _aware(checked_at)
+    key = "\x1f".join(
+        (
+            object_id,
+            object_instance_id or "",
+            provider,
+            checked.astimezone(UTC).isoformat(timespec="microseconds"),
+        )
+    )
+    jitter = _stable_jitter(key, jitter_seconds)
+    return checked + timedelta(seconds=interval_seconds + jitter)
+
+
 def effective_state(
     record: MonitoringRecord | None,
     freshness: MonitoringFreshness,
@@ -450,6 +487,7 @@ def monitoring_view(
     record: MonitoringRecord | None,
     now: datetime,
     default_interval_seconds: int = DEFAULT_MONITORING_INTERVAL_SECONDS,
+    jitter_seconds: int = 0,
 ) -> dict[str, Any]:
     """Build the one authorized monitoring projection every surface shares.
 
@@ -462,8 +500,53 @@ def monitoring_view(
         data,
         default_interval_seconds=default_interval_seconds,
     )
+    if not config.valid:
+        return {
+            "enabled": config.enabled,
+            "provider": None,
+            "interval_seconds": None,
+            "interval_overridden": False,
+            "target": None,
+            "diagnostic": "invalid_monitoring_config",
+            "state": "check_error",
+            "observed_state": "unknown",
+            "freshness": "pending",
+            "http_status": None,
+            "latency_ms": None,
+            "error_code": None,
+            "last_checked_at": None,
+            "last_success_at": None,
+            "next_due_at": None,
+            "effective_health": effective_health(
+                catalog_health=catalog_health,
+                enabled=config.enabled,
+                state="check_error",
+            ),
+        }
+    assert config.provider is not None
+    assert config.interval_seconds is not None
     resolution = resolve_monitoring_target(data, object_id=object_id)
     matching = record if record is not None and record.provider == config.provider else None
+    if matching is not None and matching.last_checked_at is not None:
+        effective_due = scheduled_next_due(
+            matching.last_checked_at,
+            object_id=object_id,
+            object_instance_id=matching.object_instance_id,
+            provider=config.provider,
+            interval_seconds=config.interval_seconds,
+            jitter_seconds=jitter_seconds,
+        )
+        matching = MonitoringRecord(
+            provider=matching.provider,
+            state=matching.state,
+            http_status=matching.http_status,
+            latency_ms=matching.latency_ms,
+            error_code=matching.error_code,
+            last_checked_at=matching.last_checked_at,
+            last_success_at=matching.last_success_at,
+            next_due_at=effective_due,
+            object_instance_id=matching.object_instance_id,
+        )
     freshness = freshness_for(
         matching,
         interval_seconds=config.interval_seconds,
@@ -561,6 +644,33 @@ def _bounded_interval(value: int) -> int:
         MIN_MONITORING_INTERVAL_SECONDS,
         min(MAX_MONITORING_INTERVAL_SECONDS, int(value)),
     )
+
+
+def _valid_monitoring_document(document: Mapping[str, Any]) -> bool:
+    if not set(document).issubset(MONITORING_DOCUMENT_KEYS):
+        return False
+    if not isinstance(document.get("enabled"), bool):
+        return False
+    provider = document.get("provider", DEFAULT_MONITORING_PROVIDER)
+    if not isinstance(provider, str) or provider not in MONITORING_PROVIDERS:
+        return False
+    if "interval_seconds" not in document:
+        return True
+    interval = document.get("interval_seconds")
+    return (
+        isinstance(interval, int)
+        and not isinstance(interval, bool)
+        and MIN_MONITORING_INTERVAL_SECONDS
+        <= interval
+        <= MAX_MONITORING_INTERVAL_SECONDS
+    )
+
+
+def _stable_jitter(key: str, jitter_seconds: int) -> int:
+    if jitter_seconds <= 0:
+        return 0
+    digest = sha256(key.encode("utf-8")).digest()
+    return int.from_bytes(digest[:8], "big") % (jitter_seconds + 1)
 
 
 def _endpoint_origin(endpoint: Mapping[str, Any]) -> tuple[str, str, int] | None:

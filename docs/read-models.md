@@ -32,6 +32,9 @@ manual maintenance wins. Service detail retains the observed state, status,
 latency, stable error, target, freshness, and timestamps. REST v1, Agent, and
 MCP consume that same resolver. Stub and concealed objects receive no monitoring
 field, target, count, timestamp, or observation lookup shortcut.
+Malformed present monitoring configuration projects one redacted
+`invalid_monitoring_config` check error only on those same readable surfaces;
+it does not fall back to an effective provider or interval.
 
 The query module does not import FastAPI requests, responses, templates, or form
 types. Routers parse transport input and render a response; they do not query

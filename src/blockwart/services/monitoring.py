@@ -25,7 +25,6 @@ from collections.abc import Mapping, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
-from random import SystemRandom
 from typing import Any
 
 from sqlalchemy import case, delete, select, update
@@ -42,6 +41,7 @@ from blockwart.domain.monitoring import (
     monitoring_view,
     read_monitoring_config,
     resolve_monitoring_target,
+    scheduled_next_due,
 )
 from blockwart.domain.monitoring_policy import (
     MonitoringPolicyError,
@@ -58,7 +58,6 @@ from blockwart.services.monitoring_registry import (
     polling_providers,
 )
 
-_RANDOM = SystemRandom()
 logger = logging.getLogger(__name__)
 
 # The observation index is keyed by object id and provider. The instance is not
@@ -239,13 +238,19 @@ def monitoring_projection(
         data,
         default_interval_seconds=resolved.default_interval_seconds,
     )
+    record = (
+        observations.get((object_id, config.provider))
+        if config.valid and config.provider is not None
+        else None
+    )
     return monitoring_view(
         data=data,
         object_id=object_id,
         catalog_health=catalog_health,
-        record=observations.get((object_id, config.provider)),
+        record=record,
         now=now,
         default_interval_seconds=resolved.default_interval_seconds,
+        jitter_seconds=resolved.jitter_seconds,
     )
 
 
@@ -284,9 +289,14 @@ def record_service_observation(
         _object_data(catalog_object),
         default_interval_seconds=resolved.default_interval_seconds,
     )
+    if not config.valid or config.interval_seconds is None:
+        return None
     checked_at = _aware(observation.checked_at)
     next_due_at = _next_due(
         checked_at,
+        object_id=object_id,
+        object_instance_id=object_instance_id,
+        provider=observation.provider,
         interval_seconds=config.interval_seconds,
         jitter_seconds=resolved.jitter_seconds,
     )
@@ -360,7 +370,7 @@ def synchronize_check_schedule(
     moment = _aware(now or datetime.now(UTC))
     drivers = set(polling_providers())
 
-    wanted: dict[tuple[str, str], str] = {}
+    wanted: dict[tuple[str, str], tuple[str, int]] = {}
     services = session.scalars(
         select(CatalogObject).where(CatalogObject.kind == "service")
     ).all()
@@ -369,9 +379,23 @@ def synchronize_check_schedule(
             _object_data(catalog_object),
             default_interval_seconds=resolved.default_interval_seconds,
         )
-        if not config.enabled or config.provider not in drivers:
+        if (
+            not config.valid
+            or not config.enabled
+            or config.provider not in drivers
+            or config.interval_seconds is None
+        ):
             continue
-        wanted[(catalog_object.id, catalog_object.instance_id)] = config.provider
+        assert config.provider is not None
+        wanted[(catalog_object.id, catalog_object.instance_id)] = (
+            config.provider,
+            config.interval_seconds,
+        )
+
+    observations = {
+        (row.object_id, row.object_instance_id, row.provider): row
+        for row in session.scalars(select(ServiceObservation)).all()
+    }
 
     existing = {
         (row.object_id, row.object_instance_id): row
@@ -382,28 +406,74 @@ def synchronize_check_schedule(
             if row.lease_expires_at is None or row.lease_expires_at <= _naive(moment):
                 session.delete(row)
             continue
-        selected_provider = wanted[key]
+        selected_provider, interval_seconds = wanted[key]
         if row.provider != selected_provider and (
             row.lease_expires_at is None or row.lease_expires_at <= _naive(moment)
         ):
             row.provider = selected_provider
             row.due_at = _naive(
-                moment + timedelta(seconds=_jitter(resolved.jitter_seconds))
+                _initial_due(
+                    moment,
+                    object_id=row.object_id,
+                    object_instance_id=row.object_instance_id,
+                    provider=selected_provider,
+                    jitter_seconds=resolved.jitter_seconds,
+                )
             )
             row.lease_owner = None
             row.lease_expires_at = None
             row.updated_at = _naive(moment)
+        if row.provider != selected_provider:
+            continue
+        observation = observations.get((*key, selected_provider))
+        if observation is None or observation.last_checked_at is None:
+            continue
+        desired_due = _next_due(
+            _aware(observation.last_checked_at),
+            object_id=row.object_id,
+            object_instance_id=row.object_instance_id,
+            provider=selected_provider,
+            interval_seconds=interval_seconds,
+            jitter_seconds=resolved.jitter_seconds,
+        )
+        desired_naive = _naive(desired_due)
+        if observation.next_due_at != desired_naive:
+            observation.next_due_at = desired_naive
+            observation.updated_at = _naive(moment)
+        if row.due_at != desired_naive:
+            row.due_at = desired_naive
+            row.updated_at = _naive(moment)
     created = 0
-    for (object_id, instance_id), provider in wanted.items():
+    for (object_id, instance_id), (provider, interval_seconds) in wanted.items():
         if (object_id, instance_id) in existing:
             continue
+        observation = observations.get((object_id, instance_id, provider))
+        due_at = (
+            _next_due(
+                _aware(observation.last_checked_at),
+                object_id=object_id,
+                object_instance_id=instance_id,
+                provider=provider,
+                interval_seconds=interval_seconds,
+                jitter_seconds=resolved.jitter_seconds,
+            )
+            if observation is not None and observation.last_checked_at is not None
+            else _initial_due(
+                moment,
+                object_id=object_id,
+                object_instance_id=instance_id,
+                provider=provider,
+                jitter_seconds=resolved.jitter_seconds,
+            )
+        )
+        if observation is not None and observation.next_due_at != _naive(due_at):
+            observation.next_due_at = _naive(due_at)
+            observation.updated_at = _naive(moment)
         values = {
             "object_id": object_id,
             "object_instance_id": instance_id,
             "provider": provider,
-            "due_at": _naive(
-                moment + timedelta(seconds=_jitter(resolved.jitter_seconds))
-            ),
+            "due_at": _naive(due_at),
             "created_at": _naive(moment),
             "updated_at": _naive(moment),
         }
@@ -554,9 +624,41 @@ def run_due_service_checks(
             data,
             default_interval_seconds=settings.default_interval_seconds,
         )
-        if not config.enabled or config.provider != claim.provider:
+        if (
+            not config.valid
+            or not config.enabled
+            or config.provider != claim.provider
+            or config.interval_seconds is None
+        ):
             _delete_claimed_lease(session, claim.lease_id, lease_owner)
             continue
+        current_observation = session.scalar(
+            select(ServiceObservation).where(
+                ServiceObservation.object_id == claim.object_id,
+                ServiceObservation.object_instance_id == claim.object_instance_id,
+                ServiceObservation.provider == claim.provider,
+            )
+        )
+        if current_observation is not None and current_observation.last_checked_at is not None:
+            current_due = _next_due(
+                _aware(current_observation.last_checked_at),
+                object_id=claim.object_id,
+                object_instance_id=claim.object_instance_id,
+                provider=claim.provider,
+                interval_seconds=config.interval_seconds,
+                jitter_seconds=settings.jitter_seconds,
+            )
+            current_observation.next_due_at = _naive(current_due)
+            current_observation.updated_at = _naive(moment)
+            if current_due > moment:
+                release_check_lease(
+                    session,
+                    lease_id=claim.lease_id,
+                    owner=lease_owner,
+                    next_due_at=current_due,
+                    now=moment,
+                )
+                continue
         resolution = resolve_monitoring_target(data, object_id=claim.object_id)
         if resolution.target is None:
             record = record_service_observation(
@@ -637,12 +739,17 @@ def run_due_service_checks(
                 )
                 completed += 1
                 continue
+            _delete_claimed_lease(session, claim.lease_id, lease_owner)
+            continue
         release_check_lease(
             session,
             lease_id=claim.lease_id,
             owner=lease_owner,
             next_due_at=_next_due(
                 moment,
+                object_id=claim.object_id,
+                object_instance_id=claim.object_instance_id,
+                provider=claim.provider,
                 interval_seconds=interval_seconds,
                 jitter_seconds=settings.jitter_seconds,
             ),
@@ -766,6 +873,7 @@ def _record(row: ServiceObservation) -> MonitoringRecord:
         last_checked_at=_aware_or_none(row.last_checked_at),
         last_success_at=_aware_or_none(row.last_success_at),
         next_due_at=_aware_or_none(row.next_due_at),
+        object_instance_id=row.object_instance_id,
     )
 
 
@@ -780,16 +888,38 @@ def _object_data(catalog_object: CatalogObject) -> dict[str, Any]:
 def _next_due(
     moment: datetime,
     *,
+    object_id: str,
+    object_instance_id: str,
+    provider: str,
     interval_seconds: int,
     jitter_seconds: int,
 ) -> datetime:
-    return moment + timedelta(seconds=interval_seconds + _jitter(jitter_seconds))
+    return scheduled_next_due(
+        moment,
+        object_id=object_id,
+        object_instance_id=object_instance_id,
+        provider=provider,
+        interval_seconds=interval_seconds,
+        jitter_seconds=jitter_seconds,
+    )
 
 
-def _jitter(jitter_seconds: int) -> int:
-    if jitter_seconds <= 0:
-        return 0
-    return _RANDOM.randint(0, jitter_seconds)
+def _initial_due(
+    moment: datetime,
+    *,
+    object_id: str,
+    object_instance_id: str,
+    provider: str,
+    jitter_seconds: int,
+) -> datetime:
+    return scheduled_next_due(
+        moment,
+        object_id=object_id,
+        object_instance_id=object_instance_id,
+        provider=provider,
+        interval_seconds=0,
+        jitter_seconds=jitter_seconds,
+    )
 
 
 def _aware(value: datetime) -> datetime:
@@ -810,8 +940,8 @@ def _naive(value: datetime) -> datetime:
 class MonitoringPlanEntry:
     object_id: str
     enabled: bool
-    provider: str
-    interval_seconds: int
+    provider: str | None
+    interval_seconds: int | None
     target_url: str | None
     target_source: str | None
     diagnostic: str | None
@@ -873,13 +1003,22 @@ def build_monitoring_plan(
             if view["diagnostic"] is not None:
                 diagnostics += 1
         target = view["target"]
-        lease = leases.get((catalog_object.id, view["provider"]))
+        provider = view["provider"]
+        lease = (
+            leases.get((catalog_object.id, provider))
+            if isinstance(provider, str)
+            else None
+        )
         entries.append(
             MonitoringPlanEntry(
                 object_id=catalog_object.id,
                 enabled=bool(view["enabled"]),
-                provider=str(view["provider"]),
-                interval_seconds=int(view["interval_seconds"]),
+                provider=provider if isinstance(provider, str) else None,
+                interval_seconds=(
+                    int(view["interval_seconds"])
+                    if isinstance(view["interval_seconds"], int)
+                    else None
+                ),
                 target_url=target["url"] if target else None,
                 target_source=target["source"] if target else None,
                 diagnostic=view["diagnostic"],
