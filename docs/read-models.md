@@ -26,6 +26,13 @@ Readable service nodes may project their bounded embedded component document for
 the detail and expandable topology views. Stub nodes never receive this field,
 so component names, counts, and edges cannot become discover-only hints.
 
+Readable services also project one provider-neutral monitoring model. The
+catalog state column and counts use effective health for enabled services;
+manual maintenance wins. Service detail retains the observed state, status,
+latency, stable error, target, freshness, and timestamps. REST v1, Agent, and
+MCP consume that same resolver. Stub and concealed objects receive no monitoring
+field, target, count, timestamp, or observation lookup shortcut.
+
 The query module does not import FastAPI requests, responses, templates, or form
 types. Routers parse transport input and render a response; they do not query
 relationships or build placement graphs themselves.

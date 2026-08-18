@@ -171,6 +171,18 @@ IDs. Clients pass the returned body `etag` unchanged as `If-Match` on
 conditional object, relationship, and access-control mutations; comment
 appends and child creation use their separate contracts.
 
+A readable service includes the provider-neutral `monitoring` projection. It
+contains the effective configuration and resolved target (or stable
+configuration diagnostic), selected provider, interval/default marker,
+effective and last observed states, freshness, HTTP status, latency, stable
+redacted error code, last check, last success, next due time, and effective
+health. The top-level `health` value uses that effective result for an enabled
+service; manual `maintenance` always wins. Pending/stale observations publish
+effective `unknown` while retaining the last observed state. Discover-only
+stubs and concealed objects expose none of these fields, counts, or timestamps.
+The same projection is used by context pages and known-ID batches. See
+[Service monitoring](service-monitoring.md).
+
 ## Commands
 
 ### `GET|POST /api/v1/objects/{object_id}/comments`
@@ -242,6 +254,12 @@ case-insensitive `http://` and `https://` prefixes.
 Service payloads may include the bounded canonical `data.components` document.
 It is written only through this parent-object command and returned only in full
 readable parent detail/context; see [Service-local components](service-components.md).
+
+Service payloads may also include the closed canonical `data.monitoring`
+document. It is written through this same command and therefore uses `write`,
+`If-Match`, schema/secret validation, audit, and rollback without a monitoring
+bypass endpoint. An absent document is disabled. See
+[Service monitoring](service-monitoring.md).
 
 ### `DELETE /api/v1/objects/{object_id}`
 

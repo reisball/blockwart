@@ -5,6 +5,14 @@ from pydantic import BaseModel, Field
 from blockwart.domain.asset_state import AssetHealth, AssetLifecycle
 from blockwart.domain.auth import Permission
 from blockwart.domain.decisions import DecisionStatus
+from blockwart.domain.monitoring import (
+    MonitoringDiagnostic,
+    MonitoringErrorCode,
+    MonitoringFreshness,
+    MonitoringProvider,
+    MonitoringState,
+    MonitoringTargetSource,
+)
 from blockwart.domain.placement import PlacementState
 from blockwart.domain.projects import ProjectCategory, ProjectStatus
 from blockwart.domain.provenance import CatalogProvenanceOut
@@ -25,6 +33,44 @@ class AgentEndpoint(BaseModel):
     transport: str
     exposure: str
     health_url: str | None = None
+
+
+class AgentMonitoringTarget(BaseModel):
+    """The one deterministically resolved probe target of a service."""
+
+    url: str
+    scheme: str
+    host: str
+    port: int
+    path: str
+    source: MonitoringTargetSource
+    endpoint_id: str
+
+
+class AgentServiceMonitoring(BaseModel):
+    """The provider-neutral monitoring projection shared by every surface.
+
+    It carries no vendor-specific payload, so adding a provider cannot change
+    this contract. ``state`` is the value a client may act on; ``observed_state``
+    is the last stored result even when it has gone stale.
+    """
+
+    enabled: bool
+    provider: MonitoringProvider
+    interval_seconds: int
+    interval_overridden: bool
+    target: AgentMonitoringTarget | None = None
+    diagnostic: MonitoringDiagnostic | None = None
+    state: MonitoringState
+    observed_state: MonitoringState
+    freshness: MonitoringFreshness
+    http_status: int | None = None
+    latency_ms: int | None = None
+    error_code: MonitoringErrorCode | None = None
+    last_checked_at: str | None = None
+    last_success_at: str | None = None
+    next_due_at: str | None = None
+    effective_health: AssetHealth | None = None
 
 
 class AgentAssetNode(BaseModel):
@@ -77,6 +123,9 @@ class AgentCatalogObjectSummary(BaseModel):
     record_state: Literal["valid", "corrupt"] = "valid"
     diagnostics: list[CatalogRecordDiagnostic] = Field(default_factory=list)
     provenance: CatalogProvenanceOut
+    # Present only for readable service objects. A discover-only stub never
+    # carries it, so monitoring cannot become an existence or state hint.
+    monitoring: AgentServiceMonitoring | None = None
 
 
 class AgentRelationshipOut(BaseModel):

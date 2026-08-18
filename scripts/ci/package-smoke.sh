@@ -79,6 +79,7 @@ fi
 "$TEMP_DIR/venv/bin/blockwart-db" integrity
 "$TEMP_DIR/venv/bin/blockwart-db" interfaces
 "$TEMP_DIR/venv/bin/blockwart-db" placements
+"$TEMP_DIR/venv/bin/blockwart-db" monitoring
 "$TEMP_DIR/venv/bin/blockwart-db" networks
 "$TEMP_DIR/venv/bin/blockwart-db" projects
 "$TEMP_DIR/venv/bin/blockwart-db" runbooks

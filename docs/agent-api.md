@@ -18,6 +18,13 @@ Readable service context includes its canonical local component document inside
 `data`. Discover-only stubs expose neither component counts nor structure. See
 [Service-local components](service-components.md).
 
+Readable service summaries and contexts also include the provider-neutral
+`monitoring` projection and effective top-level health. Manual maintenance
+wins; stale observations become effective unknown while the last observed
+result remains available. Discover-only stubs receive no monitoring
+configuration, target, result, freshness, count, or timestamp. See
+[Service monitoring](service-monitoring.md).
+
 `/api/agent` is the compatibility namespace. New clients should use the
 cursor-paginated `/api/v1/objects`, `/api/v1/context`, and object-resource
 endpoints documented in `api-v1.md`. Both namespaces delegate to the same

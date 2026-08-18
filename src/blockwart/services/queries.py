@@ -4,6 +4,7 @@ import json
 from collections import Counter
 from collections.abc import Mapping
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from typing import Any, Literal, NotRequired, TypedDict
 
 from sqlalchemy import select
@@ -37,6 +38,11 @@ from blockwart.services.catalog import (
     list_objects,
 )
 from blockwart.services.comments import query_comment_page
+from blockwart.services.monitoring import (
+    current_monitoring_settings,
+    load_observation_index,
+    monitoring_projection,
+)
 from blockwart.services.read_access import ReadAccess
 
 PUBLIC_KIND_PRIORITY = {
@@ -178,6 +184,7 @@ class ExplorerAssetDetailReadModel(TypedDict):
     runbook_status: NotRequired[str]
     runbook_risk: NotRequired[str]
     service_components: NotRequired[dict[str, list[dict[str, Any]]]]
+    monitoring: NotRequired[dict[str, Any]]
 
 
 class ExplorerAssetStubReadModel(TypedDict):
@@ -287,6 +294,7 @@ class CatalogDetailReadModel:
     relationship_targets: list[CatalogObjectReadOut]
     audit_events: list[AuditEventReadModel]
     recent_comments: list[CommentOut]
+    monitoring: dict[str, Any] | None
 
 
 def list_catalog_objects(
@@ -367,9 +375,13 @@ def query_catalog_browse(
         f"{catalog_object.kind}:{catalog_object.id}": catalog_object
         for catalog_object in all_objects
     }
+    monitoring_index = build_monitoring_index(session, all_objects)
     object_counts = Counter(catalog_object.kind for catalog_object in public_objects)
+    # The rail counts and the state column must agree, so both read the same
+    # effective health: monitoring for enabled services, the manual value
+    # otherwise, and manual maintenance ahead of either.
     health_counts = Counter(
-        str(catalog_object.health or "unknown")
+        _effective_health_value(catalog_object, monitoring_index)
         for catalog_object in public_objects
         if catalog_object.visibility == ObjectVisibility.DETAIL
         and is_asset_kind(catalog_object.kind)
@@ -402,12 +414,67 @@ def query_catalog_browse(
         explorer=build_explorer_read_model(
             public_objects,
             relationships,
+            monitoring_index=monitoring_index,
             included_refs=included_refs,
             include_network_topology=include_network_topology,
             include_inherited_services=include_inherited_services,
             network_category=network_category,
         ),
     )
+
+
+def build_monitoring_index(
+    session: Session,
+    objects: list[CatalogObjectReadOut],
+) -> dict[str, dict[str, Any]]:
+    """Project monitoring for every readable service in one bounded read.
+
+    Observations are loaded once regardless of how many services the caller may
+    read, and discover-only stubs are excluded before any projection, so
+    monitoring never becomes a hidden-object hint.
+    """
+
+    settings = current_monitoring_settings()
+    readable_service_ids = [
+        catalog_object.id
+        for catalog_object in objects
+        if catalog_object.visibility == ObjectVisibility.DETAIL
+        and catalog_object.kind == "service"
+    ]
+    observations = load_observation_index(
+        session,
+        object_ids=readable_service_ids,
+    )
+    now = datetime.now(UTC)
+    index: dict[str, dict[str, Any]] = {}
+    for catalog_object in objects:
+        if (
+            catalog_object.visibility != ObjectVisibility.DETAIL
+            or catalog_object.kind != "service"
+        ):
+            continue
+        view = monitoring_projection(
+            kind=catalog_object.kind,
+            object_id=catalog_object.id,
+            data=catalog_object.data,
+            catalog_health=catalog_object.health,
+            observations=observations,
+            now=now,
+            settings=settings,
+        )
+        if view is not None:
+            index[catalog_object.id] = view
+    return index
+
+
+def _effective_health_value(
+    catalog_object: CatalogObjectReadOut,
+    monitoring_index: Mapping[str, dict[str, Any]],
+) -> str:
+    monitoring = monitoring_index.get(catalog_object.id)
+    if monitoring is not None:
+        return str(monitoring["effective_health"] or "unknown")
+    return str(getattr(catalog_object, "health", None) or "unknown")
 
 
 def query_catalog_detail(
@@ -487,6 +554,7 @@ def query_catalog_detail(
             for event in audit_events
         ],
         recent_comments=comment_page.items if comment_page is not None else [],
+        monitoring=build_monitoring_index(session, [catalog_object]).get(object_id),
     )
 
 
@@ -1008,6 +1076,7 @@ def build_explorer_read_model(
     objects: list[CatalogObjectReadOut],
     relationships: list[RelationshipReadModel],
     *,
+    monitoring_index: Mapping[str, dict[str, Any]] | None = None,
     included_refs: set[str] | None = None,
     include_network_topology: bool = False,
     include_inherited_services: bool = False,
@@ -1020,7 +1089,7 @@ def build_explorer_read_model(
     }
     graph = PlacementGraph(object_map.values(), relationships)
     assets = {
-        ref: _explorer_asset(catalog_object)
+        ref: _explorer_asset(catalog_object, monitoring_index or {})
         for ref, catalog_object in object_map.items()
     }
 
@@ -1857,6 +1926,7 @@ def _refs_for_kind(
 
 def _explorer_asset(
     catalog_object: CatalogObjectReadOut,
+    monitoring_index: Mapping[str, dict[str, Any]],
 ) -> ExplorerAssetReadModel:
     if catalog_object.visibility == ObjectVisibility.STUB:
         return {
@@ -1926,6 +1996,10 @@ def _explorer_asset(
             asset["decision_status"] = decision_status
     if catalog_object.kind == "service":
         asset["service_components"] = service_components_view(catalog_object.data)
+        monitoring = monitoring_index.get(catalog_object.id)
+        if monitoring is not None:
+            asset["monitoring"] = monitoring
+            asset["health"] = str(monitoring["effective_health"] or "unknown")
     if catalog_object.kind == "project":
         for source_key, asset_key in (
             ("category", "project_category"),

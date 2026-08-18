@@ -41,7 +41,8 @@ DEVICE_FOUNDATION_REVISION = "20260801_0013"
 OBJECT_COMMENTS_REVISION = "20260804_0014"
 CATALOG_OWNER_REVISION = "20260806_0015"
 SOURCE_COVERAGE_REVISION = "20260811_0016"
-HEAD_REVISION = SOURCE_COVERAGE_REVISION
+SERVICE_MONITORING_REVISION = "20260818_0017"
+HEAD_REVISION = SERVICE_MONITORING_REVISION
 PROJECT_ALEMBIC_CONFIG = Path(__file__).resolve().parents[1] / "alembic.ini"
 LEGACY_SNAPSHOT = Path(__file__).resolve().parent / "fixtures" / "legacy_snapshot.sql"
 
@@ -256,6 +257,8 @@ def test_real_alembic_upgrade_creates_fresh_database_and_has_no_drift(
             "principals",
             "relationships",
             "security_events",
+            "service_check_leases",
+            "service_observations",
             "service_tokens",
             "service_token_failure_buckets",
             "source_entries",
@@ -277,6 +280,8 @@ def test_real_alembic_upgrade_creates_fresh_database_and_has_no_drift(
         "principals",
         "relationships",
         "security_events",
+        "service_check_leases",
+        "service_observations",
         "service_tokens",
         "service_token_failure_buckets",
         "source_entries",
@@ -1951,6 +1956,8 @@ def downgrade() -> None:
             "principals",
             "relationships",
             "security_events",
+            "service_check_leases",
+            "service_observations",
             "service_tokens",
             "service_token_failure_buckets",
             "source_entries",
@@ -2359,6 +2366,7 @@ def test_source_coverage_migration_preserves_populated_catalog_and_provenance(
     finally:
         connection.close()
 
+
     command.upgrade(config, SOURCE_COVERAGE_REVISION)
     connection = sqlite3.connect(database_path)
     try:
@@ -2429,6 +2437,63 @@ def test_source_coverage_migration_preserves_populated_catalog_and_provenance(
             )
         }
         assert connection.execute("PRAGMA foreign_key_check").fetchall() == []
+    finally:
+        connection.close()
+
+
+def test_service_monitoring_migration_is_additive_opt_in_and_reversible(
+    tmp_path: Path,
+) -> None:
+    database_path = tmp_path / "service-monitoring.sqlite3"
+    database_url = _database_url(database_path)
+    config = build_alembic_config(database_url)
+    command.upgrade(config, SOURCE_COVERAGE_REVISION)
+    connection = sqlite3.connect(database_path)
+    try:
+        connection.execute(
+            "INSERT INTO catalog_objects "
+            "(id, kind, label, status, lifecycle, health, data_json, "
+            "provenance_json, revision) VALUES "
+            "('legacy-unmonitored', 'service', 'Legacy unmonitored', 'active', "
+            "'active', 'healthy', '{\"schema_version\":1}', "
+            "'{\"source_type\":\"manual\",\"manual_override\":false}', 9)"
+        )
+        connection.commit()
+        before = connection.execute(
+            "SELECT * FROM catalog_objects WHERE id = 'legacy-unmonitored'"
+        ).fetchone()
+    finally:
+        connection.close()
+
+    command.upgrade(config, SERVICE_MONITORING_REVISION)
+    connection = sqlite3.connect(database_path)
+    try:
+        assert connection.execute(
+            "SELECT * FROM catalog_objects WHERE id = 'legacy-unmonitored'"
+        ).fetchone() == before
+        assert connection.execute("SELECT COUNT(*) FROM service_observations").fetchone() == (
+            0,
+        )
+        assert connection.execute("SELECT COUNT(*) FROM service_check_leases").fetchone() == (
+            0,
+        )
+    finally:
+        connection.close()
+
+    command.downgrade(config, SOURCE_COVERAGE_REVISION)
+    connection = sqlite3.connect(database_path)
+    try:
+        assert connection.execute(
+            "SELECT * FROM catalog_objects WHERE id = 'legacy-unmonitored'"
+        ).fetchone() == before
+        tables = {
+            str(row[0])
+            for row in connection.execute(
+                "SELECT name FROM sqlite_master WHERE type = 'table'"
+            )
+        }
+        assert "service_observations" not in tables
+        assert "service_check_leases" not in tables
     finally:
         connection.close()
 

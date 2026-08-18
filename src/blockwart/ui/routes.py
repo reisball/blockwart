@@ -21,6 +21,7 @@ from blockwart.domain.decisions import (
     DECISION_STATUS_VALUES,
     DecisionIntegrityError,
 )
+from blockwart.domain.monitoring import MONITORING_PROVIDER_VALUES
 from blockwart.domain.object_schema import (
     DEVICE_CATEGORIES,
     INSTALLED_SOFTWARE_KINDS,
@@ -893,6 +894,27 @@ def _detail_template_context(
     )
     installed_software = _installed_software_summary(object_data)
     service_components = service_components_view(object_data)
+    monitoring = read_model.monitoring
+    monitoring_document = object_data.get("monitoring")
+    monitoring_form = {
+        "enabled": bool(
+            isinstance(monitoring_document, Mapping)
+            and monitoring_document.get("enabled") is True
+        ),
+        "provider": (
+            str(monitoring["provider"])
+            if monitoring is not None
+            else MONITORING_PROVIDER_VALUES[0]
+        ),
+        "interval_overridden": bool(
+            monitoring is not None and monitoring["interval_overridden"]
+        ),
+        "interval_seconds": (
+            str(monitoring["interval_seconds"])
+            if monitoring is not None and monitoring["interval_overridden"]
+            else ""
+        ),
+    }
     service_component_names = {
         str(component.get("id")): str(component.get("name") or component.get("id"))
         for component in service_components["items"]
@@ -1033,6 +1055,10 @@ def _detail_template_context(
             catalog_object.kind in SERVICE_INFORMATION_OBJECT_KINDS
         ),
         "supports_service_components": catalog_object.kind == "service",
+        "supports_monitoring": catalog_object.kind == "service",
+        "monitoring": monitoring,
+        "monitoring_form": monitoring_form,
+        "monitoring_providers": MONITORING_PROVIDER_VALUES,
         "service_components": service_components,
         "service_component_names": service_component_names,
         "service_component_roles": SERVICE_COMPONENT_ROLE_VALUES,
@@ -1226,6 +1252,7 @@ def _detail_navigation_context(
         "hardware",
         "service-information",
         "components",
+        "monitoring",
         "installed-software",
         "device",
         "runbook",
@@ -1257,6 +1284,7 @@ def _detail_navigation_context(
                 f"/objects/{object_id}/installed-software?{detail_query_string}"
             ),
             "components": f"/objects/{object_id}/components?{detail_query_string}",
+            "monitoring": f"/objects/{object_id}/monitoring?{detail_query_string}",
             "component_remove": (
                 f"/objects/{object_id}/components/remove?{detail_query_string}"
             ),
@@ -2769,6 +2797,97 @@ async def update_installed_software(
             ),
         ),
     )
+    return RedirectResponse(
+        url=_detail_redirect_url(request, object_id),
+        status_code=303,
+    )
+
+
+@router.post(
+    "/objects/{object_id}/monitoring",
+    response_class=HTMLResponse,
+    dependencies=[Depends(require_browser_write_csrf)],
+)
+def update_service_monitoring_from_ui(
+    request: Request,
+    object_id: str,
+    session: Annotated[Session, Depends(get_session)],
+    monitoring_enabled: Annotated[bool, Form()] = False,
+    monitoring_provider: Annotated[str, Form(max_length=32)] = "builtin_http",
+    monitoring_interval_overridden: Annotated[bool, Form()] = False,
+    monitoring_interval_seconds: Annotated[str, Form(max_length=5)] = "",
+    if_match: Annotated[str, Form()] = "",
+):
+    """Write monitoring through the ordinary service CAS/audit boundary."""
+
+    access = read_access_from_request(request)
+    context = ui_write_context(request, access)
+    execute_ui_command(
+        session,
+        context,
+        lambda: authorize_object_command(
+            session,
+            context,
+            object_id=object_id,
+            permission=Permission.WRITE,
+        ),
+    )
+    existing_object = get_object(session, object_id)
+    if existing_object is None:
+        raise HTTPException(status_code=404, detail="Catalog object not found")
+    if existing_object.kind != "service":
+        raise HTTPException(
+            status_code=422,
+            detail="Monitoring is supported only for service objects",
+        )
+    try:
+        document: dict[str, object] = {
+            "enabled": monitoring_enabled,
+            "provider": monitoring_provider,
+        }
+        if monitoring_interval_overridden:
+            document["interval_seconds"] = int(monitoring_interval_seconds)
+        data = _editable_data_copy(existing_object.data)
+        data["monitoring"] = document
+        _reject_secret_shaped_form_data(data)
+        payload = CatalogObjectIn(
+            id=existing_object.id,
+            kind=existing_object.kind,
+            label=existing_object.label,
+            status=existing_object.status,
+            lifecycle=existing_object.lifecycle,
+            health=existing_object.health,
+            summary=existing_object.summary,
+            data=data,
+        )
+        execute_ui_command(
+            session,
+            context,
+            lambda: update_catalog_object(
+                session,
+                context,
+                object_id=object_id,
+                payload=payload,
+                expected_revision=_ui_expected_revision(
+                    request,
+                    if_match,
+                    existing_object.revision,
+                ),
+            ),
+        )
+    except (HTTPException, ValidationError, ValueError) as exc:
+        return _detail_form_error_response(
+            request,
+            session,
+            object_id,
+            error=(
+                str(exc.detail)
+                if isinstance(exc, HTTPException)
+                else _safe_error_message(exc)
+            ),
+            edit_section="monitoring",
+            status_code=exc.status_code if isinstance(exc, HTTPException) else 422,
+        )
     return RedirectResponse(
         url=_detail_redirect_url(request, object_id),
         status_code=303,

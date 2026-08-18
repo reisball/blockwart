@@ -880,6 +880,64 @@
           </section>
         {% endif %}
 
+        {% if supports_monitoring %}
+          <section class="panel monitoring-panel" aria-labelledby="monitoring-title">
+            <div class="panel-head">
+              <div>
+                <h2 class="section-title" id="monitoring-title">{{ t("monitoring.title") }}</h2>
+                <p class="meta">{{ t("monitoring.help") }}</p>
+              </div>
+              {% if can_write %}
+                {% if edit_section == "monitoring" %}
+                  <a class="button button-small button-muted" href="{{ detail_href }}">{{ t("detail.cancel") }}</a>
+                {% else %}
+                  <a class="button button-small button-muted" href="{{ detail_edit_hrefs.monitoring }}">{{ t("detail.edit") }}</a>
+                {% endif %}
+              {% endif %}
+            </div>
+            {% if edit_section == "monitoring" %}
+              {% if error %}<div class="error" role="alert">{{ error }}</div>{% endif %}
+              {% if monitoring.diagnostic %}<div class="error" role="status">{{ t("monitoring.diagnostic." ~ monitoring.diagnostic) }}</div>{% endif %}
+              <h3>{{ t("monitoring.target") }}</h3>
+              {% if monitoring.target %}<p><code>{{ monitoring.target.url }}</code></p><p class="meta">{{ t("monitoring.target_source." ~ monitoring.target.source) }} · {{ monitoring.target.endpoint_id }}</p>{% else %}<p class="meta">{{ t("monitoring.target_missing") }}</p>{% endif %}
+              <form class="form-grid" method="post" action="{{ detail_post_urls.monitoring }}">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+                <input type="hidden" name="if_match" value="{{ object_etag }}" />
+                <label class="checkbox-label"><input type="checkbox" name="monitoring_enabled" value="true"{% if monitoring_form.enabled %} checked{% endif %} /> {{ t("monitoring.enabled") }}</label>
+                <label>{{ t("monitoring.provider") }}
+                  <select name="monitoring_provider" required>{% for provider in monitoring_providers %}<option value="{{ provider }}"{% if monitoring_form.provider == provider %} selected{% endif %}>{{ t("monitoring.provider." ~ provider) }}</option>{% endfor %}</select>
+                </label>
+                <label class="checkbox-label"><input type="checkbox" name="monitoring_interval_overridden" value="true"{% if monitoring_form.interval_overridden %} checked{% endif %} /> {{ t("monitoring.interval_override") }}</label>
+                <label>{{ t("monitoring.interval_seconds") }}
+                  <input type="number" name="monitoring_interval_seconds" value="{{ monitoring_form.interval_seconds }}" min="60" max="86400" step="1" inputmode="numeric" />
+                  <span class="meta">{{ t("monitoring.interval_help") }}</span>
+                </label>
+                <div class="button-row"><button type="submit">{{ t("detail.save") }}</button><a class="button button-muted" href="{{ detail_href }}">{{ t("detail.cancel") }}</a></div>
+              </form>
+            {% else %}
+              {% if monitoring.diagnostic %}<div class="error" role="status">{{ t("monitoring.diagnostic." ~ monitoring.diagnostic) }}</div>{% endif %}
+              <dl class="fact-grid">
+                <div><dt>{{ t("monitoring.enabled") }}</dt><dd>{{ t("monitoring.yes") if monitoring.enabled else t("monitoring.no") }}</dd></div>
+                <div><dt>{{ t("monitoring.provider") }}</dt><dd>{{ t("monitoring.provider." ~ monitoring.provider) }}</dd></div>
+                <div><dt>{{ t("monitoring.interval_seconds") }}</dt><dd>{{ monitoring.interval_seconds }} s{% if not monitoring.interval_overridden %} · {{ t("monitoring.server_default") }}{% endif %}</dd></div>
+                <div><dt>{{ t("monitoring.effective_health") }}</dt><dd>{{ t("health." ~ (monitoring.effective_health or "unknown")) }}</dd></div>
+                <div><dt>{{ t("monitoring.state") }}</dt><dd>{{ t("monitoring.state." ~ monitoring.state) }}</dd></div>
+                <div><dt>{{ t("monitoring.observed_state") }}</dt><dd>{{ t("monitoring.state." ~ monitoring.observed_state) }}</dd></div>
+                <div><dt>{{ t("monitoring.freshness") }}</dt><dd>{{ t("monitoring.freshness." ~ monitoring.freshness) }}</dd></div>
+                <div><dt>{{ t("monitoring.http_status") }}</dt><dd>{{ monitoring.http_status or t("asset.no_value") }}</dd></div>
+                <div><dt>{{ t("monitoring.latency") }}</dt><dd>{% if monitoring.latency_ms is not none %}{{ monitoring.latency_ms }} ms{% else %}{{ t("asset.no_value") }}{% endif %}</dd></div>
+                <div><dt>{{ t("monitoring.last_checked_at") }}</dt><dd>{{ monitoring.last_checked_at or t("asset.no_value") }}</dd></div>
+                <div><dt>{{ t("monitoring.last_success_at") }}</dt><dd>{{ monitoring.last_success_at or t("asset.no_value") }}</dd></div>
+                <div><dt>{{ t("monitoring.next_due_at") }}</dt><dd>{{ monitoring.next_due_at or t("asset.no_value") }}</dd></div>
+              </dl>
+              <h3>{{ t("monitoring.target") }}</h3>
+              {% if monitoring.target %}<p><code>{{ monitoring.target.url }}</code></p><p class="meta">{{ t("monitoring.target_source." ~ monitoring.target.source) }} · {{ monitoring.target.endpoint_id }}</p>{% else %}<p class="meta">{{ t("monitoring.target_missing") }}</p>{% endif %}
+              {% if monitoring.error_code %}<p class="meta">{{ t("monitoring.error") }}: <code>{{ t("monitoring.error." ~ monitoring.error_code) }}</code></p>{% endif %}
+              {% if object.health == "maintenance" %}<p class="notice">{{ t("monitoring.maintenance_wins") }}</p>{% endif %}
+            {% endif %}
+          </section>
+        {% endif %}
+
         {% if supports_service_components %}
           <section class="panel service-components-panel" aria-labelledby="service-components-title">
             <div class="panel-head">

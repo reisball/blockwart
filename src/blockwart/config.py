@@ -1,4 +1,4 @@
-from pydantic import Field
+from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -145,6 +145,101 @@ class Settings(BaseSettings):
         le=604800,
         description="Retention and replay window for create-command idempotency keys.",
     )
+    monitoring_poller_enabled: bool = Field(
+        default=False,
+        description="Whether this deployment may run built-in service health checks.",
+    )
+    monitoring_default_interval_seconds: int = Field(
+        default=300,
+        ge=60,
+        le=86400,
+        description="Server-wide check interval for services without an override.",
+    )
+    monitoring_allowed_target_networks: str = Field(
+        default="",
+        max_length=4096,
+        description=(
+            "Comma-separated IP networks a health check may connect to. Empty "
+            "denies every target."
+        ),
+    )
+    monitoring_allowed_target_ports: str = Field(
+        default="80,443",
+        max_length=1024,
+        description="Comma-separated ports a health check may connect to.",
+    )
+    monitoring_connect_timeout_ms: int = Field(
+        default=2000,
+        ge=100,
+        le=15000,
+        description="Maximum time one health check may spend connecting.",
+    )
+    monitoring_total_timeout_ms: int = Field(
+        default=5000,
+        ge=200,
+        le=30000,
+        description="Maximum total time one health check may take.",
+    )
+    monitoring_max_response_bytes: int = Field(
+        default=65536,
+        ge=1024,
+        le=1048576,
+        description=(
+            "Maximum declared response-body size accepted; the response body "
+            "is never read or stored."
+        ),
+    )
+    monitoring_max_checks_per_run: int = Field(
+        default=20,
+        ge=1,
+        le=1000,
+        description="Maximum due checks one scheduler run may claim.",
+    )
+    monitoring_max_concurrent_checks: int = Field(
+        default=4,
+        ge=1,
+        le=32,
+        description="Maximum health checks executed in parallel by one process.",
+    )
+    monitoring_lease_seconds: int = Field(
+        default=60,
+        ge=10,
+        le=3600,
+        description="Lifetime of one database-backed check lease.",
+    )
+    monitoring_jitter_seconds: int = Field(
+        default=30,
+        ge=0,
+        le=3600,
+        description="Maximum random delay added when a check is scheduled.",
+    )
+    monitoring_poll_interval_seconds: int = Field(
+        default=5,
+        ge=1,
+        le=60,
+        description="How often each web process looks for due database leases.",
+    )
+
+    @model_validator(mode="after")
+    def validate_monitoring_time_bounds(self) -> "Settings":
+        if self.monitoring_connect_timeout_ms > self.monitoring_total_timeout_ms:
+            raise ValueError("monitoring connect timeout must not exceed total timeout")
+        if self.monitoring_lease_seconds * 1000 <= self.monitoring_total_timeout_ms:
+            raise ValueError("monitoring lease must exceed the total probe timeout")
+        from blockwart.domain.monitoring_policy import (
+            MonitoringPolicyError,
+            parse_target_policy,
+        )
+
+        try:
+            parse_target_policy(
+                allowed_networks=self.monitoring_allowed_target_networks,
+                allowed_ports=self.monitoring_allowed_target_ports,
+            )
+        except MonitoringPolicyError as exc:
+            raise ValueError("monitoring target policy is invalid") from exc
+        return self
+
 
 def get_settings() -> Settings:
     return Settings()

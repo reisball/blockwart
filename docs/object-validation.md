@@ -109,6 +109,14 @@ references, duplicates, self-reference, bounds, canonical ordering, and cycle
 semantics are validated and projected from the same registry. Every other kind
 rejects `data.components` explicitly.
 
+Service writes may also carry the closed `data.monitoring` document documented
+in [Service monitoring](service-monitoring.md). Once present it requires a
+strict boolean `enabled`; the provider is closed and a service interval override
+is a strict integer from 60 through 86400. Other object kinds reject the field.
+Canonical endpoint `health_url` values are absolute HTTP(S) URLs of at most 512
+characters and cannot contain URL credentials. No validation path resolves or
+retrieves a URL.
+
 ## Secret Policy
 
 Secret rejection is global and runs independently before the object-kind

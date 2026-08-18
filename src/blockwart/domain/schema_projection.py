@@ -23,6 +23,7 @@ from blockwart.domain.asset_state import (
     is_asset_kind,
 )
 from blockwart.domain.decisions import decision_contract_projection
+from blockwart.domain.monitoring import service_monitoring_contract_projection
 from blockwart.domain.object_schema import (
     BUILTIN_SCHEMAS,
     FORBIDDEN_DATA_VALUE_KEYS,
@@ -48,9 +49,11 @@ from blockwart.domain.runbooks import runbook_contract_projection
 from blockwart.domain.security import FORBIDDEN_ACL_DATA_KEYS, FORBIDDEN_SECRET_KEYS
 from blockwart.domain.service_components import service_component_contract_projection
 
-# Version 6 additively publishes bounded service-local components and their
-# directed dependency graph without changing global relationship semantics.
-SCHEMA_PROJECTION_VERSION = 6
+# Version 7 additively publishes opt-in service monitoring: the closed
+# configuration document, the provider-neutral observation vocabulary, and
+# integer value bounds. Version 6 additively published bounded service-local
+# components and their directed dependency graph.
+SCHEMA_PROJECTION_VERSION = 7
 SCHEMA_DATA_VERSION = 1
 OBJECT_STATUS_VALUES: tuple[str, ...] = get_args(LegacyObjectStatus)
 DEFAULT_OBJECT_STATUS = "active"
@@ -220,6 +223,7 @@ def kind_schema_projection(kind: str) -> dict[str, Any]:
         projection["runbook"] = runbook_contract_projection()
     if kind == "service":
         projection["service_components"] = service_component_contract_projection()
+        projection["service_monitoring"] = service_monitoring_contract_projection()
     return projection
 
 
@@ -254,6 +258,10 @@ def field_projection(field: FieldSpec) -> dict[str, Any]:
         projected["min_items"] = field.min_items
     if field.max_items is not None:
         projected["max_items"] = field.max_items
+    if field.minimum is not None:
+        projected["minimum"] = field.minimum
+    if field.maximum is not None:
+        projected["maximum"] = field.maximum
     if field.allowed_keys:
         projected["allowed_keys"] = sorted(field.allowed_keys)
         projected["additional_properties"] = False
@@ -286,6 +294,8 @@ def field_violations(field: FieldSpec) -> set[str]:
     if field.max_length is not None:
         violations.add(VIOLATION_VALUE_TOO_LONG)
     if field.min_items is not None or field.max_items is not None:
+        violations.add(VIOLATION_VALUE_OUT_OF_RANGE)
+    if field.minimum is not None or field.maximum is not None:
         violations.add(VIOLATION_VALUE_OUT_OF_RANGE)
     if field.allowed_keys:
         violations.add(VIOLATION_FIELD_NOT_ALLOWED)

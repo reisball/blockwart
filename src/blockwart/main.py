@@ -1,3 +1,7 @@
+import asyncio
+from collections.abc import AsyncIterator, Callable
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI, Request
 from fastapi.staticfiles import StaticFiles
 
@@ -10,6 +14,7 @@ from blockwart.api.routes import admin, agent, auth, catalog, health, v1
 from blockwart.config import Settings, get_settings
 from blockwart.domain.schema_projection import object_schema_projection
 from blockwart.services.login_protection import LoginProtector
+from blockwart.services.monitoring import run_monitoring_poller
 from blockwart.ui.admin import router as admin_ui_router
 from blockwart.ui.auth import router as auth_router
 from blockwart.ui.i18n import persist_locale_cookie, validate_locale_catalogs
@@ -19,8 +24,12 @@ from blockwart.ui.routes import router as ui_router
 
 def create_app(settings: Settings | None = None) -> FastAPI:
     validate_locale_catalogs()
-    app = FastAPI(title="Blockwart", version="0.1.0")
     resolved_settings = settings or get_settings()
+    app = FastAPI(
+        title="Blockwart",
+        version="0.1.0",
+        lifespan=_monitoring_lifespan(resolved_settings),
+    )
     app.state.settings = resolved_settings
     app.state.login_protector = LoginProtector(
         window_seconds=resolved_settings.auth_login_rate_window_seconds,
@@ -56,6 +65,25 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     app.openapi = canonical_openapi
     return app
+
+
+def _monitoring_lifespan(
+    settings: Settings,
+) -> Callable[[FastAPI], AsyncIterator[None]]:
+    @asynccontextmanager
+    async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
+        stop_event = asyncio.Event()
+        task: asyncio.Task[None] | None = None
+        if settings.monitoring_poller_enabled:
+            task = asyncio.create_task(run_monitoring_poller(settings, stop_event))
+        try:
+            yield
+        finally:
+            if task is not None:
+                stop_event.set()
+                await task
+
+    return lifespan
 
 
 async def principal_scoped_cache_control(request: Request, call_next):
