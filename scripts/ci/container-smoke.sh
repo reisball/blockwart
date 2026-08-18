@@ -43,7 +43,7 @@ expected_revision = sys.argv[1]
 payload = json.loads(os.environ["READY_PAYLOAD"])
 assert payload["ok"] is True
 assert payload["build_revision"] == expected_revision
-assert payload["revision"] == "20260811_0016"
+assert payload["revision"] == "20260818_0017"
 assert all(value == "ok" for value in payload["checks"].values())
 PY
 
@@ -68,6 +68,7 @@ PY
   docker exec "$container" blockwart-db integrity
   docker exec "$container" blockwart-db interfaces
   docker exec "$container" blockwart-db placements
+  docker exec "$container" blockwart-db monitoring
   docker exec "$container" blockwart-db networks
   local runbook_classification
   if runbook_classification=$(docker exec "$container" blockwart-db runbooks 2>&1); then

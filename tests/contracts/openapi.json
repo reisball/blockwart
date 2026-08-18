@@ -288,6 +288,16 @@
             ],
             "title": "Lifecycle"
           },
+          "monitoring": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AgentServiceMonitoring"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "parent": {
             "anyOf": [
               {
@@ -729,6 +739,16 @@
             ],
             "title": "Lifecycle"
           },
+          "monitoring": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AgentServiceMonitoring"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "parent": {
             "anyOf": [
               {
@@ -1090,6 +1110,54 @@
         "title": "AgentEndpoint",
         "type": "object"
       },
+      "AgentMonitoringTarget": {
+        "description": "The one deterministically resolved probe target of a service.",
+        "properties": {
+          "endpoint_id": {
+            "title": "Endpoint Id",
+            "type": "string"
+          },
+          "host": {
+            "title": "Host",
+            "type": "string"
+          },
+          "path": {
+            "title": "Path",
+            "type": "string"
+          },
+          "port": {
+            "title": "Port",
+            "type": "integer"
+          },
+          "scheme": {
+            "title": "Scheme",
+            "type": "string"
+          },
+          "source": {
+            "enum": [
+              "endpoint_health_url",
+              "derived_health_path"
+            ],
+            "title": "Source",
+            "type": "string"
+          },
+          "url": {
+            "title": "Url",
+            "type": "string"
+          }
+        },
+        "required": [
+          "url",
+          "scheme",
+          "host",
+          "port",
+          "path",
+          "source",
+          "endpoint_id"
+        ],
+        "title": "AgentMonitoringTarget",
+        "type": "object"
+      },
       "AgentRelationshipOut": {
         "properties": {
           "from_ref": {
@@ -1189,6 +1257,209 @@
           "results"
         ],
         "title": "AgentSearchOut",
+        "type": "object"
+      },
+      "AgentServiceMonitoring": {
+        "description": "The provider-neutral monitoring projection shared by every surface.\n\nIt carries no vendor-specific payload, so adding a provider cannot change\nthis contract. ``state`` is the value a client may act on; ``observed_state``\nis the last stored result even when it has gone stale.",
+        "properties": {
+          "diagnostic": {
+            "anyOf": [
+              {
+                "enum": [
+                  "ambiguous_health_url",
+                  "ambiguous_endpoints",
+                  "incomplete_endpoint",
+                  "invalid_endpoints",
+                  "invalid_health_url",
+                  "invalid_monitoring_config",
+                  "no_http_endpoint"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Diagnostic"
+          },
+          "effective_health": {
+            "anyOf": [
+              {
+                "enum": [
+                  "unknown",
+                  "healthy",
+                  "degraded",
+                  "down",
+                  "maintenance"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Effective Health"
+          },
+          "enabled": {
+            "title": "Enabled",
+            "type": "boolean"
+          },
+          "error_code": {
+            "anyOf": [
+              {
+                "enum": [
+                  "connect_failed",
+                  "dns_failed",
+                  "http_client_error",
+                  "http_server_error",
+                  "invalid_target",
+                  "policy_denied",
+                  "probe_failed",
+                  "redirect_not_supported",
+                  "response_too_large",
+                  "timeout",
+                  "tls_failed"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error Code"
+          },
+          "freshness": {
+            "enum": [
+              "pending",
+              "fresh",
+              "stale"
+            ],
+            "title": "Freshness",
+            "type": "string"
+          },
+          "http_status": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Http Status"
+          },
+          "interval_overridden": {
+            "title": "Interval Overridden",
+            "type": "boolean"
+          },
+          "interval_seconds": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Interval Seconds"
+          },
+          "last_checked_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Checked At"
+          },
+          "last_success_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Success At"
+          },
+          "latency_ms": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Latency Ms"
+          },
+          "next_due_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Due At"
+          },
+          "observed_state": {
+            "enum": [
+              "unknown",
+              "healthy",
+              "down",
+              "check_error"
+            ],
+            "title": "Observed State",
+            "type": "string"
+          },
+          "provider": {
+            "anyOf": [
+              {
+                "const": "builtin_http",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Provider"
+          },
+          "state": {
+            "enum": [
+              "unknown",
+              "healthy",
+              "down",
+              "check_error"
+            ],
+            "title": "State",
+            "type": "string"
+          },
+          "target": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AgentMonitoringTarget"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "enabled",
+          "provider",
+          "interval_seconds",
+          "interval_overridden",
+          "state",
+          "observed_state",
+          "freshness"
+        ],
+        "title": "AgentServiceMonitoring",
         "type": "object"
       },
       "ApiError": {
@@ -14703,6 +14974,24 @@
               ]
             },
             {
+              "embedded_credentials_allowed": false,
+              "format": "uri",
+              "json_types": [
+                "string"
+              ],
+              "max_length": 512,
+              "normalization": [],
+              "path": "endpoints[].health_url",
+              "pattern": "^[Hh][Tt][Tt][Pp][Ss]?://",
+              "requirement": "optional",
+              "secret_query_parameters_allowed": false,
+              "type": "url",
+              "violations": [
+                "invalid_format",
+                "value_too_long"
+              ]
+            },
+            {
               "enum": [
                 "tcp",
                 "udp"
@@ -15051,6 +15340,19 @@
               ],
               "normalization": [],
               "path": "components",
+              "reason": "is supported only for service objects",
+              "requirement": "forbidden",
+              "type": "object",
+              "violations": [
+                "field_not_allowed"
+              ]
+            },
+            {
+              "json_types": [
+                "object"
+              ],
+              "normalization": [],
+              "path": "monitoring",
               "reason": "is supported only for service objects",
               "requirement": "forbidden",
               "type": "object",
@@ -15467,6 +15769,24 @@
               ]
             },
             {
+              "embedded_credentials_allowed": false,
+              "format": "uri",
+              "json_types": [
+                "string"
+              ],
+              "max_length": 512,
+              "normalization": [],
+              "path": "endpoints[].health_url",
+              "pattern": "^[Hh][Tt][Tt][Pp][Ss]?://",
+              "requirement": "optional",
+              "secret_query_parameters_allowed": false,
+              "type": "url",
+              "violations": [
+                "invalid_format",
+                "value_too_long"
+              ]
+            },
+            {
               "enum": [
                 "tcp",
                 "udp"
@@ -15815,6 +16135,19 @@
               ],
               "normalization": [],
               "path": "components",
+              "reason": "is supported only for service objects",
+              "requirement": "forbidden",
+              "type": "object",
+              "violations": [
+                "field_not_allowed"
+              ]
+            },
+            {
+              "json_types": [
+                "object"
+              ],
+              "normalization": [],
+              "path": "monitoring",
               "reason": "is supported only for service objects",
               "requirement": "forbidden",
               "type": "object",
@@ -16244,6 +16577,24 @@
               ]
             },
             {
+              "embedded_credentials_allowed": false,
+              "format": "uri",
+              "json_types": [
+                "string"
+              ],
+              "max_length": 512,
+              "normalization": [],
+              "path": "endpoints[].health_url",
+              "pattern": "^[Hh][Tt][Tt][Pp][Ss]?://",
+              "requirement": "optional",
+              "secret_query_parameters_allowed": false,
+              "type": "url",
+              "violations": [
+                "invalid_format",
+                "value_too_long"
+              ]
+            },
+            {
               "enum": [
                 "tcp",
                 "udp"
@@ -16599,6 +16950,19 @@
               "violations": [
                 "field_not_allowed"
               ]
+            },
+            {
+              "json_types": [
+                "object"
+              ],
+              "normalization": [],
+              "path": "monitoring",
+              "reason": "is supported only for service objects",
+              "requirement": "forbidden",
+              "type": "object",
+              "violations": [
+                "field_not_allowed"
+              ]
             }
           ],
           "rules": [],
@@ -16796,6 +17160,24 @@
               "violations": [
                 "type_mismatch",
                 "value_out_of_range"
+              ]
+            },
+            {
+              "embedded_credentials_allowed": false,
+              "format": "uri",
+              "json_types": [
+                "string"
+              ],
+              "max_length": 512,
+              "normalization": [],
+              "path": "endpoints[].health_url",
+              "pattern": "^[Hh][Tt][Tt][Pp][Ss]?://",
+              "requirement": "optional",
+              "secret_query_parameters_allowed": false,
+              "type": "url",
+              "violations": [
+                "invalid_format",
+                "value_too_long"
               ]
             },
             {
@@ -17288,6 +17670,19 @@
               "violations": [
                 "field_not_allowed"
               ]
+            },
+            {
+              "json_types": [
+                "object"
+              ],
+              "normalization": [],
+              "path": "monitoring",
+              "reason": "is supported only for service objects",
+              "requirement": "forbidden",
+              "type": "object",
+              "violations": [
+                "field_not_allowed"
+              ]
             }
           ],
           "rules": [],
@@ -17472,6 +17867,24 @@
               "violations": [
                 "type_mismatch",
                 "value_out_of_range"
+              ]
+            },
+            {
+              "embedded_credentials_allowed": false,
+              "format": "uri",
+              "json_types": [
+                "string"
+              ],
+              "max_length": 512,
+              "normalization": [],
+              "path": "endpoints[].health_url",
+              "pattern": "^[Hh][Tt][Tt][Pp][Ss]?://",
+              "requirement": "optional",
+              "secret_query_parameters_allowed": false,
+              "type": "url",
+              "violations": [
+                "invalid_format",
+                "value_too_long"
               ]
             },
             {
@@ -17968,6 +18381,69 @@
               ]
             },
             {
+              "additional_properties": false,
+              "allowed_keys": [
+                "enabled",
+                "interval_seconds",
+                "provider"
+              ],
+              "json_types": [
+                "object"
+              ],
+              "normalization": [],
+              "path": "monitoring",
+              "requirement": "optional",
+              "type": "object",
+              "violations": [
+                "field_not_allowed",
+                "type_mismatch"
+              ]
+            },
+            {
+              "json_types": [
+                "boolean"
+              ],
+              "normalization": [],
+              "path": "monitoring.enabled",
+              "requirement": "optional",
+              "type": "boolean",
+              "violations": [
+                "type_mismatch"
+              ]
+            },
+            {
+              "constraint": "must be a supported monitoring provider",
+              "enum": [
+                "builtin_http"
+              ],
+              "json_types": [
+                "string"
+              ],
+              "normalization": [],
+              "path": "monitoring.provider",
+              "requirement": "optional",
+              "type": "enum",
+              "violations": [
+                "value_not_allowed"
+              ]
+            },
+            {
+              "constraint": "must be an integer from 60 to 86400",
+              "json_types": [
+                "integer"
+              ],
+              "maximum": 86400,
+              "minimum": 60,
+              "normalization": [],
+              "path": "monitoring.interval_seconds",
+              "requirement": "optional",
+              "type": "integer",
+              "violations": [
+                "type_mismatch",
+                "value_out_of_range"
+              ]
+            },
+            {
               "json_types": [
                 "array"
               ],
@@ -18196,6 +18672,11 @@
               "description": "data.components is a closed service-only document with required items and dependencies arrays. Component ids are unique lowercase local ids; dependency endpoints must name components in the same service; self references and duplicate directed pairs are rejected. Directed cycles are allowed and consumers must honor the published traversal bounds.",
               "rule": "validate_service_components",
               "violation": "value_not_allowed"
+            },
+            {
+              "description": "data.monitoring is a closed service-only document. It requires an explicit enabled flag once present; an absent document is exactly enabled=false. provider selects the observation provider and interval_seconds overrides the server-wide default within its published bounds.",
+              "rule": "validate_service_monitoring",
+              "violation": "required_field_missing"
             }
           ],
           "secret_policy": "global_enforced",
@@ -18291,6 +18772,96 @@
           ],
           "self_references_allowed": false,
           "storage_path": "data.components"
+        },
+        "service_monitoring": {
+          "absent_configuration": "disabled",
+          "default_provider": "builtin_http",
+          "diagnostics": [
+            "ambiguous_health_url",
+            "ambiguous_endpoints",
+            "incomplete_endpoint",
+            "invalid_endpoints",
+            "invalid_health_url",
+            "invalid_monitoring_config",
+            "no_http_endpoint"
+          ],
+          "error_codes": [
+            "connect_failed",
+            "dns_failed",
+            "http_client_error",
+            "http_server_error",
+            "invalid_target",
+            "policy_denied",
+            "probe_failed",
+            "redirect_not_supported",
+            "response_too_large",
+            "timeout",
+            "tls_failed"
+          ],
+          "freshness": [
+            "pending",
+            "fresh",
+            "stale"
+          ],
+          "inheritance": {
+            "advances_business_updated_at": false,
+            "advances_object_revision": false,
+            "object_audit_per_check": false,
+            "rbac": true,
+            "visibility": true
+          },
+          "interval_seconds": {
+            "default": 300,
+            "maximum": 86400,
+            "minimum": 60,
+            "server_default_configurable": true
+          },
+          "maintenance_precedence": true,
+          "probe": {
+            "allowlist": "deny_by_default",
+            "authenticated": false,
+            "methods": [
+              "GET"
+            ],
+            "redirects_followed": false,
+            "response_body_stored": false,
+            "schemes": [
+              "http",
+              "https"
+            ]
+          },
+          "providers": [
+            "builtin_http"
+          ],
+          "result_semantics": {
+            "2xx": "healthy",
+            "3xx": "check_error",
+            "4xx": "check_error",
+            "5xx": "down",
+            "before_first_check": "unknown",
+            "connect_failure": "down",
+            "missing_or_invalid_configuration": "check_error",
+            "overdue": "unknown",
+            "policy_denied": "check_error",
+            "timeout": "down",
+            "tls_failure": "down"
+          },
+          "states": [
+            "unknown",
+            "healthy",
+            "down",
+            "check_error"
+          ],
+          "storage_path": "data.monitoring",
+          "target_resolution": {
+            "derived_path": "/health",
+            "discovery_or_scanning": false,
+            "precedence": [
+              "endpoint_health_url",
+              "derived_health_path"
+            ],
+            "requires_single_complete_http_endpoint": true
+          }
         },
         "status": {
           "default": "active",
@@ -18726,6 +19297,19 @@
               ],
               "normalization": [],
               "path": "components",
+              "reason": "is supported only for service objects",
+              "requirement": "forbidden",
+              "type": "object",
+              "violations": [
+                "field_not_allowed"
+              ]
+            },
+            {
+              "json_types": [
+                "object"
+              ],
+              "normalization": [],
+              "path": "monitoring",
               "reason": "is supported only for service objects",
               "requirement": "forbidden",
               "type": "object",
@@ -20065,6 +20649,19 @@
               "violations": [
                 "field_not_allowed"
               ]
+            },
+            {
+              "json_types": [
+                "object"
+              ],
+              "normalization": [],
+              "path": "monitoring",
+              "reason": "is supported only for service objects",
+              "requirement": "forbidden",
+              "type": "object",
+              "violations": [
+                "field_not_allowed"
+              ]
             }
           ],
           "rules": [
@@ -20750,6 +21347,19 @@
               ],
               "normalization": [],
               "path": "components",
+              "reason": "is supported only for service objects",
+              "requirement": "forbidden",
+              "type": "object",
+              "violations": [
+                "field_not_allowed"
+              ]
+            },
+            {
+              "json_types": [
+                "object"
+              ],
+              "normalization": [],
+              "path": "monitoring",
               "reason": "is supported only for service objects",
               "requirement": "forbidden",
               "type": "object",
@@ -22537,6 +23147,19 @@
               "violations": [
                 "field_not_allowed"
               ]
+            },
+            {
+              "json_types": [
+                "object"
+              ],
+              "normalization": [],
+              "path": "monitoring",
+              "reason": "is supported only for service objects",
+              "requirement": "forbidden",
+              "type": "object",
+              "violations": [
+                "field_not_allowed"
+              ]
             }
           ],
           "rules": [
@@ -22802,7 +23425,7 @@
       "raw_secret_values_rejected": true
     },
     "source": "blockwart.domain.object_schema",
-    "version": 6,
+    "version": 7,
     "violation_policy": {
       "description": "A rejected write names the canonical public data path, one violation code, and the published rule when a schema postcondition rejected it. Rejected values are never returned.",
       "detail_fields": [

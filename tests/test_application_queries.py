@@ -226,7 +226,9 @@ def test_catalog_browse_query_has_a_bounded_select_count(
         )
 
     assert browse.total_objects == 4
-    assert 0 < len(select_statements) <= 4
+    # One further bounded statement loads the whole service-observation
+    # index; monitoring adds no per-object query.
+    assert 0 < len(select_statements) <= 5
 
 
 def test_application_query_module_has_no_fastapi_or_template_dependency() -> None:

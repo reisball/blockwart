@@ -30,6 +30,12 @@ Each normalized endpoint has:
 | `exposure` | `loopback`, `lan`, `vpn`, `internal`, `public`, or `unknown` |
 | `health_url` | Optional health target |
 
+For an opted-in service, exactly one explicit canonical `health_url` takes
+precedence. Without one, monitoring derives `/health` only from exactly one
+complete canonical HTTP(S) endpoint origin and port. Ambiguous or incomplete
+records remain visible diagnostics and never trigger discovery. See
+[Service monitoring](service-monitoring.md).
+
 The built-in endpoint types are Web, REST API, MCP, HEC, SSH, SMB, Database,
 S2S, Metrics, Webhook, HTTP, TCP, and UDP. Missing legacy types are derived
 only when the protocol proves the capability. An HTTP URL without a declared

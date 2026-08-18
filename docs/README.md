@@ -35,6 +35,8 @@ deleted by this classification.
   integrity](relationship-integrity.md)
 - [Service-local components](service-components.md), including local identity,
   directed dependencies, bounds, cycle semantics, and the global-service boundary
+- [Service monitoring](service-monitoring.md), including provider-neutral
+  observations, deterministic targets, leased polling, SSRF policy, and recovery
 - [Canonical Decision objects](decisions.md), including lifecycle, links, and
   dry-run-first legacy classification
 - [Canonical Project knowledge](projects.md), including category-specific results,

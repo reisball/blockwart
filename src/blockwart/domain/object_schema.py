@@ -10,6 +10,14 @@ from typing import Any, Literal
 from urllib.parse import parse_qsl, urlsplit
 
 from blockwart.domain.interfaces import CANONICAL_EXPOSURES, CANONICAL_TRANSPORTS
+from blockwart.domain.monitoring import (
+    MAX_MONITORING_INTERVAL_SECONDS,
+    MIN_MONITORING_INTERVAL_SECONDS,
+    MONITORING_DOCUMENT_KEYS,
+    MONITORING_PROVIDERS,
+    normalize_service_monitoring,
+    service_monitoring_violations,
+)
 from blockwart.domain.references import TypedReference
 from blockwart.domain.security import FORBIDDEN_SECRET_KEYS
 from blockwart.domain.service_components import (
@@ -255,6 +263,8 @@ class FieldSpec:
     max_length: int | None = None
     min_items: int | None = None
     max_items: int | None = None
+    minimum: int | None = None
+    maximum: int | None = None
     allowed_keys: frozenset[str] = frozenset()
     forbid_url_credentials: bool = False
     message: str | None = None
@@ -313,6 +323,16 @@ class FieldSpec:
             and self.min_items > self.max_items
         ):
             raise ValueError(f"minimum items exceeds maximum items: {self.path}")
+        if (
+            self.minimum is not None or self.maximum is not None
+        ) and self.field_type != "integer":
+            raise ValueError(f"only integer fields may declare value bounds: {self.path}")
+        if (
+            self.minimum is not None
+            and self.maximum is not None
+            and self.minimum > self.maximum
+        ):
+            raise ValueError(f"minimum value exceeds maximum value: {self.path}")
         if self.allowed_keys and self.field_type != "object":
             raise ValueError(f"only object fields may declare allowed keys: {self.path}")
         if self.forbid_url_credentials and self.field_type != "url":
@@ -358,6 +378,7 @@ def normalize_object_data(kind: str, data: Mapping[str, Any]) -> dict[str, Any]:
             _normalize_datetime_field(normalized, field.path.split("."))
     if kind == "service":
         normalized = normalize_service_components(normalized)
+        normalized = normalize_service_monitoring(normalized)
     return normalized
 
 
@@ -652,6 +673,19 @@ def _validate_value(field: FieldSpec, path: str, value: Any) -> None:
                 field.message or f"must contain at most {field.max_length} characters",
                 violation=VIOLATION_VALUE_TOO_LONG,
             )
+    if isinstance(value, int) and not isinstance(value, bool):
+        if field.minimum is not None and value < field.minimum:
+            raise ObjectSchemaError(
+                path,
+                field.message or f"must be at least {field.minimum}",
+                violation=VIOLATION_VALUE_OUT_OF_RANGE,
+            )
+        if field.maximum is not None and value > field.maximum:
+            raise ObjectSchemaError(
+                path,
+                field.message or f"must be at most {field.maximum}",
+                violation=VIOLATION_VALUE_OUT_OF_RANGE,
+            )
     if isinstance(value, list):
         if field.min_items is not None and len(value) < field.min_items:
             raise ObjectSchemaError(
@@ -939,6 +973,12 @@ INTERFACE_FIELDS = (
     _field("endpoints[].host", "string"),
     _field("endpoints[].port", "port"),
     _field(
+        "endpoints[].health_url",
+        "url",
+        max_length=512,
+        forbid_url_credentials=True,
+    ),
+    _field(
         "endpoints[].transport",
         "enum",
         enum_values=CANONICAL_TRANSPORTS,
@@ -1133,9 +1173,38 @@ SERVICE_FIELDS = (
     ),
 )
 
+SERVICE_MONITORING_FIELDS = (
+    _field("monitoring", "object", allowed_keys=MONITORING_DOCUMENT_KEYS),
+    _field("monitoring.enabled", "boolean"),
+    _field(
+        "monitoring.provider",
+        "enum",
+        enum_values=MONITORING_PROVIDERS,
+        message="must be a supported monitoring provider",
+    ),
+    _field(
+        "monitoring.interval_seconds",
+        "integer",
+        minimum=MIN_MONITORING_INTERVAL_SECONDS,
+        maximum=MAX_MONITORING_INTERVAL_SECONDS,
+        message=(
+            f"must be an integer from {MIN_MONITORING_INTERVAL_SECONDS} "
+            f"to {MAX_MONITORING_INTERVAL_SECONDS}"
+        ),
+    ),
+)
+
 SERVICE_COMPONENTS_FORBIDDEN_FIELDS = (
     _field(
         "components",
+        "object",
+        forbidden_message="is supported only for service objects",
+    ),
+)
+
+SERVICE_MONITORING_FORBIDDEN_FIELDS = (
+    _field(
+        "monitoring",
         "object",
         forbidden_message="is supported only for service objects",
     ),
@@ -2239,6 +2308,21 @@ def _reject_installed_software_extra_fields(data: Mapping[str, Any]) -> None:
             )
 
 
+def _validate_service_monitoring(data: Mapping[str, Any]) -> None:
+    """Require a complete monitoring document once one is declared."""
+
+    violations = service_monitoring_violations(data)
+    if not violations:
+        return
+    path, message = violations[0]
+    raise ObjectSchemaError(
+        path,
+        message,
+        violation=VIOLATION_REQUIRED_FIELD_MISSING,
+        rule=public_rule_name(_validate_service_monitoring),
+    )
+
+
 def _validate_service_components(data: Mapping[str, Any]) -> None:
     """Enforce local identity and graph integrity after field-shape checks."""
 
@@ -2322,6 +2406,13 @@ SCHEMA_RULE_CONTRACTS: Mapping[str, str] = MappingProxyType(
         "_reject_installed_software_extra_fields": (
             "Installed-software entries may contain only name, version, and url."
         ),
+        "_validate_service_monitoring": (
+            "data.monitoring is a closed service-only document. It requires an "
+            "explicit enabled flag once present; an absent document is exactly "
+            "enabled=false. provider selects the observation provider and "
+            "interval_seconds overrides the server-wide default within its "
+            "published bounds."
+        ),
         "_validate_service_components": (
             "data.components is a closed service-only document with required items "
             "and dependencies arrays. Component ids are unique lowercase local ids; "
@@ -2351,6 +2442,7 @@ SCHEMA_RULE_VIOLATIONS: Mapping[str, str] = MappingProxyType(
         "_reject_empty_installed_software_fields": VIOLATION_VALUE_TOO_SHORT,
         "_reject_installed_software_extra_fields": VIOLATION_FIELD_NOT_ALLOWED,
         "_validate_service_components": VIOLATION_VALUE_NOT_ALLOWED,
+        "_validate_service_monitoring": VIOLATION_REQUIRED_FIELD_MISSING,
     }
 )
 
@@ -2399,6 +2491,7 @@ BUILTIN_SCHEMAS: Mapping[str, TypeSchema] = MappingProxyType(
             *NETWORK_FIELDS,
             *INSTALLED_SOFTWARE_FIELDS,
             *SERVICE_COMPONENTS_FORBIDDEN_FIELDS,
+            *SERVICE_MONITORING_FORBIDDEN_FIELDS,
             *REFERENCE_FIELDS,
             rules=(
                 _require_installed_software_fields,
@@ -2412,6 +2505,7 @@ BUILTIN_SCHEMAS: Mapping[str, TypeSchema] = MappingProxyType(
             *NETWORK_FIELDS,
             *INSTALLED_SOFTWARE_FIELDS,
             *SERVICE_COMPONENTS_FORBIDDEN_FIELDS,
+            *SERVICE_MONITORING_FORBIDDEN_FIELDS,
             *REFERENCE_FIELDS,
             rules=(
                 _require_installed_software_fields,
@@ -2426,6 +2520,7 @@ BUILTIN_SCHEMAS: Mapping[str, TypeSchema] = MappingProxyType(
             *NETWORK_FIELDS,
             *NETWORK_OBJECT_FIELDS,
             *SERVICE_COMPONENTS_FORBIDDEN_FIELDS,
+            *SERVICE_MONITORING_FORBIDDEN_FIELDS,
         ),
         "device": _schema(
             "device",
@@ -2434,20 +2529,23 @@ BUILTIN_SCHEMAS: Mapping[str, TypeSchema] = MappingProxyType(
             *DEVICE_FIELDS,
             *REFERENCE_FIELDS,
             *SERVICE_COMPONENTS_FORBIDDEN_FIELDS,
+            *SERVICE_MONITORING_FORBIDDEN_FIELDS,
         ),
         "service": _schema(
             "service",
             *INTERFACE_FIELDS,
             *SERVICE_FIELDS,
+            *SERVICE_MONITORING_FIELDS,
             *REFERENCE_FIELDS,
             *INSTALLED_SOFTWARE_FORBIDDEN_FIELDS,
-            rules=(_validate_service_components,),
+            rules=(_validate_service_components, _validate_service_monitoring),
         ),
         "credential_reference": _schema(
             "credential_reference",
             *CREDENTIAL_REFERENCE_FIELDS,
             *INSTALLED_SOFTWARE_FORBIDDEN_FIELDS,
             *SERVICE_COMPONENTS_FORBIDDEN_FIELDS,
+            *SERVICE_MONITORING_FORBIDDEN_FIELDS,
             rules=(_reject_credential_value_keys,),
         ),
         "runbook": _schema(
@@ -2455,6 +2553,7 @@ BUILTIN_SCHEMAS: Mapping[str, TypeSchema] = MappingProxyType(
             *RUNBOOK_FIELDS,
             *INSTALLED_SOFTWARE_FORBIDDEN_FIELDS,
             *SERVICE_COMPONENTS_FORBIDDEN_FIELDS,
+            *SERVICE_MONITORING_FORBIDDEN_FIELDS,
             rules=(
                 _reject_credential_value_keys,
                 _require_runbook_conditional_fields,
@@ -2468,6 +2567,7 @@ BUILTIN_SCHEMAS: Mapping[str, TypeSchema] = MappingProxyType(
             *INSTALLED_SOFTWARE_FORBIDDEN_FIELDS,
             *DECISION_FIELDS,
             *SERVICE_COMPONENTS_FORBIDDEN_FIELDS,
+            *SERVICE_MONITORING_FORBIDDEN_FIELDS,
             rules=(_validate_decision_lifecycle,),
         ),
         "project": _schema(
@@ -2475,6 +2575,7 @@ BUILTIN_SCHEMAS: Mapping[str, TypeSchema] = MappingProxyType(
             *INSTALLED_SOFTWARE_FORBIDDEN_FIELDS,
             *PROJECT_FIELDS,
             *SERVICE_COMPONENTS_FORBIDDEN_FIELDS,
+            *SERVICE_MONITORING_FORBIDDEN_FIELDS,
             rules=(
                 _require_project_conditional_fields,
                 _reject_project_contradictory_fields,

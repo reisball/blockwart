@@ -61,6 +61,7 @@ from blockwart.schemas.agent import (
     AgentCatalogObjectStub,
     AgentCatalogObjectSummary,
     AgentRelationshipOut,
+    AgentServiceMonitoring,
 )
 from blockwart.schemas.catalog import CatalogRecordDiagnostic, ObjectKind
 from blockwart.schemas.comments import CommentOut
@@ -69,6 +70,11 @@ from blockwart.services.commands import revision_etag
 from blockwart.services.comments import (
     recent_comments_for_object,
     recent_comments_for_objects,
+)
+from blockwart.services.monitoring import (
+    current_monitoring_settings,
+    load_observation_index,
+    monitoring_projection,
 )
 from blockwart.services.pagination import CursorPage, paginate_items
 from blockwart.services.read_access import ReadAccess
@@ -531,6 +537,20 @@ class _AgentCatalogResolver:
             ).all()
         )
         self.placements = PlacementGraph(self.objects, self.relationships)
+        # One bounded observation read is restricted to service objects this
+        # principal may read in full. Discover-only and concealed services do
+        # not contribute rows, counts, or observation-dependent work.
+        self.monitoring_settings = current_monitoring_settings()
+        readable_service_ids = [
+            obj.id
+            for obj in self.objects
+            if obj.kind == "service"
+            and self.access.policy.visibility_for(obj.id) == ObjectVisibility.DETAIL
+        ]
+        self.observations = load_observation_index(
+            session,
+            object_ids=readable_service_ids,
+        )
 
     def search(
         self,
@@ -597,6 +617,11 @@ class _AgentCatalogResolver:
                 lifecycle=obj.lifecycle,
                 health=obj.health,
             )
+            effective_filter_health = state.health if state is not None else None
+            if can_read and obj.kind == "service":
+                monitoring = self.monitoring(obj, data)
+                if monitoring is not None:
+                    effective_filter_health = monitoring.effective_health
             if query_term and not (
                 _matches_query(obj, data, query_term)
                 if can_read
@@ -669,7 +694,7 @@ class _AgentCatalogResolver:
                     continue
             if lifecycle and (state is None or state.lifecycle != lifecycle):
                 continue
-            if health and (state is None or state.health != health):
+            if health and effective_filter_health != health:
                 continue
             if source_type is not None or stale is not None:
                 provenance = self.provenance(obj)
@@ -764,6 +789,10 @@ class _AgentCatalogResolver:
         )
         if parent_ref is not None and parent is None:
             resolved_placement_state = "unknown"
+        monitoring = self.monitoring(obj, data)
+        projected_health = state.health if state is not None else None
+        if monitoring is not None:
+            projected_health = monitoring.effective_health
         return AgentCatalogObjectSummary(
             capabilities=self.access.capabilities_for(obj.id),
             ref=_object_ref(obj),
@@ -778,7 +807,7 @@ class _AgentCatalogResolver:
             hostnames=self.resolved_hostnames(obj),
             primary_endpoint=endpoints[0] if endpoints else None,
             lifecycle=state.lifecycle if state is not None else None,
-            health=state.health if state is not None else None,
+            health=projected_health,
             decision_status=(
                 projected_knowledge_data.get("decision_status")
                 if obj.kind == "decision"
@@ -830,7 +859,26 @@ class _AgentCatalogResolver:
                 for diagnostic in record.diagnostics
             ],
             provenance=self.provenance(obj),
+            monitoring=monitoring,
         )
+
+    def monitoring(
+        self,
+        obj: CatalogObject,
+        data: Mapping[str, Any],
+    ) -> AgentServiceMonitoring | None:
+        """Project the shared monitoring read model for a readable service."""
+
+        view = monitoring_projection(
+            kind=obj.kind,
+            object_id=obj.id,
+            data=data,
+            catalog_health=obj.health,
+            observations=self.observations,
+            now=self.now,
+            settings=self.monitoring_settings,
+        )
+        return None if view is None else AgentServiceMonitoring.model_validate(view)
 
     def provenance(self, obj: CatalogObject) -> CatalogProvenanceOut:
         provenance, _ = load_provenance(obj.provenance_json)

@@ -7,6 +7,7 @@ from collections.abc import Sequence
 
 from sqlalchemy.orm import Session
 
+from blockwart.config import get_settings
 from blockwart.db.migrations import (
     build_alembic_config,
     check_database_revision,
@@ -22,6 +23,12 @@ from blockwart.services.decision_migration import (
 from blockwart.services.interface_migration import (
     apply_interface_migration_plan,
     build_interface_migration_plan,
+)
+from blockwart.services.monitoring import (
+    build_monitoring_plan,
+    monitoring_plan_entry_payload,
+    monitoring_settings,
+    run_due_service_checks,
 )
 from blockwart.services.network_classification import (
     NetworkClassificationError,
@@ -71,6 +78,7 @@ def build_parser() -> argparse.ArgumentParser:
             "integrity",
             "interfaces",
             "placements",
+            "monitoring",
             "networks",
             "decisions",
             "projects",
@@ -144,6 +152,36 @@ def main(argv: Sequence[str] | None = None) -> int:
                 f"diagnostics={len(plan.diagnostics)}"
             )
             return 1 if plan.diagnostics else 0
+        elif args.action == "monitoring":
+            revision = check_database_revision(
+                args.database_url,
+                read_only=not args.apply,
+            )
+            plan, run = _monitoring_plan(args.database_url, apply=args.apply)
+            for entry in plan.entries:
+                print(
+                    "monitoring_service "
+                    + json.dumps(
+                        monitoring_plan_entry_payload(entry),
+                        sort_keys=True,
+                        separators=(",", ":"),
+                    )
+                )
+            mode = "apply" if args.apply else "dry-run"
+            skipped = run.skipped_reason if run is not None else None
+            if skipped is not None:
+                print(f"monitoring_run_skipped reason={skipped}", file=sys.stderr)
+            print(
+                "database_monitoring_ok "
+                f"revision={revision} mode={mode} "
+                f"scanned={plan.scanned_services} enabled={plan.enabled_services} "
+                f"diagnostics={plan.diagnostics} "
+                f"poller={'enabled' if plan.poller_enabled else 'disabled'} "
+                f"allowlist={'configured' if plan.allowlist_configured else 'empty'} "
+                f"claimed={run.claimed if run is not None else 0} "
+                f"completed={run.completed if run is not None else 0}"
+            )
+            return 0
         elif args.action == "networks":
             if args.apply:
                 print(
@@ -297,6 +335,26 @@ def _placement_plan(database_url: str | None, *, apply: bool):
                 with transaction(session):
                     apply_placement_migration_plan(session, plan)
             return plan
+    finally:
+        engine.dispose()
+
+
+def _monitoring_plan(database_url: str | None, *, apply: bool):
+    """Build the write-free monitoring plan and optionally run one due pass."""
+
+    config = build_alembic_config(database_url)
+    resolved_url = str(config.attributes["database_url"])
+    engine = (
+        build_engine(resolved_url) if apply else build_read_only_engine(resolved_url)
+    )
+    try:
+        settings = monitoring_settings(get_settings())
+        with Session(engine) as session:
+            run = (
+                run_due_service_checks(session, settings=settings) if apply else None
+            )
+            plan = build_monitoring_plan(session, settings=settings)
+            return plan, run
     finally:
         engine.dispose()
 

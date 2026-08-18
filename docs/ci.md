@@ -93,7 +93,8 @@ The container smoke proves that an empty catalog fails the Owner invariant, then
 explicitly bootstrapped candidate and a database at the historical Alembic baseline. Ready
 candidates must migrate to Head without losing legacy data. Both ready paths must also pass
 `blockwart-db integrity` plus the read-only `blockwart-db interfaces` and
-`blockwart-db placements` plans.
+`blockwart-db placements` and `blockwart-db monitoring` plans. The monitoring
+plan is read-only and never resolves or contacts a catalog target.
 
 The OpenAPI snapshot at `tests/contracts/openapi.json` is an intentionally reviewed machine
 contract. After an approved API change, update and review it with:
@@ -112,6 +113,11 @@ dependencies, the workflow records load average, Linux pressure-stall informatio
 root-filesystem usage, and a compact Docker summary so host-level resource starvation can be
 distinguished from product failures. Runner provisioning and automated deployment are separate
 infrastructure tasks.
+
+Service-monitoring tests never contact a live target. They inject deterministic
+resolver/socket adapter results and use documentation address ranges only. The
+package and container smoke paths leave the poller disabled and the target
+allowlist empty; their monitoring database plan is read-only.
 
 The real host differences remain outside the workflow: Gitea Actions uses the Fabrik runner and
 Gitea repository permissions, while GitHub Actions uses GitHub repository permissions and

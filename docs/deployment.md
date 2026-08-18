@@ -124,8 +124,10 @@ curl -fsS http://127.0.0.1:8000/api/health/live
 curl -fsS http://127.0.0.1:8000/api/health/ready
 ```
 
-These endpoints provide probes, not a monitoring system. Alerting, dashboards, and external
-service registration remain deployment concerns.
+These endpoints are Blockwart's own deployment probes, not catalog service
+observations. The separate opt-in, allowlisted service-check contract is
+documented in [Service monitoring](service-monitoring.md). Alerting, dashboards,
+and external service registration remain deployment concerns.
 
 The default SQLite lock wait is five seconds. The image's HTTP probe waits seven seconds and
 Docker allows eight seconds for the complete healthcheck, so readiness can return its stable
@@ -233,6 +235,16 @@ and mapping integer keys retain native auto-increment/sequence behavior, while
 the composite entry/snapshot foreign key prevents mappings from crossing
 snapshot boundaries.
 
+Revision `0017` is additive: it creates provider-neutral service-observation
+and database-lease tables and does not rewrite catalog JSON or another existing
+row. Absent monitoring configuration is disabled, the process poller is
+disabled by default, and the target-network allowlist is empty. An upgrade
+therefore performs no DNS or probe and leaves existing services byte-for-byte
+unchanged. Prove a restored candidate with the read-only `blockwart-db
+monitoring` plan. Downgrade drops only the two monitoring tables; normal live
+recovery remains the verified pre-upgrade backup plus matching image. See
+[Service monitoring](service-monitoring.md).
+
 For a fresh Markdown import, bind the reviewed mapping directly to both the
 dry-run and apply commands. The importer requires exact coverage of all Network
 rows and rejects missing, unknown, or conflicting evidence before schema or
@@ -335,6 +347,18 @@ Optional:
 - `BLOCKWART_AUTH_SERVICE_TOKEN_FAILURE_BUCKET_MAX_ROWS` (default `10000`)
 - `BLOCKWART_AUTH_SERVICE_TOKEN_FAILURE_BUCKET_PRUNE_INTERVAL_SECONDS` (default `60`)
 - `BLOCKWART_AUTH_TRUSTED_PROXY_CIDRS` (default empty; comma-separated exact networks)
+- `BLOCKWART_MONITORING_POLLER_ENABLED` (default `false`)
+- `BLOCKWART_MONITORING_DEFAULT_INTERVAL_SECONDS` (default `300`, allowed `60..86400`)
+- `BLOCKWART_MONITORING_ALLOWED_TARGET_NETWORKS` (default empty; comma-separated CIDRs)
+- `BLOCKWART_MONITORING_ALLOWED_TARGET_PORTS` (default `80,443`)
+- `BLOCKWART_MONITORING_CONNECT_TIMEOUT_MS` (default `2000`, allowed `100..15000`)
+- `BLOCKWART_MONITORING_TOTAL_TIMEOUT_MS` (default `5000`, allowed `200..30000`)
+- `BLOCKWART_MONITORING_MAX_RESPONSE_BYTES` (default `65536`, allowed `1024..1048576`)
+- `BLOCKWART_MONITORING_MAX_CHECKS_PER_RUN` (default `20`, allowed `1..1000`)
+- `BLOCKWART_MONITORING_MAX_CONCURRENT_CHECKS` (default `4`, allowed `1..32`)
+- `BLOCKWART_MONITORING_LEASE_SECONDS` (default `60`, allowed `10..3600`)
+- `BLOCKWART_MONITORING_JITTER_SECONDS` (default `30`, allowed `0..3600`)
+- `BLOCKWART_MONITORING_POLL_INTERVAL_SECONDS` (default `5`, allowed `1..60`)
 - `BLOCKWART_SQLITE_BUSY_TIMEOUT_MS` (default `5000`, allowed `100..60000`)
 - `BLOCKWART_SQLITE_WAL_ENABLED` (default `true`)
 
@@ -344,6 +368,12 @@ within a bounded interval. Persistent database files use WAL by default so reade
 during a write transaction. In-memory SQLite retains its compatible `memory` journal mode.
 Disabling WAL selects SQLite's `DELETE` journal for an explicitly incompatible filesystem, but
 reduces concurrency and must be documented in the deployment configuration.
+
+The monitoring lease must be strictly longer than the total probe timeout, and
+the connect timeout cannot exceed the total timeout. Invalid combinations fail
+configuration validation. Do not enable polling until the exact target plan,
+smallest necessary CIDRs/ports, backup, and recovery procedure have been
+reviewed. A broad public CIDR still does not allow special-purpose networks.
 
 `BLOCKWART_SECRET_REFERENCE` is a reference label only. It must not contain a raw token, password,
 private key, cookie, or `.env` body.

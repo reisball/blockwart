@@ -635,7 +635,7 @@ def main() -> None:
         token=api_token,
     )["objects"][0]
 
-    assert readiness["revision"] == "20260811_0016"
+    assert readiness["revision"] == "20260818_0017"
     assert "Blockwart" in index
     assert static_content_type == "text/css"
     assert not any(

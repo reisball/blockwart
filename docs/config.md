@@ -17,8 +17,32 @@ Current local keys:
 - `BLOCKWART_AUTH_SERVICE_TOKEN_FAILURE_BUCKET_MAX_ROWS`
 - `BLOCKWART_AUTH_SERVICE_TOKEN_FAILURE_BUCKET_PRUNE_INTERVAL_SECONDS`
 - `BLOCKWART_AUTH_TRUSTED_PROXY_CIDRS`
+- `BLOCKWART_MONITORING_POLLER_ENABLED` (default `false`)
+- `BLOCKWART_MONITORING_DEFAULT_INTERVAL_SECONDS` (default `300`, allowed
+  `60..86400`)
+- `BLOCKWART_MONITORING_ALLOWED_TARGET_NETWORKS` (default empty; comma-separated
+  explicit CIDRs, so every target is denied)
+- `BLOCKWART_MONITORING_ALLOWED_TARGET_PORTS` (default `80,443`)
+- `BLOCKWART_MONITORING_CONNECT_TIMEOUT_MS` (default `2000`, allowed
+  `100..15000`)
+- `BLOCKWART_MONITORING_TOTAL_TIMEOUT_MS` (default `5000`, allowed
+  `200..30000`)
+- `BLOCKWART_MONITORING_MAX_RESPONSE_BYTES` (default `65536`, allowed
+  `1024..1048576`; response bodies are not read or stored)
+- `BLOCKWART_MONITORING_MAX_CHECKS_PER_RUN` (default `20`, allowed `1..1000`)
+- `BLOCKWART_MONITORING_MAX_CONCURRENT_CHECKS` (default `4`, allowed `1..32`)
+- `BLOCKWART_MONITORING_LEASE_SECONDS` (default `60`, allowed `10..3600` and
+  strictly longer than the total probe timeout)
+- `BLOCKWART_MONITORING_JITTER_SECONDS` (default `30`, allowed `0..3600`)
+- `BLOCKWART_MONITORING_POLL_INTERVAL_SECONDS` (default `5`, allowed `1..60`)
 
 `BLOCKWART_SECRET_REFERENCE` is a reference label only. It must never contain a raw secret value.
+
+Monitoring configuration is deny-by-default at both levels: the process poller
+must be enabled and the concrete target must fall within the explicit network
+and port allowlists. A service's optional interval overrides only the server
+default; it never changes timeout, concurrency, or target policy. See
+[Service monitoring](service-monitoring.md).
 
 Service-token audience is credential metadata, not environment configuration.
 `blockwart-auth issue-token --audience api|mcp` and the equivalent protected

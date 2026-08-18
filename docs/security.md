@@ -50,3 +50,12 @@ Comment origin is authenticated provenance. A server-stored service-token
 audience binds a token to `api` or `mcp` comment writes, so the client-controlled
 channel header alone cannot claim MCP origin. Audience does not grant catalog
 access; normal `read` and `write` policy remains mandatory.
+
+Opt-in service monitoring is an outbound SSRF boundary. It is disabled by
+default and uses an empty network allowlist by default. Every DNS answer and the
+concrete pinned connection address must pass the scheme, port, and network
+policy; broad public allowlists do not unlock private, loopback, link-local,
+reserved, or metadata ranges. The original hostname remains bound to HTTP Host
+and TLS SNI/certificate validation. The adapter follows no redirect, uses no
+environment proxy, sends no credential or cookie, reads no body, and exposes
+only stable redacted errors. See [Service monitoring](service-monitoring.md).
