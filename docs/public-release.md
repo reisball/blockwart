@@ -45,5 +45,8 @@ before publication.
 Immediately before publication, verify the exact repository owner, default
 branch and commit, configure branch protection or a ruleset, enable private
 vulnerability reporting, review fork pull-request and Actions permissions,
-and require the exact-head CI proof. Repeat the repository and history secret
-scan after the final push and before changing visibility.
+and require the exact-head CI proof. Keep GitHub Issues enabled and allow
+contributors to propose changes through normal fork-based pull requests;
+branch rules protect `main` without blocking those contribution paths. Repeat
+the repository and history secret scan after the final push and before
+changing visibility.
