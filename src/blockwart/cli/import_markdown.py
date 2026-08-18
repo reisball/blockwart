@@ -29,8 +29,8 @@ from blockwart.services.source_coverage import (
     resolve_snapshot_coverage,
 )
 
-DEFAULT_TOOLS_PATH = Path("/home/zoe/.openclaw/workspace/TOOLS.md")
-DEFAULT_REFERENCES_ROOT = Path("/home/zoe/.openclaw/workspace")
+DEFAULT_TOOLS_PATH = Path("TOOLS.md")
+DEFAULT_REFERENCES_ROOT = Path(".")
 DEFAULT_SOURCE_URI = "workspace://TOOLS.md"
 
 

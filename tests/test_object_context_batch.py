@@ -873,7 +873,7 @@ def test_non_batch_endpoint_not_bounded(client: TestClient) -> None:
     response = client.post(
         "/api/v1/objects/alpha/children",
         json={"id": "test-child", "kind": "service", "label": "Test"},
-        headers={"Idempotency-Key": "test-key-1234567890123456"},
+        headers={"Idempotency-Key": "test-test-test-eight"},
     )
     assert response.status_code != 413
 

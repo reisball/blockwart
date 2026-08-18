@@ -1,8 +1,8 @@
 schema_version: 1
 networks:
-  - object_id: torwaechter
+  - object_id: example-router
     target_category: router
-    evidence_source: references/torwaechter.md#basics
-  - object_id: fabrik-aimesh-node
+    evidence_source: references/example-router.md#basics
+  - object_id: example-mesh-node
     target_category: mesh
-    evidence_source: references/torwaechter.md#aimesh-and-fabrik-physical-path
+    evidence_source: references/example-router.md#mesh-path

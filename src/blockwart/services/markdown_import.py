@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import ipaddress
 import re
 from collections.abc import Mapping
 from dataclasses import dataclass, replace
@@ -269,7 +270,7 @@ def build_tools_import_plan(
     provenance = CatalogProvenance(
         source_type="import",
         source_ref=str(path),
-        managed_by="Kai + Zoe",
+        managed_by="Blockwart Markdown Import",
         manual_override=False,
     ).model_dump()
     for obj in objects:
@@ -277,7 +278,7 @@ def build_tools_import_plan(
         CatalogObjectIn.model_validate(obj)
     payload = {
         "schema_version": 1,
-        "owner": "Kai + Zoe",
+        "owner": "Blockwart Markdown Import",
         "source": str(path),
         "objects": objects,
         "relationships": relationships,
@@ -1049,12 +1050,18 @@ def _addresses_from_cell(value: str) -> list[dict[str, str]]:
         if ip in seen:
             continue
         seen.add(ip)
+        address = ipaddress.ip_address(ip)
+        network = (
+            str(ipaddress.ip_network(f"{address}/24", strict=False))
+            if address.is_private
+            else ""
+        )
         addresses.append(
             {
                 "ip": ip,
                 "family": "ipv4",
                 "interface": "",
-                "network": "192.168.50.0/24" if ip.startswith("192.168.50.") else "",
+                "network": network,
                 "scope": "lan",
             }
         )
