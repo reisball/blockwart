@@ -144,7 +144,7 @@ rpds-py==2026.6.3
     # via
     #   jsonschema
     #   referencing
-ruff==0.16.2
+ruff==0.16.3
     # via blockwart (pyproject.toml)
 sqlalchemy==2.0.51
     # via
