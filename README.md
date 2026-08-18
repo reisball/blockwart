@@ -24,6 +24,8 @@ automatically.
   cycle-safe supersession links;
 - keep canonical Project research, experiments, migrations, implementations, and incident
   reviews as structured reviewed knowledge with safe evidence and typed links;
+- manage standalone or related Projects in a focused overview/workspace with a
+  seven-kind append-only professional chronology;
 - keep canonical Runbook operating and recovery contracts with inert exact commands,
   explicit verification, distinct rollback/recovery, and cycle-safe typed links;
 - opt services into provider-neutral health observations through bounded,

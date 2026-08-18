@@ -210,6 +210,25 @@ one minimal `comment_create` audit event without the comment body; replays and
 failures record no object audit. The complete storage, Markdown, UI, MCP, and
 migration contract is in `object-comments.md`.
 
+### Project workspace resources
+
+`GET /api/v1/projects` returns only detail-authorized Projects with canonical
+`project_status`, `category`, `current_summary`, first `next_action`, and the
+latest authorized professional chronology entry. It supports exact
+`project_status` and `project_category` filters, `id`, `label`, or
+`last_activity` sorting, standard direction/limit/cursor parameters, and the
+normal optional total. Authorization precedes filtering, chronology lookup,
+counting, ordering, and cursor creation, so stubs and concealed Projects leak
+none of those derived values.
+
+`GET|POST /api/v1/projects/{object_id}/chronology` reads or appends the curated
+Project chronology. The kind is exactly `intent`, `implementation`, `result`,
+`decision`, `milestone`, `blocker`, or `note`. Append uses the same trusted
+channel, secret rejection, immutable attribution, Markdown source, atomic
+revision bump, minimal audit, and `Idempotency-Key` behavior as object
+comments. Existing untyped Project comments project as `note`; canonical
+Project fields are never changed from chronology text.
+
 ### `POST /api/v1/objects/{parent_id}/children`
 
 Requires `create_child` on the parent and an `Idempotency-Key` header containing

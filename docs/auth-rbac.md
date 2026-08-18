@@ -366,6 +366,14 @@ append. Appends do not use optimistic `If-Match`, because they cannot overwrite
 another entry, but they are idempotent and advance the object revision.
 Discover-only stubs never release comments. See `object-comments.md`.
 
+The focused Project overview and chronology apply this same boundary before
+filtering, counting, ordering, or reading activity. A Project with only
+`discover` is a strict stub only on direct generic reads; it does not appear in
+the focused overview and reveals no chronology, last-activity timestamp,
+relationship, or filter match. `write` authorizes both focused canonical-field
+edits and chronology appends. UI sessions and `api`/`mcp` audience tokens retain
+their existing trusted-channel requirements.
+
 ## Bootstrap and credential operations
 
 Run the schema upgrade before any auth command:

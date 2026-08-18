@@ -73,8 +73,10 @@ from blockwart.mcp.manifest import (
     runtime_catalog_evidence,
 )
 from blockwart.schemas.catalog import ObjectKind
+from blockwart.schemas.projects import ProjectChronologyKind
 
 ALL_OBJECT_KINDS: tuple[str, ...] = get_args(ObjectKind)
+PROJECT_CHRONOLOGY_KINDS: tuple[str, ...] = get_args(ProjectChronologyKind)
 DEFAULT_BASE_URL = "http://127.0.0.1:8000"
 API_TOKEN_ENV = "BLOCKWART_API_TOKEN"
 API_TOKEN_FILE_ENV = "BLOCKWART_API_TOKEN_FILE"
@@ -456,6 +458,54 @@ TOOLS: list[JSON] = [
         "annotations": READ_ONLY_ANNOTATIONS,
     },
     {
+        "name": "blockwart.list_projects",
+        "description": (
+            "List the focused authorized Project overview with canonical status, category, "
+            "current summary, next action, and latest professional chronology activity."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "project_category": QUERY_FILTER_PROPERTIES["project_category"],
+                "project_status": QUERY_FILTER_PROPERTIES["project_status"],
+                "limit": {"type": "integer", "minimum": 1, "maximum": 100, "default": 50},
+                "cursor": {"type": "string", "maxLength": 2048},
+                "sort": {
+                    "type": "string",
+                    "enum": ["last_activity", "label", "id"],
+                    "default": "last_activity",
+                },
+                "direction": {
+                    "type": "string",
+                    "enum": ["asc", "desc"],
+                    "default": "desc",
+                },
+                "include_total": {"type": "boolean", "default": False},
+            },
+            "additionalProperties": False,
+        },
+        "annotations": READ_ONLY_ANNOTATIONS,
+    },
+    {
+        "name": "blockwart.list_project_chronology",
+        "description": (
+            "List one authorized Project's curated append-only professional chronology. "
+            "Legacy Project comments are projected losslessly as note entries."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "object_id": {"type": "string", "minLength": 1, "maxLength": 128},
+                "limit": {"type": "integer", "minimum": 1, "maximum": 100, "default": 20},
+                "cursor": {"type": "string", "maxLength": 2048},
+                "include_total": {"type": "boolean", "default": False},
+            },
+            "required": ["object_id"],
+            "additionalProperties": False,
+        },
+        "annotations": READ_ONLY_ANNOTATIONS,
+    },
+    {
         "name": "blockwart.list_audit_events",
         "description": (
             "List the immutable system audit timeline for one readable object in "
@@ -493,6 +543,31 @@ TOOLS: list[JSON] = [
                 },
             },
             "required": ["object_id", "body", "idempotency_key"],
+            "additionalProperties": False,
+        },
+        "annotations": WRITE_ANNOTATIONS,
+    },
+    {
+        "name": "blockwart.add_project_chronology",
+        "description": (
+            "Append one typed Markdown entry to an authorized Project chronology. Requires "
+            "an MCP-audience service token and idempotency key; canonical Project fields are "
+            "never changed automatically."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "object_id": {"type": "string", "minLength": 1, "maxLength": 128},
+                "kind": {"type": "string", "enum": list(PROJECT_CHRONOLOGY_KINDS)},
+                "body": {"type": "string", "minLength": 1, "maxLength": 4000},
+                "idempotency_key": {
+                    "type": "string",
+                    "minLength": 16,
+                    "maxLength": 128,
+                    "pattern": "^[!-~]+$",
+                },
+            },
+            "required": ["object_id", "kind", "body", "idempotency_key"],
             "additionalProperties": False,
         },
         "annotations": WRITE_ANNOTATIONS,
@@ -1189,6 +1264,29 @@ def call_tool(
                 "include_total": args.get("include_total", False),
             },
         )
+    elif name == "blockwart.list_projects":
+        payload = fetch(
+            "/api/v1/projects",
+            {
+                "project_category": args.get("project_category"),
+                "project_status": args.get("project_status"),
+                "limit": args.get("limit", 50),
+                "cursor": args.get("cursor"),
+                "sort": args.get("sort", "last_activity"),
+                "direction": args.get("direction", "desc"),
+                "include_total": args.get("include_total", False),
+            },
+        )
+    elif name == "blockwart.list_project_chronology":
+        object_id = _required_string(args, "object_id")
+        payload = fetch(
+            f"/api/v1/projects/{quote(object_id, safe='')}/chronology",
+            {
+                "limit": args.get("limit", 20),
+                "cursor": args.get("cursor"),
+                "include_total": args.get("include_total", False),
+            },
+        )
     elif name == "blockwart.list_audit_events":
         object_id = _required_string(args, "object_id")
         payload = fetch(
@@ -1205,6 +1303,20 @@ def call_tool(
             "POST",
             f"/api/v1/objects/{quote(object_id, safe='')}/comments",
             {"body": _required_string(args, "body")},
+            {
+                "Idempotency-Key": _required_string(args, "idempotency_key"),
+                "X-Blockwart-Channel": "mcp",
+            },
+        )
+    elif name == "blockwart.add_project_chronology":
+        object_id = _required_string(args, "object_id")
+        payload = request(
+            "POST",
+            f"/api/v1/projects/{quote(object_id, safe='')}/chronology",
+            {
+                "kind": _required_string(args, "kind"),
+                "body": _required_string(args, "body"),
+            },
             {
                 "Idempotency-Key": _required_string(args, "idempotency_key"),
                 "X-Blockwart-Channel": "mcp",

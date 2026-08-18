@@ -1097,6 +1097,45 @@ button:hover,
   border-top: 1px solid var(--border);
 }
 
+.project-filter-grid,
+.project-work-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(15rem, 1fr));
+  gap: 1rem;
+}
+
+.project-overview-table td {
+  vertical-align: top;
+}
+
+.project-flow {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: .45rem;
+  font-size: .85rem;
+}
+
+.project-flow span,
+.chronology-entry-head {
+  font-weight: 700;
+}
+
+.chronology-entry-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: .7rem;
+}
+
+.chronology-intent { border-inline-start: .3rem solid #6b5cff; }
+.chronology-implementation { border-inline-start: .3rem solid #1677a6; }
+.chronology-result { border-inline-start: .3rem solid #24835b; }
+.chronology-blocker { border-inline-start: .3rem solid #b54040; }
+.chronology-decision { border-inline-start: .3rem solid #9b6b13; }
+.chronology-milestone { border-inline-start: .3rem solid #7c4ba0; }
+.chronology-note { border-inline-start: .3rem solid #7b8490; }
+
 .comment-body {
   overflow-wrap: anywhere;
 }

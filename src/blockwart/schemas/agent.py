@@ -19,6 +19,7 @@ from blockwart.domain.provenance import CatalogProvenanceOut
 from blockwart.domain.runbooks import RunbookRisk, RunbookStatus
 from blockwart.schemas.catalog import CatalogRecordDiagnostic, ObjectKind
 from blockwart.schemas.comments import CommentOut
+from blockwart.schemas.projects import ProjectChronologyEntryOut
 
 
 class AgentEndpoint(BaseModel):
@@ -146,6 +147,9 @@ class AgentCatalogObjectContext(AgentCatalogObjectSummary):
     dependencies: dict[str, list[str]] = Field(default_factory=dict)
     credential_references: list[str] = Field(default_factory=list)
     recent_comments: list[CommentOut] = Field(default_factory=list)
+    # Project-only professional chronology. Non-Project contexts keep this
+    # absent/null; discover-only stubs never carry it.
+    recent_project_chronology: list[ProjectChronologyEntryOut] | None = None
 
 
 class AgentCatalogObjectStub(BaseModel):

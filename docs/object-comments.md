@@ -71,6 +71,15 @@ The object detail page shows the five newest entries and links to the paged
 timeline. The v1 detail and agent context expose the same five authorized
 entries under `recent_comments`; compact search stubs never include them.
 
+Projects add a curated projection over this same append-only storage. A typed
+Project entry has one of `intent`, `implementation`, `result`, `decision`,
+`milestone`, `blocker`, or `note`; an existing or generic Project comment with
+no kind projects as `note` without rewriting its text or metadata. The focused
+resources are `GET|POST /api/v1/projects/{object_id}/chronology` and the MCP
+`list_project_chronology`/`add_project_chronology` tools. Generic comments,
+including every non-Project comment, keep the API and behavior documented
+above. Project chronology and the technical audit timeline remain separate.
+
 ## Audit and migration
 
 A successful append writes exactly one `comment_create` audit event containing
@@ -93,3 +102,10 @@ revision can be downgraded only while `object_comments` is empty. Once a legacy
 or new timeline entry exists, application rollback requires the paired
 pre-migration database backup; the downgrade fails closed rather than losing
 history.
+
+Alembic revision `20260818_0018` adds the nullable Project chronology kind and
+its seven-value check constraint. SQLite performs a guarded batch rebuild and
+recreates the immutable update/delete triggers; PostgreSQL adds the column and
+constraint directly. Existing rows are not rewritten. Downgrade is allowed
+only when no typed entry exists, because dropping populated kind metadata would
+collapse reviewed semantics.

@@ -65,6 +65,7 @@ from blockwart.schemas.agent import (
 )
 from blockwart.schemas.catalog import CatalogRecordDiagnostic, ObjectKind
 from blockwart.schemas.comments import CommentOut
+from blockwart.schemas.projects import ProjectChronologyEntryOut
 from blockwart.schemas.v1 import ObjectSortField, SortDirection
 from blockwart.services.commands import revision_etag
 from blockwart.services.comments import (
@@ -77,6 +78,10 @@ from blockwart.services.monitoring import (
     monitoring_projection,
 )
 from blockwart.services.pagination import CursorPage, paginate_items
+from blockwart.services.project_chronology import (
+    recent_project_chronology_for_object,
+    recent_project_chronology_for_objects,
+)
 from blockwart.services.read_access import ReadAccess
 from blockwart.services.record_integrity import read_catalog_record_data
 
@@ -233,10 +238,17 @@ def query_agent_context_page(
         include_total=include_total,
         resource="context",
     )
+    page_objects = rows_page.page.items
+    recent_comments = rows_page.resolver.prefetch_recent_comments(page_objects)
+    recent_chronology = rows_page.resolver.prefetch_project_chronology(page_objects)
     return AgentContextPage(
         items=[
-            rows_page.resolver.context(catalog_object)
-            for catalog_object in rows_page.page.items
+            rows_page.resolver.context_with_comments(
+                catalog_object,
+                recent_comments,
+                recent_chronology,
+            )
+            for catalog_object in page_objects
         ],
         next_cursor=rows_page.page.next_cursor,
         total=rows_page.page.total,
@@ -358,9 +370,12 @@ def query_agent_object_contexts(
         else:
             detail_objects.append(catalog_object)
     recent_comments = resolver.prefetch_recent_comments(detail_objects)
+    recent_chronology = resolver.prefetch_project_chronology(detail_objects)
     for catalog_object in detail_objects:
         by_id[catalog_object.id] = resolver.context_with_comments(
-            catalog_object, recent_comments
+            catalog_object,
+            recent_comments,
+            recent_chronology,
         )
     ordered_items = [by_id[object_id] for object_id in ordered_unique_ids]
     return AgentObjectContextBatch(items=ordered_items)
@@ -890,12 +905,22 @@ class _AgentCatalogResolver:
         return self.context_with_comments(
             obj,
             {obj.id: recent_comments_for_object(self.session, obj, limit=5)},
+            {
+                obj.id: recent_project_chronology_for_object(
+                    self.session,
+                    obj,
+                    limit=5,
+                )
+            }
+            if obj.kind == "project"
+            else {},
         )
 
     def context_with_comments(
         self,
         obj: CatalogObject,
         recent_comments: dict[str, list[CommentOut]],
+        recent_project_chronology: dict[str, list[ProjectChronologyEntryOut]],
     ) -> AgentCatalogObjectContext:
         data = self._project_knowledge_data(obj.kind, _safe_object_data(obj))
         object_ref = _object_ref(obj)
@@ -934,6 +959,11 @@ class _AgentCatalogResolver:
             dependencies=self.dependencies(object_ref),
             credential_references=sorted(_collect_credential_references(data)),
             recent_comments=recent_comments.get(obj.id, []),
+            recent_project_chronology=(
+                recent_project_chronology.get(obj.id, [])
+                if obj.kind == "project"
+                else None
+            ),
         )
 
     def prefetch_recent_comments(
@@ -943,6 +973,12 @@ class _AgentCatalogResolver:
         if not objects:
             return {}
         return recent_comments_for_objects(self.session, objects, limit=5)
+
+    def prefetch_project_chronology(
+        self,
+        objects: list[CatalogObject],
+    ) -> dict[str, list[ProjectChronologyEntryOut]]:
+        return recent_project_chronology_for_objects(self.session, objects, limit=5)
 
     def stub(self, obj: CatalogObject) -> AgentCatalogObjectStub:
         object_ref = _object_ref(obj)

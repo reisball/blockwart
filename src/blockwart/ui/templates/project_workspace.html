@@ -1,0 +1,71 @@
+{% macro text_list(items) -%}
+  {% if items %}<ul>{% for item in items %}<li>{{ item }}</li>{% endfor %}</ul>{% else %}<p class="meta">{{ t("project.workspace.empty_value") }}</p>{% endif %}
+{%- endmacro %}
+{% macro reference_list(items) -%}
+  {% if items %}<ul>{% for item in items %}<li>{% if item.id %}<a href="/objects/{{ item.id }}">{{ item.label }}</a> {% endif %}<code>{{ item.ref }}</code></li>{% endfor %}</ul>{% else %}<p class="meta">{{ t("project.workspace.empty_value") }}</p>{% endif %}
+{%- endmacro %}
+<!doctype html>
+<html lang="{{ locale }}">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>{{ title }}</title>
+    <link rel="stylesheet" href="/static/app.css" />
+  </head>
+  <body>
+    <main class="page stack">
+      <header class="integrated-detail-heading">
+        <a class="detail-back-button" href="/projects">← {{ t("project.workspace.back") }}</a>
+        <div><p class="eyebrow">{{ t("project.workspace.eyebrow") }}</p><h1>{{ object.label }}</h1><span>project:{{ object.id }}</span></div>
+        {% if not is_stub %}<a class="button button-muted" href="/objects/{{ object.id }}">{{ t("project.workspace.full_record") }}</a>{% endif %}
+      </header>
+
+      {% if is_stub %}
+        <section class="panel"><p>{{ t("auth.stub_notice_short") }}</p></section>
+      {% else %}
+        {% if error %}<div class="error" role="alert">{{ error }}</div>{% endif %}
+        <section class="panel">
+          <div class="panel-head"><h2 class="section-title">{{ t("project.workspace.current_state") }}</h2>{% if can_write and not edit %}<a class="button button-small" href="/projects/{{ object.id }}?edit=true">{{ t("detail.edit") }}</a>{% endif %}</div>
+          <dl class="fact-grid"><div><dt>{{ t("project.field.project_status.label") }}</dt><dd><span class="badge">{{ t("project.status." ~ project.project_status) if project.project_status else t("asset.no_value") }}</span></dd></div><div><dt>{{ t("project.field.category.label") }}</dt><dd>{{ t("project.category." ~ project.category) if project.category else t("asset.no_value") }}</dd></div></dl>
+          {% if edit %}
+            <form class="form-grid" method="post" action="/projects/{{ object.id }}/work">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token }}" /><input type="hidden" name="if_match" value="{{ object_etag }}" />
+              <label>{{ t("project.field.objective.label") }}<textarea name="objective" maxlength="4000">{{ project_form.objective }}</textarea></label>
+              <label>{{ t("project.field.in_scope.label") }}<textarea name="in_scope">{{ project_form.in_scope }}</textarea></label>
+              <label>{{ t("project.field.out_of_scope.label") }}<textarea name="out_of_scope">{{ project_form.out_of_scope }}</textarea></label>
+              <label>{{ t("project.field.current_summary.label") }}<textarea name="current_summary" maxlength="4000">{{ project_form.current_summary }}</textarea></label>
+              <label>{{ t("project.field.open_questions.label") }}<textarea name="open_questions">{{ project_form.open_questions }}</textarea></label>
+              <label>{{ t("project.field.blockers.label") }}<textarea name="blockers">{{ project_form.blockers }}</textarea></label>
+              <label>{{ t("project.field.next_actions.label") }}<textarea name="next_actions">{{ project_form.next_actions }}</textarea></label>
+              <fieldset><legend>{{ t("project.workspace.typed_links") }}</legend>
+                {% for field in ["related_assets", "related_decisions", "related_runbooks", "related_projects"] %}<label>{{ t("project.field." ~ field ~ ".label") }}<textarea name="{{ field }}">{{ project_form[field] }}</textarea></label>{% endfor %}
+              </fieldset>
+              <fieldset><legend>{{ t("project.field.sources.label") }}</legend><p class="meta">{{ t("project.workspace.sources_help") }}</p>
+                <div class="table-wrap"><table class="table edit-table"><thead><tr><th>ID</th><th>{{ t("project.column.source_type") }}</th><th>{{ t("project.column.reference_kind") }}</th><th>{{ t("project.column.title") }}</th><th>{{ t("project.column.url") }}</th><th>{{ t("project.column.author") }}</th><th>{{ t("project.column.publisher") }}</th><th>{{ t("project.column.published_at") }}</th><th>{{ t("project.column.retrieved_at") }}</th><th></th></tr></thead>
+                  <tbody data-row-list="workspace-sources">{% for row in source_rows %}<tr><td><input name="source_id" value="{{ row.id or '' }}" maxlength="64" /></td><td><select name="source_source_type">{% for option in project_source_types %}<option value="{{ option }}"{% if row.source_type == option %} selected{% endif %}>{{ t("project.source_type." ~ option) }}</option>{% endfor %}</select></td><td><select name="source_reference_kind"><option value="">{{ t("asset.no_value") }}</option>{% for option in project_reference_kinds %}<option value="{{ option }}"{% if row.reference_kind == option %} selected{% endif %}>{{ t("project.reference_kind." ~ option) }}</option>{% endfor %}</select></td><td><input name="source_title" value="{{ row.title or '' }}" maxlength="200" /></td><td><input name="source_url" value="{{ row.url or '' }}" type="url" maxlength="2048" /></td><td><input name="source_author" value="{{ row.author or '' }}" /></td><td><input name="source_publisher" value="{{ row.publisher or '' }}" /></td><td><input name="source_published_at" value="{{ row.published_at or '' }}" /></td><td><input name="source_retrieved_at" value="{{ row.retrieved_at or '' }}" /></td><td><button class="button button-small button-muted" type="button" data-remove-row>{{ t("project.collection.remove") }}</button></td></tr>{% endfor %}</tbody>
+                </table></div>
+                <template data-row-template="workspace-sources"><tr><td><input name="source_id" maxlength="64" /></td><td><select name="source_source_type">{% for option in project_source_types %}<option value="{{ option }}">{{ t("project.source_type." ~ option) }}</option>{% endfor %}</select></td><td><select name="source_reference_kind"><option value="">{{ t("asset.no_value") }}</option>{% for option in project_reference_kinds %}<option value="{{ option }}">{{ t("project.reference_kind." ~ option) }}</option>{% endfor %}</select></td><td><input name="source_title" maxlength="200" /></td><td><input name="source_url" type="url" maxlength="2048" /></td><td><input name="source_author" /></td><td><input name="source_publisher" /></td><td><input name="source_published_at" /></td><td><input name="source_retrieved_at" /></td><td><button class="button button-small button-muted" type="button" data-remove-row>{{ t("project.collection.remove") }}</button></td></tr></template>
+                <button class="button button-small button-muted" type="button" data-add-row="workspace-sources">{{ t("project.source.add") }}</button>
+              </fieldset>
+              <div class="button-row"><button type="submit">{{ t("detail.save") }}</button><a class="button button-muted" href="/projects/{{ object.id }}">{{ t("detail.cancel") }}</a></div>
+            </form>
+          {% else %}
+            <h3>{{ t("project.field.objective.label") }}</h3><p class="preserve-lines">{{ project.objective or t("project.workspace.empty_value") }}</p>
+            <div class="project-work-grid"><div><h3>{{ t("project.field.in_scope.label") }}</h3>{{ text_list(project.in_scope_list) }}</div><div><h3>{{ t("project.field.out_of_scope.label") }}</h3>{{ text_list(project.out_of_scope_list) }}</div></div>
+            <h3>{{ t("project.field.current_summary.label") }}</h3><p class="preserve-lines">{{ project.current_summary or t("project.workspace.empty_value") }}</p>
+            <div class="project-work-grid"><div><h3>{{ t("project.field.open_questions.label") }}</h3>{{ text_list(project.open_questions_list) }}</div><div><h3>{{ t("project.field.blockers.label") }}</h3>{{ text_list(project.blockers_list) }}</div><div><h3>{{ t("project.field.next_actions.label") }}</h3>{{ text_list(project.next_actions_list) }}</div></div>
+          {% endif %}
+        </section>
+
+        {% if not edit %}<section class="panel"><h2 class="section-title">{{ t("project.workspace.typed_links") }}</h2><div class="project-work-grid"><div><h3>{{ t("project.field.related_assets.label") }}</h3>{{ reference_list(project.related_assets_links) }}</div><div><h3>{{ t("project.field.related_decisions.label") }}</h3>{{ reference_list(project.related_decisions_links) }}</div><div><h3>{{ t("project.field.related_runbooks.label") }}</h3>{{ reference_list(project.related_runbooks_links) }}</div><div><h3>{{ t("project.field.related_projects.label") }}</h3>{{ reference_list(project.related_projects_links) }}</div></div><h3>{{ t("project.field.sources.label") }}</h3>{% if project.sources %}<ul>{% for source in project.sources %}<li><strong>{{ source.title }}</strong> · {{ t("project.source_type." ~ source.source_type) }}{% if source.reference_kind %} · {{ t("project.reference_kind." ~ source.reference_kind) }}{% endif %}{% if source.safe_url %} · <a href="{{ source.safe_url }}" target="_blank" rel="noopener noreferrer">{{ t("project.source.open") }}</a>{% endif %}</li>{% endfor %}</ul>{% else %}<p class="meta">{{ t("project.workspace.empty_value") }}</p>{% endif %}</section>{% endif %}
+
+        <section class="panel" id="chronology">
+          <div class="panel-head"><div><p class="eyebrow">{{ t("project.workspace.flow_help") }}</p><h2 class="section-title">{{ t("project.workspace.chronology") }}</h2></div><div class="project-flow" aria-label="{{ t('project.workspace.flow_help') }}"><span>{{ t("project.chronology.kind.intent") }}</span><b>→</b><span>{{ t("project.chronology.kind.implementation") }}</span><b>→</b><span>{{ t("project.chronology.kind.result") }}</span></div></div>
+          {% if can_write %}<form class="form-grid chronology-form" method="post" action="/projects/{{ object.id }}/chronology"><input type="hidden" name="csrf_token" value="{{ csrf_token }}" /><input type="hidden" name="idempotency_key" value="{{ chronology_idempotency_key }}" /><label>{{ t("project.workspace.entry_kind") }}<select name="chronology_kind">{% for kind in chronology_kinds %}<option value="{{ kind }}">{{ t("project.chronology.kind." ~ kind) }}</option>{% endfor %}</select></label><label>{{ t("project.workspace.entry_body") }}<textarea name="body" maxlength="4000" required></textarea></label><button type="submit">{{ t("project.workspace.append") }}</button></form>{% endif %}
+          {% if chronology %}<ol class="comment-timeline project-chronology">{% for entry in chronology %}<li id="chronology-{{ entry.id }}" class="chronology-entry chronology-{{ entry.kind }}"><div class="chronology-entry-head"><span class="badge">{{ t("project.chronology.kind." ~ entry.kind) }}</span><time>{{ entry.created_at }}</time></div><div class="comment-body">{{ entry.rendered_html }}</div><div class="meta">{{ entry.author_display_name or t("comment.legacy_author") }} · {{ entry.origin }} · {{ entry.format }}</div></li>{% endfor %}</ol>{% else %}<p class="meta">{{ t("project.workspace.no_activity") }}</p>{% endif %}
+        </section>
+      {% endif %}
+    </main>
+    <script src="/static/detail.js" defer></script>
+  </body>
+</html>

@@ -349,12 +349,13 @@
                   <legend>{{ schema_fields_by_key.sources.label }}</legend>
                   <p class="meta">{{ schema_fields_by_key.sources.placeholder }}</p>
                   <div class="table-wrap"><table class="table edit-table">
-                    <thead><tr><th>{{ t("project.column.id") }}</th><th>{{ t("project.column.source_type") }}</th><th>{{ t("project.column.title") }}</th><th>{{ t("project.column.url") }}</th><th>{{ t("project.column.author") }}</th><th>{{ t("project.column.publisher") }}</th><th>{{ t("project.column.published_at") }}</th><th>{{ t("project.column.retrieved_at") }}</th><th><span class="visually-hidden">{{ t("project.collection.actions") }}</span></th></tr></thead>
+                    <thead><tr><th>{{ t("project.column.id") }}</th><th>{{ t("project.column.source_type") }}</th><th>{{ t("project.column.reference_kind") }}</th><th>{{ t("project.column.title") }}</th><th>{{ t("project.column.url") }}</th><th>{{ t("project.column.author") }}</th><th>{{ t("project.column.publisher") }}</th><th>{{ t("project.column.published_at") }}</th><th>{{ t("project.column.retrieved_at") }}</th><th><span class="visually-hidden">{{ t("project.collection.actions") }}</span></th></tr></thead>
                     <tbody data-row-list="project-sources">
                       {% for row in project_table_rows.sources %}
                         <tr>
                           <td><input name="source_id" value="{{ row.id or '' }}" maxlength="64" autocomplete="off" /></td>
                           <td><select name="source_source_type">{% for option in project_source_types %}<option value="{{ option }}"{% if row.source_type == option %} selected{% endif %}>{{ t("project.source_type." ~ option) }}</option>{% endfor %}</select></td>
+                          <td><select name="source_reference_kind"><option value="">{{ t("asset.no_value") }}</option>{% for option in project_reference_kinds %}<option value="{{ option }}"{% if row.reference_kind == option %} selected{% endif %}>{{ t("project.reference_kind." ~ option) }}</option>{% endfor %}</select></td>
                           <td><input name="source_title" value="{{ row.title or '' }}" maxlength="200" autocomplete="off" /></td>
                           <td><input name="source_url" type="url" maxlength="2048" inputmode="url" value="{{ row.url or '' }}" autocomplete="off" placeholder="https://example.invalid/source" /></td>
                           <td><input name="source_author" value="{{ row.author or '' }}" maxlength="200" autocomplete="off" /></td>
@@ -366,11 +367,12 @@
                       {% endfor %}
                     </tbody>
                   </table></div>
-                  <template data-row-template="project-sources"><tr><td><input name="source_id" value="" maxlength="64" autocomplete="off" /></td><td><select name="source_source_type">{% for option in project_source_types %}<option value="{{ option }}">{{ t("project.source_type." ~ option) }}</option>{% endfor %}</select></td><td><input name="source_title" value="" maxlength="200" autocomplete="off" /></td><td><input name="source_url" type="url" maxlength="2048" inputmode="url" value="" autocomplete="off" placeholder="https://example.invalid/source" /></td><td><input name="source_author" value="" maxlength="200" autocomplete="off" /></td><td><input name="source_publisher" value="" maxlength="200" autocomplete="off" /></td><td><input name="source_published_at" value="" autocomplete="off" placeholder="2026-08-11T12:00:00Z" /></td><td><input name="source_retrieved_at" value="" autocomplete="off" placeholder="2026-08-11T12:00:00Z" /></td><td><button class="button button-small button-muted" type="button" data-remove-row>{{ t("project.collection.remove") }}</button></td></tr></template>
+                  <template data-row-template="project-sources"><tr><td><input name="source_id" value="" maxlength="64" autocomplete="off" /></td><td><select name="source_source_type">{% for option in project_source_types %}<option value="{{ option }}">{{ t("project.source_type." ~ option) }}</option>{% endfor %}</select></td><td><select name="source_reference_kind"><option value="">{{ t("asset.no_value") }}</option>{% for option in project_reference_kinds %}<option value="{{ option }}">{{ t("project.reference_kind." ~ option) }}</option>{% endfor %}</select></td><td><input name="source_title" value="" maxlength="200" autocomplete="off" /></td><td><input name="source_url" type="url" maxlength="2048" inputmode="url" value="" autocomplete="off" placeholder="https://example.invalid/source" /></td><td><input name="source_author" value="" maxlength="200" autocomplete="off" /></td><td><input name="source_publisher" value="" maxlength="200" autocomplete="off" /></td><td><input name="source_published_at" value="" autocomplete="off" placeholder="2026-08-11T12:00:00Z" /></td><td><input name="source_retrieved_at" value="" autocomplete="off" placeholder="2026-08-11T12:00:00Z" /></td><td><button class="button button-small button-muted" type="button" data-remove-row>{{ t("project.collection.remove") }}</button></td></tr></template>
                   <button class="button button-small button-muted" type="button" data-add-row="project-sources">{{ t("project.source.add") }}</button>
                 </fieldset>
                 {{ project_text_field("current_summary") }}
                 {{ project_line_field("open_questions") }}
+                {{ project_line_field("blockers") }}
                 {{ project_line_field("recommendations") }}
                 {{ project_line_field("next_actions") }}
                 {% if project_form.category == "research" %}
@@ -498,6 +500,7 @@
               <h2 class="section-title" id="project-state-title">{{ t("project.section.state") }}</h2>
               <h3>{{ schema_fields_by_key.current_summary.label }}</h3>{{ project_text(project_detail.current_summary) }}
               <h3>{{ schema_fields_by_key.open_questions.label }}</h3>{{ project_text_list(project_detail.open_questions_list) }}
+              <h3>{{ schema_fields_by_key.blockers.label }}</h3>{{ project_text_list(project_detail.blockers_list) }}
               <h3>{{ schema_fields_by_key.recommendations.label }}</h3>{{ project_text_list(project_detail.recommendations_list) }}
               <h3>{{ schema_fields_by_key.next_actions.label }}</h3>{{ project_text_list(project_detail.next_actions_list) }}
               <h3>{{ schema_fields_by_key.lessons_learned.label }}</h3>{{ project_text_list(project_detail.lessons_learned_list) }}
