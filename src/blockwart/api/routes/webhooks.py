@@ -9,7 +9,15 @@ appends no comments, and persists no alert descriptions or error text.
 Service mapping is explicit and stable: each service that should receive Gatus
 observations carries a ``data.gatus`` document with ``source``, ``group``, and
 ``endpoint`` fields.  The receiver matches the incoming payload against all
-services and fails closed when zero or more than one service matches.
+services and fails closed when zero or more than one *authorized* service
+matches.
+
+Concealment: target resolution runs against the caller's read access, so a
+token without visibility over a mapping observes the same failure as a token
+that names an unknown endpoint.  Zero authorized matches is a single 404; the
+caller cannot distinguish "no mapping", "mapping exists but is hidden", or
+"mapping exists but is not authorized".  Ambiguity is only ever measured over
+authorized matches, never over hidden ones.
 """
 
 from __future__ import annotations
@@ -17,7 +25,7 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -42,6 +50,12 @@ router = APIRouter(
     responses=API_ERROR_RESPONSES,
 )
 
+# The maximum skew a reported event timestamp may be ahead of the server's
+# receive time. A far-future timestamp must not pin the observation row and
+# starve later legitimate deliveries, so anything beyond this window is
+# rejected as invalid rather than trusted.
+_FUTURE_SKEW_SECONDS = 300
+
 
 @router.post("/gatus", response_model=WebhookGatusOut)
 def receive_gatus_webhook(
@@ -52,32 +66,42 @@ def receive_gatus_webhook(
 ) -> WebhookGatusOut:
     """Ingest one Gatus alert as a canonical service observation.
 
+    The observation's ``checked_at`` (observed time) is the event timestamp
+    when present, otherwise the server receive time. Storage ``updated_at`` is
+    always the server receive time, so observed and received time are never
+    conflated.
+
     Args:
         payload: The Gatus custom alert payload with endpoint identity,
-            alert state, and check timestamp.
+            alert state, and optional check timestamp.
         request: The incoming FastAPI request.
         session: The database session for this request.
         access: Authenticated service-token read access with policy.
 
     Returns:
-        The matched object id, observation state, and ingestion status.
+        The matched object id, observation state, observed time, and whether a
+        write actually happened. ``ingested`` is truthful: a duplicate or
+        stale replay that the conflict guard rejects reports False.
 
     Raises:
-        HTTPException: 404 if no service matches, 409 if the mapping is
-            ambiguous, 403 if the token is not authorized for the target
-            service, or 422 if the timestamp is invalid.
+        HTTPException: 404 for no authorized match, 409 for ambiguous
+            authorized matches, or 422 for an invalid or over-skewed future
+            timestamp.
     """
-    checked_at = _parse_gatus_timestamp(payload.timestamp)
-    state = _gatus_alert_to_state(payload.alert)
+    received_at = datetime.now(UTC)
+    checked_at = _resolve_checked_at(payload.timestamp, received_at=received_at)
 
-    candidates = _resolve_gatus_targets(
+    candidates = _resolve_authorized_gatus_targets(
         session,
+        access=access,
         source=payload.source,
         group=payload.group,
         endpoint=payload.endpoint,
     )
 
     if not candidates:
+        # One uniform, concealment-safe failure. No branch distinguishes a
+        # missing mapping from a hidden or unauthorized one.
         raise HTTPException(
             status_code=404,
             detail="No service matches this Gatus endpoint identity",
@@ -94,37 +118,35 @@ def receive_gatus_webhook(
 
     catalog_object = candidates[0]
 
-    if Permission.DISCOVER not in access.capabilities_for(catalog_object.id):
-        logger.error("gatus_webhook_error code=policy_denied")
-        raise HTTPException(
-            status_code=403,
-            detail="Service token is not authorized for this service",
-        )
-
     observation = MonitoringObservation(
         provider="gatus",
-        state=state,
+        state=_gatus_alert_to_state(payload.alert),
         checked_at=checked_at,
         http_status=payload.http_status,
         latency_ms=payload.latency_ms,
     )
 
     settings = MonitoringSettings()
-    record = record_service_observation(
+    record, written = record_service_observation(
         session,
         object_id=catalog_object.id,
         object_instance_id=catalog_object.instance_id,
         observation=observation,
-        now=checked_at,
+        now=received_at,
         settings=settings,
+        report_written=True,
     )
 
     session.commit()
 
-    ingested = record is not None
-    if not ingested:
-        logger.error(
-            "gatus_webhook_error code=stale_or_missing_instance object_id=%s",
+    if record is None:
+        logger.info(
+            "gatus_webhook_info code=missing_instance object_id=%s",
+            _redacted(catalog_object.id),
+        )
+    elif not written:
+        logger.info(
+            "gatus_webhook_info code=duplicate_or_stale object_id=%s",
             _redacted(catalog_object.id),
         )
 
@@ -132,8 +154,8 @@ def receive_gatus_webhook(
         object_id=catalog_object.id,
         provider="gatus",
         state=observation.state,
-        checked_at=payload.timestamp,
-        ingested=ingested,
+        checked_at=checked_at.isoformat(),
+        ingested=written,
     )
 
 
@@ -157,8 +179,8 @@ def _gatus_alert_to_state(alert: str) -> str:
     raise ValueError(f"unsupported Gatus alert state: {alert!r}")
 
 
-def _parse_gatus_timestamp(value: str) -> datetime:
-    """Parse a Gatus RFC 3339 timestamp into an aware UTC datetime.
+def _parse_checked_at(value: str) -> datetime:
+    """Parse an RFC 3339 timestamp into an aware UTC datetime.
 
     Args:
         value: The timestamp string from the Gatus payload.
@@ -181,19 +203,48 @@ def _parse_gatus_timestamp(value: str) -> datetime:
     return parsed.astimezone(UTC)
 
 
-def _resolve_gatus_targets(
+def _resolve_checked_at(payload_timestamp: str | None, *, received_at: datetime) -> datetime:
+    """Resolve the observation's observed time.
+
+    When a timestamp is present it becomes ``checked_at``; otherwise the server
+    receive time is used. The result is rejected when it lies more than
+    ``_FUTURE_SKEW_SECONDS`` ahead of the receive time, so a single far-future
+    timestamp cannot pin the provider row and block legitimate later writes.
+
+    Args:
+        payload_timestamp: The optional event timestamp from the payload.
+        received_at: The server receive time (used as the fallback and as the
+            reference for the future-skew bound).
+
+    Returns:
+        The bounded observed time.
+
+    Raises:
+        HTTPException: 422 for an invalid or over-skewed future timestamp.
+    """
+    if payload_timestamp is None:
+        return received_at
+    checked_at = _parse_checked_at(payload_timestamp)
+    if checked_at > received_at + timedelta(seconds=_FUTURE_SKEW_SECONDS):
+        raise HTTPException(
+            status_code=422,
+            detail="timestamp is too far in the future",
+        )
+    return checked_at
+
+
+def _ordered_matching_services(
     session: Session,
     *,
     source: str | None,
     group: str | None,
     endpoint: str,
 ) -> list[CatalogObject]:
-    """Find services whose ``data.gatus`` mapping matches the Gatus payload.
+    """Return every matching service in a stable order.
 
-    The match is exact and case-sensitive.  ``endpoint`` is always required;
-    ``source`` and ``group`` must match when the service's mapping declares
-    them.  A service with only ``gatus.endpoint`` matches any payload with
-    that endpoint, regardless of source/group.
+    The scan is over all service rows uniformly (never filtered by the caller's
+    visibility), so a concealed token cannot infer hidden mapping existence
+    from the number of rows a scan reads.
 
     Args:
         session: The database session to query.
@@ -202,10 +253,13 @@ def _resolve_gatus_targets(
         endpoint: The required Gatus endpoint name.
 
     Returns:
-        A list of matching service catalog objects.  Zero means no match;
-        more than one means an ambiguous mapping.
+        Every service whose ``data.gatus`` mapping matches, ordered by id.
     """
-    services = session.scalars(select(CatalogObject).where(CatalogObject.kind == "service")).all()
+    services = session.scalars(
+        select(CatalogObject)
+        .where(CatalogObject.kind == "service")
+        .order_by(CatalogObject.id)
+    ).all()
     matches: list[CatalogObject] = []
     for service in services:
         mapping = _read_gatus_mapping(service)
@@ -215,6 +269,47 @@ def _resolve_gatus_targets(
             continue
         matches.append(service)
     return matches
+
+
+def _resolve_authorized_gatus_targets(
+    session: Session,
+    *,
+    access: ReadAccess,
+    source: str | None,
+    group: str | None,
+    endpoint: str,
+) -> list[CatalogObject]:
+    """Find services whose ``data.gatus`` mapping matches and are authorized.
+
+    The match is exact and case-sensitive. ``endpoint`` is always required;
+    ``source`` and ``group`` must match when the service's mapping declares
+    them. A service with only ``gatus.endpoint`` matches any payload with that
+    endpoint, regardless of source/group.
+
+    Concealment: only services the caller has ``DISCOVER`` over are retained.
+    Ambiguity is measured only over authorized matches, never over hidden ones,
+    so a hidden second mapping never leaks its existence or cardinality.
+
+    Args:
+        session: The database session to query.
+        access: The caller's read access (for capability filtering).
+        source: The optional Gatus source label.
+        group: The optional Gatus group label.
+        endpoint: The required Gatus endpoint name.
+
+    Returns:
+        The list of *authorized* matching service catalog objects. Zero means
+        no authorized match; more than one means an ambiguous authorized
+        mapping.
+    """
+    authorized: list[CatalogObject] = []
+    for service in _ordered_matching_services(
+        session, source=source, group=group, endpoint=endpoint
+    ):
+        if Permission.DISCOVER not in access.capabilities_for(service.id):
+            continue
+        authorized.append(service)
+    return authorized
 
 
 def _read_gatus_mapping(row: CatalogObject) -> dict[str, str] | None:

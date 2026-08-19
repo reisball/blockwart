@@ -36,7 +36,7 @@ from blockwart.domain.interfaces import (
 )
 from blockwart.domain.timestamps import format_rfc3339_utc
 
-MonitoringProvider = Literal["builtin_http"]
+MonitoringProvider = Literal["builtin_http", "gatus"]
 MonitoringState = Literal["unknown", "healthy", "down", "check_error"]
 MonitoringFreshness = Literal["pending", "fresh", "stale"]
 MonitoringTargetSource = Literal["endpoint_health_url", "derived_health_path"]

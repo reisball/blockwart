@@ -14,7 +14,8 @@ Covered scenarios:
 - Maintenance precedence: a maintenance catalog_health is not overwritten
   because the webhook writes observations, not catalog health.
 - Auth failure (no token) → 401.
-- Policy denial (token not authorized for the service) → 403.
+- Concealment: a token without authorization for the matching service
+  receives the same 404 as an unknown endpoint, never a 403.
 - No alert descriptions or error text are persisted.
 - checked_at from the Gatus event, not server now(), is used for idempotency.
 """
@@ -280,7 +281,12 @@ def test_duplicate_payload_does_not_overwrite(
 
     assert first.status_code == 200
     assert second.status_code == 200
-    assert first.json() == second.json()
+    # A duplicate delivery is a no-op: the first write lands, the replay does
+    # not (``ingested`` is truthful, not "a row exists").
+    assert first.json()["ingested"] is True
+    assert second.json()["ingested"] is False
+    # The stored state is unchanged by the duplicate.
+    assert first.json()["state"] == second.json()["state"]
 
 
 def test_out_of_order_older_timestamp_does_not_overwrite(
@@ -580,7 +586,7 @@ def test_gatus_webhook_requires_authentication(
     assert response.status_code == 401
 
 
-def test_gatus_webhook_policy_denial_returns_403(
+def test_gatus_webhook_conceals_unauthorized_target(
     alembic_session_factory,
 ) -> None:
     with alembic_session_factory() as session:
@@ -617,7 +623,9 @@ def test_gatus_webhook_policy_denial_returns_403(
             json=_gatus_payload(endpoint="allowed-service", alert="RESOLVED"),
         )
 
-    assert denied.status_code == 403
+    # Concealment: the unauthorized service is indistinguishable from a
+    # missing one (404), so the caller cannot infer hidden mapping existence.
+    assert denied.status_code == 404
     assert allowed.status_code == 200
 
 
@@ -867,3 +875,195 @@ def test_webhook_writes_observation_not_catalog_health(
         )
         assert obs is not None
         assert obs.state == "down"
+
+# ---------------------------------------------------------------------------
+# Review regressions (reisball @ #178): public projection, concealment,
+# future timestamps / received time, truthful duplicate/replay responses.
+# ---------------------------------------------------------------------------
+
+
+def test_agent_service_monitoring_accepts_gatus_provider(
+    alembic_session_factory,
+    install_unrestricted_read_access,
+) -> None:
+    """The public Agent projection must accept provider='gatus'.
+
+    Before #135 alignment, ``MonitoringProvider`` was ``Literal["builtin_http"]``
+    and ``AgentServiceMonitoring`` raised a Pydantic validation error for a
+    Gatus-observed service. The literal is now widened, so the shared read
+    model must not reject the push provider.
+    """
+    from blockwart.schemas.agent import AgentServiceMonitoring
+
+    view = AgentServiceMonitoring(
+        enabled=True,
+        provider="gatus",
+        interval_seconds=300,
+        interval_overridden=False,
+        target=None,
+        diagnostic=None,
+        state="down",
+        observed_state="down",
+        freshness="fresh",
+        http_status=503,
+        latency_ms=120,
+        error_code=None,
+        last_checked_at="2026-08-19T12:00:00Z",
+        last_success_at=None,
+        next_due_at=None,
+        effective_health="down",
+    )
+    assert view.provider == "gatus"
+
+
+def test_gatus_webhook_rejects_over_skewed_future_timestamp(
+    alembic_session_factory,
+    install_unrestricted_read_access,
+) -> None:
+    """A far-future event timestamp must be rejected, not pinned.
+
+    A single event whose ``checked_at`` lies more than the future-skew window
+    ahead of the server receive time must not starve later legitimate
+    observations by pinning the provider row.
+    """
+
+    with alembic_session_factory() as session:
+        upsert_object(
+            session,
+            _service(
+                "future-service",
+                gatus={"endpoint": "future-service"},
+                monitoring={"enabled": True, "provider": "gatus"},
+            ),
+        )
+        session.commit()
+
+    # A timestamp ten minutes ahead of the *real* server receive time exceeds
+    # the 300s future-skew window (the receiver compares against its own now,
+    # not the fixed test clock).
+    future_ts = (datetime.now(UTC) + timedelta(minutes=10)).isoformat()
+
+    app = _install_app_with_unrestricted_access(
+        alembic_session_factory, install_unrestricted_read_access
+    )
+    with TestClient(app) as client:
+        response = client.post(
+            "/api/v1/webhooks/gatus",
+            json=_gatus_payload(
+                endpoint="future-service",
+                timestamp=future_ts,
+                alert="TRIGGERED",
+            ),
+        )
+
+    # The repo's API error contract renders the body in its own shape; the
+    # established convention is to assert the status code (see
+    # test_invalid_timestamp_returns_422).
+    assert response.status_code == 422
+
+
+def test_wihout_timestamp_uses_server_receive_time(
+    alembic_session_factory,
+    install_unrestricted_read_access,
+) -> None:
+    """Stock Gatus custom alerts expose no timestamp placeholder, so an absent
+    timestamp must fall back to the server receive time instead of failing."""
+    with alembic_session_factory() as session:
+        upsert_object(
+            session,
+            _service(
+                "no-ts-service",
+                gatus={"endpoint": "no-ts-service"},
+                monitoring={"enabled": True, "provider": "gatus"},
+            ),
+        )
+        session.commit()
+
+    app = _install_app_with_unrestricted_access(
+        alembic_session_factory, install_unrestricted_read_access
+    )
+    # No timestamp key at all in the payload.
+    payload = _gatus_payload(endpoint="no-ts-service", alert="TRIGGERED")
+    payload.pop("timestamp", None)
+
+    with TestClient(app) as client:
+        response = client.post("/api/v1/webhooks/gatus", json=payload)
+
+    assert response.status_code == 200
+    assert response.json()["ingested"] is True
+
+    with alembic_session_factory() as session:
+        obs = session.scalar(
+            select(ServiceObservation).where(
+                ServiceObservation.object_id == "no-ts-service",
+                ServiceObservation.provider == "gatus",
+            )
+        )
+        assert obs is not None
+        # checked_at is near now (receive time), not a fixed past event.
+        assert obs.last_checked_at is not None
+        from datetime import UTC
+        from datetime import datetime as _dt
+
+        now_utc = _dt.now(UTC).replace(tzinfo=None)
+        assert abs((obs.last_checked_at - now_utc).total_seconds()) < 120
+
+
+def test_replay_after_newer_is_truthfully_not_ingested(
+    alembic_session_factory,
+    install_unrestricted_read_access,
+) -> None:
+    """A stale replay must report ingested=False even though a row exists."""
+    with alembic_session_factory() as session:
+        upsert_object(
+            session,
+            _service(
+                "truth-replay",
+                gatus={"endpoint": "truth-replay"},
+                monitoring={"enabled": True, "provider": "gatus"},
+            ),
+        )
+        session.commit()
+
+    app = _install_app_with_unrestricted_access(
+        alembic_session_factory, install_unrestricted_read_access
+    )
+    ts1 = NOW.isoformat()
+    ts2 = (NOW + timedelta(minutes=5)).isoformat()
+    with TestClient(app) as client:
+        # First: TRIGGERED at NOW (lands)
+        first = client.post(
+            "/api/v1/webhooks/gatus",
+            json=_gatus_payload(
+                endpoint="truth-replay", timestamp=ts1, alert="TRIGGERED"
+            ),
+        )
+        # Second: RESOLVED at NOW+5 (lands)
+        second = client.post(
+            "/api/v1/webhooks/gatus",
+            json=_gatus_payload(
+                endpoint="truth-replay", timestamp=ts2, alert="RESOLVED", http_status=200
+            ),
+        )
+        # Stale replay: TRIGGERED at NOW (older than stored NOW+5) -> no-op
+        replay = client.post(
+            "/api/v1/webhooks/gatus",
+            json=_gatus_payload(
+                endpoint="truth-replay", timestamp=ts1, alert="TRIGGERED"
+            ),
+        )
+
+    assert first.json()["ingested"] is True
+    assert second.json()["ingested"] is True
+    # The stale replay reports ingested=False (truthful), not True.
+    assert replay.json()["ingested"] is False
+
+    with alembic_session_factory() as session:
+        obs = session.scalar(
+            select(ServiceObservation).where(
+                ServiceObservation.object_id == "truth-replay",
+                ServiceObservation.provider == "gatus",
+            )
+        )
+        assert obs is not None
+        assert obs.state == "healthy"

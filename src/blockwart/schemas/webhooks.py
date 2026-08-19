@@ -30,13 +30,15 @@ class WebhookGatusIn(BaseModel):
         description="Gatus alert state: TRIGGERED or RESOLVED",
     )
 
-    # The timestamp Gatus observed the result.  Used for idempotency:
-    # replays and out-of-order deliveries are rejected by the observation
-    # seam's ``last_checked_at < excluded.last_checked_at`` guard.
-    timestamp: str = Field(
+    # Optional RFC 3339 timestamp of the check result.  Stock Gatus custom
+    # alerts expose no event-timestamp placeholder, so this is optional.
+    # When present it is used as ``checked_at``; when absent the receiver
+    # falls back to the server's receive time (``now()``).
+    timestamp: str | None = Field(
+        default=None,
         min_length=1,
         max_length=64,
-        description="RFC 3339 timestamp of the Gatus check result",
+        description="Optional RFC 3339 timestamp of the Gatus check result",
     )
 
     # Optional bounded metadata.  The receiver extracts only http_status

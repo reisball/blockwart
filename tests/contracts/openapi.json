@@ -1434,7 +1434,10 @@
           "provider": {
             "anyOf": [
               {
-                "const": "builtin_http",
+                "enum": [
+                  "builtin_http",
+                  "gatus"
+                ],
                 "type": "string"
               },
               {
@@ -6229,17 +6232,23 @@
             "title": "Source"
           },
           "timestamp": {
-            "description": "RFC 3339 timestamp of the Gatus check result",
-            "maxLength": 64,
-            "minLength": 1,
-            "title": "Timestamp",
-            "type": "string"
+            "anyOf": [
+              {
+                "maxLength": 64,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Optional RFC 3339 timestamp of the Gatus check result",
+            "title": "Timestamp"
           }
         },
         "required": [
           "endpoint",
-          "alert",
-          "timestamp"
+          "alert"
         ],
         "title": "WebhookGatusIn",
         "type": "object"
@@ -15935,7 +15944,7 @@
     },
     "/api/v1/webhooks/gatus": {
       "post": {
-        "description": "Ingest one Gatus alert as a canonical service observation.\n\nArgs:\n    payload: The Gatus custom alert payload with endpoint identity,\n        alert state, and check timestamp.\n    request: The incoming FastAPI request.\n    session: The database session for this request.\n    access: Authenticated service-token read access with policy.\n\nReturns:\n    The matched object id, observation state, and ingestion status.\n\nRaises:\n    HTTPException: 404 if no service matches, 409 if the mapping is\n        ambiguous, 403 if the token is not authorized for the target\n        service, or 422 if the timestamp is invalid.",
+        "description": "Ingest one Gatus alert as a canonical service observation.\n\nThe observation's ``checked_at`` (observed time) is the event timestamp\nwhen present, otherwise the server receive time. Storage ``updated_at`` is\nalways the server receive time, so observed and received time are never\nconflated.\n\nArgs:\n    payload: The Gatus custom alert payload with endpoint identity,\n        alert state, and optional check timestamp.\n    request: The incoming FastAPI request.\n    session: The database session for this request.\n    access: Authenticated service-token read access with policy.\n\nReturns:\n    The matched object id, observation state, observed time, and whether a\n    write actually happened. ``ingested`` is truthful: a duplicate or\n    stale replay that the conflict guard rejects reports False.\n\nRaises:\n    HTTPException: 404 for no authorized match, 409 for ambiguous\n        authorized matches, or 422 for an invalid or over-skewed future\n        timestamp.",
         "operationId": "receive_gatus_webhook_api_v1_webhooks_gatus_post",
         "requestBody": {
           "content": {
