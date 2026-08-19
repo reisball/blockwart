@@ -1,8 +1,11 @@
 from __future__ import annotations
 
 import json
-from collections.abc import Generator
+from collections.abc import Generator, Mapping
 from concurrent.futures import ThreadPoolExecutor
+from dataclasses import dataclass
+from html.parser import HTMLParser
+from urllib.parse import urlencode
 
 from fastapi.testclient import TestClient
 from sqlalchemy import func, select
@@ -33,6 +36,68 @@ KINDS = (
     "blocker",
     "note",
 )
+
+
+@dataclass(frozen=True)
+class _FilterForm:
+    """The rendered `/projects` filter form and the query it can construct."""
+
+    action: str
+    method: str
+    omits_empty_parameters: bool
+    controls: dict[str, tuple[str, ...]]
+
+
+class _FilterFormParser(HTMLParser):
+    def __init__(self) -> None:
+        super().__init__()
+        self.action = ""
+        self.method = ""
+        self.omits_empty_parameters = False
+        self.controls: dict[str, list[str]] = {}
+        self._seen_form = False
+        self._in_form = False
+        self._control = ""
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        attributes = dict(attrs)
+        if tag == "form" and not self._seen_form:
+            self._seen_form = True
+            self._in_form = True
+            self.action = attributes.get("action") or ""
+            self.method = (attributes.get("method") or "get").lower()
+            self.omits_empty_parameters = "data-omit-empty-filters" in attributes
+        elif tag == "select" and self._in_form:
+            self._control = attributes.get("name") or ""
+            self.controls.setdefault(self._control, [])
+        elif tag == "option" and self._control:
+            self.controls[self._control].append(attributes.get("value") or "")
+
+    def handle_endtag(self, tag: str) -> None:
+        if tag == "select":
+            self._control = ""
+        elif tag == "form":
+            self._in_form = False
+
+
+def _parse_project_filter_form(html: str) -> _FilterForm:
+    parser = _FilterFormParser()
+    parser.feed(html)
+    return _FilterForm(
+        action=parser.action,
+        method=parser.method,
+        omits_empty_parameters=parser.omits_empty_parameters,
+        controls={name: tuple(values) for name, values in parser.controls.items()},
+    )
+
+
+def _submitted_filter_query(form: _FilterForm, selection: Mapping[str, str]) -> str:
+    """Build the query the enhanced GET form submits for one filter selection."""
+    for name, value in selection.items():
+        assert value in form.controls[name]
+    return urlencode(
+        [(name, selection[name]) for name in form.controls if selection.get(name)]
+    )
 
 
 def _auth(token: str, *, key: str | None = None) -> dict[str, str]:
@@ -436,6 +501,89 @@ def test_project_overview_orders_activity_and_binds_filter_cursor(
         headers=_auth(root_state["owner_token"]),
     )
     assert rebound.status_code == 400
+
+
+def test_project_overview_filter_form_omits_unset_query_parameters(
+    root_client: TestClient,  # noqa: F811
+    root_state,  # noqa: F811
+) -> None:
+    owner_token = root_state["owner_token"]
+    _create_project(
+        root_client,
+        owner_token,
+        "filter-migration-active",
+        category="migration",
+        status="active",
+    )
+    _create_project(
+        root_client,
+        owner_token,
+        "filter-research-active",
+        category="research",
+        status="active",
+    )
+    _create_project(
+        root_client,
+        owner_token,
+        "filter-migration-paused",
+        category="migration",
+        status="paused",
+    )
+    root_client.cookies.set(AUTH_SESSION_COOKIE_NAME, root_state["owner_session"].value)
+
+    overview = root_client.get("/projects")
+    assert overview.status_code == 200
+    form = _parse_project_filter_form(overview.text)
+    assert (form.action, form.method) == ("/projects", "get")
+    assert form.omits_empty_parameters
+    assert list(form.controls) == ["project_category", "project_status"]
+    assert form.controls["project_category"][0] == ""
+    assert form.controls["project_status"][0] == ""
+    assert {"migration", "research"} <= set(form.controls["project_category"])
+    assert {"active", "paused"} <= set(form.controls["project_status"])
+    assert '<script src="/static/projects.js" defer></script>' in overview.text
+    assert '<a class="button button-muted" href="/projects">' in overview.text
+
+    enhancement = root_client.get("/static/projects.js")
+    assert enhancement.status_code == 200
+    assert "form[data-omit-empty-filters]" in enhancement.text
+    assert "control.disabled = true" in enhancement.text
+
+    migration_active = "Filter Migration Active"
+    research_active = "Filter Research Active"
+    migration_paused = "Filter Migration Paused"
+    rendered_labels = {migration_active, research_active, migration_paused}
+    cases = (
+        (
+            {"project_status": "active"},
+            "project_status=active",
+            {migration_active, research_active},
+        ),
+        (
+            {"project_category": "migration"},
+            "project_category=migration",
+            {migration_active, migration_paused},
+        ),
+        (
+            {"project_category": "migration", "project_status": "active"},
+            "project_category=migration&project_status=active",
+            {migration_active},
+        ),
+        ({}, "", rendered_labels),
+    )
+    for selection, expected_query, expected_labels in cases:
+        query = _submitted_filter_query(form, selection)
+        assert query == expected_query
+        response = root_client.get(f"/projects?{query}" if query else "/projects")
+        assert response.status_code == 200
+        for label in rendered_labels:
+            assert (label in response.text) is (label in expected_labels)
+
+    # The overview keeps its typed contract, so an empty enum parameter stays rejected.
+    # That is exactly the submission the filter form must never produce.
+    empty_category = root_client.get("/projects?project_category=&project_status=active")
+    empty_status = root_client.get("/projects?project_category=migration&project_status=")
+    assert (empty_category.status_code, empty_status.status_code) == (422, 422)
 
 
 def test_parallel_same_key_project_chronology_appends_once(root_state) -> None:  # noqa: F811

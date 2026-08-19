@@ -21,7 +21,7 @@
       </header>
 
       <section class="panel">
-        <form class="form-grid" method="get" action="/projects">
+        <form class="form-grid" method="get" action="/projects" data-omit-empty-filters>
           <div class="project-filter-grid">
             <label>{{ t("project.field.category.label") }}
               <select name="project_category">
@@ -63,5 +63,6 @@
         {% if next_url %}<div class="button-row"><a class="button button-muted" href="{{ next_url }}">{{ t("project.workspace.next_page") }}</a></div>{% endif %}
       </section>
     </main>
+    <script src="/static/projects.js" defer></script>
   </body>
 </html>
