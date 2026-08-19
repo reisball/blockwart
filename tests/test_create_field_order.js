@@ -33,6 +33,48 @@ assert.deepEqual(
   ],
 );
 
+const overriddenKeys = [
+  "kind",
+  "object_id",
+  "primary_name",
+  "status",
+  "summary",
+  "category",
+  "project_status",
+];
+const overriddenFields = new Map(overriddenKeys.map((key) => [key, { key }]));
+const overriddenAnchor = { key: "anchor" };
+const overriddenContainer = {
+  children: [...overriddenFields.values(), overriddenAnchor],
+  insertBefore(field, before) {
+    this.children.splice(this.children.indexOf(field), 1);
+    this.children.splice(this.children.indexOf(before), 0, field);
+  },
+};
+
+reorderCreateFields(overriddenContainer, overriddenAnchor, overriddenFields, [
+  { key: "summary" },
+  { key: "kind" },
+  { key: "object_id" },
+  { key: "primary_name" },
+  { key: "category" },
+  { key: "project_status" },
+  { key: "status" },
+]);
+assert.deepEqual(
+  overriddenContainer.children.map((field) => field.key),
+  [
+    "summary",
+    "kind",
+    "object_id",
+    "primary_name",
+    "category",
+    "project_status",
+    "status",
+    "anchor",
+  ],
+);
+
 const fields = new Map(rendered.map((key) => [key, { key }]));
 const anchor = { key: "anchor" };
 const container = {

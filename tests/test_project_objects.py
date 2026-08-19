@@ -30,7 +30,7 @@ from blockwart.domain.schema_projection import (
 )
 from blockwart.domain.search import SearchQuery
 from blockwart.domain.ui_schema import (
-    create_data_field_keys,
+    create_root_field_keys,
     load_editable_schema_settings,
     save_editable_schema_settings,
     ui_schema_payload,
@@ -1532,20 +1532,20 @@ def _create_link_targets(root_client, root_state) -> None:  # noqa: F811
 
 def test_create_form_projection_keeps_one_control_per_canonical_path() -> None:
     payload = ui_schema_payload()
-    keys = create_data_field_keys(payload)
+    keys = create_root_field_keys(payload)
     assert len(keys) == len(set(keys))
 
     definitions = {
         str(field["key"]): field
-        for kind in ("runbook", "project", "decision")
-        for field in payload[kind]["create_field_definitions"]
+        for schema in payload.values()
+        for field in schema["create_field_definitions"]
     }
     paths = [str(definitions[key]["storage_path"]) for key in keys]
     assert len(paths) == len(set(paths))
     # Nested collections keep their dedicated table editor as their one control.
     assert {"sources", "docs", "steps"} <= set(keys)
-    # Every Project create data path is projected, exactly once.
-    assert set(_project_create_data_keys()) <= set(keys)
+    # Every Project create path, common and data alike, is projected once.
+    assert set(payload["project"]["create_fields"]) <= set(keys)
     for kind in ("runbook", "project", "decision"):
         kind_keys = [
             str(field["key"]) for field in payload[kind]["create_field_definitions"]
@@ -1567,36 +1567,8 @@ def test_create_root_form_preserves_selected_kind_create_order(
         ]["create_fields"]
 
 
-def test_create_root_form_preserves_project_schema_override_order(
-    root_client,  # noqa: F811
-    root_state,  # noqa: F811
-    tmp_path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    override_path = tmp_path / "ui_schema_overrides.json"
-    monkeypatch.setenv("BLOCKWART_SCHEMA_OVERRIDES_PATH", str(override_path))
+def _save_project_schema_order(field_order: list[str]) -> None:
     settings = load_editable_schema_settings("project")
-    field_order = [
-        "kind",
-        "object_id",
-        "primary_name",
-        "status",
-        "summary",
-        "review_after",
-        *(
-            key
-            for key in settings["field_order"]
-            if key
-            not in {
-                "kind",
-                "object_id",
-                "primary_name",
-                "status",
-                "summary",
-                "review_after",
-            }
-        ),
-    ]
     fields = {
         str(field["key"]): {
             "labels": dict(field["localized_labels"]),
@@ -1612,13 +1584,62 @@ def test_create_root_form_preserves_project_schema_override_order(
         fields=fields,
     )
 
+
+def test_create_root_form_preserves_project_schema_override_order(
+    root_client,  # noqa: F811
+    root_state,  # noqa: F811
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    override_path = tmp_path / "ui_schema_overrides.json"
+    monkeypatch.setenv("BLOCKWART_SCHEMA_OVERRIDES_PATH", str(override_path))
+    settings = load_editable_schema_settings("project")
+    leading = [
+        "kind",
+        "object_id",
+        "primary_name",
+        "category",
+        "project_status",
+        "status",
+        "summary",
+    ]
+    field_order = [
+        *leading,
+        *(key for key in settings["field_order"] if key not in set(leading)),
+    ]
+    _save_project_schema_order(field_order)
+
     _browser_session(root_client, root_state)
     response = root_client.get("/?create_root=1&kind=project")
     assert response.status_code == 200
     assert _visible_create_field_keys(_create_root_form(response.text)) == (
         ui_schema_payload()["project"]["create_fields"]
     )
-    assert _visible_create_field_keys(_create_root_form(response.text))[5] == "review_after"
+    initial = _visible_create_field_keys(_create_root_form(response.text))
+    assert initial[: len(leading)] == leading
+    assert initial.index("category") < initial.index("status")
+
+
+def test_create_root_form_preserves_overridden_common_field_order(
+    root_client,  # noqa: F811
+    root_state,  # noqa: F811
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    override_path = tmp_path / "ui_schema_overrides.json"
+    monkeypatch.setenv("BLOCKWART_SCHEMA_OVERRIDES_PATH", str(override_path))
+    settings = load_editable_schema_settings("project")
+    leading = ["summary", "kind", "object_id", "primary_name", "status"]
+    _save_project_schema_order(
+        [*leading, *(key for key in settings["field_order"] if key not in set(leading))]
+    )
+
+    _browser_session(root_client, root_state)
+    response = root_client.get("/?create_root=1&kind=project")
+    assert response.status_code == 200
+    initial = _visible_create_field_keys(_create_root_form(response.text))
+    assert initial == ui_schema_payload()["project"]["create_fields"]
+    assert initial[: len(leading)] == leading
 
 
 def test_create_root_asset_form_keeps_its_single_labels_control(

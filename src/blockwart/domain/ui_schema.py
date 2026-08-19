@@ -566,9 +566,21 @@ RUNBOOK_FIELD_OVERRIDES: dict[str, UiField] = {
     for field in RUNBOOK_DATA_FIELDS
 }
 
-# The kinds whose canonical data fields the one create-root form renders, in
-# the order that form lays them out.
+# The knowledge kinds whose create fields share controls in the one create-root
+# form. Their canonical paths form one physical-control union.
 CREATE_FORM_KIND_ORDER: tuple[str, ...] = ("runbook", "project", "decision")
+ROOT_COMMON_FIELD_KEYS: tuple[str, ...] = (
+    "kind",
+    "object_id",
+    "primary_name",
+    "labels",
+    "device_category",
+    "device_manufacturer",
+    "device_model",
+    "platform",
+    "status",
+    "summary",
+)
 
 COMMON_CREATE_FIELDS = (
     "kind",
@@ -885,11 +897,11 @@ def create_field_payload(schema: UiTypeSchema) -> list[dict[str, object]]:
     return _field_payload(schema, schema.create_fields, visible_in_create=True)
 
 
-def create_data_field_keys(
+def create_root_field_keys(
     schemas: Mapping[str, Any],
     selected_kind: str | None = None,
 ) -> tuple[str, ...]:
-    """Return the create-root data controls, one per canonical data path.
+    """Return every physical create-root control in selected-kind order.
 
     The create-root form is a single form for every object kind, while several
     canonical paths belong to more than one kind: `review_after` and the typed
@@ -898,16 +910,19 @@ def create_data_field_keys(
     create fields separately therefore produced several controls writing one
     stored path, which made submit precedence and empty overwrites ambiguous.
 
-    The union is projected once, keeping the first definition of each canonical
-    path. A selected kind puts its own definitions first, preserving its
-    declared create order for server-rendered controls. Remaining controls stay
-    in stable union order for client-side kind changes. Nested table editors
-    claim their own paths instead of being repeated as scalar controls.
+    The shared union is projected once, keeping the first definition of each
+    canonical path. Every control that physically exists in the root form —
+    common and data fields alike — follows the selected kind's complete
+    declaration order on the initial render. Remaining controls stay in stable
+    union order for client-side kind changes. Nested table editors claim their
+    own paths instead of being repeated as scalar controls.
     Per-kind labels and help text stay in each kind's own schema; the form
     resolves them for the selected kind.
     """
 
-    rendered: dict[str, str] = {}
+    rendered: dict[str, str] = {
+        key: key for key in ROOT_COMMON_FIELD_KEYS
+    }
     for kind in CREATE_FORM_KIND_ORDER:
         for definition in schemas[kind]["create_field_definitions"]:
             storage_path = str(definition["storage_path"])
@@ -918,12 +933,11 @@ def create_data_field_keys(
     if selected_kind not in schemas:
         return tuple(rendered.values())
 
-    union_keys = set(rendered.values())
+    rendered_keys = set(rendered.values())
     selected = [
         str(definition["key"])
         for definition in schemas[selected_kind]["create_field_definitions"]
-        if str(definition["storage_path"]).startswith("data_json.")
-        and str(definition["key"]) in union_keys
+        if str(definition["key"]) in rendered_keys
     ]
     return tuple((*selected, *(key for key in rendered.values() if key not in selected)))
 

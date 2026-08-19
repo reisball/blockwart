@@ -50,8 +50,8 @@ from blockwart.domain.service_components import (
 )
 from blockwart.domain.ui_schema import (
     CREATE_KIND_ORDER,
-    create_data_field_keys,
     create_parent_kinds,
+    create_root_field_keys,
     get_ui_schema,
     schema_field_payload,
     ui_schema_payload,
@@ -480,7 +480,7 @@ def _index_template_context(
         "form_ui_schema": localized_schemas[selected_form_kind],
         # One create control per canonical data path, so a path shared by two
         # kinds cannot become two controls writing the same stored value.
-        "create_data_field_keys": create_data_field_keys(
+        "create_root_field_keys": create_root_field_keys(
             localized_schemas,
             selected_form_kind,
         ),
