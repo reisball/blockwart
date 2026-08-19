@@ -76,7 +76,7 @@ Project entry has one of `intent`, `implementation`, `result`, `decision`,
 `milestone`, `blocker`, or `note`; an existing or generic Project comment with
 no kind projects as `note` without rewriting its text or metadata. The focused
 resources are `GET|POST /api/v1/projects/{object_id}/chronology` and the MCP
-`list_project_chronology`/`add_project_chronology` tools. Generic comments,
+`list_project_chronology`/`append_project_chronology` tools. Generic comments,
 including every non-Project comment, keep the API and behavior documented
 above. Project chronology and the technical audit timeline remain separate.
 

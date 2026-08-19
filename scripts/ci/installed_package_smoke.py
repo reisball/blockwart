@@ -139,7 +139,7 @@ async def check_mcp(
                 "blockwart.get_object_contexts",
                 "blockwart.list_projects",
                 "blockwart.list_project_chronology",
-                "blockwart.add_project_chronology",
+                "blockwart.append_project_chronology",
                 "blockwart.list_comments",
                 "blockwart.list_audit_events",
                 "blockwart.add_comment",
@@ -383,7 +383,7 @@ async def check_mcp(
             standalone_payload = _tool_payload(standalone_project)
             assert standalone_payload["catalog_object"]["parent_path"] == []
             project_entry = await session.call_tool(
-                "blockwart.add_project_chronology",
+                "blockwart.append_project_chronology",
                 {
                     "object_id": "package-smoke-project",
                     "kind": "intent",

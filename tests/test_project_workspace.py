@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 from collections.abc import Generator
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
@@ -669,6 +670,7 @@ def test_mcp_project_tools_map_to_the_reviewed_rest_contract(
 ) -> None:
     _create_project(root_client, root_state["owner_token"], "mcp-project")
     token = root_state["owner_mcp_token"]
+    calls: list[tuple[str, str, dict, dict[str, str]]] = []
 
     def fetch(path: str, params: dict) -> dict:
         response = root_client.get(
@@ -680,6 +682,7 @@ def test_mcp_project_tools_map_to_the_reviewed_rest_contract(
         return response.json()
 
     def request(method: str, path: str, body: dict, headers: dict[str, str]) -> dict:
+        calls.append((method, path, body, headers))
         response = root_client.request(
             method,
             path,
@@ -689,31 +692,138 @@ def test_mcp_project_tools_map_to_the_reviewed_rest_contract(
         assert response.status_code in {200, 201}, response.text
         return response.json()
 
-    created = call_tool(
-        "blockwart.add_project_chronology",
+    entries = (
+        ("intent", "Define the agent-only chronology intent."),
+        ("implementation", "Implement the canonical REST wrapper."),
+        ("result", "Verify the Project chronology result."),
+    )
+    created_payloads = []
+    for index, (kind, body) in enumerate(entries, start=1):
+        created = call_tool(
+            "blockwart.append_project_chronology",
+            {
+                "object_id": "mcp-project",
+                "kind": kind,
+                "body": body,
+                "idempotency_key": f"mcp-project-entry-{index:04d}",
+            },
+            fetcher=fetch,
+            requester=request,
+        )
+        created_payloads.append(json.loads(created["content"][0]["text"]))
+
+    replay = call_tool(
+        "blockwart.append_project_chronology",
         {
             "object_id": "mcp-project",
-            "kind": "intent",
-            "body": "Describe the fictional intent.",
-            "idempotency_key": "mcp-project-entry-0001",
+            "kind": "result",
+            "body": "Verify the Project chronology result.",
+            "idempotency_key": "mcp-project-entry-0003",
         },
         fetcher=fetch,
         requester=request,
     )
-    listed = call_tool(
+    replay_payload = json.loads(replay["content"][0]["text"])
+
+    rest_page = root_client.get(
+        "/api/v1/projects/mcp-project/chronology",
+        params={"limit": 1, "include_total": True},
+        headers=_auth(token),
+    )
+    assert rest_page.status_code == 200
+    mcp_page = call_tool(
         "blockwart.list_project_chronology",
-        {"object_id": "mcp-project", "include_total": True},
+        {"object_id": "mcp-project", "limit": 1, "include_total": True},
         fetcher=fetch,
     )
+    listed_payload = json.loads(mcp_page["content"][0]["text"])
+    assert listed_payload == rest_page.json()
+    assert listed_payload["total"] == len(entries)
+    assert replay_payload == {**created_payloads[-1], "replayed": True}
+    assert all(payload["entry"]["origin"] == "mcp" for payload in created_payloads)
+    assert all(
+        payload["entry"]["author_principal_id"] == root_state["owner_id"]
+        and payload["entry"]["author_principal_type"] == "service_account"
+        for payload in created_payloads
+    )
+
+    # The cursor stays opaque to MCP: each page is forwarded unchanged and
+    # together they reproduce the REST/UI chronology entries exactly.
+    pages = [listed_payload]
+    while pages[-1]["next_cursor"]:
+        cursor = pages[-1]["next_cursor"]
+        rest_following = root_client.get(
+            "/api/v1/projects/mcp-project/chronology",
+            params={"limit": 1, "cursor": cursor, "include_total": True},
+            headers=_auth(token),
+        )
+        mcp_following = call_tool(
+            "blockwart.list_project_chronology",
+            {
+                "object_id": "mcp-project",
+                "limit": 1,
+                "cursor": cursor,
+                "include_total": True,
+            },
+            fetcher=fetch,
+        )
+        payload = json.loads(mcp_following["content"][0]["text"])
+        assert rest_following.status_code == 200
+        assert payload == rest_following.json()
+        pages.append(payload)
+    assert [entry for page in pages for entry in page["items"]] == list(
+        reversed([payload["entry"] for payload in created_payloads])
+    )
+    assert all(page["total"] == len(entries) for page in pages)
+
+    root_client.cookies.set(AUTH_SESSION_COOKIE_NAME, root_state["owner_session"].value)
+    workspace = root_client.get("/projects/mcp-project")
+    assert workspace.status_code == 200
+    assert all(body in workspace.text for _, body in entries)
+    assert all(kind.title() in workspace.text for kind, _ in entries)
+    assert [
+        (
+            method,
+            path,
+            body,
+            {
+                key: value
+                for key, value in headers.items()
+                if key != "X-Correlation-ID"
+            },
+        )
+        for method, path, body, headers in calls
+    ] == [
+        (
+            "POST",
+            "/api/v1/projects/mcp-project/chronology",
+            {"kind": kind, "body": body},
+            {
+                "Idempotency-Key": f"mcp-project-entry-{index:04d}",
+                "X-Blockwart-Channel": "mcp",
+            },
+        )
+        for index, (kind, body) in enumerate(entries, start=1)
+    ] + [
+        (
+            "POST",
+            "/api/v1/projects/mcp-project/chronology",
+            {"kind": "result", "body": "Verify the Project chronology result."},
+            {
+                "Idempotency-Key": "mcp-project-entry-0003",
+                "X-Blockwart-Channel": "mcp",
+            },
+        )
+    ]
+    assert all(
+        re.match(r"^[A-Za-z0-9._-]{1,64}$", headers["X-Correlation-ID"])
+        for *_, headers in calls
+    )
+
     projects = call_tool(
         "blockwart.list_projects",
         {"project_status": "planned", "include_total": True},
         fetcher=fetch,
     )
-    created_payload = json.loads(created["content"][0]["text"])
-    listed_payload = json.loads(listed["content"][0]["text"])
     projects_payload = json.loads(projects["content"][0]["text"])
-    assert created_payload["entry"]["kind"] == "intent"
-    assert listed_payload["total"] == 1
-    assert listed_payload["items"][0]["kind"] == "intent"
     assert any(item["id"] == "mcp-project" for item in projects_payload["items"])

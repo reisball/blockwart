@@ -598,7 +598,7 @@ TOOLS: list[JSON] = [
         "annotations": WRITE_ANNOTATIONS,
     },
     {
-        "name": "blockwart.add_project_chronology",
+        "name": "blockwart.append_project_chronology",
         "description": (
             "Append one typed Markdown entry to an authorized Project chronology. Requires "
             "an MCP-audience service token and idempotency key; canonical Project fields are "
@@ -1397,7 +1397,7 @@ def call_tool(
                 "X-Blockwart-Channel": "mcp",
             },
         )
-    elif name == "blockwart.add_project_chronology":
+    elif name == "blockwart.append_project_chronology":
         object_id = _required_string(args, "object_id")
         payload = request(
             "POST",

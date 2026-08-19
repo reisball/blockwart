@@ -71,7 +71,7 @@ It wraps the object-authorized v1 API:
 - blockwart.get_object_contexts -> POST /api/v1/object-contexts
 - blockwart.list_projects -> GET /api/v1/projects
 - blockwart.list_project_chronology -> GET /api/v1/projects/{object_id}/chronology
-- blockwart.add_project_chronology -> POST /api/v1/projects/{object_id}/chronology
+- blockwart.append_project_chronology -> POST /api/v1/projects/{object_id}/chronology
 - blockwart.list_comments -> GET /api/v1/objects/{object_id}/comments
 - blockwart.list_audit_events -> GET /api/v1/objects/{object_id}/audit-events
 - blockwart.add_comment -> POST /api/v1/objects/{object_id}/comments
@@ -144,7 +144,7 @@ Choose the smallest tool that directly answers the intent:
   `get_object_context`; audit events are not.
 - Use `blockwart.list_projects` for the focused, authorized Project overview.
   Use `blockwart.list_project_chronology` and
-  `blockwart.add_project_chronology` for the seven-kind professional history;
+  `blockwart.append_project_chronology` for the seven-kind professional history;
   this never promotes text into reviewed canonical Project fields. Project
   contexts also carry the five newest entries.
 
