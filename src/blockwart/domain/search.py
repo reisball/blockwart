@@ -72,7 +72,7 @@ RANK_SECONDARY_FIELD = 5
 RANK_UNRANKED = 9
 
 SEARCH_SNIPPET_MAX_LENGTH = 240
-_SNIPPET_TRUNCATION_MARKER = "…"
+SNIPPET_TRUNCATION_MARKER = "…"
 
 # Bounded projection work per object: a damaged or unusually large document
 # cannot turn one search into unbounded string scanning.
@@ -379,7 +379,10 @@ def search_snippet(
     collapsed = " ".join(candidate.split())
     if len(collapsed) <= SEARCH_SNIPPET_MAX_LENGTH:
         return collapsed
-    return collapsed[:SEARCH_SNIPPET_MAX_LENGTH].rstrip() + _SNIPPET_TRUNCATION_MARKER
+    # The truncation marker counts towards the published maximum, so the
+    # returned snippet is never longer than `SEARCH_SNIPPET_MAX_LENGTH`.
+    kept = SEARCH_SNIPPET_MAX_LENGTH - len(SNIPPET_TRUNCATION_MARKER)
+    return collapsed[:kept].rstrip() + SNIPPET_TRUNCATION_MARKER
 
 
 def _normalized_filter(value: str | None) -> str | None:

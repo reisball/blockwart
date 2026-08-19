@@ -493,7 +493,7 @@
           "search_snippet": {
             "anyOf": [
               {
-                "maxLength": 241,
+                "maxLength": 240,
                 "type": "string"
               },
               {
@@ -928,7 +928,7 @@
           "search_snippet": {
             "anyOf": [
               {
-                "maxLength": 241,
+                "maxLength": 240,
                 "type": "string"
               },
               {

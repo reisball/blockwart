@@ -112,7 +112,7 @@ class AgentCatalogObjectSummary(BaseModel):
     # summary exists. A discover-only stub never carries it.
     search_snippet: str | None = Field(
         default=None,
-        max_length=SEARCH_SNIPPET_MAX_LENGTH + 1,
+        max_length=SEARCH_SNIPPET_MAX_LENGTH,
     )
     parent: AgentAssetReadNode | None = None
     ips: list[str] = Field(default_factory=list)

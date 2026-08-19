@@ -11,22 +11,27 @@ from collections.abc import Generator
 
 import pytest
 from fastapi.testclient import TestClient
+from pydantic import ValidationError
 from sqlalchemy.orm import Session
 
 from blockwart.api.deps import get_session
 from blockwart.db.session import transaction
 from blockwart.domain.auth import Permission, PrincipalContext, PrincipalType
+from blockwart.domain.provenance import CatalogProvenanceOut
 from blockwart.domain.search import (
     AGENT_SEARCH_LIMIT_MAX,
     CONTEXT_LIMIT_MAX,
     SEARCH_LIMIT_MAX,
     SEARCH_SNIPPET_MAX_LENGTH,
+    SNIPPET_TRUNCATION_MARKER,
     SearchQuery,
+    search_snippet,
 )
 from blockwart.domain.validation_errors import SEARCH_LIMIT_DETAIL_FIELDS
 from blockwart.main import create_app
 from blockwart.mcp.server import ToolInputError, call_tool
 from blockwart.models import CatalogObject
+from blockwart.schemas.agent import AgentCatalogObjectSummary
 from blockwart.services.agent import query_agent_objects_page, search_agent_objects
 from blockwart.services.policy import PolicySnapshot
 from blockwart.services.read_access import ReadAccess
@@ -469,8 +474,15 @@ def test_search_snippet_is_bounded_and_absent_from_stubs(session_factory) -> Non
             _reader({"long-runbook": frozenset(Permission)}),
             search=SearchQuery(query="certificate rotation", match="exact_label"),
         )[0]
-        assert len(detail.search_snippet) <= SEARCH_SNIPPET_MAX_LENGTH + 1
-        assert detail.search_snippet.endswith("…")
+        # The published maximum includes the truncation marker: a snippet of
+        # 241 characters would violate the documented contract.
+        assert detail.search_snippet.endswith(SNIPPET_TRUNCATION_MARKER)
+        assert len(detail.search_snippet) == SEARCH_SNIPPET_MAX_LENGTH
+        assert (
+            len(detail.search_snippet.removesuffix(SNIPPET_TRUNCATION_MARKER))
+            == SEARCH_SNIPPET_MAX_LENGTH - len(SNIPPET_TRUNCATION_MARKER)
+        )
+        assert detail.search_snippet[:40] == long_purpose[:40]
 
         stub = search_agent_objects(
             session,
@@ -479,6 +491,52 @@ def test_search_snippet_is_bounded_and_absent_from_stubs(session_factory) -> Non
         )[0]
         assert stub.visibility == "stub"
         assert "search_snippet" not in stub.model_dump()
+
+
+@pytest.mark.parametrize(
+    "length",
+    [
+        SEARCH_SNIPPET_MAX_LENGTH - 1,
+        SEARCH_SNIPPET_MAX_LENGTH,
+        SEARCH_SNIPPET_MAX_LENGTH + 1,
+        SEARCH_SNIPPET_MAX_LENGTH * 3,
+    ],
+)
+def test_search_snippet_never_exceeds_the_published_maximum(length: int) -> None:
+    source = "a" * length
+    snippet = search_snippet(kind="runbook", summary=None, data={"purpose": source})
+    assert snippet is not None
+    assert len(snippet) <= SEARCH_SNIPPET_MAX_LENGTH
+    if length <= SEARCH_SNIPPET_MAX_LENGTH:
+        # A snippet that already fits is published unchanged and unmarked.
+        assert snippet == source
+    else:
+        assert snippet.endswith(SNIPPET_TRUNCATION_MARKER)
+        assert len(snippet) == SEARCH_SNIPPET_MAX_LENGTH
+        assert snippet.startswith(
+            source[: SEARCH_SNIPPET_MAX_LENGTH - len(SNIPPET_TRUNCATION_MARKER)]
+        )
+
+
+def test_search_snippet_field_publishes_the_documented_maximum() -> None:
+    field = AgentCatalogObjectSummary.model_fields["search_snippet"]
+    published = [
+        constraint.max_length
+        for constraint in field.metadata
+        if getattr(constraint, "max_length", None) is not None
+    ]
+    assert published == [SEARCH_SNIPPET_MAX_LENGTH]
+    with pytest.raises(ValidationError):
+        AgentCatalogObjectSummary(
+            ref="runbook:oversized",
+            id="oversized",
+            kind="runbook",
+            label="Oversized",
+            status="active",
+            revision=1,
+            search_snippet="a" * (SEARCH_SNIPPET_MAX_LENGTH + 1),
+            provenance=CatalogProvenanceOut(),
+        )
 
 
 def test_search_snippet_is_absent_without_a_summary_or_knowledge_field(
