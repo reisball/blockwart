@@ -139,7 +139,7 @@ REST v1 exposes the overview at `GET /api/v1/projects` and chronology at
 `GET|POST /api/v1/projects/{id}/chronology`. Agent detail/context includes the five newest
 authorized entries as `recent_project_chronology`. MCP maps the same contract through
 `blockwart.list_projects`, `blockwart.list_project_chronology`, and
-`blockwart.add_project_chronology`.
+`blockwart.append_project_chronology`.
 
 The compatibility rule is explicit and non-destructive. Revision `20260818_0018` adds a nullable
 kind column and a closed database constraint. A Project comment whose kind is null—including all

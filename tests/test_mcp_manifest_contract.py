@@ -13,6 +13,17 @@ from blockwart.mcp.manifest import (
 from blockwart.mcp.server import TOOLS, local_contract_metadata, validate_runtime_catalog
 
 
+def test_project_chronology_tools_have_the_reviewed_manifest_evidence() -> None:
+    metadata = contract_metadata(TOOLS, build_revision="issue-205")
+
+    assert metadata == {
+        "build_revision": "issue-205",
+        "contract_version": "1",
+        "manifest_digest": "268fa5cc3768fa558292c92585bc272ceafee56ac445e67ad250cd1f56ead09d",
+        "tool_count": 29,
+    }
+
+
 def test_manifest_bytes_and_digest_ignore_registered_tool_order() -> None:
     original = copy.deepcopy(TOOLS)
     reordered = [

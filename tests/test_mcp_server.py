@@ -389,7 +389,7 @@ def test_mcp_client_completes_handshake_and_calls_every_read_only_tool() -> None
         "blockwart.list_project_chronology",
         "blockwart.list_audit_events",
         "blockwart.add_comment",
-        "blockwart.add_project_chronology",
+        "blockwart.append_project_chronology",
         "blockwart.get_context",
         "blockwart.get_source_coverage",
         "blockwart.create_child",
@@ -438,7 +438,7 @@ def test_mcp_client_completes_handshake_and_calls_every_read_only_tool() -> None
             "blockwart.create_child",
             "blockwart.create_root",
             "blockwart.add_comment",
-            "blockwart.add_project_chronology",
+            "blockwart.append_project_chronology",
             "blockwart.update_object",
             "blockwart.delete_object",
             "blockwart.create_relationship",
@@ -675,6 +675,16 @@ def test_mcp_write_tools_forward_preconditions_without_credentials_in_arguments(
         requester=requester,
     )
     call_tool(
+        "blockwart.append_project_chronology",
+        {
+            "object_id": "project/demo with space",
+            "kind": "implementation",
+            "body": "**MCP** implementation log",
+            "idempotency_key": "mcp-chronology-key-0001",
+        },
+        requester=requester,
+    )
+    call_tool(
         "blockwart.update_object",
         {
             "object_id": "demo",
@@ -749,6 +759,15 @@ def test_mcp_write_tools_forward_preconditions_without_credentials_in_arguments(
             {"body": "**MCP** work log"},
             {
                 "Idempotency-Key": "mcp-comment-key-0001",
+                "X-Blockwart-Channel": "mcp",
+            },
+        ),
+        (
+            "POST",
+            "/api/v1/projects/project%2Fdemo%20with%20space/chronology",
+            {"kind": "implementation", "body": "**MCP** implementation log"},
+            {
+                "Idempotency-Key": "mcp-chronology-key-0001",
                 "X-Blockwart-Channel": "mcp",
             },
         ),
@@ -1137,6 +1156,48 @@ def test_mcp_rejects_oversized_token_file_without_an_upstream_request(
         ("blockwart.search", {"unexpected": "ignored"}),
         ("blockwart.get_context", {"port": 0}),
         ("blockwart.get_object_context", {"object_id": 123}),
+        ("blockwart.list_project_chronology", {"object_id": "demo", "limit": 0}),
+        ("blockwart.list_project_chronology", {"object_id": "demo", "limit": 101}),
+        (
+            "blockwart.list_project_chronology",
+            {"object_id": "demo", "cursor": "x" * 2049},
+        ),
+        (
+            "blockwart.append_project_chronology",
+            {
+                "object_id": "demo",
+                "kind": "not-a-chronology-kind",
+                "body": "Rejected kind.",
+                "idempotency_key": "mcp-chronology-key-0001",
+            },
+        ),
+        (
+            "blockwart.append_project_chronology",
+            {
+                "object_id": "demo",
+                "kind": "intent",
+                "body": "",
+                "idempotency_key": "mcp-chronology-key-0001",
+            },
+        ),
+        (
+            "blockwart.append_project_chronology",
+            {
+                "object_id": "demo",
+                "kind": "intent",
+                "body": "x" * 4001,
+                "idempotency_key": "mcp-chronology-key-0001",
+            },
+        ),
+        (
+            "blockwart.append_project_chronology",
+            {
+                "object_id": "demo",
+                "kind": "intent",
+                "body": "Bounded key.",
+                "idempotency_key": "short",
+            },
+        ),
         ("blockwart.list_audit_events", {"object_id": "demo", "limit": 0}),
         ("blockwart.list_audit_events", {"object_id": "demo", "limit": 101}),
         (
@@ -1186,7 +1247,7 @@ def test_mcp_tools_publish_explicit_read_write_and_delete_hints() -> None:
         "blockwart.list_project_chronology",
         "blockwart.list_audit_events",
         "blockwart.add_comment",
-        "blockwart.add_project_chronology",
+        "blockwart.append_project_chronology",
         "blockwart.get_context",
         "blockwart.get_source_coverage",
         "blockwart.create_child",
@@ -1236,7 +1297,64 @@ def test_mcp_tools_publish_explicit_read_write_and_delete_hints() -> None:
     assert not tools["blockwart.update_object"]["annotations"]["destructiveHint"]
     assert not tools["blockwart.update_grant"]["annotations"]["destructiveHint"]
     assert not tools["blockwart.add_comment"]["annotations"]["destructiveHint"]
-    assert not tools["blockwart.add_project_chronology"]["annotations"]["destructiveHint"]
+    assert not tools["blockwart.append_project_chronology"]["annotations"]["destructiveHint"]
+
+
+def test_project_chronology_tools_publish_the_closed_rest_contract() -> None:
+    tools = {tool["name"]: tool for tool in TOOLS}
+
+    assert "blockwart.add_project_chronology" not in tools
+    assert tools["blockwart.list_project_chronology"] == {
+        "name": "blockwart.list_project_chronology",
+        "description": (
+            "List one authorized Project's curated append-only professional chronology. "
+            "Legacy Project comments are projected losslessly as note entries."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "object_id": {"type": "string", "minLength": 1, "maxLength": 128},
+                "limit": {"type": "integer", "minimum": 1, "maximum": 100, "default": 20},
+                "cursor": {"type": "string", "maxLength": 2048},
+                "include_total": {"type": "boolean", "default": False},
+            },
+            "required": ["object_id"],
+            "additionalProperties": False,
+        },
+        "annotations": {
+            "readOnlyHint": True,
+            "destructiveHint": False,
+            "idempotentHint": True,
+            "openWorldHint": True,
+        },
+    }
+    assert tools["blockwart.append_project_chronology"]["inputSchema"] == {
+        "type": "object",
+        "properties": {
+            "object_id": {"type": "string", "minLength": 1, "maxLength": 128},
+            "kind": {
+                "type": "string",
+                "enum": [
+                    "intent",
+                    "implementation",
+                    "result",
+                    "decision",
+                    "milestone",
+                    "blocker",
+                    "note",
+                ],
+            },
+            "body": {"type": "string", "minLength": 1, "maxLength": 4000},
+            "idempotency_key": {
+                "type": "string",
+                "minLength": 16,
+                "maxLength": 128,
+                "pattern": "^[!-~]+$",
+            },
+        },
+        "required": ["object_id", "kind", "body", "idempotency_key"],
+        "additionalProperties": False,
+    }
 
 
 def test_mcp_descriptions_route_fresh_agent_read_and_create_intents() -> None:
