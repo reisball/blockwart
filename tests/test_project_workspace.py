@@ -520,7 +520,7 @@ def test_project_overview_filter_form_normalizes_empty_query_parameters(
     overview = root_client.get("/projects")
     assert overview.status_code == 200
     form = _parse_project_filter_form(overview.text)
-    assert (form.action, form.method) == ("/projects/filter", "get")
+    assert (form.action, form.method) == ("/projects/filters/normalize", "get")
     assert list(form.controls) == ["project_category", "project_status"]
     assert form.controls["project_category"][0] == ""
     assert form.controls["project_status"][0] == ""
@@ -603,6 +603,23 @@ def test_project_overview_filter_form_normalizes_empty_query_parameters(
     )
     assert invalid_submission.headers["location"] == "/projects?project_category=not-a-category"
     assert root_client.get(invalid_submission.headers["location"]).status_code == 422
+
+
+def test_project_workspace_filter_id_remains_detail_and_editable(
+    root_client: TestClient,  # noqa: F811
+    root_state,  # noqa: F811
+) -> None:
+    _create_project(root_client, root_state["owner_token"], "filter")
+    root_client.cookies.set(AUTH_SESSION_COOKIE_NAME, root_state["owner_session"].value)
+
+    detail = root_client.get("/projects/filter")
+    assert detail.status_code == 200
+    assert "<h1>Filter</h1>" in detail.text
+    assert 'href="/projects/filter?edit=true"' in detail.text
+
+    edit = root_client.get("/projects/filter?edit=true")
+    assert edit.status_code == 200
+    assert '<form class="form-grid" method="post" action="/projects/filter/work">' in edit.text
 
 
 def test_parallel_same_key_project_chronology_appends_once(root_state) -> None:  # noqa: F811

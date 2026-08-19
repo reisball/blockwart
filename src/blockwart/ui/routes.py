@@ -843,7 +843,7 @@ def project_overview(
     )
 
 
-@router.get("/projects/filter")
+@router.get("/projects/filters/normalize")
 def normalize_project_filter_submission(
     project_category: str | None = None,
     project_status: str | None = None,
