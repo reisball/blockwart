@@ -40,12 +40,17 @@ class ProviderCheckRequest:
     ``target`` is already resolved and ``diagnostic`` already explains why it
     could not be. An adapter never inspects catalog data, resolves a second
     target, or falls back to another endpoint.
+
+    ``gatus_mapping`` carries the stable Gatus endpoint identity (``endpoint``,
+    ``group``, ``source``) for the Gatus pull adapter. It is provider-specific
+    and absent for every other provider.
     """
 
     object_id: str
     target: MonitoringTarget | None
     diagnostic: str | None
     limits: ProbeLimits
+    gatus_mapping: dict[str, str] | None = None
 
 
 MonitoringAcquire = Callable[[ProviderCheckRequest], MonitoringObservation]
@@ -100,6 +105,7 @@ def registered_providers() -> tuple[str, ...]:
 def _register_builtin_providers() -> None:
     # Imported lazily so the registry module stays importable from the pure
     # domain tests without pulling in socket and TLS machinery.
+    from blockwart.services.monitoring_gatus import probe_gatus_endpoint
     from blockwart.services.monitoring_probe import probe_http_target
 
     register_provider(
@@ -109,6 +115,17 @@ def _register_builtin_providers() -> None:
             acquire=probe_http_target,
             description=(
                 "Bounded unauthenticated HTTP(S) GET against one allowlisted target."
+            ),
+        )
+    )
+    register_provider(
+        MonitoringProviderSpec(
+            provider="gatus",
+            polling=True,
+            acquire=probe_gatus_endpoint,
+            description=(
+                "Gatus pull adapter: polls the Gatus status API as the "
+                "preferred source (#177)."
             ),
         )
     )
