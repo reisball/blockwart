@@ -6159,6 +6159,127 @@
         ],
         "title": "V1TopologyStubNodeOut",
         "type": "object"
+      },
+      "WebhookGatusIn": {
+        "properties": {
+          "alert": {
+            "description": "Gatus alert state: TRIGGERED or RESOLVED",
+            "enum": [
+              "TRIGGERED",
+              "RESOLVED"
+            ],
+            "title": "Alert",
+            "type": "string"
+          },
+          "endpoint": {
+            "maxLength": 255,
+            "minLength": 1,
+            "title": "Endpoint",
+            "type": "string"
+          },
+          "group": {
+            "anyOf": [
+              {
+                "maxLength": 128,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Group"
+          },
+          "http_status": {
+            "anyOf": [
+              {
+                "maximum": 599,
+                "minimum": 100,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Http Status"
+          },
+          "latency_ms": {
+            "anyOf": [
+              {
+                "maximum": 600000,
+                "minimum": 0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Latency Ms"
+          },
+          "source": {
+            "anyOf": [
+              {
+                "maxLength": 128,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Source"
+          },
+          "timestamp": {
+            "description": "RFC 3339 timestamp of the Gatus check result",
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Timestamp",
+            "type": "string"
+          }
+        },
+        "required": [
+          "endpoint",
+          "alert",
+          "timestamp"
+        ],
+        "title": "WebhookGatusIn",
+        "type": "object"
+      },
+      "WebhookGatusOut": {
+        "properties": {
+          "checked_at": {
+            "title": "Checked At",
+            "type": "string"
+          },
+          "ingested": {
+            "title": "Ingested",
+            "type": "boolean"
+          },
+          "object_id": {
+            "title": "Object Id",
+            "type": "string"
+          },
+          "provider": {
+            "default": "gatus",
+            "title": "Provider",
+            "type": "string"
+          },
+          "state": {
+            "title": "State",
+            "type": "string"
+          }
+        },
+        "required": [
+          "object_id",
+          "provider",
+          "state",
+          "checked_at",
+          "ingested"
+        ],
+        "title": "WebhookGatusOut",
+        "type": "object"
       }
     },
     "securitySchemes": {
@@ -15814,6 +15935,97 @@
           "api-v1-readonly"
         ]
       }
+    },
+    "/api/v1/webhooks/gatus": {
+      "post": {
+        "operationId": "receive_gatus_webhook_api_v1_webhooks_gatus_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WebhookGatusIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WebhookGatusOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Authentication required"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Permission denied"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Resource not found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Unprocessable entity"
+          }
+        },
+        "summary": "Ingest One Gatus Alert As A Canonical Service Observation",
+        "tags": [
+          "api-v1-webhooks"
+        ]
+      }
     }
   },
   "x-blockwart-object-schema": {
@@ -16341,6 +16553,20 @@
               "type": "object",
               "violations": [
                 "field_not_allowed"
+              ]
+            },
+            {
+              "additional_properties": false,
+              "json_types": [
+                "object"
+              ],
+              "normalization": [],
+              "path": "gatus",
+              "requirement": "forbidden",
+              "type": "object",
+              "violations": [
+                "field_not_allowed",
+                "type_mismatch"
               ]
             },
             {
@@ -17136,6 +17362,20 @@
               "type": "object",
               "violations": [
                 "field_not_allowed"
+              ]
+            },
+            {
+              "additional_properties": false,
+              "json_types": [
+                "object"
+              ],
+              "normalization": [],
+              "path": "gatus",
+              "requirement": "forbidden",
+              "type": "object",
+              "violations": [
+                "field_not_allowed",
+                "type_mismatch"
               ]
             },
             {
@@ -17946,6 +18186,20 @@
               "violations": [
                 "field_not_allowed"
               ]
+            },
+            {
+              "additional_properties": false,
+              "json_types": [
+                "object"
+              ],
+              "normalization": [],
+              "path": "gatus",
+              "requirement": "forbidden",
+              "type": "object",
+              "violations": [
+                "field_not_allowed",
+                "type_mismatch"
+              ]
             }
           ],
           "rules": [],
@@ -18665,6 +18919,20 @@
               "type": "object",
               "violations": [
                 "field_not_allowed"
+              ]
+            },
+            {
+              "additional_properties": false,
+              "json_types": [
+                "object"
+              ],
+              "normalization": [],
+              "path": "gatus",
+              "requirement": "forbidden",
+              "type": "object",
+              "violations": [
+                "field_not_allowed",
+                "type_mismatch"
               ]
             }
           ],
@@ -19397,7 +19665,8 @@
             {
               "constraint": "must be a supported monitoring provider",
               "enum": [
-                "builtin_http"
+                "builtin_http",
+                "gatus"
               ],
               "json_types": [
                 "string"
@@ -19648,6 +19917,76 @@
               "violations": [
                 "field_not_allowed"
               ]
+            },
+            {
+              "additional_properties": false,
+              "allowed_keys": [
+                "source",
+                "group",
+                "endpoint"
+              ],
+              "json_types": [
+                "object"
+              ],
+              "normalization": [],
+              "path": "gatus",
+              "requirement": "optional",
+              "type": "object",
+              "violations": [
+                "field_not_allowed",
+                "type_mismatch"
+              ]
+            },
+            {
+              "json_types": [
+                "string"
+              ],
+              "max_length": 128,
+              "min_length": 1,
+              "normalization": [
+                "strip_whitespace"
+              ],
+              "path": "gatus.source",
+              "requirement": "optional",
+              "type": "string",
+              "violations": [
+                "type_mismatch",
+                "value_length_out_of_bounds"
+              ]
+            },
+            {
+              "json_types": [
+                "string"
+              ],
+              "max_length": 128,
+              "min_length": 1,
+              "normalization": [
+                "strip_whitespace"
+              ],
+              "path": "gatus.group",
+              "requirement": "optional",
+              "type": "string",
+              "violations": [
+                "type_mismatch",
+                "value_length_out_of_bounds"
+              ]
+            },
+            {
+              "json_types": [
+                "string"
+              ],
+              "max_length": 255,
+              "min_length": 1,
+              "normalization": [
+                "strip_whitespace"
+              ],
+              "path": "gatus.endpoint",
+              "requirement": "optional",
+              "type": "string",
+              "violations": [
+                "type_mismatch",
+                "value_length_out_of_bounds"
+              ]
             }
           ],
           "rules": [
@@ -19814,7 +20153,8 @@
             ]
           },
           "providers": [
-            "builtin_http"
+            "builtin_http",
+            "gatus"
           ],
           "result_semantics": {
             "2xx": "healthy",
@@ -20298,6 +20638,20 @@
               "type": "object",
               "violations": [
                 "field_not_allowed"
+              ]
+            },
+            {
+              "additional_properties": false,
+              "json_types": [
+                "object"
+              ],
+              "normalization": [],
+              "path": "gatus",
+              "requirement": "forbidden",
+              "type": "object",
+              "violations": [
+                "field_not_allowed",
+                "type_mismatch"
               ]
             }
           ],
@@ -21645,6 +21999,20 @@
               "violations": [
                 "field_not_allowed"
               ]
+            },
+            {
+              "additional_properties": false,
+              "json_types": [
+                "object"
+              ],
+              "normalization": [],
+              "path": "gatus",
+              "requirement": "forbidden",
+              "type": "object",
+              "violations": [
+                "field_not_allowed",
+                "type_mismatch"
+              ]
             }
           ],
           "rules": [
@@ -22348,6 +22716,20 @@
               "type": "object",
               "violations": [
                 "field_not_allowed"
+              ]
+            },
+            {
+              "additional_properties": false,
+              "json_types": [
+                "object"
+              ],
+              "normalization": [],
+              "path": "gatus",
+              "requirement": "forbidden",
+              "type": "object",
+              "violations": [
+                "field_not_allowed",
+                "type_mismatch"
               ]
             }
           ],
@@ -24196,6 +24578,20 @@
               "type": "object",
               "violations": [
                 "field_not_allowed"
+              ]
+            },
+            {
+              "additional_properties": false,
+              "json_types": [
+                "object"
+              ],
+              "normalization": [],
+              "path": "gatus",
+              "requirement": "forbidden",
+              "type": "object",
+              "violations": [
+                "field_not_allowed",
+                "type_mismatch"
               ]
             }
           ],

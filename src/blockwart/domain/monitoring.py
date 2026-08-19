@@ -67,7 +67,7 @@ MonitoringErrorCode = Literal[
 # the Gatus receiver tracked in #177) adds exactly one value here plus one
 # adapter registration; no read model, freshness rule, or maintenance rule
 # changes with it.
-MONITORING_PROVIDER_VALUES: tuple[str, ...] = ("builtin_http",)
+MONITORING_PROVIDER_VALUES: tuple[str, ...] = ("builtin_http", "gatus")
 MONITORING_PROVIDERS = frozenset(MONITORING_PROVIDER_VALUES)
 DEFAULT_MONITORING_PROVIDER = "builtin_http"
 
@@ -244,11 +244,7 @@ def read_monitoring_config(
     assert isinstance(provider, str)
     raw_interval = document.get("interval_seconds")
     overridden = raw_interval is not None
-    interval = (
-        int(raw_interval)
-        if overridden
-        else _bounded_interval(default_interval_seconds)
-    )
+    interval = int(raw_interval) if overridden else _bounded_interval(default_interval_seconds)
     return MonitoringConfig(
         enabled=enabled,
         provider=provider,
@@ -322,23 +318,19 @@ def resolve_monitoring_target(
         return MonitoringTargetResolution(None, "invalid_endpoints")
 
     endpoints = [
-        endpoint
-        for endpoint in normalized.get("endpoints", [])
-        if isinstance(endpoint, Mapping)
+        endpoint for endpoint in normalized.get("endpoints", []) if isinstance(endpoint, Mapping)
     ]
 
     declared = [
         endpoint
         for endpoint in endpoints
-        if isinstance(endpoint.get("health_url"), str)
-        and endpoint["health_url"].strip()
+        if isinstance(endpoint.get("health_url"), str) and endpoint["health_url"].strip()
     ]
     if len(declared) > 1:
         return MonitoringTargetResolution(None, "ambiguous_health_url")
     if declared:
         parsed = [
-            (endpoint, _parse_health_url(str(endpoint["health_url"])))
-            for endpoint in declared
+            (endpoint, _parse_health_url(str(endpoint["health_url"]))) for endpoint in declared
         ]
         if any(target is None for _, target in parsed):
             return MonitoringTargetResolution(None, "invalid_health_url")
@@ -461,13 +453,18 @@ def effective_health(
     healthy/down claim into automated state.
     """
 
-    manual = catalog_health if catalog_health in {
-        "unknown",
-        "healthy",
-        "degraded",
-        "down",
-        "maintenance",
-    } else None
+    manual = (
+        catalog_health
+        if catalog_health
+        in {
+            "unknown",
+            "healthy",
+            "degraded",
+            "down",
+            "maintenance",
+        }
+        else None
+    )
     if manual == "maintenance":
         return "maintenance"
     if not enabled:
@@ -572,9 +569,7 @@ def monitoring_view(
         "last_success_at": format_rfc3339_utc(
             matching.last_success_at if matching is not None else None
         ),
-        "next_due_at": format_rfc3339_utc(
-            matching.next_due_at if matching is not None else None
-        ),
+        "next_due_at": format_rfc3339_utc(matching.next_due_at if matching is not None else None),
         "effective_health": effective_health(
             catalog_health=catalog_health,
             enabled=config.enabled,
@@ -660,9 +655,7 @@ def _valid_monitoring_document(document: Mapping[str, Any]) -> bool:
     return (
         isinstance(interval, int)
         and not isinstance(interval, bool)
-        and MIN_MONITORING_INTERVAL_SECONDS
-        <= interval
-        <= MAX_MONITORING_INTERVAL_SECONDS
+        and MIN_MONITORING_INTERVAL_SECONDS <= interval <= MAX_MONITORING_INTERVAL_SECONDS
     )
 
 
