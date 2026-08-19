@@ -850,6 +850,26 @@ def project_overview(
     )
 
 
+@router.get("/projects/filters/normalize")
+def normalize_project_filter_submission(
+    project_category: str | None = None,
+    project_status: str | None = None,
+) -> RedirectResponse:
+    """Redirect a native Project filter form to its canonical typed URL."""
+    parameters = [
+        (name, value)
+        for name, value in (
+            ("project_category", project_category),
+            ("project_status", project_status),
+        )
+        if value not in (None, "")
+    ]
+    target = "/projects"
+    if parameters:
+        target = f"{target}?{urlencode(parameters)}"
+    return RedirectResponse(target, status_code=303)
+
+
 def _project_workspace_response(
     request: Request,
     session: Session,

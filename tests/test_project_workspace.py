@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 from collections.abc import Generator
 from concurrent.futures import ThreadPoolExecutor
+from dataclasses import dataclass
+from html.parser import HTMLParser
 
 from fastapi.testclient import TestClient
 from sqlalchemy import func, select
@@ -33,6 +35,55 @@ KINDS = (
     "blocker",
     "note",
 )
+
+
+@dataclass(frozen=True)
+class _FilterForm:
+    """The rendered `/projects` filter form."""
+
+    action: str
+    method: str
+    controls: dict[str, tuple[str, ...]]
+
+
+class _FilterFormParser(HTMLParser):
+    def __init__(self) -> None:
+        super().__init__()
+        self.action = ""
+        self.method = ""
+        self.controls: dict[str, list[str]] = {}
+        self._seen_form = False
+        self._in_form = False
+        self._control = ""
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        attributes = dict(attrs)
+        if tag == "form" and not self._seen_form:
+            self._seen_form = True
+            self._in_form = True
+            self.action = attributes.get("action") or ""
+            self.method = (attributes.get("method") or "get").lower()
+        elif tag == "select" and self._in_form:
+            self._control = attributes.get("name") or ""
+            self.controls.setdefault(self._control, [])
+        elif tag == "option" and self._control:
+            self.controls[self._control].append(attributes.get("value") or "")
+
+    def handle_endtag(self, tag: str) -> None:
+        if tag == "select":
+            self._control = ""
+        elif tag == "form":
+            self._in_form = False
+
+
+def _parse_project_filter_form(html: str) -> _FilterForm:
+    parser = _FilterFormParser()
+    parser.feed(html)
+    return _FilterForm(
+        action=parser.action,
+        method=parser.method,
+        controls={name: tuple(values) for name, values in parser.controls.items()},
+    )
 
 
 def _auth(token: str, *, key: str | None = None) -> dict[str, str]:
@@ -436,6 +487,139 @@ def test_project_overview_orders_activity_and_binds_filter_cursor(
         headers=_auth(root_state["owner_token"]),
     )
     assert rebound.status_code == 400
+
+
+def test_project_overview_filter_form_normalizes_empty_query_parameters(
+    root_client: TestClient,  # noqa: F811
+    root_state,  # noqa: F811
+) -> None:
+    owner_token = root_state["owner_token"]
+    _create_project(
+        root_client,
+        owner_token,
+        "filter-migration-active",
+        category="migration",
+        status="active",
+    )
+    _create_project(
+        root_client,
+        owner_token,
+        "filter-research-active",
+        category="research",
+        status="active",
+    )
+    _create_project(
+        root_client,
+        owner_token,
+        "filter-migration-paused",
+        category="migration",
+        status="paused",
+    )
+    root_client.cookies.set(AUTH_SESSION_COOKIE_NAME, root_state["owner_session"].value)
+
+    overview = root_client.get("/projects")
+    assert overview.status_code == 200
+    form = _parse_project_filter_form(overview.text)
+    assert (form.action, form.method) == ("/projects/filters/normalize", "get")
+    assert list(form.controls) == ["project_category", "project_status"]
+    assert form.controls["project_category"][0] == ""
+    assert form.controls["project_status"][0] == ""
+    assert {"migration", "research"} <= set(form.controls["project_category"])
+    assert {"active", "paused"} <= set(form.controls["project_status"])
+    assert "projects.js" not in overview.text
+    assert '<a class="button button-muted" href="/projects">' in overview.text
+
+    migration_active = "Filter Migration Active"
+    research_active = "Filter Research Active"
+    migration_paused = "Filter Migration Paused"
+    rendered_labels = {migration_active, research_active, migration_paused}
+    cases = (
+        (
+            {"project_category": "", "project_status": "active"},
+            "/projects?project_status=active",
+            {migration_active, research_active},
+        ),
+        (
+            {"project_category": "migration", "project_status": ""},
+            "/projects?project_category=migration",
+            {migration_active, migration_paused},
+        ),
+        (
+            {"project_category": "migration", "project_status": "active"},
+            "/projects?project_category=migration&project_status=active",
+            {migration_active},
+        ),
+        ({"project_category": "", "project_status": ""}, "/projects", rendered_labels),
+    )
+    canonical_urls: dict[str, str] = {}
+    for selection, expected_target, expected_labels in cases:
+        for name, value in selection.items():
+            assert value in form.controls[name]
+        submitted = root_client.request(
+            form.method.upper(),
+            form.action,
+            params=[(name, selection[name]) for name in form.controls],
+            follow_redirects=False,
+        )
+        assert submitted.status_code == 303
+        assert submitted.headers["location"] == expected_target
+        canonical_urls[expected_target] = submitted.headers["location"]
+
+        response = root_client.get(submitted.headers["location"])
+        assert response.status_code == 200
+        for label in rendered_labels:
+            assert (label in response.text) is (label in expected_labels)
+
+    # A changed submission gets its own canonical URL; returning to the earlier URL
+    # restores its previous result set.
+    changed = root_client.request(
+        form.method.upper(),
+        form.action,
+        params=[("project_category", "migration"), ("project_status", "")],
+        follow_redirects=False,
+    )
+    assert changed.headers["location"] == canonical_urls["/projects?project_category=migration"]
+    earlier = root_client.get(canonical_urls["/projects?project_status=active"])
+    assert earlier.status_code == 200
+    assert migration_active in earlier.text
+    assert research_active in earlier.text
+    assert migration_paused not in earlier.text
+
+    # The typed overview contract still rejects direct empty or invalid values.
+    empty_category = root_client.get("/projects?project_category=&project_status=active")
+    empty_status = root_client.get("/projects?project_category=migration&project_status=")
+    invalid = root_client.get("/projects?project_category=not-a-category")
+    assert (empty_category.status_code, empty_status.status_code, invalid.status_code) == (
+        422,
+        422,
+        422,
+    )
+
+    # The normalizer forwards nonempty invalid input rather than silently dropping it.
+    invalid_submission = root_client.get(
+        form.action,
+        params={"project_category": "not-a-category", "project_status": ""},
+        follow_redirects=False,
+    )
+    assert invalid_submission.headers["location"] == "/projects?project_category=not-a-category"
+    assert root_client.get(invalid_submission.headers["location"]).status_code == 422
+
+
+def test_project_workspace_filter_id_remains_detail_and_editable(
+    root_client: TestClient,  # noqa: F811
+    root_state,  # noqa: F811
+) -> None:
+    _create_project(root_client, root_state["owner_token"], "filter")
+    root_client.cookies.set(AUTH_SESSION_COOKIE_NAME, root_state["owner_session"].value)
+
+    detail = root_client.get("/projects/filter")
+    assert detail.status_code == 200
+    assert "<h1>Filter</h1>" in detail.text
+    assert 'href="/projects/filter?edit=true"' in detail.text
+
+    edit = root_client.get("/projects/filter?edit=true")
+    assert edit.status_code == 200
+    assert '<form class="form-grid" method="post" action="/projects/filter/work">' in edit.text
 
 
 def test_parallel_same_key_project_chronology_appends_once(root_state) -> None:  # noqa: F811
