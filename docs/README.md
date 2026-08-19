@@ -20,6 +20,9 @@ deleted by this classification.
 - [Agent API](agent-api.md), [API v1](api-v1.md), and the [API boundary
   contract](api-boundary-contract.md)
 - [MCP server](mcp.md)
+- [Agent read projections](agent-read-projections.md), including the versioned
+  compact/context/full profiles, the closed field mask, capability
+  deduplication, scoped schema reads, and the synthetic context budgets
 - [Object comments](object-comments.md)
 
 ## Active Security Documentation
@@ -43,7 +46,8 @@ deleted by this classification.
   evidence, typed links, and reviewed migration
 - [Canonical Runbook contracts / Kanonische Runbook-Verträge](runbooks.md), including
   operating, rollback, recovery, authorization, and reviewed legacy migration
-- [Application read models](read-models.md) and [service
+- [Application read models](read-models.md), [agent read
+  projections](agent-read-projections.md), and [service
   interfaces](service-interfaces.md)
 - [Source coverage and import drift](source-coverage.md)
 - [Append-only object comments](object-comments.md)

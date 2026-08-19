@@ -164,8 +164,14 @@ def query_agent_context_page(
     sort: ObjectSortField = "id",
     direction: SortDirection = "asc",
     include_total: bool = False,
+    include_recent_comments: bool = True,
 ) -> AgentContextPage:
-    """Return one stable v1 page of sanitized object contexts."""
+    """Return one stable v1 page of sanitized object contexts.
+
+    ``include_recent_comments`` also decides whether the bounded newest-first
+    comment and Project-chronology previews are read at all, so a discovery
+    page that does not want them does not pay for them either.
+    """
     rows_page = _query_agent_rows_page(
         session,
         access,
@@ -178,8 +184,16 @@ def query_agent_context_page(
         resource="context",
     )
     page_objects = rows_page.page.items
-    recent_comments = rows_page.resolver.prefetch_recent_comments(page_objects)
-    recent_chronology = rows_page.resolver.prefetch_project_chronology(page_objects)
+    recent_comments = (
+        rows_page.resolver.prefetch_recent_comments(page_objects)
+        if include_recent_comments
+        else {}
+    )
+    recent_chronology = (
+        rows_page.resolver.prefetch_project_chronology(page_objects)
+        if include_recent_comments
+        else {}
+    )
     return AgentContextPage(
         items=[
             rows_page.resolver.context_with_comments(
@@ -234,6 +248,8 @@ def query_agent_object_contexts(
     session: Session,
     access: ReadAccess,
     object_ids: list[str],
+    *,
+    include_recent_comments: bool = True,
 ) -> AgentObjectContextBatch:
     """Return authorized contexts for a bounded list of known object ids.
 
@@ -270,8 +286,12 @@ def query_agent_object_contexts(
             by_id[object_id] = resolver.stub(catalog_object)
         else:
             detail_objects.append(catalog_object)
-    recent_comments = resolver.prefetch_recent_comments(detail_objects)
-    recent_chronology = resolver.prefetch_project_chronology(detail_objects)
+    recent_comments = (
+        resolver.prefetch_recent_comments(detail_objects) if include_recent_comments else {}
+    )
+    recent_chronology = (
+        resolver.prefetch_project_chronology(detail_objects) if include_recent_comments else {}
+    )
     for catalog_object in detail_objects:
         by_id[catalog_object.id] = resolver.context_with_comments(
             catalog_object,

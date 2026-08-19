@@ -59,7 +59,7 @@ def _agent_api_server():
     class AgentApiHandler(BaseHTTPRequestHandler):
         def do_GET(self) -> None:
             parsed = urlsplit(self.path)
-            query = parse_qs(parsed.query)
+            query = parse_qs(parsed.query, keep_blank_values=True)
             requests.append(
                 {
                     "method": "GET",
@@ -84,7 +84,8 @@ def _agent_api_server():
                         "sort": "id",
                         "direction": "asc",
                     }
-                    if parsed.path in {
+                    if parsed.path
+                    in {
                         "/api/v1/objects",
                         "/api/v1/context",
                         "/api/v1/projects",
@@ -471,9 +472,7 @@ def test_mcp_client_completes_handshake_and_calls_every_read_only_tool() -> None
     assert result_payloads["blockwart.list_audit_events"]["path"] == (
         "/api/v1/objects/host%2Ffabrik/audit-events"
     )
-    assert result_payloads["blockwart.list_projects"]["items"][0]["path"] == (
-        "/api/v1/projects"
-    )
+    assert result_payloads["blockwart.list_projects"]["items"][0]["path"] == ("/api/v1/projects")
     assert result_payloads["blockwart.list_project_chronology"]["path"] == (
         "/api/v1/projects/project%2Fdemo/chronology"
     )
@@ -482,9 +481,7 @@ def test_mcp_client_completes_handshake_and_calls_every_read_only_tool() -> None
         "limit": ["3"],
     }
     assert result_payloads["blockwart.get_context"]["objects"][0]["path"] == ("/api/v1/context")
-    assert result_payloads["blockwart.get_source_coverage"]["path"] == (
-        "/api/v1/source-coverage"
-    )
+    assert result_payloads["blockwart.get_source_coverage"]["path"] == ("/api/v1/source-coverage")
     assert result_payloads["blockwart.get_object_access"]["path"] == (
         "/api/v1/objects/host%2Ffabrik/access"
     )
@@ -551,8 +548,7 @@ def test_mcp_client_completes_handshake_and_calls_every_read_only_tool() -> None
         assert payload["error"]["code"] == "invalid_arguments"
         published = ("code", "field", "location", "maximum", "minimum", "received")
         assert [
-            {key: detail[key] for key in published}
-            for detail in payload["error"]["details"]
+            {key: detail[key] for key in published} for detail in payload["error"]["details"]
         ] == [
             {
                 "code": "value_out_of_range",
@@ -1891,3 +1887,221 @@ def test_mcp_translates_stable_api_error_without_leaking_details() -> None:
         }
     }
     assert "must-not-leak" not in result.content[0].text
+
+
+def test_read_tools_forward_the_closed_projection_arguments() -> None:
+    """The wrapper must pass a projection through, not reinterpret it."""
+    calls: list[tuple[str, dict]] = []
+
+    def fake_fetch(path, params):
+        calls.append((path, params))
+        return {
+            "items": [{"ref": "host:alpha", "id": "alpha", "capability_set": "cap-dr"}],
+            "next_cursor": None,
+            "total": None,
+            "sort": "id",
+            "direction": "asc",
+            "projection": {
+                "version": 1,
+                "profile": "compact",
+                "sections": ["identity", "state", "knowledge"],
+            },
+            "capability_sets": {"cap-dr": ["discover", "read"]},
+        }
+
+    response = call_tool(
+        "blockwart.search",
+        {"projection": "compact", "fields": ["knowledge"], "limit": 50},
+        fetcher=fake_fetch,
+    )
+
+    assert calls == [
+        (
+            "/api/v1/objects",
+            {
+                "q": None,
+                "kind": None,
+                "limit": 50,
+                "projection": "compact",
+                "fields": ["knowledge"],
+            },
+        )
+    ]
+    payload = json.loads(response["content"][0]["text"])
+    # An agent cannot resolve `capability_set` without the table, so neither
+    # the descriptor nor the table may be dropped by the wrapper.
+    assert payload["projection"]["profile"] == "compact"
+    assert payload["capability_sets"] == {"cap-dr": ["discover", "read"]}
+
+
+@pytest.mark.parametrize(
+    ("tool_name", "endpoint"),
+    [
+        ("blockwart.search", "/api/v1/objects"),
+        ("blockwart.get_context", "/api/v1/context"),
+    ],
+)
+def test_mcp_get_tools_send_an_explicit_empty_field_mask_to_the_server(
+    tool_name: str,
+    endpoint: str,
+) -> None:
+    """An empty mask is core-only, never the omitted/full compatibility path."""
+    with _agent_api_server() as (base_url, requests):
+        call_tool(tool_name, {"fields": []}, base_url=base_url)
+        call_tool(tool_name, {}, base_url=base_url)
+
+    assert requests[0]["path"] == endpoint
+    assert requests[0]["query"]["fields"] == [""]
+    assert "fields" not in requests[1]["query"]
+
+
+def test_the_known_id_batch_forwards_its_projection_in_the_request_body() -> None:
+    bodies: list[dict] = []
+
+    def fake_request(method, path, body, headers):
+        del method, path, headers
+        bodies.append(body)
+        return {"objects": [], "count": 0}
+
+    call_tool(
+        "blockwart.get_object_contexts",
+        {
+            "object_ids": ["alpha"],
+            "projection": "compact",
+            "include_recent_comments": False,
+        },
+        requester=fake_request,
+    )
+
+    assert bodies == [
+        {
+            "object_ids": ["alpha"],
+            "projection": "compact",
+            "include_recent_comments": False,
+        }
+    ]
+
+
+def test_a_default_batch_call_still_sends_no_projection_at_all() -> None:
+    bodies: list[dict] = []
+
+    def fake_request(method, path, body, headers):
+        del method, path, headers
+        bodies.append(body)
+        return {"objects": [], "count": 0}
+
+    call_tool(
+        "blockwart.get_object_contexts",
+        {"object_ids": ["alpha"]},
+        requester=fake_request,
+    )
+
+    assert bodies == [{"object_ids": ["alpha"]}]
+
+
+def test_an_unpublished_projection_argument_is_rejected_before_any_request() -> None:
+    def fail_fetch(path, params):  # pragma: no cover - must never run
+        raise AssertionError("rejected arguments must not reach the API")
+
+    for arguments in (
+        {"projection": "everything"},
+        {"fields": ["data"]},
+        {"fields": ["knowledge", "knowledge"]},
+    ):
+        with pytest.raises(ToolInputError):
+            call_tool("blockwart.search", arguments, fetcher=fail_fetch)
+
+
+def test_describe_schema_scopes_one_kind_and_one_write_intent() -> None:
+    response = call_tool(
+        "blockwart.describe_schema",
+        {
+            "kind": "system",
+            "write_intent": "blockwart.create_child",
+            "sections": ["object_fields", "minimal_example"],
+        },
+    )
+    payload = json.loads(response["content"][0]["text"])
+
+    assert payload["requested_kind"] == "system"
+    assert payload["requested_write_intent"] == "blockwart.create_child"
+    assert payload["sections"] == ["object_fields", "minimal_example"]
+    assert [kind["kind"] for kind in payload["kinds"]] == ["system"]
+    assert [intent["tool"] for intent in payload["write_intents"]] == ["blockwart.create_child"]
+    # No foreign intent contract and no relationship registry was loaded.
+    assert "relationships" not in payload
+    assert "violation_policy" not in payload
+
+
+def test_a_scoped_schema_read_is_a_fraction_of_the_complete_contract() -> None:
+    complete = json.dumps(mcp_server.describe_schema_payload())
+    scoped = json.dumps(
+        mcp_server.describe_schema_payload(
+            "system",
+            write_intent="blockwart.create_child",
+            sections=["object_fields", "minimal_example"],
+        )
+    )
+    example_only = json.dumps(
+        mcp_server.describe_schema_payload(
+            "system",
+            write_intent="blockwart.create_child",
+            sections=["minimal_example"],
+        )
+    )
+
+    assert len(scoped) < len(complete) / 10
+    assert len(example_only) < 1_000
+
+
+def test_describe_schema_without_a_scope_still_returns_the_complete_contract() -> None:
+    payload = mcp_server.describe_schema_payload()
+
+    assert payload["requested_kind"] is None
+    assert "requested_write_intent" not in payload
+    assert "sections" not in payload
+    for section in ("kinds", "violation_policy", "write_intents", "relationships"):
+        assert section in payload
+    assert all("minimal_example" in kind for kind in payload["kinds"])
+    assert all("required_arguments" in intent for intent in payload["write_intents"])
+
+
+def test_describe_schema_sections_keep_relationships_and_errors_independent() -> None:
+    relationships = mcp_server.describe_schema_payload(sections=["relationships"])
+    errors = mcp_server.describe_schema_payload(sections=["errors"])
+    combined = mcp_server.describe_schema_payload(sections=["relationships", "errors"])
+
+    assert relationships["sections"] == ["relationships"]
+    assert "violation_policy" not in relationships
+    assert "rejection_policy" not in relationships["relationships"]
+    assert all(
+        "violations" not in field
+        for relationship_type in relationships["relationships"]["types"]
+        for field in relationship_type["metadata"]["fields"]
+    )
+
+    assert errors["sections"] == ["errors"]
+    assert "relationships" not in errors
+    assert errors["relationship_errors"]["rejection_policy"]["rejections"]
+    assert errors["relationship_errors"]["metadata_field_violations"]
+
+    assert combined["relationships"] == relationships["relationships"]
+    assert combined["relationship_errors"] == errors["relationship_errors"]
+
+
+def test_unscoped_describe_schema_keeps_the_historical_payload_byte_for_byte() -> None:
+    """New section filtering must not alter the established unscoped contract."""
+    projection = mcp_server.object_schema_projection()
+    expected = {
+        **projection,
+        "requested_kind": None,
+        "write_intents": mcp_server._write_intents(None),
+        "relationships": mcp_server.relationship_projection(None),
+    }
+
+    assert mcp_server.describe_schema_payload() == expected
+
+
+def test_an_unknown_schema_section_is_rejected_by_the_published_tool_schema() -> None:
+    with pytest.raises(ToolInputError):
+        call_tool("blockwart.describe_schema", {"sections": ["everything"]})

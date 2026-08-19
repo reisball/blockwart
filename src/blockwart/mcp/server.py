@@ -47,6 +47,13 @@ from blockwart.domain.projects import (
     RELATED_OBJECT_MAX_LENGTH,
     RELATED_OBJECT_PATTERN,
 )
+from blockwart.domain.read_projection import (
+    FIELDS_DESCRIPTION,
+    PROJECTION_DESCRIPTION,
+    PROJECTION_PROFILES,
+    PROJECTION_SECTIONS,
+    RECENT_COMMENTS_DESCRIPTION,
+)
 from blockwart.domain.relationship_projection import (
     metadata_json_schema,
     metadata_union_json_schema,
@@ -420,17 +427,54 @@ QUERY_FILTER_PROPERTIES: JSON = {
     "include_total": {"type": "boolean", "default": False},
 }
 
+# The closed read-projection arguments every agent read publishes. They are
+# generated from the same domain contract the API enforces, so the tool schema
+# cannot carry a second, drifting copy of the profile or field vocabulary.
+READ_PROJECTION_PROPERTIES: JSON = {
+    "projection": {
+        "type": "string",
+        "enum": list(PROJECTION_PROFILES),
+        "default": "full",
+        "description": PROJECTION_DESCRIPTION,
+    },
+    "fields": {
+        "type": "array",
+        "items": {"type": "string", "enum": list(PROJECTION_SECTIONS)},
+        "uniqueItems": True,
+        "maxItems": len(PROJECTION_SECTIONS),
+        "description": FIELDS_DESCRIPTION,
+    },
+}
+RECENT_COMMENTS_PROPERTY: JSON = {
+    "type": "boolean",
+    "description": RECENT_COMMENTS_DESCRIPTION,
+}
+# The closed sections of the generated write contract. A small write intent can
+# request exactly the sections it needs instead of the complete contract.
+SCHEMA_SECTIONS: tuple[str, ...] = (
+    "object_fields",
+    "write_intents",
+    "minimal_example",
+    "relationships",
+    "errors",
+)
+
 TOOLS: list[JSON] = [
     {
         "name": "blockwart.search",
         "description": (
             "Find candidate Blockwart objects as compact summaries. Use get_context when "
-            "the same call should search and return full authorized details."
+            "the same call should search and return full authorized details. Set "
+            "projection = compact for a wide discovery page: it keeps every identity, "
+            "revision, visibility decision, and effective permission, publishes each "
+            "distinct permission set once in capability_sets, and drops the repeated "
+            "parent, provenance, and network blocks."
         ),
         "inputSchema": {
             "type": "object",
             "properties": {
                 **QUERY_FILTER_PROPERTIES,
+                **READ_PROJECTION_PROPERTIES,
                 "limit": {
                     "type": "integer",
                     "minimum": SEARCH_LIMIT_MIN,
@@ -466,11 +510,17 @@ TOOLS: list[JSON] = [
             "field-equivalent to get_object_context including its write-ready strong ETag; "
             "discover-only items are strict stubs; concealed and missing ids are indistinguishable "
             "concealed placeholders. Use get_object_context for one id and get_context to search "
-            "by attribute instead of by known id."
+            "by attribute instead of by known id. With omitted projection controls, the "
+            "backwards-compatible full default includes its bounded comment preview; compact "
+            "and context omit it unless include_recent_comments asks for one. projection = "
+            "compact returns the same identities, revisions, and effective permissions in far "
+            "less context."
         ),
         "inputSchema": {
             "type": "object",
             "properties": {
+                **READ_PROJECTION_PROPERTIES,
+                "include_recent_comments": RECENT_COMMENTS_PROPERTY,
                 "object_ids": {
                     "type": "array",
                     "minItems": 1,
@@ -481,7 +531,7 @@ TOOLS: list[JSON] = [
                         "maxLength": 128,
                     },
                     "description": "Known object ids, deduplicated by first occurrence",
-                }
+                },
             },
             "required": ["object_ids"],
             "additionalProperties": False,
@@ -628,12 +678,16 @@ TOOLS: list[JSON] = [
             "Find objects by name, kind, parent, endpoint, state, or provenance and return "
             "their full sanitized details in one call, including current strong ETags. Reuse "
             "an ETag unchanged as if_match on write tools; use search for compact candidate "
-            "lists."
+            "lists. projection and fields narrow the returned sections without changing "
+            "which objects match; include_recent_comments switches the bounded comment "
+            "preview on or off."
         ),
         "inputSchema": {
             "type": "object",
             "properties": {
                 **QUERY_FILTER_PROPERTIES,
+                **READ_PROJECTION_PROPERTIES,
+                "include_recent_comments": RECENT_COMMENTS_PROPERTY,
                 "limit": {
                     "type": "integer",
                     "minimum": SEARCH_LIMIT_MIN,
@@ -693,7 +747,9 @@ TOOLS: list[JSON] = [
             "kinds, endpoint predicates, type-dependent metadata fields, graph rules, "
             "revision/no-op semantics, and rejection catalog. Call it before "
             "create_child, create_root, update_object, create_attached_device, "
-            "create_relationship, or delete_relationship; it reads no catalog data."
+            "create_relationship, or delete_relationship; it reads no catalog data. "
+            "Scope it with kind, write_intent, and sections to prepare exactly one "
+            "small write without loading foreign intent or relationship contracts."
         ),
         "inputSchema": {
             "type": "object",
@@ -704,6 +760,28 @@ TOOLS: list[JSON] = [
                     "description": (
                         "Restrict the contract to exactly one object kind and the "
                         "relationship types that accept it as an endpoint"
+                    ),
+                },
+                "write_intent": {
+                    "type": "string",
+                    "enum": list(WRITE_INTENT_TOOLS),
+                    "description": (
+                        "Restrict the published write intents to exactly this one "
+                        "tool; every other intent contract and example is omitted"
+                    ),
+                },
+                "sections": {
+                    "type": "array",
+                    "items": {"type": "string", "enum": list(SCHEMA_SECTIONS)},
+                    "uniqueItems": True,
+                    "maxItems": len(SCHEMA_SECTIONS),
+                    "description": (
+                        "Closed server-defined contract sections. Omit for the "
+                        "complete contract; object_fields is the kind field "
+                        "contract, write_intents the intent arguments, "
+                        "minimal_example the generated valid examples, "
+                        "relationships the relationship registry, and errors the "
+                        "rejection catalog."
                     ),
                 },
             },
@@ -1032,27 +1110,147 @@ def local_contract_metadata(*, build_revision: str | None = None) -> JSON:
     )
 
 
-def describe_schema_payload(kind: str | None = None) -> JSON:
+def describe_schema_payload(
+    kind: str | None = None,
+    *,
+    write_intent: str | None = None,
+    sections: list[str] | tuple[str, ...] | None = None,
+) -> JSON:
     """Project the canonical domain object and relationship registries for MCP clients.
 
     The payload is generated from `blockwart.domain.object_schema` and
     `blockwart.domain.relationships` on every call and contains no catalog data,
     credentials, or internal paths.
+
+    `kind`, `write_intent`, and `sections` only ever remove published material.
+    Omitting the new scopes keeps the historical payload byte-for-byte intact;
+    a scoped payload echoes the resolved sections it actually contains.
     """
+    # The optional ``kind`` argument predates read projections. Retain the
+    # exact historical payload whenever neither new scope is requested, so a
+    # caller that has not adopted write-intent/section scoping sees no change.
+    if write_intent is None and sections is None:
+        projection = object_schema_projection()
+        if kind is not None:
+            projection["kinds"] = [
+                projected for projected in projection["kinds"] if projected["kind"] == kind
+            ]
+        return {
+            **projection,
+            "requested_kind": kind,
+            "write_intents": _write_intents(kind),
+            "relationships": relationship_projection(kind),
+        }
+
+    selected = _selected_schema_sections(sections)
     projection = object_schema_projection()
-    if kind is not None:
-        projection["kinds"] = [
-            projected for projected in projection["kinds"] if projected["kind"] == kind
-        ]
-    return {
-        **projection,
+    payload: JSON = {
+        "version": projection["version"],
+        "source": projection["source"],
         "requested_kind": kind,
-        "write_intents": _write_intents(kind),
-        "relationships": relationship_projection(kind),
+        "requested_write_intent": write_intent,
+        "sections": list(selected),
+    }
+    if "object_fields" in selected:
+        for field in (
+            "requirement_values",
+            "object_status",
+            "asset_kinds",
+            "knowledge_kinds",
+            "secret_policy",
+        ):
+            payload[field] = projection[field]
+        payload["kinds"] = [
+            _scoped_kind(projected, example="minimal_example" in selected)
+            for projected in projection["kinds"]
+            if kind in (None, projected["kind"])
+        ]
+    if "errors" in selected:
+        payload["violation_policy"] = projection["violation_policy"]
+        payload["relationship_errors"] = _relationship_errors(kind)
+    if {"write_intents", "minimal_example"} & set(selected):
+        payload["write_intents"] = _write_intents(
+            kind,
+            write_intent=write_intent,
+            contract="write_intents" in selected,
+            example="minimal_example" in selected,
+        )
+    if "relationships" in selected:
+        payload["relationships"] = _relationships_without_errors(kind)
+    return payload
+
+
+def _selected_schema_sections(
+    sections: list[str] | tuple[str, ...] | None,
+) -> tuple[str, ...]:
+    """Return the requested contract sections in their published order."""
+    if sections is None:
+        return SCHEMA_SECTIONS
+    requested = set(sections)
+    unknown = requested - set(SCHEMA_SECTIONS)
+    if unknown:
+        raise ToolInputError("Tool arguments are invalid")
+    return tuple(section for section in SCHEMA_SECTIONS if section in requested)
+
+
+def _relationships_without_errors(kind: str | None) -> JSON:
+    """Return the relationship structure section without its error contract.
+
+    A scoped `relationships` read describes types, directed endpoints, metadata
+    shapes, and graph rules only. Rejection codes and metadata violation codes
+    live exclusively under the independent `errors` section.
+    """
+    relationships = relationship_projection(kind)
+    relationships.pop("rejection_policy")
+    for relationship_type in relationships["types"]:
+        for metadata_field in relationship_type["metadata"]["fields"]:
+            metadata_field.pop("violations")
+    return relationships
+
+
+def _relationship_errors(kind: str | None) -> JSON:
+    """Return every published relationship error without its structural contract."""
+    relationships = relationship_projection(kind)
+    metadata_field_violations = []
+    for relationship_type in relationships["types"]:
+        fields = [
+            {"name": field["name"], "violations": field["violations"]}
+            for field in relationship_type["metadata"]["fields"]
+        ]
+        if fields:
+            metadata_field_violations.append(
+                {
+                    "relation_type": relationship_type["relation_type"],
+                    "fields": fields,
+                }
+            )
+    return {
+        "rejection_policy": relationships["rejection_policy"],
+        "metadata_field_violations": metadata_field_violations,
     }
 
 
-def _write_intents(kind: str | None) -> list[JSON]:
+def _scoped_kind(projected: JSON, *, example: bool) -> JSON:
+    """Drop the generated example of one kind unless it was asked for."""
+    if example:
+        return projected
+    return {key: value for key, value in projected.items() if key != "minimal_example"}
+
+
+def _write_intents(
+    kind: str | None,
+    *,
+    write_intent: str | None = None,
+    contract: bool = True,
+    example: bool = True,
+) -> list[JSON]:
+    """Project the write intents that can create or change this kind.
+
+    `write_intent` keeps exactly one tool, so preparing one small write never
+    loads the arguments or examples of the other intents. `contract` and
+    `example` follow the requested sections: an intent may publish only its
+    identity and generated example when just `minimal_example` was asked for.
+    """
     intents: list[JSON] = []
     for name, argument, kinds, arguments, relationship, parent_kinds in (
         (
@@ -1088,20 +1286,20 @@ def _write_intents(kind: str | None) -> list[JSON]:
             sorted(_ATTACHMENT_RULE.to_kinds),
         ),
     ):
+        if write_intent is not None and name != write_intent:
+            continue
         supported = [supported_kind for supported_kind in kinds if kind in (None, supported_kind)]
         if not supported:
             continue
-        intents.append(
-            {
-                "tool": name,
-                "object_argument": argument,
-                "kinds": supported,
-                "required_arguments": list(arguments),
-                "relation_type": relationship,
-                "parent_kinds": parent_kinds,
-                "example": _write_intent_example(name, argument, supported[0]),
-            }
-        )
+        intent: JSON = {"tool": name, "kinds": supported}
+        if contract:
+            intent["object_argument"] = argument
+            intent["required_arguments"] = list(arguments)
+            intent["relation_type"] = relationship
+            intent["parent_kinds"] = parent_kinds
+        if example:
+            intent["example"] = _write_intent_example(name, argument, supported[0])
+        intents.append(intent)
     return intents
 
 
@@ -1228,9 +1426,7 @@ def _unexpected_arguments(error: ValidationError) -> list[str]:
     instance = error.instance if isinstance(error.instance, dict) else {}
     published = error.schema.get("properties", {}) if isinstance(error.schema, dict) else {}
     return sorted(
-        argument
-        for argument in instance
-        if isinstance(argument, str) and argument not in published
+        argument for argument in instance if isinstance(argument, str) and argument not in published
     )
 
 
@@ -1320,7 +1516,11 @@ def call_tool(
     if name == SCHEMA_TOOL_NAME:
         # The published contract is generated locally: it reaches no upstream
         # API and therefore requires no credential.
-        payload = describe_schema_payload(args.get("kind"))
+        payload = describe_schema_payload(
+            args.get("kind"),
+            write_intent=args.get("write_intent"),
+            sections=args.get("sections"),
+        )
     elif name == "blockwart.search":
         payload = _legacy_page_payload(
             fetch("/api/v1/objects", _clean_params(args, default_limit=10)),
@@ -1340,7 +1540,14 @@ def call_tool(
         payload = request(
             "POST",
             "/api/v1/object-contexts",
-            {"object_ids": object_ids},
+            {
+                "object_ids": object_ids,
+                **{
+                    argument: args[argument]
+                    for argument in ("projection", "fields", "include_recent_comments")
+                    if argument in args
+                },
+            },
             {},
         )
     elif name == "blockwart.list_comments":
@@ -1658,7 +1865,21 @@ def fetch_json(
     correlation_id: str | None = None,
 ) -> JSON:
     root = (base_url or os.environ.get("BLOCKWART_API_BASE_URL") or DEFAULT_BASE_URL).rstrip("/")
-    query = urlencode({key: value for key, value in params.items() if value is not None})
+    # Publish list arguments as repeated query parameters. An empty field mask
+    # is intentionally encoded as the present ``fields=`` marker rather than
+    # disappearing under ``doseq``: it means the explicit core-only mask and
+    # is not the backwards-compatible omitted/full default.
+    query_pairs: list[tuple[str, Any]] = []
+    for key, value in params.items():
+        if value is None:
+            continue
+        if isinstance(value, (list, tuple)):
+            query_pairs.extend((key, item) for item in value)
+            if not value and key == "fields":
+                query_pairs.append((key, ""))
+        else:
+            query_pairs.append((key, value))
+    query = urlencode(query_pairs)
     url = f"{root}{path}"
     if query:
         url = f"{url}?{query}"
@@ -1980,6 +2201,9 @@ def _clean_params(args: JSON, *, default_limit: int) -> JSON:
         "sort",
         "direction",
         "include_total",
+        "projection",
+        "fields",
+        "include_recent_comments",
     ):
         if name in args:
             params[name] = args[name]
@@ -2024,7 +2248,7 @@ def _legacy_page_payload(
         )
         if key in args
     }
-    return {
+    legacy_payload = {
         "query": args.get("q"),
         "kind": args.get("kind"),
         "filters": filters,
@@ -2035,6 +2259,13 @@ def _legacy_page_payload(
         "sort": payload.get("sort"),
         "direction": payload.get("direction"),
     }
+    if "projection" in payload:
+        # A projected page publishes the versioned descriptor and the one
+        # capability-set table its items key into. Dropping either would leave
+        # an agent unable to resolve the effective permissions it was given.
+        legacy_payload["projection"] = payload["projection"]
+        legacy_payload["capability_sets"] = payload.get("capability_sets", {})
+    return legacy_payload
 
 
 def _required_string(args: JSON, key: str) -> str:
