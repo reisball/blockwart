@@ -76,6 +76,19 @@ The receiver deliberately does not persist:
 Only the canonical observation fields are stored: `state`, `http_status`,
 `latency_ms`, and `checked_at`.
 
+### Gatus Reports Binary State Only
+
+Gatus custom alerts produce only two states: `TRIGGERED` (down) and
+`RESOLVED` (healthy).  Gatus does not transmit error details, DNS failures,
+or timeout reasons through the webhook — those are internal to Gatus and
+not part of the alert payload.
+
+Consequence: every Gatus failure (DNS error, connection refused, timeout,
+TLS error, etc.) collapses to `state=down`.  The `check_error` and
+`error_code` observation fields are **never set** by the Gatus adapter.
+If detailed error information is needed, inspect the Gatus dashboard or
+logs directly.
+
 ## Authorization
 
 The webhook uses the standard Blockwart service-token authentication

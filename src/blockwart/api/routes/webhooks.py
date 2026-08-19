@@ -14,6 +14,7 @@ services and fails closed when zero or more than one service matches.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 from datetime import UTC, datetime
@@ -93,7 +94,7 @@ def receive_gatus_webhook(
 
     catalog_object = candidates[0]
 
-    if not access.can(Permission.DISCOVER, catalog_object.id):
+    if Permission.DISCOVER not in access.capabilities_for(catalog_object.id):
         logger.error("gatus_webhook_error code=policy_denied")
         raise HTTPException(
             status_code=403,
@@ -114,7 +115,7 @@ def receive_gatus_webhook(
         object_id=catalog_object.id,
         object_instance_id=catalog_object.instance_id,
         observation=observation,
-        now=datetime.now(UTC),
+        now=checked_at,
         settings=settings,
     )
 
@@ -145,10 +146,15 @@ def _gatus_alert_to_state(alert: str) -> str:
     Returns:
         The canonical monitoring state: ``down`` for TRIGGERED,
         ``healthy`` for RESOLVED.
+
+    Raises:
+        ValueError: If *alert* is neither ``TRIGGERED`` nor ``RESOLVED``.
     """
     if alert == "TRIGGERED":
         return "down"
-    return "healthy"
+    if alert == "RESOLVED":
+        return "healthy"
+    raise ValueError(f"unsupported Gatus alert state: {alert!r}")
 
 
 def _parse_gatus_timestamp(value: str) -> datetime:
@@ -261,14 +267,14 @@ def _mapping_matches(
 
 
 def _redacted(value: str) -> str:
-    """Return a bounded, redacted form of a value for safe logging.
+    """Return a hashed, non-reversible form of a value for safe logging.
 
     Args:
         value: The string to redact.
 
     Returns:
-        A truncated, non-sensitive representation.
+        A ``sha256:<16-hex>`` digest that cannot be reversed to the
+        original value.
     """
-    if len(value) <= 32:
-        return value[:8] + "…" if len(value) > 8 else value
-    return value[:8] + f"…({len(value)} chars)"
+    digest = hashlib.sha256(value.encode()).hexdigest()
+    return f"sha256:{digest[:16]}"
