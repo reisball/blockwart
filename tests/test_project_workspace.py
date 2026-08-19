@@ -1,11 +1,10 @@
 from __future__ import annotations
 
 import json
-from collections.abc import Generator, Mapping
+from collections.abc import Generator
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from html.parser import HTMLParser
-from urllib.parse import urlencode
 
 from fastapi.testclient import TestClient
 from sqlalchemy import func, select
@@ -40,11 +39,10 @@ KINDS = (
 
 @dataclass(frozen=True)
 class _FilterForm:
-    """The rendered `/projects` filter form and the query it can construct."""
+    """The rendered `/projects` filter form."""
 
     action: str
     method: str
-    omits_empty_parameters: bool
     controls: dict[str, tuple[str, ...]]
 
 
@@ -53,7 +51,6 @@ class _FilterFormParser(HTMLParser):
         super().__init__()
         self.action = ""
         self.method = ""
-        self.omits_empty_parameters = False
         self.controls: dict[str, list[str]] = {}
         self._seen_form = False
         self._in_form = False
@@ -66,7 +63,6 @@ class _FilterFormParser(HTMLParser):
             self._in_form = True
             self.action = attributes.get("action") or ""
             self.method = (attributes.get("method") or "get").lower()
-            self.omits_empty_parameters = "data-omit-empty-filters" in attributes
         elif tag == "select" and self._in_form:
             self._control = attributes.get("name") or ""
             self.controls.setdefault(self._control, [])
@@ -86,17 +82,7 @@ def _parse_project_filter_form(html: str) -> _FilterForm:
     return _FilterForm(
         action=parser.action,
         method=parser.method,
-        omits_empty_parameters=parser.omits_empty_parameters,
         controls={name: tuple(values) for name, values in parser.controls.items()},
-    )
-
-
-def _submitted_filter_query(form: _FilterForm, selection: Mapping[str, str]) -> str:
-    """Build the query the enhanced GET form submits for one filter selection."""
-    for name, value in selection.items():
-        assert value in form.controls[name]
-    return urlencode(
-        [(name, selection[name]) for name in form.controls if selection.get(name)]
     )
 
 
@@ -503,7 +489,7 @@ def test_project_overview_orders_activity_and_binds_filter_cursor(
     assert rebound.status_code == 400
 
 
-def test_project_overview_filter_form_omits_unset_query_parameters(
+def test_project_overview_filter_form_normalizes_empty_query_parameters(
     root_client: TestClient,  # noqa: F811
     root_state,  # noqa: F811
 ) -> None:
@@ -534,20 +520,14 @@ def test_project_overview_filter_form_omits_unset_query_parameters(
     overview = root_client.get("/projects")
     assert overview.status_code == 200
     form = _parse_project_filter_form(overview.text)
-    assert (form.action, form.method) == ("/projects", "get")
-    assert form.omits_empty_parameters
+    assert (form.action, form.method) == ("/projects/filter", "get")
     assert list(form.controls) == ["project_category", "project_status"]
     assert form.controls["project_category"][0] == ""
     assert form.controls["project_status"][0] == ""
     assert {"migration", "research"} <= set(form.controls["project_category"])
     assert {"active", "paused"} <= set(form.controls["project_status"])
-    assert '<script src="/static/projects.js" defer></script>' in overview.text
+    assert "projects.js" not in overview.text
     assert '<a class="button button-muted" href="/projects">' in overview.text
-
-    enhancement = root_client.get("/static/projects.js")
-    assert enhancement.status_code == 200
-    assert "form[data-omit-empty-filters]" in enhancement.text
-    assert "control.disabled = true" in enhancement.text
 
     migration_active = "Filter Migration Active"
     research_active = "Filter Research Active"
@@ -555,35 +535,74 @@ def test_project_overview_filter_form_omits_unset_query_parameters(
     rendered_labels = {migration_active, research_active, migration_paused}
     cases = (
         (
-            {"project_status": "active"},
-            "project_status=active",
+            {"project_category": "", "project_status": "active"},
+            "/projects?project_status=active",
             {migration_active, research_active},
         ),
         (
-            {"project_category": "migration"},
-            "project_category=migration",
+            {"project_category": "migration", "project_status": ""},
+            "/projects?project_category=migration",
             {migration_active, migration_paused},
         ),
         (
             {"project_category": "migration", "project_status": "active"},
-            "project_category=migration&project_status=active",
+            "/projects?project_category=migration&project_status=active",
             {migration_active},
         ),
-        ({}, "", rendered_labels),
+        ({"project_category": "", "project_status": ""}, "/projects", rendered_labels),
     )
-    for selection, expected_query, expected_labels in cases:
-        query = _submitted_filter_query(form, selection)
-        assert query == expected_query
-        response = root_client.get(f"/projects?{query}" if query else "/projects")
+    canonical_urls: dict[str, str] = {}
+    for selection, expected_target, expected_labels in cases:
+        for name, value in selection.items():
+            assert value in form.controls[name]
+        submitted = root_client.request(
+            form.method.upper(),
+            form.action,
+            params=[(name, selection[name]) for name in form.controls],
+            follow_redirects=False,
+        )
+        assert submitted.status_code == 303
+        assert submitted.headers["location"] == expected_target
+        canonical_urls[expected_target] = submitted.headers["location"]
+
+        response = root_client.get(submitted.headers["location"])
         assert response.status_code == 200
         for label in rendered_labels:
             assert (label in response.text) is (label in expected_labels)
 
-    # The overview keeps its typed contract, so an empty enum parameter stays rejected.
-    # That is exactly the submission the filter form must never produce.
+    # A changed submission gets its own canonical URL; returning to the earlier URL
+    # restores its previous result set.
+    changed = root_client.request(
+        form.method.upper(),
+        form.action,
+        params=[("project_category", "migration"), ("project_status", "")],
+        follow_redirects=False,
+    )
+    assert changed.headers["location"] == canonical_urls["/projects?project_category=migration"]
+    earlier = root_client.get(canonical_urls["/projects?project_status=active"])
+    assert earlier.status_code == 200
+    assert migration_active in earlier.text
+    assert research_active in earlier.text
+    assert migration_paused not in earlier.text
+
+    # The typed overview contract still rejects direct empty or invalid values.
     empty_category = root_client.get("/projects?project_category=&project_status=active")
     empty_status = root_client.get("/projects?project_category=migration&project_status=")
-    assert (empty_category.status_code, empty_status.status_code) == (422, 422)
+    invalid = root_client.get("/projects?project_category=not-a-category")
+    assert (empty_category.status_code, empty_status.status_code, invalid.status_code) == (
+        422,
+        422,
+        422,
+    )
+
+    # The normalizer forwards nonempty invalid input rather than silently dropping it.
+    invalid_submission = root_client.get(
+        form.action,
+        params={"project_category": "not-a-category", "project_status": ""},
+        follow_redirects=False,
+    )
+    assert invalid_submission.headers["location"] == "/projects?project_category=not-a-category"
+    assert root_client.get(invalid_submission.headers["location"]).status_code == 422
 
 
 def test_parallel_same_key_project_chronology_appends_once(root_state) -> None:  # noqa: F811
