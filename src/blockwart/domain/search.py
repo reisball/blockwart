@@ -299,10 +299,15 @@ def rank_match(
     be dropped from the result set. ``data`` is the caller's already authorized
     and secret-redacted projection; a discover-only stub passes ``None``, so
     only its identity fields can ever be compared.
+
+    An exact mode without a normalized term has nothing to be equal to, so it
+    matches nothing. Normal mode keeps listing the authorized catalog, because
+    an absent term there is an absent text filter rather than an empty exact
+    comparison.
     """
     term = query.term
     if term is None:
-        return RANK_UNRANKED
+        return None if query.is_exact else RANK_UNRANKED
     normalized_ref = normalize_search_text(ref)
     normalized_id = normalize_search_text(object_id)
     normalized_label = normalize_search_text(label)

@@ -25,6 +25,7 @@ from blockwart.domain.search import (
     SEARCH_SNIPPET_MAX_LENGTH,
     SNIPPET_TRUNCATION_MARKER,
     SearchQuery,
+    rank_match,
     search_snippet,
 )
 from blockwart.domain.validation_errors import SEARCH_LIMIT_DETAIL_FIELDS
@@ -295,6 +296,71 @@ def test_exact_label_uses_the_documented_normalization(session_factory) -> None:
             ]
         assert _ids(session, access, SearchQuery(query="gateway", match="exact_label")) == []
         assert _ids(session, access, SearchQuery(query="gateway-01", match="exact_label")) == []
+
+
+# --------------------------------------------------------------------------
+# Exact modes without a normalized term
+# --------------------------------------------------------------------------
+
+# The representations every transport accepts for "no search term": absent,
+# empty, and whitespace-only. All three normalize to no term at all.
+EMPTY_TERMS: tuple[str | None, ...] = (None, "", "   ", "\t \n ")
+
+
+@pytest.mark.parametrize("term", EMPTY_TERMS)
+@pytest.mark.parametrize("match", ["exact_ref", "exact_label"])
+def test_exact_mode_without_a_term_matches_nothing(
+    session_factory,
+    term: str | None,
+    match: str,
+) -> None:
+    with session_factory() as session:
+        access = full_reader()
+        assert _ids(session, access, SearchQuery(query=term, match=match)) == []
+        # The rank ladder itself refuses the object rather than a later filter.
+        assert (
+            rank_match(
+                SearchQuery(query=term, match=match),
+                ref="host:gateway-01",
+                object_id="gateway-01",
+                label="Gateway 01",
+                summary="Edge gateway of the documentation network.",
+                kind="host",
+                data={},
+            )
+            is None
+        )
+
+
+@pytest.mark.parametrize("term", EMPTY_TERMS)
+def test_normal_mode_without_a_term_still_lists_the_authorized_catalog(
+    session_factory,
+    term: str | None,
+) -> None:
+    with session_factory() as session:
+        access = full_reader()
+        listed = _ids(session, access, SearchQuery(query=term))
+        assert sorted(listed) == sorted(catalog_object.id for catalog_object in catalog_objects())
+
+
+def test_empty_exact_mode_counts_and_pages_over_the_authorized_set_only(
+    session_factory,
+) -> None:
+    with session_factory() as session:
+        # Authorization still runs first; an empty exact query simply matches
+        # nothing, so no count, cursor, or position can be derived from it.
+        access = _reader({"gateway-01": frozenset(Permission)})
+        page = query_agent_objects_page(
+            session,
+            access,
+            search=SearchQuery(query="  ", match="exact_ref"),
+            limit=50,
+            sort="relevance",
+            include_total=True,
+        )
+        assert page.items == []
+        assert page.total == 0
+        assert page.next_cursor is None
 
 
 # --------------------------------------------------------------------------
@@ -668,6 +734,142 @@ def test_cursor_of_a_normal_query_is_rejected_after_a_mode_switch(
     )
     assert first.status_code == 200
     assert first.json()["next_cursor"] is None
+
+
+# --------------------------------------------------------------------------
+# Empty exact queries at every public boundary
+# --------------------------------------------------------------------------
+
+# What each transport can actually send for "no term": the parameter omitted,
+# sent empty, or sent whitespace-only.
+EMPTY_QUERY_PARAMS: tuple[dict[str, str], ...] = ({}, {"q": ""}, {"q": "   "})
+
+
+@pytest.mark.parametrize("empty_query", EMPTY_QUERY_PARAMS)
+@pytest.mark.parametrize("match", ["exact_ref", "exact_label"])
+@pytest.mark.parametrize(
+    ("path", "items_field"),
+    [("/api/v1/objects", "items"), ("/api/v1/context", "items")],
+)
+def test_v1_exact_mode_without_a_term_returns_no_results(
+    client: TestClient,
+    path: str,
+    items_field: str,
+    match: str,
+    empty_query: dict[str, str],
+) -> None:
+    response = client.get(
+        path,
+        params={"match": match, "include_total": "true", **empty_query},
+    )
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload[items_field] == []
+    assert payload["total"] == 0
+    assert payload["next_cursor"] is None
+
+
+@pytest.mark.parametrize("empty_query", EMPTY_QUERY_PARAMS)
+@pytest.mark.parametrize("match", ["exact_ref", "exact_label"])
+@pytest.mark.parametrize(
+    ("path", "items_field"),
+    [("/api/agent/search", "results"), ("/api/agent/context", "objects")],
+)
+def test_agent_api_exact_mode_without_a_term_returns_no_results(
+    client: TestClient,
+    path: str,
+    items_field: str,
+    match: str,
+    empty_query: dict[str, str],
+) -> None:
+    response = client.get(path, params={"match": match, **empty_query})
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload[items_field] == []
+    assert payload["count"] == 0
+
+
+@pytest.mark.parametrize(
+    ("path", "items_field"),
+    [
+        ("/api/v1/objects", "items"),
+        ("/api/v1/context", "items"),
+        ("/api/agent/search", "results"),
+        ("/api/agent/context", "objects"),
+    ],
+)
+def test_normal_mode_without_a_term_is_unchanged_at_every_rest_boundary(
+    client: TestClient,
+    path: str,
+    items_field: str,
+) -> None:
+    for empty_query in EMPTY_QUERY_PARAMS:
+        response = client.get(path, params={"limit": 5, **empty_query})
+        assert response.status_code == 200
+        assert response.json()[items_field] != []
+
+
+def _mcp_fetcher(client: TestClient):
+    """Call the real API through the MCP wrapper's fetch contract.
+
+    Parameters are dropped exactly like `fetch_json` drops them, so an omitted
+    `q` reaches the boundary as an absent query parameter rather than as an
+    empty string.
+    """
+
+    def fetch(path: str, params: dict) -> dict:
+        response = client.get(
+            path,
+            params={key: value for key, value in params.items() if value is not None},
+        )
+        assert response.status_code == 200
+        return response.json()
+
+    return fetch
+
+
+def _mcp_payload(result: dict) -> dict:
+    """Decode the single JSON text content block of one MCP tool result."""
+    assert result["isError"] is False
+    return json.loads(result["content"][0]["text"])
+
+
+@pytest.mark.parametrize("empty_arguments", [{}, {"q": ""}, {"q": "   "}])
+@pytest.mark.parametrize("match", ["exact_ref", "exact_label"])
+@pytest.mark.parametrize(
+    ("tool", "items_field"),
+    [("blockwart.search", "results"), ("blockwart.get_context", "objects")],
+)
+def test_mcp_exact_mode_without_a_term_returns_no_results(
+    client: TestClient,
+    tool: str,
+    items_field: str,
+    match: str,
+    empty_arguments: dict[str, str],
+) -> None:
+    payload = _mcp_payload(
+        call_tool(
+            tool,
+            {"match": match, **empty_arguments},
+            fetcher=_mcp_fetcher(client),
+        )
+    )
+    assert payload[items_field] == []
+    assert payload["count"] == 0
+
+
+@pytest.mark.parametrize(
+    ("tool", "items_field"),
+    [("blockwart.search", "results"), ("blockwart.get_context", "objects")],
+)
+def test_mcp_normal_mode_without_a_term_is_unchanged(
+    client: TestClient,
+    tool: str,
+    items_field: str,
+) -> None:
+    payload = _mcp_payload(call_tool(tool, {}, fetcher=_mcp_fetcher(client)))
+    assert payload[items_field] != []
+    assert payload["count"] == len(payload[items_field])
 
 
 # --------------------------------------------------------------------------
