@@ -1458,7 +1458,10 @@
           "provider": {
             "anyOf": [
               {
-                "const": "builtin_http",
+                "enum": [
+                  "builtin_http",
+                  "gatus"
+                ],
                 "type": "string"
               },
               {
@@ -19513,6 +19516,7 @@
               "additional_properties": false,
               "allowed_keys": [
                 "enabled",
+                "gatus",
                 "interval_seconds",
                 "provider"
               ],
@@ -19543,7 +19547,8 @@
             {
               "constraint": "must be a supported monitoring provider",
               "enum": [
-                "builtin_http"
+                "builtin_http",
+                "gatus"
               ],
               "json_types": [
                 "string"
@@ -19912,7 +19917,9 @@
             "invalid_endpoints",
             "invalid_health_url",
             "invalid_monitoring_config",
-            "no_http_endpoint"
+            "no_http_endpoint",
+            "missing_gatus_source",
+            "invalid_gatus_source_url"
           ],
           "error_codes": [
             "connect_failed",
@@ -19960,7 +19967,8 @@
             ]
           },
           "providers": [
-            "builtin_http"
+            "builtin_http",
+            "gatus"
           ],
           "result_semantics": {
             "2xx": "healthy",
