@@ -29,7 +29,12 @@ from blockwart.domain.schema_projection import (
     minimal_object_example,
 )
 from blockwart.domain.search import SearchQuery
-from blockwart.domain.ui_schema import create_data_field_keys, ui_schema_payload
+from blockwart.domain.ui_schema import (
+    create_data_field_keys,
+    load_editable_schema_settings,
+    save_editable_schema_settings,
+    ui_schema_payload,
+)
 from blockwart.mcp.server import QUERY_FILTER_PROPERTIES, describe_schema_payload
 from blockwart.models import AuditEvent, CatalogObject
 from blockwart.schemas.catalog import CatalogObjectIn
@@ -1461,6 +1466,17 @@ def _create_field_keys(form: str) -> list[str]:
     return re.findall(r'data-create-field="([^"]+)"', form)
 
 
+def _visible_create_field_keys(form: str) -> list[str]:
+    return [
+        match.group(1)
+        for match in re.finditer(
+            r'<(?:label|fieldset) data-create-field="([^"]+)"([^>]*)>',
+            form,
+        )
+        if "hidden" not in match.group(2)
+    ]
+
+
 def _submitted_body(form: str, values: dict[str, str]) -> str:
     """Build the body the rendered create-root form actually submits.
 
@@ -1526,8 +1542,8 @@ def test_create_form_projection_keeps_one_control_per_canonical_path() -> None:
     }
     paths = [str(definitions[key]["storage_path"]) for key in keys]
     assert len(paths) == len(set(paths))
-    # Nested collections keep their table editor instead of a second control.
-    assert not {"sources", "findings", "measurements", "docs", "steps"} & set(keys)
+    # Nested collections keep their dedicated table editor as their one control.
+    assert {"sources", "docs", "steps"} <= set(keys)
     # Every Project create data path is projected, exactly once.
     assert set(_project_create_data_keys()) <= set(keys)
     for kind in ("runbook", "project", "decision"):
@@ -1535,6 +1551,91 @@ def test_create_form_projection_keeps_one_control_per_canonical_path() -> None:
             str(field["key"]) for field in payload[kind]["create_field_definitions"]
         ]
         assert len(kind_keys) == len(set(kind_keys))
+
+
+def test_create_root_form_preserves_selected_kind_create_order(
+    root_client,  # noqa: F811
+    root_state,  # noqa: F811
+) -> None:
+    _browser_session(root_client, root_state)
+    payload = ui_schema_payload()
+    for kind in ("project", "runbook", "decision"):
+        response = root_client.get(f"/?create_root=1&kind={kind}")
+        assert response.status_code == 200
+        assert _visible_create_field_keys(_create_root_form(response.text)) == payload[
+            kind
+        ]["create_fields"]
+
+
+def test_create_root_form_preserves_project_schema_override_order(
+    root_client,  # noqa: F811
+    root_state,  # noqa: F811
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    override_path = tmp_path / "ui_schema_overrides.json"
+    monkeypatch.setenv("BLOCKWART_SCHEMA_OVERRIDES_PATH", str(override_path))
+    settings = load_editable_schema_settings("project")
+    field_order = [
+        "kind",
+        "object_id",
+        "primary_name",
+        "status",
+        "summary",
+        "review_after",
+        *(
+            key
+            for key in settings["field_order"]
+            if key
+            not in {
+                "kind",
+                "object_id",
+                "primary_name",
+                "status",
+                "summary",
+                "review_after",
+            }
+        ),
+    ]
+    fields = {
+        str(field["key"]): {
+            "labels": dict(field["localized_labels"]),
+            "placeholders": dict(field["localized_placeholders"]),
+            "required": bool(field["required"]),
+            "visible_in_detail": bool(field["visible_in_detail"]),
+        }
+        for field in settings["fields"]
+    }
+    save_editable_schema_settings(
+        "project",
+        field_order=field_order,
+        fields=fields,
+    )
+
+    _browser_session(root_client, root_state)
+    response = root_client.get("/?create_root=1&kind=project")
+    assert response.status_code == 200
+    assert _visible_create_field_keys(_create_root_form(response.text)) == (
+        ui_schema_payload()["project"]["create_fields"]
+    )
+    assert _visible_create_field_keys(_create_root_form(response.text))[5] == "review_after"
+
+
+def test_create_root_asset_form_keeps_its_single_labels_control(
+    root_client,  # noqa: F811
+    root_state,  # noqa: F811
+) -> None:
+    _browser_session(root_client, root_state)
+    form = _create_root_form(root_client.get("/?create_root=1&kind=host").text)
+    assert _create_field_keys(form).count("labels") == 1
+    assert _visible_create_field_keys(form) == [
+        "kind",
+        "object_id",
+        "primary_name",
+        "labels",
+        "status",
+        "summary",
+    ]
 
 
 def test_create_root_form_renders_each_project_path_once(

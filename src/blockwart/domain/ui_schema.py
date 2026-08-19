@@ -569,11 +569,6 @@ RUNBOOK_FIELD_OVERRIDES: dict[str, UiField] = {
 # The kinds whose canonical data fields the one create-root form renders, in
 # the order that form lays them out.
 CREATE_FORM_KIND_ORDER: tuple[str, ...] = ("runbook", "project", "decision")
-# Input types whose control is a nested table editor rather than one scalar
-# field. Decision `docs` reuses the shared source-list editor.
-CREATE_TABLE_INPUT_TYPES: frozenset[str] = frozenset(
-    {*PROJECT_TABLE_INPUT_TYPES.values(), *RUNBOOK_TABLE_INPUT_TYPES.values()}
-)
 
 COMMON_CREATE_FIELDS = (
     "kind",
@@ -890,7 +885,10 @@ def create_field_payload(schema: UiTypeSchema) -> list[dict[str, object]]:
     return _field_payload(schema, schema.create_fields, visible_in_create=True)
 
 
-def create_data_field_keys(schemas: Mapping[str, Any]) -> tuple[str, ...]:
+def create_data_field_keys(
+    schemas: Mapping[str, Any],
+    selected_kind: str | None = None,
+) -> tuple[str, ...]:
     """Return the create-root data controls, one per canonical data path.
 
     The create-root form is a single form for every object kind, while several
@@ -900,9 +898,11 @@ def create_data_field_keys(schemas: Mapping[str, Any]) -> tuple[str, ...]:
     create fields separately therefore produced several controls writing one
     stored path, which made submit precedence and empty overwrites ambiguous.
 
-    The union is projected once instead, in kind order, keeping the first
-    definition of each canonical path. Paths whose control is a nested table
-    editor are claimed by that editor and are not repeated as a scalar control.
+    The union is projected once, keeping the first definition of each canonical
+    path. A selected kind puts its own definitions first, preserving its
+    declared create order for server-rendered controls. Remaining controls stay
+    in stable union order for client-side kind changes. Nested table editors
+    claim their own paths instead of being repeated as scalar controls.
     Per-kind labels and help text stay in each kind's own schema; the form
     resolves them for the selected kind.
     """
@@ -913,13 +913,19 @@ def create_data_field_keys(schemas: Mapping[str, Any]) -> tuple[str, ...]:
             storage_path = str(definition["storage_path"])
             if not storage_path.startswith("data_json."):
                 continue
-            rendered.setdefault(
-                storage_path,
-                ""
-                if definition["input_type"] in CREATE_TABLE_INPUT_TYPES
-                else str(definition["key"]),
-            )
-    return tuple(key for key in rendered.values() if key)
+            rendered.setdefault(storage_path, str(definition["key"]))
+
+    if selected_kind not in schemas:
+        return tuple(rendered.values())
+
+    union_keys = set(rendered.values())
+    selected = [
+        str(definition["key"])
+        for definition in schemas[selected_kind]["create_field_definitions"]
+        if str(definition["storage_path"]).startswith("data_json.")
+        and str(definition["key"]) in union_keys
+    ]
+    return tuple((*selected, *(key for key in rendered.values() if key not in selected)))
 
 
 def schema_field_payload(schema: UiTypeSchema) -> list[dict[str, object]]:

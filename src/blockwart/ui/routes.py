@@ -480,7 +480,10 @@ def _index_template_context(
         "form_ui_schema": localized_schemas[selected_form_kind],
         # One create control per canonical data path, so a path shared by two
         # kinds cannot become two controls writing the same stored value.
-        "create_data_field_keys": create_data_field_keys(localized_schemas),
+        "create_data_field_keys": create_data_field_keys(
+            localized_schemas,
+            selected_form_kind,
+        ),
         "create_fields_by_key": {
             **{
                 str(field["key"]): field
