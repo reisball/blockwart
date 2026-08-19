@@ -373,6 +373,7 @@ def test_replay_after_newer_observation_is_rejected(
                 endpoint="replay-service",
                 timestamp=ts2,
                 alert="RESOLVED",
+                http_status=200,
             ),
         )
         # Replay: TRIGGERED at NOW (stale)
