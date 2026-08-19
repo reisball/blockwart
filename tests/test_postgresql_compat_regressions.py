@@ -31,11 +31,13 @@ from sqlalchemy.orm import Session, sessionmaker
 from blockwart.db.base import Base
 from blockwart.db.migrations import build_alembic_config
 from blockwart.db.session import build_engine
+from blockwart.domain.search import SearchQuery
 from blockwart.models import (
     CatalogObject,
     IdempotencyRecord,
     ServiceTokenFailureBucket,
 )
+from blockwart.services.agent import query_agent_objects_page
 from blockwart.services.catalog import _endpoint_descriptor_rows_statement
 from blockwart.services.decision_migration import (
     apply_decision_migration_plan,
@@ -1513,3 +1515,76 @@ def test_postgresql_token_bucket_inserts_round_trip(
         rows = session.query(ServiceTokenFailureBucket).all()
         assert len(rows) == 1
         assert rows[0].failure_count == 1
+
+
+# ---------------------------------------------------------------------------
+# Issue #186: the ranked search projection is engine independent
+# ---------------------------------------------------------------------------
+
+
+@PG_SKIP
+def test_postgresql_search_relevance_matches_the_sqlite_contract(
+    pg_session_factory: sessionmaker[Session],
+) -> None:
+    """Ranking, exact modes, and operational filtering agree on PG and SQLite.
+
+    Ordering, tie breaking, and the operational filter are decided over the
+    authorized projection rather than by the database, so a different server
+    collation cannot change the published result order.
+    """
+    from test_agent_search_relevance import (  # noqa: PLC0415
+        RANKED_GATEWAY_ORDER,
+        catalog_objects,
+        full_reader,
+    )
+
+    _upgrade_to(_pg_url(pg_session_factory.kw["bind"].url.database), HEAD_REVISION)
+
+    with pg_session_factory() as session:
+        for catalog_object in catalog_objects():
+            session.add(catalog_object)
+        session.commit()
+
+        access = full_reader()
+        ranked = query_agent_objects_page(
+            session,
+            access,
+            search=SearchQuery(query="gateway"),
+            limit=50,
+            sort="relevance",
+            include_total=True,
+        )
+        assert [item.id for item in ranked.items] == RANKED_GATEWAY_ORDER
+        assert ranked.total == len(RANKED_GATEWAY_ORDER)
+
+        operational = query_agent_objects_page(
+            session,
+            access,
+            search=SearchQuery(query="gateway", operational_only=True),
+            limit=50,
+            sort="relevance",
+        )
+        assert [item.id for item in operational.items] == [
+            item
+            for item in RANKED_GATEWAY_ORDER
+            if item
+            not in {
+                "decommissioned-gateway",
+                "staging-gateway",
+                "retired-gateway-runbook",
+            }
+        ]
+
+        for search, expected in (
+            (SearchQuery(query="host:gateway-01", match="exact_ref"), ["gateway-01"]),
+            (SearchQuery(query="  GATEWAY   01 ", match="exact_label"), ["gateway-01"]),
+            (SearchQuery(query="gateway-import-bot"), []),
+        ):
+            page = query_agent_objects_page(
+                session,
+                access,
+                search=search,
+                limit=50,
+                sort="relevance",
+            )
+            assert [item.id for item in page.items] == expected

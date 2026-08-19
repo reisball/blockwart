@@ -102,14 +102,19 @@ sort fields are:
 - `id`
 - `label`
 - `kind`
+- `relevance`
 - `updated_at`
 
-Every order uses the object ID as the final unique tie-breaker. `direction` is
-`asc` or `desc`, `limit` is 1..100, and `cursor` continues a previous page.
+Every order uses the object ID as the final unique tie-breaker; `relevance`
+uses the label and then the ID. `direction` is `asc` or `desc`, `limit` is
+1..100, and `cursor` continues a previous page. The default sort is unchanged,
+so a client that does not ask for `relevance` keeps its historical order.
 
 The list accepts:
 
-- `q`: case-insensitive ID, label, summary, or catalog-data search
+- `q`: case-insensitive search over the closed search projection below
+- `match`: `normal` (default), `exact_ref`, or `exact_label`
+- `operational_only`: exclude non-operational records
 - `kind`: exact object kind
 - `parent`: exact typed ancestor reference, not only the immediate parent
 - `ip`: exact resolved IP
@@ -133,7 +138,8 @@ The list accepts:
 Objects with `read` use the full summary. Objects with only `discover` use a
 strict stub containing identity, display label, released placement, and the
 caller's capabilities. Detail-field filters exclude stubs rather than probing
-their hidden values; text search on stubs uses only ID, kind, and label.
+their hidden values; text search on stubs uses only their ID, canonical
+reference, and label.
 Decision reference projections omit concealed targets, and `applies_to` returns
 no match when its target is not discoverable.
 Project reference projections follow the same rule. Project filters exclude discover-only stubs;
@@ -142,6 +148,69 @@ Runbook references and status/risk/relationship filters use that identical rule;
 steps, commands, verification, sources, credential references, and relationships
 are absent from discover-only stubs.
 Objects without `discover` are absent.
+
+### Search projection, matching, and relevance
+
+`q` is compared against a closed, server-defined projection, never against the
+serialized catalog document or the provenance header. Both the term and the
+compared value use one normalization: Unicode NFKC, whitespace runs collapsed
+to a single space, trimmed, and case-folded.
+
+The `relevance` order publishes this fixed precedence, best first:
+
+1. exact canonical `kind:id` reference or exact ID;
+2. exact normalized label;
+3. the term inside the ID or the label;
+4. a structured domain field: hostnames, network addresses, endpoint host,
+   URL, and capability, plus Decision `decision`, Runbook `purpose`, and
+   Project `current_summary` and `objective`;
+5. the top-level summary;
+6. another explicitly allowlisted bounded field: `network.location`,
+   `network.manufacturer`, `network.model`, `installed_software[].name`,
+   `owner`, Decision `context`, `rationale`, `consequences`, and
+   `alternatives`, Runbook `in_scope`, `out_of_scope`, `approval_requirement`,
+   and step titles, and Project `next_actions`, `open_questions`, `blockers`,
+   `in_scope`, and `out_of_scope`.
+
+Equal ranks are ordered by label and then by ID, so repeated identical queries
+return identical pages. A query without `q` gives every object the same rank
+and therefore keeps that stable label/ID order.
+
+Everything else is deliberately unsearchable: the serialized `data` document,
+the canonical provenance header (including `source_ref` and `managed_by`),
+imported `sources`, `docs`, and `source_references` entries, `schema_version`,
+credential references, command bodies, component and monitoring documents, and
+any other unlisted path. Generic migration or import boilerplate therefore
+cannot match a term or outrank a useful record.
+
+`match=exact_ref` matches only the exact canonical `kind:id` reference or the
+exact ID. `match=exact_label` matches only the exactly normalized label. Both
+exact modes evaluate the identity fields a discover-only stub already
+publishes, so they neither widen nor narrow concealment.
+
+`operational_only=true` removes records whose canonical status is `inactive` or
+`deleted`, whose canonical asset lifecycle is `retired`, or whose canonical
+knowledge status is retired: Runbook `retired`, `superseded`, or `deprecated`,
+Decision `superseded` or `deprecated`, and Project `archived`. It reads
+detail-only state and therefore excludes discover-only stubs, exactly like the
+other detail filters. The default is unchanged: without the flag every
+authorized record stays visible.
+
+Ranking, filtering, counting, ordering, cursor creation, and cursor validation
+happen only over the authorized result set, so a concealed object can change
+neither a position, a count, nor a cursor. Cursors bind the principal and
+effective policy, the normalized term, the match mode, `operational_only`,
+every structured filter, the resource, the sort field, and the direction; a
+cursor from a different query returns `400 invalid_request`.
+
+Every readable detail summary — and therefore every context that extends one —
+also carries `search_snippet`: one bounded,
+whitespace-collapsed line of at most 240 characters (with a truncation marker
+when it is shortened). It is the top-level summary, or — when the object has
+none — exactly the authorized canonical knowledge field of the kind: Runbook
+`purpose`, Decision `decision`, or Project `current_summary`. No other data
+path, full document, imported body, concealed field, secret-shaped value, or
+diagnostic becomes a snippet, and a discover-only stub never carries one.
 
 The resolver loads one bounded catalog/relationship snapshot, applies the
 principal's effective policy first, and then evaluates search and structured
@@ -419,7 +488,7 @@ partial business data or object audit event.
 ### `GET /api/v1/context`
 
 Returns the same detailed contexts as a cursor page. It accepts the object-list
-filters and sort fields, with a smaller limit of 1..20.
+filters, search parameters, and sort fields, with a smaller limit of 1..20.
 
 ### `POST /api/v1/object-contexts`
 
@@ -507,6 +576,15 @@ All v1 errors use the shared REST envelope and `X-Correlation-ID`. Missing
 objects return `404 not_found`, query validation returns
 `422 validation_error`, and incompatible cursors return
 `400 invalid_request`.
+
+A rejected search `limit` on `/api/v1/objects`, `/api/v1/context`,
+`/api/agent/search`, or `/api/agent/context` adds one narrowly scoped detail to
+the standard `validation_error` envelope. Beyond the canonical detail fields it
+carries `field` (`limit`), the server-declared `minimum` and `maximum`, and
+`received`, which is the sent value re-derived as a bounded integer or `null`.
+No other parameter and no other resource is described this way, and no other
+rejected input is echoed; see
+[API boundary contract](api-boundary-contract.md).
 
 Missing or invalid bearer credentials return `401 unauthorized` with
 `WWW-Authenticate: Bearer`. Authorized responses are private and non-cacheable

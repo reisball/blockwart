@@ -17,6 +17,7 @@ from blockwart.domain.placement import PlacementState
 from blockwart.domain.projects import ProjectCategory, ProjectStatus
 from blockwart.domain.provenance import CatalogProvenanceOut
 from blockwart.domain.runbooks import RunbookRisk, RunbookStatus
+from blockwart.domain.search import SEARCH_SNIPPET_MAX_LENGTH
 from blockwart.schemas.catalog import CatalogRecordDiagnostic, ObjectKind
 from blockwart.schemas.comments import CommentOut
 from blockwart.schemas.projects import ProjectChronologyEntryOut
@@ -106,6 +107,13 @@ class AgentCatalogObjectSummary(BaseModel):
     status: str
     revision: int = Field(ge=1)
     summary: str | None = None
+    # One bounded, safe orientation line for a detailed result. It is the
+    # top-level summary, or the canonical knowledge field of the kind when no
+    # summary exists. A discover-only stub never carries it.
+    search_snippet: str | None = Field(
+        default=None,
+        max_length=SEARCH_SNIPPET_MAX_LENGTH,
+    )
     parent: AgentAssetReadNode | None = None
     ips: list[str] = Field(default_factory=list)
     hostnames: list[str] = Field(default_factory=list)

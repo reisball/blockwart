@@ -20,6 +20,14 @@ from blockwart.domain.projects import (
 )
 from blockwart.domain.provenance import SourceType
 from blockwart.domain.runbooks import RunbookRisk, RunbookStatus
+from blockwart.domain.search import (
+    AGENT_SEARCH_LIMIT_MAX,
+    CONTEXT_LIMIT_MAX,
+    SEARCH_LIMIT_MIN,
+    SEARCH_TEXT_MAX_LENGTH,
+    SearchMatchMode,
+    SearchQuery,
+)
 from blockwart.schemas.agent import AgentContextOut, AgentSearchOut
 from blockwart.schemas.catalog import ObjectKind
 from blockwart.schemas.v1 import V1NetworkTopologyOut
@@ -45,8 +53,19 @@ def agent_search(
     access: Annotated[ReadAccess, Depends(require_api_read_access)],
     q: Annotated[
         str | None,
-        Query(description="Search term for id, label, summary, or data"),
+        Query(
+            max_length=SEARCH_TEXT_MAX_LENGTH,
+            description="Search term for the closed server-defined search projection",
+        ),
     ] = None,
+    match: Annotated[
+        SearchMatchMode,
+        Query(description="normal, exact_ref, or exact_label matching"),
+    ] = "normal",
+    operational_only: Annotated[
+        bool,
+        Query(description="Exclude inactive, deleted, and retired records"),
+    ] = False,
     kind: ObjectKind | None = None,
     parent: Annotated[str | None, Query(description="Typed parent reference")] = None,
     ip: Annotated[str | None, Query(description="Resolved exact IP address")] = None,
@@ -83,9 +102,11 @@ def agent_search(
         bool | None,
         Query(description="Exact computed freshness state"),
     ] = None,
-    limit: Annotated[int, Query(ge=1, le=50)] = 10,
+    limit: Annotated[int, Query(ge=SEARCH_LIMIT_MIN, le=AGENT_SEARCH_LIMIT_MAX)] = 10,
 ) -> AgentSearchOut:
     filters = _active_filters(
+        match=match,
+        operational_only=operational_only,
         parent=parent,
         ip=ip,
         port=port,
@@ -108,9 +129,30 @@ def agent_search(
     results = search_agent_objects(
         session,
         access,
-        query=q,
-        kind=kind,
-        **filters,
+        search=SearchQuery(
+            query=q,
+            match=match,
+            operational_only=operational_only,
+            kind=kind,
+            parent=parent,
+            ip=ip,
+            port=port,
+            endpoint_type=endpoint_type,
+            protocol=protocol,
+            exposure=exposure,
+            status=status,
+            decision_status=decision_status,
+            applies_to=applies_to,
+            runbook_status=runbook_status,
+            runbook_risk=runbook_risk,
+            project_category=project_category,
+            project_status=project_status,
+            related_object=related_object,
+            lifecycle=lifecycle,
+            health=health,
+            source_type=source_type,
+            stale=stale,
+        ),
         limit=limit,
     )
     return AgentSearchOut(
@@ -158,7 +200,21 @@ def agent_network_topology(
 def agent_context(
     session: Annotated[Session, Depends(get_session)],
     access: Annotated[ReadAccess, Depends(require_api_read_access)],
-    q: Annotated[str | None, Query(description="Search term for context retrieval")] = None,
+    q: Annotated[
+        str | None,
+        Query(
+            max_length=SEARCH_TEXT_MAX_LENGTH,
+            description="Search term for the closed server-defined search projection",
+        ),
+    ] = None,
+    match: Annotated[
+        SearchMatchMode,
+        Query(description="normal, exact_ref, or exact_label matching"),
+    ] = "normal",
+    operational_only: Annotated[
+        bool,
+        Query(description="Exclude inactive, deleted, and retired records"),
+    ] = False,
     kind: ObjectKind | None = None,
     parent: Annotated[str | None, Query(description="Typed parent reference")] = None,
     ip: Annotated[str | None, Query(description="Resolved exact IP address")] = None,
@@ -195,9 +251,11 @@ def agent_context(
         bool | None,
         Query(description="Exact computed freshness state"),
     ] = None,
-    limit: Annotated[int, Query(ge=1, le=20)] = 5,
+    limit: Annotated[int, Query(ge=SEARCH_LIMIT_MIN, le=CONTEXT_LIMIT_MAX)] = 5,
 ) -> AgentContextOut:
     filters = _active_filters(
+        match=match,
+        operational_only=operational_only,
         parent=parent,
         ip=ip,
         port=port,
@@ -220,9 +278,30 @@ def agent_context(
     objects = build_agent_context(
         session,
         access,
-        query=q,
-        kind=kind,
-        **filters,
+        search=SearchQuery(
+            query=q,
+            match=match,
+            operational_only=operational_only,
+            kind=kind,
+            parent=parent,
+            ip=ip,
+            port=port,
+            endpoint_type=endpoint_type,
+            protocol=protocol,
+            exposure=exposure,
+            status=status,
+            decision_status=decision_status,
+            applies_to=applies_to,
+            runbook_status=runbook_status,
+            runbook_risk=runbook_risk,
+            project_category=project_category,
+            project_status=project_status,
+            related_object=related_object,
+            lifecycle=lifecycle,
+            health=health,
+            source_type=source_type,
+            stale=stale,
+        ),
         limit=limit,
     )
     return AgentContextOut(
@@ -236,6 +315,8 @@ def agent_context(
 
 def _active_filters(
     *,
+    match: SearchMatchMode,
+    operational_only: bool,
     parent: str | None,
     ip: str | None,
     port: int | None,
@@ -256,6 +337,10 @@ def _active_filters(
     stale: bool | None,
 ) -> dict[str, str | int | bool]:
     filters: dict[str, str | int | bool | None] = {
+        # Both search modes are echoed only when they leave their default, so
+        # an unchanged request keeps its historical response body.
+        "match": match if match != "normal" else None,
+        "operational_only": operational_only or None,
         "parent": parent,
         "ip": ip,
         "port": port,

@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -10,15 +9,10 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from blockwart.domain.asset_state import (
-    AssetHealth,
-    AssetLifecycle,
-    state_from_record,
-)
+from blockwart.domain.asset_state import state_from_record
 from blockwart.domain.auth import ObjectVisibility, Permission
 from blockwart.domain.catalog_data import CatalogDataRead
 from blockwart.domain.decisions import (
-    DecisionStatus,
     decision_matches_filters,
     project_authorized_decision_data,
     validate_applies_to_filter,
@@ -29,23 +23,26 @@ from blockwart.domain.interfaces import (
 )
 from blockwart.domain.placement import PlacementGraph, placement_state
 from blockwart.domain.projects import (
-    ProjectCategory,
-    ProjectStatus,
     project_authorized_data,
     project_matches_filters,
 )
 from blockwart.domain.provenance import (
     CatalogProvenanceOut,
-    SourceType,
     load_provenance,
     provenance_for_read,
 )
 from blockwart.domain.runbooks import (
-    RunbookRisk,
-    RunbookStatus,
     authorized_runbook_data,
     runbook_matches_filters,
     validate_runbook_related_object_filter,
+)
+from blockwart.domain.search import (
+    EMPTY_SEARCH,
+    RANK_UNRANKED,
+    SearchQuery,
+    is_operational,
+    rank_match,
+    search_snippet,
 )
 from blockwart.domain.security import redact_secret_values
 from blockwart.domain.timestamps import format_rfc3339_utc
@@ -63,7 +60,7 @@ from blockwart.schemas.agent import (
     AgentRelationshipOut,
     AgentServiceMonitoring,
 )
-from blockwart.schemas.catalog import CatalogRecordDiagnostic, ObjectKind
+from blockwart.schemas.catalog import CatalogRecordDiagnostic
 from blockwart.schemas.comments import CommentOut
 from blockwart.schemas.projects import ProjectChronologyEntryOut
 from blockwart.schemas.v1 import ObjectSortField, SortDirection
@@ -106,30 +103,29 @@ class _AgentRowsPage:
     page: CursorPage[CatalogObject]
 
 
+@dataclass(frozen=True, slots=True)
+class _SearchMatches:
+    """The authorized matches of one search query and their published ranks."""
+
+    objects: list[CatalogObject]
+    ranks: dict[str, int]
+
+
+def default_search_sort(search: SearchQuery) -> ObjectSortField:
+    """Return the ordering a surface without an explicit sort parameter uses.
+
+    A free-text or exact-match query is ordered by the published relevance
+    ladder; every other request keeps the historical `kind` grouping, so a
+    plain listing does not change its order.
+    """
+    return "relevance" if search.term is not None else "kind"
+
+
 def query_agent_objects_page(
     session: Session,
     access: ReadAccess,
     *,
-    query: str | None = None,
-    kind: ObjectKind | None = None,
-    parent: str | None = None,
-    ip: str | None = None,
-    port: int | None = None,
-    endpoint_type: str | None = None,
-    protocol: str | None = None,
-    exposure: str | None = None,
-    status: str | None = None,
-    decision_status: DecisionStatus | None = None,
-    applies_to: str | None = None,
-    runbook_status: RunbookStatus | None = None,
-    runbook_risk: RunbookRisk | None = None,
-    project_category: ProjectCategory | None = None,
-    project_status: ProjectStatus | None = None,
-    related_object: str | None = None,
-    lifecycle: AssetLifecycle | None = None,
-    health: AssetHealth | None = None,
-    source_type: SourceType | None = None,
-    stale: bool | None = None,
+    search: SearchQuery = EMPTY_SEARCH,
     limit: int = 50,
     cursor: str | None = None,
     sort: ObjectSortField = "id",
@@ -140,26 +136,7 @@ def query_agent_objects_page(
     rows_page = _query_agent_rows_page(
         session,
         access,
-        query=query,
-        kind=kind,
-        parent=parent,
-        ip=ip,
-        port=port,
-        endpoint_type=endpoint_type,
-        protocol=protocol,
-        exposure=exposure,
-        status=status,
-        decision_status=decision_status,
-        applies_to=applies_to,
-        runbook_status=runbook_status,
-        runbook_risk=runbook_risk,
-        project_category=project_category,
-        project_status=project_status,
-        related_object=related_object,
-        lifecycle=lifecycle,
-        health=health,
-        source_type=source_type,
-        stale=stale,
+        search=search,
         limit=limit,
         cursor=cursor,
         sort=sort,
@@ -181,26 +158,7 @@ def query_agent_context_page(
     session: Session,
     access: ReadAccess,
     *,
-    query: str | None = None,
-    kind: ObjectKind | None = None,
-    parent: str | None = None,
-    ip: str | None = None,
-    port: int | None = None,
-    endpoint_type: str | None = None,
-    protocol: str | None = None,
-    exposure: str | None = None,
-    status: str | None = None,
-    decision_status: DecisionStatus | None = None,
-    applies_to: str | None = None,
-    runbook_status: RunbookStatus | None = None,
-    runbook_risk: RunbookRisk | None = None,
-    project_category: ProjectCategory | None = None,
-    project_status: ProjectStatus | None = None,
-    related_object: str | None = None,
-    lifecycle: AssetLifecycle | None = None,
-    health: AssetHealth | None = None,
-    source_type: SourceType | None = None,
-    stale: bool | None = None,
+    search: SearchQuery = EMPTY_SEARCH,
     limit: int = 20,
     cursor: str | None = None,
     sort: ObjectSortField = "id",
@@ -211,26 +169,7 @@ def query_agent_context_page(
     rows_page = _query_agent_rows_page(
         session,
         access,
-        query=query,
-        kind=kind,
-        parent=parent,
-        ip=ip,
-        port=port,
-        endpoint_type=endpoint_type,
-        protocol=protocol,
-        exposure=exposure,
-        status=status,
-        decision_status=decision_status,
-        applies_to=applies_to,
-        runbook_status=runbook_status,
-        runbook_risk=runbook_risk,
-        project_category=project_category,
-        project_status=project_status,
-        related_object=related_object,
-        lifecycle=lifecycle,
-        health=health,
-        source_type=source_type,
-        stale=stale,
+        search=search,
         limit=limit,
         cursor=cursor,
         sort=sort,
@@ -259,53 +198,15 @@ def search_agent_objects(
     session: Session,
     access: ReadAccess,
     *,
-    query: str | None = None,
-    kind: ObjectKind | None = None,
-    parent: str | None = None,
-    ip: str | None = None,
-    port: int | None = None,
-    endpoint_type: str | None = None,
-    protocol: str | None = None,
-    exposure: str | None = None,
-    status: str | None = None,
-    decision_status: DecisionStatus | None = None,
-    applies_to: str | None = None,
-    runbook_status: RunbookStatus | None = None,
-    runbook_risk: RunbookRisk | None = None,
-    project_category: ProjectCategory | None = None,
-    project_status: ProjectStatus | None = None,
-    related_object: str | None = None,
-    lifecycle: AssetLifecycle | None = None,
-    health: AssetHealth | None = None,
-    source_type: SourceType | None = None,
-    stale: bool | None = None,
+    search: SearchQuery = EMPTY_SEARCH,
     limit: int = 10,
 ) -> list[AgentCatalogObjectRead]:
     return query_agent_objects_page(
         session,
         access,
-        query=query,
-        kind=kind,
-        parent=parent,
-        ip=ip,
-        port=port,
-        endpoint_type=endpoint_type,
-        protocol=protocol,
-        exposure=exposure,
-        status=status,
-        decision_status=decision_status,
-        applies_to=applies_to,
-        runbook_status=runbook_status,
-        runbook_risk=runbook_risk,
-        project_category=project_category,
-        project_status=project_status,
-        related_object=related_object,
-        lifecycle=lifecycle,
-        health=health,
-        source_type=source_type,
-        stale=stale,
+        search=search,
         limit=limit,
-        sort="kind",
+        sort=default_search_sort(search),
     ).items
 
 
@@ -385,53 +286,15 @@ def build_agent_context(
     session: Session,
     access: ReadAccess,
     *,
-    query: str | None = None,
-    kind: ObjectKind | None = None,
-    parent: str | None = None,
-    ip: str | None = None,
-    port: int | None = None,
-    endpoint_type: str | None = None,
-    protocol: str | None = None,
-    exposure: str | None = None,
-    status: str | None = None,
-    decision_status: DecisionStatus | None = None,
-    applies_to: str | None = None,
-    runbook_status: RunbookStatus | None = None,
-    runbook_risk: RunbookRisk | None = None,
-    project_category: ProjectCategory | None = None,
-    project_status: ProjectStatus | None = None,
-    related_object: str | None = None,
-    lifecycle: AssetLifecycle | None = None,
-    health: AssetHealth | None = None,
-    source_type: SourceType | None = None,
-    stale: bool | None = None,
+    search: SearchQuery = EMPTY_SEARCH,
     limit: int = 5,
 ) -> list[AgentCatalogContextRead]:
     return query_agent_context_page(
         session,
         access,
-        query=query,
-        kind=kind,
-        parent=parent,
-        ip=ip,
-        port=port,
-        endpoint_type=endpoint_type,
-        protocol=protocol,
-        exposure=exposure,
-        status=status,
-        decision_status=decision_status,
-        applies_to=applies_to,
-        runbook_status=runbook_status,
-        runbook_risk=runbook_risk,
-        project_category=project_category,
-        project_status=project_status,
-        related_object=related_object,
-        lifecycle=lifecycle,
-        health=health,
-        source_type=source_type,
-        stale=stale,
+        search=search,
         limit=limit,
-        sort="kind",
+        sort=default_search_sort(search),
     ).items
 
 
@@ -439,26 +302,7 @@ def _query_agent_rows_page(
     session: Session,
     access: ReadAccess,
     *,
-    query: str | None,
-    kind: ObjectKind | None,
-    parent: str | None,
-    ip: str | None,
-    port: int | None,
-    endpoint_type: str | None,
-    protocol: str | None,
-    exposure: str | None,
-    status: str | None,
-    decision_status: DecisionStatus | None,
-    applies_to: str | None,
-    runbook_status: RunbookStatus | None,
-    runbook_risk: RunbookRisk | None,
-    project_category: ProjectCategory | None,
-    project_status: ProjectStatus | None,
-    related_object: str | None,
-    lifecycle: AssetLifecycle | None,
-    health: AssetHealth | None,
-    source_type: SourceType | None,
-    stale: bool | None,
+    search: SearchQuery,
     limit: int,
     cursor: str | None,
     sort: ObjectSortField,
@@ -467,63 +311,20 @@ def _query_agent_rows_page(
     resource: str,
 ) -> _AgentRowsPage:
     resolver = _AgentCatalogResolver(session, access)
-    objects = resolver.search(
-        query=query,
-        kind=kind,
-        parent=parent,
-        ip=ip,
-        port=port,
-        endpoint_type=endpoint_type,
-        protocol=protocol,
-        exposure=exposure,
-        status=status,
-        decision_status=decision_status,
-        applies_to=applies_to,
-        runbook_status=runbook_status,
-        runbook_risk=runbook_risk,
-        project_category=project_category,
-        project_status=project_status,
-        related_object=related_object,
-        lifecycle=lifecycle,
-        health=health,
-        source_type=source_type,
-        stale=stale,
-        limit=None,
-    )
+    matches = resolver.search(search)
     page = paginate_items(
-        objects,
+        matches.objects,
         key=lambda catalog_object: _object_sort_key(
             catalog_object,
             sort,
             access,
+            matches.ranks,
         ),
         limit=limit,
         resource=resource,
         sort=sort,
         direction=direction,
-        query={
-            "access": access.cursor_scope,
-            "endpoint_type": _normalized_filter(endpoint_type),
-            "exposure": _normalized_filter(exposure),
-            "health": health,
-            "ip": ip,
-            "kind": kind,
-            "lifecycle": lifecycle,
-            "parent": parent,
-            "port": port,
-            "protocol": _normalized_filter(protocol),
-            "q": query.strip().casefold() if query else None,
-            "status": _normalized_filter(status),
-            "decision_status": decision_status,
-            "applies_to": applies_to,
-            "runbook_status": runbook_status,
-            "runbook_risk": runbook_risk,
-            "project_category": project_category,
-            "project_status": project_status,
-            "related_object": related_object,
-            "source_type": source_type,
-            "stale": stale,
-        },
+        query={"access": access.cursor_scope, **search.cursor_fields()},
         cursor=cursor,
         include_total=include_total,
     )
@@ -567,55 +368,37 @@ class _AgentCatalogResolver:
             object_ids=readable_service_ids,
         )
 
-    def search(
-        self,
-        *,
-        query: str | None,
-        kind: ObjectKind | None,
-        parent: str | None,
-        ip: str | None,
-        port: int | None,
-        endpoint_type: str | None,
-        protocol: str | None,
-        exposure: str | None,
-        status: str | None,
-        decision_status: DecisionStatus | None,
-        applies_to: str | None,
-        runbook_status: RunbookStatus | None,
-        runbook_risk: RunbookRisk | None,
-        project_category: ProjectCategory | None,
-        project_status: ProjectStatus | None,
-        related_object: str | None,
-        lifecycle: AssetLifecycle | None,
-        health: AssetHealth | None,
-        source_type: SourceType | None,
-        stale: bool | None,
-        limit: int | None,
-    ) -> list[CatalogObject]:
+    def search(self, search: SearchQuery) -> _SearchMatches:
+        """Return the authorized matches of one search query with their ranks.
+
+        Authorization is decided first: a concealed object is never considered,
+        and a discover-only object is compared only against the identity fields
+        its stub already publishes. Ranking, and therefore ordering, counting,
+        and cursor creation, happens exclusively over that authorized set.
+        """
         matches: list[CatalogObject] = []
-        normalized_query = query.strip() if query else ""
-        query_term = normalized_query.casefold() if normalized_query else None
+        ranks: dict[str, int] = {}
         parsed_applies_to = (
-            validate_applies_to_filter(applies_to) if applies_to is not None else None
+            validate_applies_to_filter(search.applies_to)
+            if search.applies_to is not None
+            else None
         )
         if parsed_applies_to is not None and not self.access.policy.can(
             Permission.DISCOVER,
             parsed_applies_to.object_id,
         ):
-            return []
+            return _SearchMatches(objects=[], ranks={})
         parsed_related_object = (
-            validate_runbook_related_object_filter(related_object)
-            if related_object is not None
+            validate_runbook_related_object_filter(search.related_object)
+            if search.related_object is not None
             else None
         )
         if parsed_related_object is not None and not self.access.policy.can(
             Permission.DISCOVER,
             parsed_related_object.object_id,
         ):
-            return []
-        candidate_ids = self._candidate_ids(
-            kind=kind,
-        )
+            return _SearchMatches(objects=[], ranks={})
+        candidate_ids = self._candidate_ids(kind=search.kind)
         for obj in self.objects:
             visibility = self.access.policy.visibility_for(obj.id)
             if visibility == ObjectVisibility.NONE:
@@ -637,118 +420,109 @@ class _AgentCatalogResolver:
                 monitoring = self.monitoring(obj, data)
                 if monitoring is not None:
                     effective_filter_health = monitoring.effective_health
-            if query_term and not (
-                _matches_query(obj, data, query_term)
-                if can_read
-                else _matches_stub_query(obj, query_term)
+            rank = rank_match(
+                search,
+                ref=_object_ref(obj),
+                object_id=obj.id,
+                label=obj.label,
+                summary=obj.summary if can_read else None,
+                kind=obj.kind,
+                data=data if can_read else None,
+            )
+            if rank is None:
+                continue
+            if search.has_detail_filters and not can_read:
+                continue
+            if search.operational_only and not is_operational(
+                kind=obj.kind,
+                status=state.status if state is not None else obj.status,
+                lifecycle=state.lifecycle if state is not None else None,
+                data=data,
             ):
                 continue
-            if (
-                (
-                    status
-                    or decision_status
-                    or applies_to
-                    or runbook_status
-                    or runbook_risk
-                    or project_category
-                    or project_status
-                    or related_object
-                    or lifecycle
-                    or health
-                    or ip
-                    or port is not None
-                    or endpoint_type
-                    or protocol
-                    or exposure
-                    or source_type is not None
-                    or stale is not None
-                )
-                and not can_read
-            ):
+            if search.status and obj.status.casefold() != search.status.casefold():
                 continue
-            if status and obj.status.casefold() != status.casefold():
-                continue
-            if decision_status is not None or applies_to is not None:
+            if search.decision_status is not None or search.applies_to is not None:
                 if obj.kind != "decision" or not decision_matches_filters(
                     data,
-                    decision_status=decision_status,
-                    applies_to=applies_to,
+                    decision_status=search.decision_status,
+                    applies_to=search.applies_to,
                 ):
                     continue
-            if runbook_status is not None or runbook_risk is not None:
+            if search.runbook_status is not None or search.runbook_risk is not None:
                 if obj.kind != "runbook" or not runbook_matches_filters(
                     data,
-                    runbook_status=runbook_status,
-                    runbook_risk=runbook_risk,
+                    runbook_status=search.runbook_status,
+                    runbook_risk=search.runbook_risk,
                     related_object=None,
                 ):
                     continue
             if (
-                project_category is not None
-                or project_status is not None
-                or related_object is not None
+                search.project_category is not None
+                or search.project_status is not None
+                or search.related_object is not None
             ):
                 project_match = obj.kind == "project" and project_matches_filters(
                     data,
-                    project_category=project_category,
-                    project_status=project_status,
-                    related_object=related_object,
+                    project_category=search.project_category,
+                    project_status=search.project_status,
+                    related_object=search.related_object,
                 )
                 runbook_match = (
-                    project_category is None
-                    and project_status is None
+                    search.project_category is None
+                    and search.project_status is None
                     and obj.kind == "runbook"
                     and runbook_matches_filters(
                         data,
-                        runbook_status=runbook_status,
-                        runbook_risk=runbook_risk,
-                        related_object=related_object,
+                        runbook_status=search.runbook_status,
+                        runbook_risk=search.runbook_risk,
+                        related_object=search.related_object,
                     )
                 )
                 if not project_match and not runbook_match:
                     continue
-            if lifecycle and (state is None or state.lifecycle != lifecycle):
+            if search.lifecycle and (state is None or state.lifecycle != search.lifecycle):
                 continue
-            if health and effective_filter_health != health:
+            if search.health and effective_filter_health != search.health:
                 continue
-            if source_type is not None or stale is not None:
+            if search.source_type is not None or search.stale is not None:
                 provenance = self.provenance(obj)
                 if (
-                    source_type is not None
-                    and provenance.source_type != source_type
+                    search.source_type is not None
+                    and provenance.source_type != search.source_type
                 ):
                     continue
-                if stale is not None and provenance.is_stale is not stale:
+                if search.stale is not None and provenance.is_stale is not search.stale:
                     continue
-            if parent and parent not in self.visible_parent_path_refs(obj):
+            if search.parent and search.parent not in self.visible_parent_path_refs(obj):
                 continue
-            if ip and ip not in self.resolved_ips(obj):
+            if search.ip and search.ip not in self.resolved_ips(obj):
                 continue
-            if port is not None and port not in self.ports(obj):
+            if search.port is not None and search.port not in self.ports(obj):
                 continue
             endpoints = self.endpoints(obj)
-            if endpoint_type and not _endpoint_value_matches(
+            if search.endpoint_type and not _endpoint_value_matches(
                 endpoints,
                 "type",
-                endpoint_type,
+                search.endpoint_type,
             ):
                 continue
-            if protocol and not _endpoint_value_matches(
+            if search.protocol and not _endpoint_value_matches(
                 endpoints,
                 "protocol",
-                protocol,
+                search.protocol,
             ):
                 continue
-            if exposure and not _endpoint_value_matches(
+            if search.exposure and not _endpoint_value_matches(
                 endpoints,
                 "exposure",
-                exposure,
+                search.exposure,
             ):
                 continue
             matches.append(obj)
-            if limit is not None and len(matches) == limit:
-                break
-        return matches
+            ranks[obj.id] = rank
+        return _SearchMatches(objects=matches, ranks=ranks)
+
 
     def _project_knowledge_data(
         self,
@@ -772,11 +546,7 @@ class _AgentCatalogResolver:
     def _can_discover(self, object_id: str) -> bool:
         return self.access.policy.can(Permission.DISCOVER, object_id)
 
-    def _candidate_ids(
-        self,
-        *,
-        kind: ObjectKind | None,
-    ) -> set[str]:
+    def _candidate_ids(self, *, kind: str | None) -> set[str]:
         statement = select(CatalogObject.id)
         if kind:
             statement = statement.where(CatalogObject.kind == kind)
@@ -817,6 +587,11 @@ class _AgentCatalogResolver:
             status=state.status if state is not None else obj.status,
             revision=obj.revision,
             summary=obj.summary,
+            search_snippet=search_snippet(
+                kind=obj.kind,
+                summary=obj.summary,
+                data=projected_knowledge_data,
+            ),
             parent=parent,
             ips=self.resolved_ips(obj),
             hostnames=self.resolved_hostnames(obj),
@@ -1175,24 +950,6 @@ def _safe_object_record(obj: CatalogObject) -> CatalogDataRead:
     )
 
 
-def _matches_query(obj: CatalogObject, data: Mapping[str, Any], query_term: str) -> bool:
-    values = [
-        obj.id,
-        obj.label,
-        obj.summary or "",
-        json.dumps(data, sort_keys=True),
-        obj.provenance_json,
-    ]
-    return any(query_term in value.casefold() for value in values)
-
-
-def _matches_stub_query(obj: CatalogObject, query_term: str) -> bool:
-    return any(
-        query_term in value.casefold()
-        for value in (obj.id, obj.kind, obj.label)
-    )
-
-
 def _endpoint_value_matches(
     endpoints: list[dict[str, Any]],
     field: str,
@@ -1213,7 +970,14 @@ def _object_sort_key(
     obj: CatalogObject,
     sort: ObjectSortField,
     access: ReadAccess,
+    ranks: Mapping[str, int],
 ) -> tuple[str, str]:
+    if sort == "relevance":
+        # The rank is already computed over the authorized result set, so the
+        # published precedence never depends on a value this reader may not
+        # see. Equal ranks fall back to the stable label/id tie-breaker.
+        rank = ranks.get(obj.id, RANK_UNRANKED)
+        return f"{rank:02d}", f"{obj.label.casefold()}\0{obj.id}"
     if sort == "label":
         return obj.label.casefold(), obj.id
     if sort == "kind":
@@ -1226,10 +990,6 @@ def _object_sort_key(
         )
         return updated_at, obj.id
     return obj.id.casefold(), obj.id
-
-
-def _normalized_filter(value: str | None) -> str | None:
-    return value.casefold() if value else None
 
 
 def _optional_text(value: Any) -> str | None:

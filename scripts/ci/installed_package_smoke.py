@@ -227,10 +227,30 @@ async def check_mcp(
             assert project_contract["evidence"]["contradictory_findings_allowed"] is True
             search_properties = tools["blockwart.search"].inputSchema["properties"]
             assert {
+                "match",
+                "operational_only",
                 "project_category",
                 "project_status",
                 "related_object",
             } <= set(search_properties)
+            assert search_properties["match"]["enum"] == [
+                "normal",
+                "exact_ref",
+                "exact_label",
+            ]
+            assert search_properties["sort"]["enum"] == [
+                "id",
+                "label",
+                "kind",
+                "relevance",
+                "updated_at",
+            ]
+            assert tools["blockwart.search"].inputSchema["properties"]["limit"] == {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 50,
+                "default": 10,
+            }
             device_category = next(
                 field
                 for field in schema_kinds["device"]["data"]["fields"]

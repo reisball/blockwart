@@ -23,6 +23,14 @@ from blockwart.domain.projects import (
 )
 from blockwart.domain.provenance import SourceType
 from blockwart.domain.runbooks import RunbookRisk, RunbookStatus
+from blockwart.domain.search import (
+    CONTEXT_LIMIT_MAX,
+    SEARCH_LIMIT_MAX,
+    SEARCH_LIMIT_MIN,
+    SEARCH_TEXT_MAX_LENGTH,
+    SearchMatchMode,
+    SearchQuery,
+)
 from blockwart.domain.source_coverage import SourceCoverageError
 from blockwart.schemas.agent import AgentCatalogContextRead
 from blockwart.schemas.catalog import CatalogObjectIn, ObjectKind, ObjectStatus
@@ -141,8 +149,30 @@ def get_mcp_contract_metadata(
 QueryText = Annotated[
     str | None,
     Query(
-        max_length=200,
-        description="Case-insensitive search over id, label, summary, and catalog data",
+        max_length=SEARCH_TEXT_MAX_LENGTH,
+        description=(
+            "Search term matched against the closed server-defined search "
+            "projection: canonical reference, id, label, structured domain "
+            "fields, summary, and allowlisted bounded fields"
+        ),
+    ),
+]
+MatchMode = Annotated[
+    SearchMatchMode,
+    Query(
+        description=(
+            "normal weighted search, exact_ref for an exact kind:id or id, or "
+            "exact_label for an exact normalized label"
+        ),
+    ),
+]
+OperationalOnly = Annotated[
+    bool,
+    Query(
+        description=(
+            "Exclude inactive/deleted status, retired lifecycle, and the "
+            "retired canonical knowledge states"
+        ),
     ),
 ]
 ParentFilter = Annotated[
@@ -169,7 +199,7 @@ CursorParameter = Annotated[
     str | None,
     Query(max_length=2048, description="Opaque cursor returned by the previous page"),
 ]
-PageLimit = Annotated[int, Query(ge=1, le=100)]
+PageLimit = Annotated[int, Query(ge=SEARCH_LIMIT_MIN, le=SEARCH_LIMIT_MAX)]
 
 
 @router.get(
@@ -235,6 +265,8 @@ def list_v1_objects(
     session: Annotated[Session, Depends(get_session)],
     access: Annotated[ReadAccess, Depends(require_api_read_access)],
     q: QueryText = None,
+    match: MatchMode = "normal",
+    operational_only: OperationalOnly = False,
     kind: ObjectKind | None = None,
     parent: ParentFilter = None,
     ip: IpFilter = None,
@@ -284,26 +316,30 @@ def list_v1_objects(
         page = query_agent_objects_page(
             session,
             access,
-            query=q,
-            kind=kind,
-            parent=parent,
-            ip=ip,
-            port=port,
-            endpoint_type=endpoint_type,
-            protocol=protocol,
-            exposure=exposure,
-            status=status,
-            decision_status=decision_status,
-            applies_to=applies_to,
-            runbook_status=runbook_status,
-            runbook_risk=runbook_risk,
-            project_category=project_category,
-            project_status=project_status,
-            related_object=related_object,
-            lifecycle=lifecycle,
-            health=health,
-            source_type=source_type,
-            stale=stale,
+            search=SearchQuery(
+                query=q,
+                match=match,
+                operational_only=operational_only,
+                kind=kind,
+                parent=parent,
+                ip=ip,
+                port=port,
+                endpoint_type=endpoint_type,
+                protocol=protocol,
+                exposure=exposure,
+                status=status,
+                decision_status=decision_status,
+                applies_to=applies_to,
+                runbook_status=runbook_status,
+                runbook_risk=runbook_risk,
+                project_category=project_category,
+                project_status=project_status,
+                related_object=related_object,
+                lifecycle=lifecycle,
+                health=health,
+                source_type=source_type,
+                stale=stale,
+            ),
             limit=limit,
             cursor=cursor,
             sort=sort,
@@ -368,6 +404,8 @@ def get_v1_context(
     session: Annotated[Session, Depends(get_session)],
     access: Annotated[ReadAccess, Depends(require_api_read_access)],
     q: QueryText = None,
+    match: MatchMode = "normal",
+    operational_only: OperationalOnly = False,
     kind: ObjectKind | None = None,
     parent: ParentFilter = None,
     ip: IpFilter = None,
@@ -404,7 +442,7 @@ def get_v1_context(
         bool | None,
         Query(description="Exact computed freshness state"),
     ] = None,
-    limit: Annotated[int, Query(ge=1, le=20)] = 5,
+    limit: Annotated[int, Query(ge=SEARCH_LIMIT_MIN, le=CONTEXT_LIMIT_MAX)] = 5,
     cursor: CursorParameter = None,
     sort: ObjectSortField = "id",
     direction: SortDirection = "asc",
@@ -417,26 +455,30 @@ def get_v1_context(
         page = query_agent_context_page(
             session,
             access,
-            query=q,
-            kind=kind,
-            parent=parent,
-            ip=ip,
-            port=port,
-            endpoint_type=endpoint_type,
-            protocol=protocol,
-            exposure=exposure,
-            status=status,
-            decision_status=decision_status,
-            applies_to=applies_to,
-            runbook_status=runbook_status,
-            runbook_risk=runbook_risk,
-            project_category=project_category,
-            project_status=project_status,
-            related_object=related_object,
-            lifecycle=lifecycle,
-            health=health,
-            source_type=source_type,
-            stale=stale,
+            search=SearchQuery(
+                query=q,
+                match=match,
+                operational_only=operational_only,
+                kind=kind,
+                parent=parent,
+                ip=ip,
+                port=port,
+                endpoint_type=endpoint_type,
+                protocol=protocol,
+                exposure=exposure,
+                status=status,
+                decision_status=decision_status,
+                applies_to=applies_to,
+                runbook_status=runbook_status,
+                runbook_risk=runbook_risk,
+                project_category=project_category,
+                project_status=project_status,
+                related_object=related_object,
+                lifecycle=lifecycle,
+                health=health,
+                source_type=source_type,
+                stale=stale,
+            ),
             limit=limit,
             cursor=cursor,
             sort=sort,

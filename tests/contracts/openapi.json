@@ -490,6 +490,18 @@
             ],
             "title": "Runbook Status"
           },
+          "search_snippet": {
+            "anyOf": [
+              {
+                "maxLength": 240,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Search Snippet"
+          },
           "source_references": {
             "items": {
               "additionalProperties": true,
@@ -912,6 +924,18 @@
               }
             ],
             "title": "Runbook Status"
+          },
+          "search_snippet": {
+            "anyOf": [
+              {
+                "maxLength": 240,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Search Snippet"
           },
           "status": {
             "title": "Status",
@@ -4018,6 +4042,7 @@
               "id",
               "label",
               "kind",
+              "relevance",
               "updated_at"
             ],
             "title": "Sort",
@@ -4997,6 +5022,7 @@
               "id",
               "label",
               "kind",
+              "relevance",
               "updated_at"
             ],
             "title": "Sort",
@@ -6184,21 +6210,51 @@
         "operationId": "agent_context_api_agent_context_get",
         "parameters": [
           {
-            "description": "Search term for context retrieval",
+            "description": "Search term for the closed server-defined search projection",
             "in": "query",
             "name": "q",
             "required": false,
             "schema": {
               "anyOf": [
                 {
+                  "maxLength": 200,
                   "type": "string"
                 },
                 {
                   "type": "null"
                 }
               ],
-              "description": "Search term for context retrieval",
+              "description": "Search term for the closed server-defined search projection",
               "title": "Q"
+            }
+          },
+          {
+            "description": "normal, exact_ref, or exact_label matching",
+            "in": "query",
+            "name": "match",
+            "required": false,
+            "schema": {
+              "default": "normal",
+              "description": "normal, exact_ref, or exact_label matching",
+              "enum": [
+                "normal",
+                "exact_ref",
+                "exact_label"
+              ],
+              "title": "Match",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Exclude inactive, deleted, and retired records",
+            "in": "query",
+            "name": "operational_only",
+            "required": false,
+            "schema": {
+              "default": false,
+              "description": "Exclude inactive, deleted, and retired records",
+              "title": "Operational Only",
+              "type": "boolean"
             }
           },
           {
@@ -7002,21 +7058,51 @@
         "operationId": "agent_search_api_agent_search_get",
         "parameters": [
           {
-            "description": "Search term for id, label, summary, or data",
+            "description": "Search term for the closed server-defined search projection",
             "in": "query",
             "name": "q",
             "required": false,
             "schema": {
               "anyOf": [
                 {
+                  "maxLength": 200,
                   "type": "string"
                 },
                 {
                   "type": "null"
                 }
               ],
-              "description": "Search term for id, label, summary, or data",
+              "description": "Search term for the closed server-defined search projection",
               "title": "Q"
+            }
+          },
+          {
+            "description": "normal, exact_ref, or exact_label matching",
+            "in": "query",
+            "name": "match",
+            "required": false,
+            "schema": {
+              "default": "normal",
+              "description": "normal, exact_ref, or exact_label matching",
+              "enum": [
+                "normal",
+                "exact_ref",
+                "exact_label"
+              ],
+              "title": "Match",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Exclude inactive, deleted, and retired records",
+            "in": "query",
+            "name": "operational_only",
+            "required": false,
+            "schema": {
+              "default": false,
+              "description": "Exclude inactive, deleted, and retired records",
+              "title": "Operational Only",
+              "type": "boolean"
             }
           },
           {
@@ -10086,7 +10172,7 @@
         "operationId": "get_v1_context_api_v1_context_get",
         "parameters": [
           {
-            "description": "Case-insensitive search over id, label, summary, and catalog data",
+            "description": "Search term matched against the closed server-defined search projection: canonical reference, id, label, structured domain fields, summary, and allowlisted bounded fields",
             "in": "query",
             "name": "q",
             "required": false,
@@ -10100,8 +10186,37 @@
                   "type": "null"
                 }
               ],
-              "description": "Case-insensitive search over id, label, summary, and catalog data",
+              "description": "Search term matched against the closed server-defined search projection: canonical reference, id, label, structured domain fields, summary, and allowlisted bounded fields",
               "title": "Q"
+            }
+          },
+          {
+            "description": "normal weighted search, exact_ref for an exact kind:id or id, or exact_label for an exact normalized label",
+            "in": "query",
+            "name": "match",
+            "required": false,
+            "schema": {
+              "default": "normal",
+              "description": "normal weighted search, exact_ref for an exact kind:id or id, or exact_label for an exact normalized label",
+              "enum": [
+                "normal",
+                "exact_ref",
+                "exact_label"
+              ],
+              "title": "Match",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Exclude inactive/deleted status, retired lifecycle, and the retired canonical knowledge states",
+            "in": "query",
+            "name": "operational_only",
+            "required": false,
+            "schema": {
+              "default": false,
+              "description": "Exclude inactive/deleted status, retired lifecycle, and the retired canonical knowledge states",
+              "title": "Operational Only",
+              "type": "boolean"
             }
           },
           {
@@ -10547,6 +10662,7 @@
                 "id",
                 "label",
                 "kind",
+                "relevance",
                 "updated_at"
               ],
               "title": "Sort",
@@ -10980,7 +11096,7 @@
         "operationId": "list_v1_objects_api_v1_objects_get",
         "parameters": [
           {
-            "description": "Case-insensitive search over id, label, summary, and catalog data",
+            "description": "Search term matched against the closed server-defined search projection: canonical reference, id, label, structured domain fields, summary, and allowlisted bounded fields",
             "in": "query",
             "name": "q",
             "required": false,
@@ -10994,8 +11110,37 @@
                   "type": "null"
                 }
               ],
-              "description": "Case-insensitive search over id, label, summary, and catalog data",
+              "description": "Search term matched against the closed server-defined search projection: canonical reference, id, label, structured domain fields, summary, and allowlisted bounded fields",
               "title": "Q"
+            }
+          },
+          {
+            "description": "normal weighted search, exact_ref for an exact kind:id or id, or exact_label for an exact normalized label",
+            "in": "query",
+            "name": "match",
+            "required": false,
+            "schema": {
+              "default": "normal",
+              "description": "normal weighted search, exact_ref for an exact kind:id or id, or exact_label for an exact normalized label",
+              "enum": [
+                "normal",
+                "exact_ref",
+                "exact_label"
+              ],
+              "title": "Match",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Exclude inactive/deleted status, retired lifecycle, and the retired canonical knowledge states",
+            "in": "query",
+            "name": "operational_only",
+            "required": false,
+            "schema": {
+              "default": false,
+              "description": "Exclude inactive/deleted status, retired lifecycle, and the retired canonical knowledge states",
+              "title": "Operational Only",
+              "type": "boolean"
             }
           },
           {
@@ -11441,6 +11586,7 @@
                 "id",
                 "label",
                 "kind",
+                "relevance",
                 "updated_at"
               ],
               "title": "Sort",

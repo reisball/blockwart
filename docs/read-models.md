@@ -40,8 +40,14 @@ The query module does not import FastAPI requests, responses, templates, or form
 types. Routers parse transport input and render a response; they do not query
 relationships or build placement graphs themselves.
 
+One typed search-query contract (`blockwart.domain.search`) is shared by REST
+v1, the Agent compatibility namespace, and MCP. It owns the match modes, the
+operational filter, the closed searched field projection, the deterministic
+rank ladder, and the bounded `search_snippet`, so the three surfaces cannot
+drift apart. It performs no semantic, vector, or model-based ranking.
+
 The query boundary receives one immutable principal/policy snapshot. Counts,
-search, topology, relationships, audit, and pagination operate on its
+search, ranking, topology, relationships, audit, and pagination operate on its
 authorized projection. Detail predicates exclude stubs, placement edges
 require discoverable endpoints, and non-placement edges require readable
 endpoints.

@@ -60,12 +60,21 @@ from blockwart.domain.schema_projection import (
     minimal_object_example,
     object_schema_projection,
 )
+from blockwart.domain.search import (
+    AGENT_SEARCH_LIMIT_MAX,
+    CONTEXT_LIMIT_MAX,
+    SEARCH_LIMIT_MIN,
+    SEARCH_MATCH_MODES,
+    SEARCH_TEXT_MAX_LENGTH,
+)
 from blockwart.domain.source_coverage import COVERAGE_STATES, SOURCE_CLASSIFICATIONS
 from blockwart.domain.validation_errors import (
     DATA_PATH_ROOT,
+    SEARCH_LIMIT_FIELD,
     order_public_details,
     public_detail,
     sanitize_public_details,
+    search_limit_detail,
 )
 from blockwart.mcp.manifest import (
     contract_metadata,
@@ -94,7 +103,7 @@ class ToolInputError(ValueError):
     def __init__(
         self,
         message: str,
-        details: list[dict[str, str | None]] | None = None,
+        details: list[dict[str, str | int | None]] | None = None,
     ) -> None:
         super().__init__(message)
         self.details = details or []
@@ -110,7 +119,7 @@ class UpstreamError(RuntimeError):
         code: str,
         public_message: str,
         correlation_id: str | None = None,
-        details: list[dict[str, str | None]] | None = None,
+        details: list[dict[str, str | int | None]] | None = None,
     ) -> None:
         super().__init__(public_message)
         self.code = code
@@ -235,6 +244,10 @@ RELATIONSHIP_TOOLS: tuple[str, ...] = (
 # Tools whose rejected arguments are published as field-accurate details on the
 # canonical violation contract.
 FIELD_ACCURATE_TOOLS: tuple[str, ...] = (*WRITE_INTENT_TOOLS, *RELATIONSHIP_TOOLS)
+# The read tools whose rejected page size publishes one narrowly scoped
+# field-accurate detail. Every other rejected read argument keeps the opaque
+# invalid_arguments shape, so no other input is described or echoed.
+SEARCH_LIMIT_TOOLS: tuple[str, ...] = ("blockwart.search", "blockwart.get_context")
 # Tools whose arguments carry canonical relationship paths.
 RELATIONSHIP_ARGUMENT_TOOLS: tuple[str, ...] = (
     *RELATIONSHIP_TOOLS,
@@ -293,7 +306,34 @@ GRANT_SCOPE_SCHEMA: JSON = {
 }
 
 QUERY_FILTER_PROPERTIES: JSON = {
-    "q": {"type": "string", "description": "Search term"},
+    "q": {
+        "type": "string",
+        "maxLength": SEARCH_TEXT_MAX_LENGTH,
+        "description": (
+            "Search term matched against the closed server-defined search "
+            "projection: canonical kind:id reference, id, label, structured "
+            "domain fields, summary, and allowlisted bounded fields. The "
+            "serialized data document, provenance, and imported boilerplate "
+            "are never searched."
+        ),
+    },
+    "match": {
+        "type": "string",
+        "enum": list(SEARCH_MATCH_MODES),
+        "default": "normal",
+        "description": (
+            "normal weighted search, exact_ref for an exact canonical kind:id "
+            "or exact id, or exact_label for an exact normalized label"
+        ),
+    },
+    "operational_only": {
+        "type": "boolean",
+        "default": False,
+        "description": (
+            "Exclude inactive and deleted status, retired lifecycle, and the "
+            "retired canonical Runbook, Decision, and Project states"
+        ),
+    },
     "kind": {
         "type": "string",
         "enum": list(ALL_OBJECT_KINDS),
@@ -364,8 +404,13 @@ QUERY_FILTER_PROPERTIES: JSON = {
     "cursor": {"type": "string", "description": "Opaque v1 continuation cursor"},
     "sort": {
         "type": "string",
-        "enum": ["id", "label", "kind", "updated_at"],
+        "enum": ["id", "label", "kind", "relevance", "updated_at"],
         "default": "id",
+        "description": (
+            "Use relevance with q for the published rank ladder: exact "
+            "ref/id, exact label, identity, structured domain field, summary, "
+            "then other allowlisted fields"
+        ),
     },
     "direction": {
         "type": "string",
@@ -386,7 +431,12 @@ TOOLS: list[JSON] = [
             "type": "object",
             "properties": {
                 **QUERY_FILTER_PROPERTIES,
-                "limit": {"type": "integer", "minimum": 1, "maximum": 50, "default": 10},
+                "limit": {
+                    "type": "integer",
+                    "minimum": SEARCH_LIMIT_MIN,
+                    "maximum": AGENT_SEARCH_LIMIT_MAX,
+                    "default": 10,
+                },
             },
             "additionalProperties": False,
         },
@@ -584,7 +634,12 @@ TOOLS: list[JSON] = [
             "type": "object",
             "properties": {
                 **QUERY_FILTER_PROPERTIES,
-                "limit": {"type": "integer", "minimum": 1, "maximum": 20, "default": 5},
+                "limit": {
+                    "type": "integer",
+                    "minimum": SEARCH_LIMIT_MIN,
+                    "maximum": CONTEXT_LIMIT_MAX,
+                    "default": 5,
+                },
             },
             "additionalProperties": False,
         },
@@ -1098,14 +1153,14 @@ _ARGUMENT_VIOLATIONS: dict[str, str] = {
 }
 
 
-def _argument_details(name: str, arguments: JSON) -> list[dict[str, str | None]]:
+def _argument_details(name: str, arguments: JSON) -> list[dict[str, str | int | None]]:
     """Project rejected tool arguments onto the published violation contract.
 
     Only the argument location, the missing argument names declared by the
     published tool schema, and one violation code are projected. Rejected
     values and jsonschema messages are never copied.
     """
-    details: list[dict[str, str | None]] = []
+    details: list[dict[str, str | int | None]] = []
     for error in TOOL_INPUT_VALIDATORS[name].iter_errors(arguments):
         location = ".".join(str(part) for part in error.absolute_path)
         code = _ARGUMENT_VIOLATIONS.get(str(error.validator), GENERIC_SCHEMA_VIOLATION)
@@ -1121,6 +1176,36 @@ def _argument_details(name: str, arguments: JSON) -> list[dict[str, str | None]]
                     path=_canonical_argument_path(name, argument_location),
                 )
             )
+    return order_public_details(details)
+
+
+def _search_limit_details(name: str, arguments: JSON) -> list[dict[str, str | int | None]]:
+    """Project a rejected search page size onto its field-accurate detail.
+
+    Only the `limit` argument of a search tool is described: the published
+    range comes from this tool schema and the received value is re-derived as a
+    bounded integer. A violation of any other argument contributes nothing, so
+    a rejected term, filter, or cursor is never echoed or even named.
+    """
+    if name not in SEARCH_LIMIT_TOOLS:
+        return []
+    schema = TOOL_DEFINITIONS[name]["inputSchema"]["properties"][SEARCH_LIMIT_FIELD]
+    details: list[dict[str, str | int | None]] = []
+    for error in TOOL_INPUT_VALIDATORS[name].iter_errors(arguments):
+        if list(error.absolute_path) != [SEARCH_LIMIT_FIELD]:
+            continue
+        details.append(
+            search_limit_detail(
+                location=SEARCH_LIMIT_FIELD,
+                code=_ARGUMENT_VIOLATIONS.get(
+                    str(error.validator),
+                    GENERIC_SCHEMA_VIOLATION,
+                ),
+                received=arguments.get(SEARCH_LIMIT_FIELD),
+                minimum=schema["minimum"],
+                maximum=schema["maximum"],
+            )
+        )
     return order_public_details(details)
 
 
@@ -1194,10 +1279,14 @@ def call_tool(
         # Object-write and relationship tools publish field-accurate argument
         # violations on the same contract the API projects. Read tools keep
         # their existing opaque invalid_arguments shape so the public contract
-        # does not widen for tools outside this slice.
+        # does not widen for tools outside this slice; the one exception is a
+        # rejected search page size, which publishes the narrowly scoped
+        # limit detail documented in `api-boundary-contract.md`.
         raise ToolInputError(
             "Tool arguments are invalid",
-            _argument_details(name, args) if name in FIELD_ACCURATE_TOOLS else [],
+            _argument_details(name, args)
+            if name in FIELD_ACCURATE_TOOLS
+            else _search_limit_details(name, args),
         ) from exc
 
     request_id = _safe_correlation_id(correlation_id)
@@ -1867,6 +1956,8 @@ def _clean_params(args: JSON, *, default_limit: int) -> JSON:
         "limit": args.get("limit", default_limit),
     }
     for name in (
+        "match",
+        "operational_only",
         "parent",
         "ip",
         "port",
@@ -1910,6 +2001,8 @@ def _legacy_page_payload(
     filters = {
         key: args[key]
         for key in (
+            "match",
+            "operational_only",
             "parent",
             "ip",
             "port",
@@ -2132,7 +2225,7 @@ def _translate_http_error(exc: HTTPError) -> UpstreamError:
     )
 
 
-def _upstream_details(error: JSON) -> list[dict[str, str | None]]:
+def _upstream_details(error: JSON) -> list[dict[str, str | int | None]]:
     """Re-derive publishable details from an untrusted upstream error body.
 
     Only a published violation code, a canonical path, and a published rule
@@ -2156,7 +2249,7 @@ def _tool_error_result(
     message: str,
     *,
     correlation_id: str | None = None,
-    details: list[dict[str, str | None]] | None = None,
+    details: list[dict[str, str | int | None]] | None = None,
 ) -> types.CallToolResult:
     error: dict[str, object] = {"code": code, "message": message}
     if correlation_id is not None:
