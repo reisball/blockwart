@@ -111,6 +111,7 @@
         "type": "object"
       },
       "AgentCatalogConcealed": {
+        "additionalProperties": false,
         "properties": {
           "id": {
             "title": "Id",
@@ -130,6 +131,7 @@
         "type": "object"
       },
       "AgentCatalogObjectContext": {
+        "additionalProperties": false,
         "properties": {
           "applies_to": {
             "items": {
@@ -557,6 +559,7 @@
         "type": "object"
       },
       "AgentCatalogObjectStub": {
+        "additionalProperties": false,
         "properties": {
           "capabilities": {
             "items": {
@@ -654,6 +657,7 @@
         "type": "object"
       },
       "AgentCatalogObjectSummary": {
+        "additionalProperties": false,
         "properties": {
           "applies_to": {
             "items": {
@@ -1194,6 +1198,633 @@
           "endpoint_id"
         ],
         "title": "AgentMonitoringTarget",
+        "type": "object"
+      },
+      "AgentProjectedObject": {
+        "additionalProperties": false,
+        "description": "One readable object under a non-default read projection.\n\nIdentity and state are always present, so a projected object publishes the\nsame id, ref, kind, revision, visibility decision, and effective\npermissions as the full contract. The effective permissions are published\nonce per distinct permission set in the response-level `capability_sets`\ntable, which `capability_set` keys into. A full read never carries that\nkey and a projected read never carries an inline capability list, so the\ntwo contracts can never be confused for one another.",
+        "properties": {
+          "applies_to": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Applies To"
+          },
+          "capability_set": {
+            "title": "Capability Set",
+            "type": "string"
+          },
+          "children_refs": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Children Refs"
+          },
+          "credential_references": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Credential References"
+          },
+          "data": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Data"
+          },
+          "decision_status": {
+            "anyOf": [
+              {
+                "enum": [
+                  "proposed",
+                  "accepted",
+                  "superseded",
+                  "deprecated",
+                  "rejected"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Decision Status"
+          },
+          "dependencies": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Dependencies"
+          },
+          "diagnostics": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/CatalogRecordDiagnostic"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Diagnostics"
+          },
+          "endpoints": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/AgentEndpoint"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Endpoints"
+          },
+          "etag": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Etag"
+          },
+          "health": {
+            "anyOf": [
+              {
+                "enum": [
+                  "unknown",
+                  "healthy",
+                  "degraded",
+                  "down",
+                  "maintenance"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Health"
+          },
+          "hostnames": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Hostnames"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "ips": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ips"
+          },
+          "kind": {
+            "enum": [
+              "host",
+              "system",
+              "network",
+              "device",
+              "service",
+              "credential_reference",
+              "runbook",
+              "decision",
+              "project"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "lifecycle": {
+            "anyOf": [
+              {
+                "enum": [
+                  "planned",
+                  "active",
+                  "retired"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Lifecycle"
+          },
+          "monitoring": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AgentServiceMonitoring"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "parent_path_refs": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Parent Path Refs"
+          },
+          "parent_ref": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Parent Ref"
+          },
+          "placement_state": {
+            "anyOf": [
+              {
+                "enum": [
+                  "root",
+                  "assigned",
+                  "unassigned",
+                  "unknown"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Placement State"
+          },
+          "primary_endpoint": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AgentEndpoint"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "project_category": {
+            "anyOf": [
+              {
+                "enum": [
+                  "implementation",
+                  "migration",
+                  "research",
+                  "experiment",
+                  "incident_review",
+                  "other"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Project Category"
+          },
+          "project_status": {
+            "anyOf": [
+              {
+                "enum": [
+                  "planned",
+                  "active",
+                  "paused",
+                  "completed",
+                  "cancelled",
+                  "archived"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Project Status"
+          },
+          "provenance": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CatalogProvenanceOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "recent_comments": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/CommentOut"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Recent Comments"
+          },
+          "recent_project_chronology": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/ProjectChronologyEntryOut"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Recent Project Chronology"
+          },
+          "record_state": {
+            "anyOf": [
+              {
+                "enum": [
+                  "valid",
+                  "corrupt"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Record State"
+          },
+          "ref": {
+            "title": "Ref",
+            "type": "string"
+          },
+          "related_assets": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Related Assets"
+          },
+          "relationships": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/AgentRelationshipOut"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Relationships"
+          },
+          "revision": {
+            "minimum": 1.0,
+            "title": "Revision",
+            "type": "integer"
+          },
+          "runbook_applies_to": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Runbook Applies To"
+          },
+          "runbook_risk": {
+            "anyOf": [
+              {
+                "enum": [
+                  "read-only",
+                  "safe-change",
+                  "disruptive",
+                  "destructive"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Runbook Risk"
+          },
+          "runbook_status": {
+            "anyOf": [
+              {
+                "enum": [
+                  "draft",
+                  "approved",
+                  "active",
+                  "deprecated",
+                  "superseded",
+                  "retired"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Runbook Status"
+          },
+          "search_snippet": {
+            "anyOf": [
+              {
+                "maxLength": 240,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Search Snippet"
+          },
+          "source_references": {
+            "anyOf": [
+              {
+                "items": {
+                  "additionalProperties": true,
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source References"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "summary": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Summary"
+          },
+          "updated_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Updated At"
+          },
+          "visibility": {
+            "const": "detail",
+            "default": "detail",
+            "title": "Visibility",
+            "type": "string"
+          }
+        },
+        "required": [
+          "capability_set",
+          "ref",
+          "id",
+          "kind",
+          "label",
+          "status",
+          "revision"
+        ],
+        "title": "AgentProjectedObject",
+        "type": "object"
+      },
+      "AgentProjectedStub": {
+        "additionalProperties": false,
+        "description": "One discover-only object under a non-default read projection.\n\nA projected stub publishes strictly the subset of what the full stub\nalready publishes, so a projection can never turn discover-only knowledge\ninto readable knowledge.",
+        "properties": {
+          "capability_set": {
+            "title": "Capability Set",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "host",
+              "system",
+              "network",
+              "device",
+              "service",
+              "credential_reference",
+              "runbook",
+              "decision",
+              "project"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "parent_path_refs": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Parent Path Refs"
+          },
+          "parent_ref": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Parent Ref"
+          },
+          "placement_state": {
+            "anyOf": [
+              {
+                "enum": [
+                  "root",
+                  "assigned",
+                  "unassigned",
+                  "unknown"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Placement State"
+          },
+          "ref": {
+            "title": "Ref",
+            "type": "string"
+          },
+          "visibility": {
+            "const": "stub",
+            "default": "stub",
+            "title": "Visibility",
+            "type": "string"
+          }
+        },
+        "required": [
+          "capability_set",
+          "ref",
+          "id",
+          "kind",
+          "label"
+        ],
+        "title": "AgentProjectedStub",
         "type": "object"
       },
       "AgentRelationshipOut": {
@@ -3666,6 +4297,38 @@
         "title": "ProjectOverviewPageOut",
         "type": "object"
       },
+      "ReadProjectionOut": {
+        "additionalProperties": false,
+        "description": "The echoed, versioned description of one resolved projected read.",
+        "properties": {
+          "profile": {
+            "enum": [
+              "compact",
+              "context",
+              "full"
+            ],
+            "title": "Profile",
+            "type": "string"
+          },
+          "sections": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Sections",
+            "type": "array"
+          },
+          "version": {
+            "default": 1,
+            "title": "Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "profile"
+        ],
+        "title": "ReadProjectionOut",
+        "type": "object"
+      },
       "ReadinessOut": {
         "properties": {
           "build_revision": {
@@ -4003,6 +4666,7 @@
         "type": "object"
       },
       "V1ContextPageOut": {
+        "additionalProperties": false,
         "properties": {
           "direction": {
             "enum": [
@@ -4932,7 +5596,44 @@
         "type": "object"
       },
       "V1ObjectContextBatchIn": {
+        "description": "One known-id batch request and its optional read projection.\n\nThe projection fields travel in the body so this endpoint keeps taking no\nquery parameter at all. They are the same closed profile and closed field\nmask every other agent read uses.",
         "properties": {
+          "fields": {
+            "anyOf": [
+              {
+                "items": {
+                  "enum": [
+                    "knowledge",
+                    "orientation",
+                    "network",
+                    "integrity",
+                    "monitoring",
+                    "detail",
+                    "activity"
+                  ],
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Closed server-defined field mask. It can only narrow the chosen profile; identity and state are always returned, so identities, revisions, visibility decisions, and effective permissions never depend on it.",
+            "title": "Fields"
+          },
+          "include_recent_comments": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Explicitly include or exclude the bounded newest-first comment preview. Omit it to keep the profile default; list_comments remains the complete authorized comment history either way.",
+            "title": "Include Recent Comments"
+          },
           "object_ids": {
             "items": {
               "maxLength": 128,
@@ -4943,6 +5644,23 @@
             "minItems": 1,
             "title": "Object Ids",
             "type": "array"
+          },
+          "projection": {
+            "anyOf": [
+              {
+                "enum": [
+                  "compact",
+                  "context",
+                  "full"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Closed server-defined read profile. compact keeps identity, state, and the type-aware short fields; context adds network, integrity, monitoring, and the detail document; full is the unchanged complete contract.",
+            "title": "Projection"
           }
         },
         "required": [
@@ -4952,6 +5670,7 @@
         "type": "object"
       },
       "V1ObjectContextBatchOut": {
+        "additionalProperties": false,
         "properties": {
           "count": {
             "title": "Count",
@@ -4983,6 +5702,7 @@
         "type": "object"
       },
       "V1ObjectPageOut": {
+        "additionalProperties": false,
         "properties": {
           "direction": {
             "enum": [
@@ -5099,6 +5819,150 @@
           "active"
         ],
         "title": "V1PrincipalSummaryOut",
+        "type": "object"
+      },
+      "V1ProjectedObjectContextBatchOut": {
+        "additionalProperties": false,
+        "description": "One known-id batch under a non-default read projection.\n\nConcealed placeholders are byte-identical to the full contract under every\nprofile and field mask, so a projection cannot separate a concealed id from\na missing one.",
+        "properties": {
+          "capability_sets": {
+            "additionalProperties": {
+              "items": {
+                "$ref": "#/components/schemas/Permission"
+              },
+              "type": "array"
+            },
+            "title": "Capability Sets",
+            "type": "object"
+          },
+          "count": {
+            "title": "Count",
+            "type": "integer"
+          },
+          "objects": {
+            "items": {
+              "discriminator": {
+                "mapping": {
+                  "concealed": "#/components/schemas/AgentCatalogConcealed",
+                  "detail": "#/components/schemas/AgentProjectedObject",
+                  "stub": "#/components/schemas/AgentProjectedStub"
+                },
+                "propertyName": "visibility"
+              },
+              "oneOf": [
+                {
+                  "$ref": "#/components/schemas/AgentProjectedObject"
+                },
+                {
+                  "$ref": "#/components/schemas/AgentProjectedStub"
+                },
+                {
+                  "$ref": "#/components/schemas/AgentCatalogConcealed"
+                }
+              ]
+            },
+            "title": "Objects",
+            "type": "array"
+          },
+          "projection": {
+            "$ref": "#/components/schemas/ReadProjectionOut"
+          }
+        },
+        "required": [
+          "projection",
+          "objects",
+          "count"
+        ],
+        "title": "V1ProjectedObjectContextBatchOut",
+        "type": "object"
+      },
+      "V1ProjectedPageOut": {
+        "additionalProperties": false,
+        "description": "One page of objects or contexts under a non-default read projection.\n\nOrdering, paging, cursors, and the returned result set are exactly those of\nthe full page: only the serialized sections differ. `capability_sets` is\nthe response-level table each item's `capability_set` key resolves in; two\nitems share a key only when their effective permissions are identical.",
+        "properties": {
+          "capability_sets": {
+            "additionalProperties": {
+              "items": {
+                "$ref": "#/components/schemas/Permission"
+              },
+              "type": "array"
+            },
+            "title": "Capability Sets",
+            "type": "object"
+          },
+          "direction": {
+            "enum": [
+              "asc",
+              "desc"
+            ],
+            "title": "Direction",
+            "type": "string"
+          },
+          "items": {
+            "items": {
+              "discriminator": {
+                "mapping": {
+                  "detail": "#/components/schemas/AgentProjectedObject",
+                  "stub": "#/components/schemas/AgentProjectedStub"
+                },
+                "propertyName": "visibility"
+              },
+              "oneOf": [
+                {
+                  "$ref": "#/components/schemas/AgentProjectedObject"
+                },
+                {
+                  "$ref": "#/components/schemas/AgentProjectedStub"
+                }
+              ]
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Cursor"
+          },
+          "projection": {
+            "$ref": "#/components/schemas/ReadProjectionOut"
+          },
+          "sort": {
+            "enum": [
+              "id",
+              "label",
+              "kind",
+              "relevance",
+              "updated_at"
+            ],
+            "title": "Sort",
+            "type": "string"
+          },
+          "total": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Total"
+          }
+        },
+        "required": [
+          "projection",
+          "items",
+          "sort",
+          "direction"
+        ],
+        "title": "V1ProjectedPageOut",
         "type": "object"
       },
       "V1RelationshipCommandIn": {
@@ -10694,6 +11558,77 @@
               "title": "Include Total",
               "type": "boolean"
             }
+          },
+          {
+            "description": "Closed server-defined read profile. compact keeps identity, state, and the type-aware short fields; context adds network, integrity, monitoring, and the detail document; full is the unchanged complete contract.",
+            "in": "query",
+            "name": "projection",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "compact",
+                    "context",
+                    "full"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Closed server-defined read profile. compact keeps identity, state, and the type-aware short fields; context adds network, integrity, monitoring, and the detail document; full is the unchanged complete contract.",
+              "title": "Projection"
+            }
+          },
+          {
+            "description": "Closed server-defined field mask. It can only narrow the chosen profile; identity and state are always returned, so identities, revisions, visibility decisions, and effective permissions never depend on it.",
+            "in": "query",
+            "name": "fields",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "items": {
+                    "enum": [
+                      "knowledge",
+                      "orientation",
+                      "network",
+                      "integrity",
+                      "monitoring",
+                      "detail",
+                      "activity"
+                    ],
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Closed server-defined field mask. It can only narrow the chosen profile; identity and state are always returned, so identities, revisions, visibility decisions, and effective permissions never depend on it.",
+              "title": "Fields"
+            }
+          },
+          {
+            "description": "Explicitly include or exclude the bounded newest-first comment preview. Omit it to keep the profile default; list_comments remains the complete authorized comment history either way.",
+            "in": "query",
+            "name": "include_recent_comments",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Explicitly include or exclude the bounded newest-first comment preview. Omit it to keep the profile default; list_comments remains the complete authorized comment history either way.",
+              "title": "Include Recent Comments"
+            }
           }
         ],
         "responses": {
@@ -10701,7 +11636,15 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/V1ContextPageOut"
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/V1ContextPageOut"
+                    },
+                    {
+                      "$ref": "#/components/schemas/V1ProjectedPageOut"
+                    }
+                  ],
+                  "title": "Response Get V1 Context Api V1 Context Get"
                 }
               }
             },
@@ -10963,7 +11906,15 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/V1ObjectContextBatchOut"
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/V1ObjectContextBatchOut"
+                    },
+                    {
+                      "$ref": "#/components/schemas/V1ProjectedObjectContextBatchOut"
+                    }
+                  ],
+                  "title": "Response Post V1 Object Contexts Api V1 Object Contexts Post"
                 }
               }
             },
@@ -11618,6 +12569,59 @@
               "title": "Include Total",
               "type": "boolean"
             }
+          },
+          {
+            "description": "Closed server-defined read profile. compact keeps identity, state, and the type-aware short fields; context adds network, integrity, monitoring, and the detail document; full is the unchanged complete contract.",
+            "in": "query",
+            "name": "projection",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "compact",
+                    "context",
+                    "full"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Closed server-defined read profile. compact keeps identity, state, and the type-aware short fields; context adds network, integrity, monitoring, and the detail document; full is the unchanged complete contract.",
+              "title": "Projection"
+            }
+          },
+          {
+            "description": "Closed server-defined field mask. It can only narrow the chosen profile; identity and state are always returned, so identities, revisions, visibility decisions, and effective permissions never depend on it.",
+            "in": "query",
+            "name": "fields",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "items": {
+                    "enum": [
+                      "knowledge",
+                      "orientation",
+                      "network",
+                      "integrity",
+                      "monitoring",
+                      "detail",
+                      "activity"
+                    ],
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Closed server-defined field mask. It can only narrow the chosen profile; identity and state are always returned, so identities, revisions, visibility decisions, and effective permissions never depend on it.",
+              "title": "Fields"
+            }
           }
         ],
         "responses": {
@@ -11625,7 +12629,15 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/V1ObjectPageOut"
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/V1ObjectPageOut"
+                    },
+                    {
+                      "$ref": "#/components/schemas/V1ProjectedPageOut"
+                    }
+                  ],
+                  "title": "Response List V1 Objects Api V1 Objects Get"
                 }
               }
             },

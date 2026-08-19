@@ -61,7 +61,7 @@ summaries while preserving the canonical parent path and placement state.
 It applies the same object visibility decision and strict stub fields as the
 catalog/UI projection.
 
-A readable detail adds the five newest entries as `recent_comments`. The
+A full readable detail adds the five newest entries as `recent_comments`. The
 entries remain exact Markdown or legacy plain-text source plus a format marker;
 rendered HTML is a browser-only projection. Discover-only stubs never contain
 comments. The exhaustive newest-first timeline is a separate opaque-cursor
@@ -79,6 +79,12 @@ existing-but-concealed IDs receive equivalent bounded policy-shaped work:
 ``visibility_for`` is called for every requested ID regardless of whether the
 object row exists, so the two cases do not take observably different
 shortcuts.
+
+The versioned compact/context/full agent read projections can instead omit the
+preview before it is fetched; compact and context batch/discovery reads default
+to no preview, and `include_recent_comments` makes it explicit. Their closed
+field mask only narrows authorized serialization. See
+`agent-read-projections.md`; `list_comments` remains the complete timeline.
 
 Catalog topology and Agent context both resolve placement through
 `blockwart.domain.placement.PlacementGraph`. This keeps placement semantics in

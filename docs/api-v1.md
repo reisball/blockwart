@@ -34,6 +34,22 @@ skipped equal-sort rows.
 count. Set `include_total=true` when an exact authorized matching count is
 needed.
 
+## Agent read projections
+
+`GET /objects`, `GET /context`, and `POST /object-contexts` add an opt-in,
+versioned, closed read projection for agent clients. `projection` is one of
+`compact`, `context`, or `full`; the closed `fields` mask may only narrow it.
+Non-default responses include the resolved version and sections plus one
+response-level `capability_sets` table, which items reference by
+`capability_set`. Only byte-identical effective permission sets share a key.
+
+`include_recent_comments` controls the bounded comment preview on context and
+batch reads. It defaults off for compact/context and on for full; the historical
+no-argument full response remains unchanged. `list_comments` remains the full
+history. Projections never alter visibility, authorization, concealment,
+ordering, cursors, revisions, or ETags. The exact profile and budget contract
+is documented in [Agent read projections](agent-read-projections.md).
+
 ## MCP contract metadata
 
 ### `GET /api/v1/mcp-contract`

@@ -72,7 +72,8 @@ blockwart-mcp
 The service-account token must have the exact object grants required by the
 requested tools. Credential references may be returned; credential values are
 never resolved. See the [MCP tool list](docs/mcp.md), [REST API](docs/api-v1.md),
-and [authorization model](docs/auth-rbac.md) before integrating a client.
+the [agent read-projection guide](docs/agent-read-projections.md), and
+[authorization model](docs/auth-rbac.md) before integrating a client.
 
 ## Local setup
 

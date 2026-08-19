@@ -95,6 +95,30 @@ It wraps the object-authorized v1 API:
 - blockwart.update_grant -> PUT /api/v1/objects/{object_id}/access/grants/{grant_id}
 - blockwart.revoke_grant -> DELETE /api/v1/objects/{object_id}/access/grants/{grant_id}
 
+## Versioned agent read projections
+
+`blockwart.search`, `blockwart.get_context`, and
+`blockwart.get_object_contexts` accept the versioned closed `projection`
+profile (`compact`, `context`, or `full`) and the closed `fields` mask.
+Projected pages publish one `capability_sets` table; each item refers to its
+exact effective permission set with `capability_set`. This saves repeated
+capability blocks without conflating different rights. Identity, revision,
+visibility, authorization, cursor, concealment, and strong ETag semantics are
+unchanged. No projection argument retains the historical complete response.
+
+The bounded comment/chronology preview is independently controlled by
+`include_recent_comments`. It is off by default for `compact` and `context`,
+so discovery and batch reads do not fetch it unnecessarily. `list_comments`
+remains the full opaque-cursor history. `get_object_context` remains a
+single-object full read.
+
+`blockwart.describe_schema` can narrow its local generated contract to one
+`kind`, one `write_intent`, and closed `sections`: `object_fields`,
+`write_intents`, `minimal_example`, `relationships`, and `errors`. See
+[Agent read projections](agent-read-projections.md) for the precise profiles,
+field-mask vocabulary, synthetic budget evidence, and recommended adoption
+ladder.
+
 ## Agent intent guide
 
 Choose the smallest tool that directly answers the intent:
@@ -112,7 +136,9 @@ Choose the smallest tool that directly answers the intent:
   published contract cannot drift from server-side validation. The optional
   `kind` argument narrows both the kind contract and the relationship types
   that accept that kind as an endpoint; the published relationship vocabulary
-  stays complete.
+  stays complete. For one small write, request exactly one `kind`, one
+  `write_intent`, and `sections: ["object_fields", "minimal_example"]`; add
+  `relationships` or `errors` only when that write needs them.
 - Use `blockwart.get_object_context` when the exact object ID is already known.
 - Use `blockwart.get_object_contexts` when several exact object IDs are already
   known and their authorized contexts must be retrieved in one bounded
@@ -124,12 +150,14 @@ Choose the smallest tool that directly answers the intent:
   caller cannot discover or IDs that do not exist. Concealed and missing IDs are
   indistinguishable; the placeholder carries only the requested ID. Use
   `get_object_context` for a single ID and `get_context` to search by attribute.
+  For a candidate batch, set `projection=compact`; use `context` only after
+  narrowing the set, and request the comment preview explicitly when needed.
 - Use `blockwart.get_context` to find assets or services by name, kind, parent,
-  endpoint, state, or provenance and return their full authorized details in the
-  same call.
-- Use `blockwart.search` when a compact candidate list is preferable to full
-  detail payloads. With a `q` term, pass `sort=relevance` to receive the
-  published rank ladder instead of the default `id` order.
+  endpoint, state, or provenance. Start with `projection=compact` for broad
+  discovery, then use `projection=context` for a bounded working set.
+- Use `blockwart.search` with `projection=compact` for candidate lists. With a
+  `q` term, pass `sort=relevance` to receive the published rank ladder instead
+  of the default `id` order.
 - Use `blockwart.get_source_coverage` to inspect the latest recorded inventory
   coverage/drift snapshot. Its default mapped scope follows object visibility;
   the full source-only scope requires platform-admin authority.

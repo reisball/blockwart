@@ -174,7 +174,7 @@ field as the single-object resource. Discover-only stubs expose neither
 `ETag` header. Concealed objects remain omitted from collections and return
 the same `404` as absent IDs on direct reads.
 
-Readable contexts expose `recent_comments`; discover-only stubs do not. The
+Full readable contexts expose `recent_comments`; discover-only stubs do not. The
 complete timeline and append command live only in REST v1 and MCP. Agent
 responses return Markdown or legacy plain-text source, never rendered HTML;
 see `object-comments.md`.
@@ -216,3 +216,8 @@ preserving its established `results` and `objects` payload fields:
 
 The MCP server also exposes authorized create, update, relationship, and delete
 commands through the shared `/api/v1` command surface. See `mcp.md`.
+
+MCP read tools additionally support the versioned closed compact/context/full
+projection contract, capability-set deduplication, explicit comment previews,
+and scoped generated schema reads. The legacy Agent API namespace keeps its
+established full response shape. See `agent-read-projections.md`.

@@ -11,6 +11,13 @@ from pydantic import (
 )
 
 from blockwart.domain.auth import GrantScope, Permission, Role
+from blockwart.domain.read_projection import (
+    FIELDS_DESCRIPTION,
+    PROJECTION_DESCRIPTION,
+    RECENT_COMMENTS_DESCRIPTION,
+    ProjectionProfile,
+    ProjectionSection,
+)
 from blockwart.domain.relationship_projection import (
     metadata_json_schema,
     metadata_union_json_schema,
@@ -35,6 +42,9 @@ from blockwart.schemas.agent import (
     AgentCatalogBatchItem,
     AgentCatalogContextRead,
     AgentCatalogObjectRead,
+    AgentProjectedBatchItem,
+    AgentProjectedRead,
+    ReadProjectionOut,
 )
 from blockwart.schemas.catalog import CatalogObjectIn, CatalogObjectOut, ObjectKind
 
@@ -65,6 +75,10 @@ ATTACHED_TO_RELATION_TYPE = "attached_to"
 
 
 class V1ObjectPageOut(BaseModel):
+    # Closed so the default full page can never absorb a projected page and
+    # silently drop its projection descriptor or capability-set table.
+    model_config = ConfigDict(extra="forbid")
+
     items: list[AgentCatalogObjectRead]
     next_cursor: str | None = None
     total: int | None = None
@@ -73,7 +87,29 @@ class V1ObjectPageOut(BaseModel):
 
 
 class V1ContextPageOut(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     items: list[AgentCatalogContextRead]
+    next_cursor: str | None = None
+    total: int | None = None
+    sort: ObjectSortField
+    direction: SortDirection
+
+
+class V1ProjectedPageOut(BaseModel):
+    """One page of objects or contexts under a non-default read projection.
+
+    Ordering, paging, cursors, and the returned result set are exactly those of
+    the full page: only the serialized sections differ. `capability_sets` is
+    the response-level table each item's `capability_set` key resolves in; two
+    items share a key only when their effective permissions are identical.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    projection: ReadProjectionOut
+    capability_sets: dict[str, list[Permission]] = Field(default_factory=dict)
+    items: list[AgentProjectedRead]
     next_cursor: str | None = None
     total: int | None = None
     sort: ObjectSortField
@@ -167,6 +203,25 @@ MAX_BATCH_REQUEST_BODY_BYTES = 8192
 
 
 class V1ObjectContextBatchIn(BaseModel):
+    """One known-id batch request and its optional read projection.
+
+    The projection fields travel in the body so this endpoint keeps taking no
+    query parameter at all. They are the same closed profile and closed field
+    mask every other agent read uses.
+    """
+
+    projection: ProjectionProfile | None = Field(
+        default=None,
+        description=PROJECTION_DESCRIPTION,
+    )
+    fields: list[ProjectionSection] | None = Field(
+        default=None,
+        description=FIELDS_DESCRIPTION,
+    )
+    include_recent_comments: bool | None = Field(
+        default=None,
+        description=RECENT_COMMENTS_DESCRIPTION,
+    )
     object_ids: list[str] = Field(
         min_length=1,
         max_length=MAX_BATCH_OBJECT_IDS,
@@ -191,7 +246,25 @@ class V1ObjectContextBatchIn(BaseModel):
 
 
 class V1ObjectContextBatchOut(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     objects: list[AgentCatalogBatchItem]
+    count: int
+
+
+class V1ProjectedObjectContextBatchOut(BaseModel):
+    """One known-id batch under a non-default read projection.
+
+    Concealed placeholders are byte-identical to the full contract under every
+    profile and field mask, so a projection cannot separate a concealed id from
+    a missing one.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    projection: ReadProjectionOut
+    capability_sets: dict[str, list[Permission]] = Field(default_factory=dict)
+    objects: list[AgentProjectedBatchItem]
     count: int
 
 
