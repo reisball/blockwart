@@ -323,15 +323,24 @@
             <label data-create-field="summary"><span data-field-label="summary">{{ create_fields_by_key.summary.label }}</span>
               <textarea class="summary-input" name="summary" data-field-input="summary" placeholder="{{ create_fields_by_key.summary.placeholder }}" {% if create_fields_by_key.summary.required %}required{% endif %}>{{ form.summary }}</textarea>
             </label>
-            {% for field in ui_schemas.runbook.create_field_definitions if field.storage_path.startswith("data_json.") and field.key not in ["prerequisites", "steps", "verification", "rollback", "recovery", "sources"] %}
-              <label data-create-field="{{ field.key }}" {% if field.key not in form_ui_schema.create_fields %}hidden{% endif %}><span data-field-label="{{ field.key }}">{{ field.label }}</span>
-                {% if field.key == "runbook_status" %}<select name="runbook_status" required>{% for option in runbook_statuses %}<option value="{{ option }}"{% if form.runbook_status == option %} selected{% endif %}>{{ t("runbook.status." ~ option) }}</option>{% endfor %}</select>
-                {% elif field.key == "risk_level" %}<select name="risk_level"><option value="">{{ t("asset.no_value") }}</option>{% for option in runbook_risks %}<option value="{{ option }}"{% if form.risk_level == option %} selected{% endif %}>{{ t("runbook.risk." ~ option) }}</option>{% endfor %}</select>
-                {% elif field.key == "approval_required" %}<select name="approval_required" required><option value="false"{% if form.approval_required != "true" %} selected{% endif %}>{{ t("runbook.approval.no") }}</option><option value="true"{% if form.approval_required == "true" %} selected{% endif %}>{{ t("runbook.approval.yes") }}</option></select>
-                {% elif field.key == "change_fallback" %}<select name="change_fallback"><option value="">{{ t("asset.no_value") }}</option>{% for option in runbook_change_fallbacks %}<option value="{{ option }}"{% if form.change_fallback == option %} selected{% endif %}>{{ t("runbook.fallback." ~ option) }}</option>{% endfor %}</select>
-                {% elif field.input_type in ["textarea", "list", "reference-list"] %}<textarea name="{{ field.key }}" autocomplete="off" placeholder="{{ field.placeholder }}">{{ form[field.key] }}</textarea>
-                {% else %}<input name="{{ field.key }}" value="{{ form[field.key] }}" autocomplete="off" placeholder="{{ field.placeholder }}" />{% endif %}
-                <span class="meta">{{ field.placeholder }}</span>
+            {#- One control per canonical data path (#204): several paths, such
+                as `review_after` or the typed `related_*` links, belong to more
+                than one kind, so the shared projection renders their single
+                control here and the selected kind supplies its own label and
+                help text. -#}
+            {% for key in create_data_field_keys %}
+              {% set field = create_fields_by_key[key] %}
+              <label data-create-field="{{ key }}" {% if key not in form_ui_schema.create_fields %}hidden{% endif %}><span data-field-label="{{ key }}">{{ field.label }}</span>
+                {% if key == "runbook_status" %}<select name="runbook_status" required>{% for option in runbook_statuses %}<option value="{{ option }}"{% if form.runbook_status == option %} selected{% endif %}>{{ t("runbook.status." ~ option) }}</option>{% endfor %}</select>
+                {% elif key == "risk_level" %}<select name="risk_level"><option value="">{{ t("asset.no_value") }}</option>{% for option in runbook_risks %}<option value="{{ option }}"{% if form.risk_level == option %} selected{% endif %}>{{ t("runbook.risk." ~ option) }}</option>{% endfor %}</select>
+                {% elif key == "approval_required" %}<select name="approval_required" required><option value="false"{% if form.approval_required != "true" %} selected{% endif %}>{{ t("runbook.approval.no") }}</option><option value="true"{% if form.approval_required == "true" %} selected{% endif %}>{{ t("runbook.approval.yes") }}</option></select>
+                {% elif key == "change_fallback" %}<select name="change_fallback"><option value="">{{ t("asset.no_value") }}</option>{% for option in runbook_change_fallbacks %}<option value="{{ option }}"{% if form.change_fallback == option %} selected{% endif %}>{{ t("runbook.fallback." ~ option) }}</option>{% endfor %}</select>
+                {% elif key == "category" %}<select name="category" data-field-input="category" required>{% for option in project_categories %}<option value="{{ option }}"{% if form.category == option %} selected{% endif %}>{{ t("project.category." ~ option) }}</option>{% endfor %}</select>
+                {% elif key == "project_status" %}<select name="project_status" data-field-input="project_status" required>{% for option in project_statuses %}<option value="{{ option }}"{% if form.project_status == option %} selected{% endif %}>{{ t("project.status." ~ option) }}</option>{% endfor %}</select>
+                {% elif key == "decision_status" %}<select name="decision_status" data-field-input="decision_status" required>{% for decision_status in decision_statuses %}<option value="{{ decision_status }}"{% if form.decision_status == decision_status %} selected{% endif %}>{{ t("decision.status." ~ decision_status) }}</option>{% endfor %}</select>
+                {% elif field.input_type in ["textarea", "list", "reference-list"] %}<textarea name="{{ key }}" data-field-input="{{ key }}" autocomplete="off" placeholder="{{ field.placeholder }}">{{ form[key] }}</textarea>
+                {% else %}<input name="{{ key }}" data-field-input="{{ key }}" value="{{ form[key] }}" autocomplete="off" placeholder="{{ field.placeholder }}" />{% endif %}
+                <span class="meta" data-field-help="{{ key }}">{{ field.placeholder }}</span>
               </label>
             {% endfor %}
             {{ runbook_create_table("prerequisites", ["id", "description"], "prerequisite") }}
@@ -340,63 +349,28 @@
             {{ runbook_create_table("rollback", ["id", "title", "description", "command", "expected_effect"], "rollback") }}
             {{ runbook_create_table("recovery", ["id", "title", "description", "command", "expected_effect"], "recovery") }}
             {{ runbook_create_table("sources", ["id", "source_type", "title", "url", "author", "publisher", "published_at", "retrieved_at"], "runbook_source") }}
-            {% for field in ui_schemas.project.create_field_definitions if field.storage_path.startswith("data_json.") %}
-              <label data-create-field="{{ field.key }}" {% if field.key not in form_ui_schema.create_fields %}hidden{% endif %}><span data-field-label="{{ field.key }}">{{ field.label }}</span>
-                {% if field.key == "category" %}
-                  <select name="category" data-field-input="category" required>
-                    {% for option in project_categories %}<option value="{{ option }}"{% if form.category == option %} selected{% endif %}>{{ t("project.category." ~ option) }}</option>{% endfor %}
-                  </select>
-                {% elif field.key == "project_status" %}
-                  <select name="project_status" data-field-input="project_status" required>
-                    {% for option in project_statuses %}<option value="{{ option }}"{% if form.project_status == option %} selected{% endif %}>{{ t("project.status." ~ option) }}</option>{% endfor %}
-                  </select>
-                {% elif field.input_type in ["textarea", "list", "reference-list"] %}
-                  <textarea name="{{ field.key }}" data-field-input="{{ field.key }}" autocomplete="off" placeholder="{{ field.placeholder }}">{{ form[field.key] }}</textarea>
-                {% else %}
-                  <input name="{{ field.key }}" data-field-input="{{ field.key }}" value="{{ form[field.key] }}" autocomplete="off" placeholder="{{ field.placeholder }}" />
-                {% endif %}
-                <span class="meta">{{ field.placeholder }}</span>
-              </label>
-            {% endfor %}
-            {% for field in ui_schemas.decision.create_field_definitions if field.storage_path.startswith("data_json.") %}
-              {% if field.key == "docs" %}
-                <fieldset data-create-field="docs" {% if "docs" not in form_ui_schema.create_fields %}hidden{% endif %}>
-                  <legend data-field-label="docs">{{ field.label }}</legend>
-                  <p class="meta">{{ field.placeholder }}</p>
-                  <div class="table-wrap">
-                    <table class="table edit-table">
-                      <thead><tr><th>{{ t("decision.source.type") }}</th><th>{{ t("decision.source.title") }}</th><th>{{ t("decision.source.url") }}</th><th>{{ t("decision.source.published_at") }}</th><th><span class="visually-hidden">{{ t("decision.collection.actions") }}</span></th></tr></thead>
-                      <tbody data-row-list="decision-docs-create">
-                        {% for source in form.decision_docs %}
-                          <tr>
-                            <td><select name="doc_source_type">{% for source_type in decision_source_types %}<option value="{{ source_type }}"{% if source.source_type == source_type %} selected{% endif %}>{{ t("decision.source_type." ~ source_type) }}</option>{% endfor %}</select></td>
-                            <td><input name="doc_title" value="{{ source.title }}" maxlength="200" autocomplete="off" /></td>
-                            <td><input name="doc_url" value="{{ source.url }}" type="url" maxlength="2048" inputmode="url" autocomplete="off" placeholder="https://example.invalid/source" /></td>
-                            <td><input name="doc_published_at" value="{{ source.published_at }}" autocomplete="off" placeholder="2026-08-11T12:00:00Z" /></td>
-                            <td><button class="button button-small button-muted" type="button" data-remove-row>{{ t("decision.collection.remove") }}</button></td>
-                          </tr>
-                        {% endfor %}
-                      </tbody>
-                    </table>
-                  </div>
-                  <template data-row-template="decision-docs-create"><tr><td><select name="doc_source_type">{% for source_type in decision_source_types %}<option value="{{ source_type }}">{{ t("decision.source_type." ~ source_type) }}</option>{% endfor %}</select></td><td><input name="doc_title" value="" maxlength="200" autocomplete="off" /></td><td><input name="doc_url" value="" type="url" maxlength="2048" inputmode="url" autocomplete="off" placeholder="https://example.invalid/source" /></td><td><input name="doc_published_at" value="" autocomplete="off" placeholder="2026-08-11T12:00:00Z" /></td><td><button class="button button-small button-muted" type="button" data-remove-row>{{ t("decision.collection.remove") }}</button></td></tr></template>
-                  <button class="button button-small button-muted" type="button" data-add-row="decision-docs-create">{{ t("decision.source.add") }}</button>
-                </fieldset>
-              {% else %}
-                <label data-create-field="{{ field.key }}" {% if field.key not in form_ui_schema.create_fields %}hidden{% endif %}><span data-field-label="{{ field.key }}">{{ field.label }}</span>
-                  {% if field.key == "decision_status" %}
-                    <select name="decision_status" data-field-input="decision_status" required>
-                      {% for decision_status in decision_statuses %}<option value="{{ decision_status }}"{% if form.decision_status == decision_status %} selected{% endif %}>{{ t("decision.status." ~ decision_status) }}</option>{% endfor %}
-                    </select>
-                  {% elif field.input_type in ["textarea", "list", "reference-list"] %}
-                    <textarea name="{{ field.key }}" data-field-input="{{ field.key }}" autocomplete="off" placeholder="{{ field.placeholder }}">{{ form[field.key] }}</textarea>
-                  {% else %}
-                    <input name="{{ field.key }}" data-field-input="{{ field.key }}" value="{{ form[field.key] }}" autocomplete="off" placeholder="{{ field.placeholder }}" />
-                  {% endif %}
-                  <span class="meta">{{ field.placeholder }}</span>
-                </label>
-              {% endif %}
-            {% endfor %}
+            <fieldset data-create-field="docs" {% if "docs" not in form_ui_schema.create_fields %}hidden{% endif %}>
+              <legend data-field-label="docs">{{ create_fields_by_key.docs.label }}</legend>
+              <p class="meta">{{ create_fields_by_key.docs.placeholder }}</p>
+              <div class="table-wrap">
+                <table class="table edit-table">
+                  <thead><tr><th>{{ t("decision.source.type") }}</th><th>{{ t("decision.source.title") }}</th><th>{{ t("decision.source.url") }}</th><th>{{ t("decision.source.published_at") }}</th><th><span class="visually-hidden">{{ t("decision.collection.actions") }}</span></th></tr></thead>
+                  <tbody data-row-list="decision-docs-create">
+                    {% for source in form.decision_docs %}
+                      <tr>
+                        <td><select name="doc_source_type">{% for source_type in decision_source_types %}<option value="{{ source_type }}"{% if source.source_type == source_type %} selected{% endif %}>{{ t("decision.source_type." ~ source_type) }}</option>{% endfor %}</select></td>
+                        <td><input name="doc_title" value="{{ source.title }}" maxlength="200" autocomplete="off" /></td>
+                        <td><input name="doc_url" value="{{ source.url }}" type="url" maxlength="2048" inputmode="url" autocomplete="off" placeholder="https://example.invalid/source" /></td>
+                        <td><input name="doc_published_at" value="{{ source.published_at }}" autocomplete="off" placeholder="2026-08-11T12:00:00Z" /></td>
+                        <td><button class="button button-small button-muted" type="button" data-remove-row>{{ t("decision.collection.remove") }}</button></td>
+                      </tr>
+                    {% endfor %}
+                  </tbody>
+                </table>
+              </div>
+              <template data-row-template="decision-docs-create"><tr><td><select name="doc_source_type">{% for source_type in decision_source_types %}<option value="{{ source_type }}">{{ t("decision.source_type." ~ source_type) }}</option>{% endfor %}</select></td><td><input name="doc_title" value="" maxlength="200" autocomplete="off" /></td><td><input name="doc_url" value="" type="url" maxlength="2048" inputmode="url" autocomplete="off" placeholder="https://example.invalid/source" /></td><td><input name="doc_published_at" value="" autocomplete="off" placeholder="2026-08-11T12:00:00Z" /></td><td><button class="button button-small button-muted" type="button" data-remove-row>{{ t("decision.collection.remove") }}</button></td></tr></template>
+              <button class="button button-small button-muted" type="button" data-add-row="decision-docs-create">{{ t("decision.source.add") }}</button>
+            </fieldset>
             <div class="button-row">
               <button type="submit">{{ t("asset.save") }}</button>
               <a class="button button-muted" href="/?{{ detail_query_string }}">{{ t("asset.cancel") }}</a>

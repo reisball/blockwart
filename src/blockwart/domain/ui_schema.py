@@ -1,6 +1,7 @@
 import json
 import os
 import tempfile
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from functools import cache
 from pathlib import Path
@@ -565,6 +566,15 @@ RUNBOOK_FIELD_OVERRIDES: dict[str, UiField] = {
     for field in RUNBOOK_DATA_FIELDS
 }
 
+# The kinds whose canonical data fields the one create-root form renders, in
+# the order that form lays them out.
+CREATE_FORM_KIND_ORDER: tuple[str, ...] = ("runbook", "project", "decision")
+# Input types whose control is a nested table editor rather than one scalar
+# field. Decision `docs` reuses the shared source-list editor.
+CREATE_TABLE_INPUT_TYPES: frozenset[str] = frozenset(
+    {*PROJECT_TABLE_INPUT_TYPES.values(), *RUNBOOK_TABLE_INPUT_TYPES.values()}
+)
+
 COMMON_CREATE_FIELDS = (
     "kind",
     "object_id",
@@ -878,6 +888,38 @@ def primary_name_storage_path(schema: UiTypeSchema) -> str:
 
 def create_field_payload(schema: UiTypeSchema) -> list[dict[str, object]]:
     return _field_payload(schema, schema.create_fields, visible_in_create=True)
+
+
+def create_data_field_keys(schemas: Mapping[str, Any]) -> tuple[str, ...]:
+    """Return the create-root data controls, one per canonical data path.
+
+    The create-root form is a single form for every object kind, while several
+    canonical paths belong to more than one kind: `review_after` and the typed
+    `related_*` links are Decision, Project, and Runbook fields, and `in_scope`
+    and `out_of_scope` are Project and Runbook fields. Rendering each kind's
+    create fields separately therefore produced several controls writing one
+    stored path, which made submit precedence and empty overwrites ambiguous.
+
+    The union is projected once instead, in kind order, keeping the first
+    definition of each canonical path. Paths whose control is a nested table
+    editor are claimed by that editor and are not repeated as a scalar control.
+    Per-kind labels and help text stay in each kind's own schema; the form
+    resolves them for the selected kind.
+    """
+
+    rendered: dict[str, str] = {}
+    for kind in CREATE_FORM_KIND_ORDER:
+        for definition in schemas[kind]["create_field_definitions"]:
+            storage_path = str(definition["storage_path"])
+            if not storage_path.startswith("data_json."):
+                continue
+            rendered.setdefault(
+                storage_path,
+                ""
+                if definition["input_type"] in CREATE_TABLE_INPUT_TYPES
+                else str(definition["key"]),
+            )
+    return tuple(key for key in rendered.values() if key)
 
 
 def schema_field_payload(schema: UiTypeSchema) -> list[dict[str, object]]:

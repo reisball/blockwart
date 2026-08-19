@@ -455,12 +455,21 @@
       const input = key
         ? field.querySelector(`[data-field-input="${CSS.escape(key)}"]`)
         : null;
+      // A canonical path shared by several kinds has exactly one control, so
+      // its help text has to follow the selected kind instead of staying on
+      // whichever kind rendered the page.
+      const help = key
+        ? field.querySelector(`[data-field-help="${CSS.escape(key)}"]`)
+        : null;
       if (label && definition?.label) {
         label.textContent = definition.label;
       }
       if (input && definition) {
         input.placeholder = definition.placeholder || "";
         input.required = Boolean(definition.required);
+      }
+      if (help && definition) {
+        help.textContent = definition.placeholder || "";
       }
     }
     if (platformField) {
