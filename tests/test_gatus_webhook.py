@@ -22,9 +22,12 @@ Covered scenarios:
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
+from typing import Annotated
 
+from fastapi import Depends
 from fastapi.testclient import TestClient
 from sqlalchemy import select
+from sqlalchemy.orm import Session
 
 from blockwart.api.deps import get_session
 from blockwart.config import Settings
@@ -119,7 +122,7 @@ def _install_app_with_restricted_access(
     app.dependency_overrides[get_session] = override_get_session
 
     def restricted_access(
-        session,
+        session: Annotated[Session, Depends(get_session)],
     ) -> ReadAccess:
         return ReadAccess(
             principal=PrincipalContext(
