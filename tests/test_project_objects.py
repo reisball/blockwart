@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 import json
+import re
+from html import unescape
+from urllib.parse import urlencode
 
 import pytest
 import yaml
@@ -21,9 +24,17 @@ from blockwart.domain.projects import (
     PROJECT_SOURCE_TYPE_VALUES,
     project_category_fields,
 )
-from blockwart.domain.schema_projection import kind_schema_projection
+from blockwart.domain.schema_projection import (
+    kind_schema_projection,
+    minimal_object_example,
+)
 from blockwart.domain.search import SearchQuery
-from blockwart.domain.ui_schema import ui_schema_payload
+from blockwart.domain.ui_schema import (
+    create_root_field_keys,
+    load_editable_schema_settings,
+    save_editable_schema_settings,
+    ui_schema_payload,
+)
 from blockwart.mcp.server import QUERY_FILTER_PROPERTIES, describe_schema_payload
 from blockwart.models import AuditEvent, CatalogObject
 from blockwart.schemas.catalog import CatalogObjectIn
@@ -44,6 +55,7 @@ from blockwart.services.project_migration import (
     project_data_sha256,
 )
 from blockwart.services.read_access import ReadAccess
+from blockwart.ui.i18n import load_catalog
 from blockwart.ui.security import AUTH_CSRF_COOKIE_NAME, AUTH_SESSION_COOKIE_NAME
 
 RESEARCH_SOURCE = {
@@ -1435,6 +1447,462 @@ def test_structured_ui_editor_round_trips_without_raw_json(
     assert "Source-backed" in detail.text
     assert "project.field." not in detail.text
     assert "project.section." not in detail.text
+
+
+def _create_root_form(text: str) -> str:
+    """Return only the create-root form markup of one rendered catalog page."""
+    start = text.index('action="/roots"')
+    return text[start : text.index("</form>", start)]
+
+
+def _project_editor_form(text: str) -> str:
+    """Return only the structured Project editor form of one detail page."""
+    start = text.index('id="project-editor-title"')
+    form_start = text.index("<form", start)
+    return text[form_start : text.index("</form>", form_start)]
+
+
+def _create_field_keys(form: str) -> list[str]:
+    return re.findall(r'data-create-field="([^"]+)"', form)
+
+
+def _visible_create_field_keys(form: str) -> list[str]:
+    return [
+        match.group(1)
+        for match in re.finditer(
+            r'<(?:label|fieldset) data-create-field="([^"]+)"([^>]*)>',
+            form,
+        )
+        if "hidden" not in match.group(2)
+    ]
+
+
+def _submitted_body(form: str, values: dict[str, str]) -> str:
+    """Build the body the rendered create-root form actually submits.
+
+    Every rendered control sends its own value, so a duplicated control sends a
+    second, empty value for the same canonical path. Deriving the body from the
+    markup keeps this test bound to what the form renders instead of to a
+    hand-written payload no browser would produce.
+    """
+    body: list[tuple[str, str]] = []
+    entered: set[str] = set()
+    for name in re.findall(r'name="([^"]+)"', form):
+        if name not in values:
+            continue
+        body.append((name, "" if name in entered else values[name]))
+        entered.add(name)
+    return urlencode(body)
+
+
+def _project_create_data_keys() -> list[str]:
+    return [
+        str(field["key"])
+        for field in ui_schema_payload()["project"]["create_field_definitions"]
+        if str(field["storage_path"]).startswith("data_json.")
+    ]
+
+
+def _browser_session(root_client, root_state) -> None:  # noqa: F811
+    root_client.cookies.set(AUTH_SESSION_COOKIE_NAME, root_state["owner_session"].value)
+    root_client.cookies.set(
+        AUTH_CSRF_COOKIE_NAME,
+        root_state["owner_session"].csrf_token,
+    )
+
+
+def _create_link_targets(root_client, root_state) -> None:  # noqa: F811
+    for index, body in enumerate(
+        (
+            minimal_object_example("decision") | {"id": "linked-decision"},
+            minimal_object_example("runbook") | {"id": "linked-runbook"},
+            minimal_object_example("project") | {"id": "linked-project"},
+        )
+    ):
+        response = root_client.post(
+            "/api/v1/roots",
+            headers={
+                "Authorization": f"Bearer {root_state['owner_token']}",
+                "Idempotency-Key": f"project-link-target-{index}",
+            },
+            json=body,
+        )
+        assert response.status_code == 201, response.text
+
+
+def test_create_form_projection_keeps_one_control_per_canonical_path() -> None:
+    payload = ui_schema_payload()
+    keys = create_root_field_keys(payload)
+    assert len(keys) == len(set(keys))
+
+    definitions = {
+        str(field["key"]): field
+        for schema in payload.values()
+        for field in schema["create_field_definitions"]
+    }
+    paths = [str(definitions[key]["storage_path"]) for key in keys]
+    assert len(paths) == len(set(paths))
+    # Nested collections keep their dedicated table editor as their one control.
+    assert {"sources", "docs", "steps"} <= set(keys)
+    # Every Project create path, common and data alike, is projected once.
+    assert set(payload["project"]["create_fields"]) <= set(keys)
+    for kind in ("runbook", "project", "decision"):
+        kind_keys = [
+            str(field["key"]) for field in payload[kind]["create_field_definitions"]
+        ]
+        assert len(kind_keys) == len(set(kind_keys))
+
+
+def test_create_root_form_preserves_selected_kind_create_order(
+    root_client,  # noqa: F811
+    root_state,  # noqa: F811
+) -> None:
+    _browser_session(root_client, root_state)
+    payload = ui_schema_payload()
+    for kind in ("project", "runbook", "decision"):
+        response = root_client.get(f"/?create_root=1&kind={kind}")
+        assert response.status_code == 200
+        assert _visible_create_field_keys(_create_root_form(response.text)) == payload[
+            kind
+        ]["create_fields"]
+
+
+def _save_project_schema_order(field_order: list[str]) -> None:
+    settings = load_editable_schema_settings("project")
+    fields = {
+        str(field["key"]): {
+            "labels": dict(field["localized_labels"]),
+            "placeholders": dict(field["localized_placeholders"]),
+            "required": bool(field["required"]),
+            "visible_in_detail": bool(field["visible_in_detail"]),
+        }
+        for field in settings["fields"]
+    }
+    save_editable_schema_settings(
+        "project",
+        field_order=field_order,
+        fields=fields,
+    )
+
+
+def test_create_root_form_preserves_project_schema_override_order(
+    root_client,  # noqa: F811
+    root_state,  # noqa: F811
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    override_path = tmp_path / "ui_schema_overrides.json"
+    monkeypatch.setenv("BLOCKWART_SCHEMA_OVERRIDES_PATH", str(override_path))
+    settings = load_editable_schema_settings("project")
+    leading = [
+        "kind",
+        "object_id",
+        "primary_name",
+        "category",
+        "project_status",
+        "status",
+        "summary",
+    ]
+    field_order = [
+        *leading,
+        *(key for key in settings["field_order"] if key not in set(leading)),
+    ]
+    _save_project_schema_order(field_order)
+
+    _browser_session(root_client, root_state)
+    response = root_client.get("/?create_root=1&kind=project")
+    assert response.status_code == 200
+    assert _visible_create_field_keys(_create_root_form(response.text)) == (
+        ui_schema_payload()["project"]["create_fields"]
+    )
+    initial = _visible_create_field_keys(_create_root_form(response.text))
+    assert initial[: len(leading)] == leading
+    assert initial.index("category") < initial.index("status")
+
+
+def test_create_root_form_preserves_overridden_common_field_order(
+    root_client,  # noqa: F811
+    root_state,  # noqa: F811
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    override_path = tmp_path / "ui_schema_overrides.json"
+    monkeypatch.setenv("BLOCKWART_SCHEMA_OVERRIDES_PATH", str(override_path))
+    settings = load_editable_schema_settings("project")
+    leading = ["summary", "kind", "object_id", "primary_name", "status"]
+    _save_project_schema_order(
+        [*leading, *(key for key in settings["field_order"] if key not in set(leading))]
+    )
+
+    _browser_session(root_client, root_state)
+    response = root_client.get("/?create_root=1&kind=project")
+    assert response.status_code == 200
+    initial = _visible_create_field_keys(_create_root_form(response.text))
+    assert initial == ui_schema_payload()["project"]["create_fields"]
+    assert initial[: len(leading)] == leading
+
+
+def test_create_root_asset_form_keeps_its_single_labels_control(
+    root_client,  # noqa: F811
+    root_state,  # noqa: F811
+) -> None:
+    _browser_session(root_client, root_state)
+    form = _create_root_form(root_client.get("/?create_root=1&kind=host").text)
+    assert _create_field_keys(form).count("labels") == 1
+    assert _visible_create_field_keys(form) == [
+        "kind",
+        "object_id",
+        "primary_name",
+        "labels",
+        "status",
+        "summary",
+    ]
+
+
+def test_create_root_form_renders_each_project_path_once(
+    root_client,  # noqa: F811
+    root_state,  # noqa: F811
+) -> None:
+    _browser_session(root_client, root_state)
+    response = root_client.get("/?create_root=1&kind=project")
+    assert response.status_code == 200
+    form = _create_root_form(response.text)
+
+    keys = _create_field_keys(form)
+    assert len(keys) == len(set(keys))
+
+    project_keys = _project_create_data_keys()
+    assert {
+        "in_scope",
+        "out_of_scope",
+        "related_assets",
+        "related_decisions",
+        "related_runbooks",
+        "related_projects",
+        "review_after",
+    } <= set(project_keys)
+    for key in project_keys:
+        assert keys.count(key) == 1
+        assert form.count(f'name="{key}"') == 1
+        opening = re.search(rf'<label data-create-field="{key}"([^>]*)>', form)
+        assert opening is not None
+        assert "hidden" not in opening.group(1)
+
+    # Decision and Runbook keep their own controls in the same shared form.
+    for key in ("decision", "rationale", "decision_status", "purpose", "runbook_status"):
+        assert keys.count(key) == 1
+
+
+def test_create_root_form_keeps_other_kinds_complete(
+    root_client,  # noqa: F811
+    root_state,  # noqa: F811
+) -> None:
+    """The deduplicated form still offers every Decision and Runbook control."""
+    payload = ui_schema_payload()
+    _browser_session(root_client, root_state)
+    for kind in ("decision", "runbook"):
+        form = _create_root_form(
+            root_client.get(f"/?create_root=1&kind={kind}").text
+        )
+        keys = _create_field_keys(form)
+        assert len(keys) == len(set(keys))
+        for definition in payload[kind]["create_field_definitions"]:
+            key = str(definition["key"])
+            if not str(definition["storage_path"]).startswith("data_json."):
+                continue
+            assert keys.count(key) == 1, (kind, key)
+            opening = re.search(
+                rf'<(?:label|fieldset) data-create-field="{key}"([^>]*)>',
+                form,
+            )
+            assert opening is not None, (kind, key)
+            assert "hidden" not in opening.group(1), (kind, key)
+
+
+def test_create_root_form_keeps_project_and_runbook_help_apart(
+    root_client,  # noqa: F811
+    root_state,  # noqa: F811
+) -> None:
+    catalog = load_catalog("en")
+    project_help = catalog["project.field.in_scope.help"]
+    runbook_help = catalog["runbook.field.in_scope.help"]
+    assert project_help != runbook_help
+    _browser_session(root_client, root_state)
+
+    project_form = _create_root_form(
+        root_client.get("/?create_root=1&kind=project").text
+    )
+    assert project_help in project_form
+    assert runbook_help not in project_form
+
+    runbook_form = _create_root_form(
+        root_client.get("/?create_root=1&kind=runbook").text
+    )
+    assert runbook_help in runbook_form
+    assert project_help not in runbook_form
+
+
+def test_create_root_project_submit_round_trips_shared_paths(
+    root_client,  # noqa: F811
+    root_state,  # noqa: F811
+) -> None:
+    _create_link_targets(root_client, root_state)
+    _browser_session(root_client, root_state)
+    in_scope = "Catalog read paths\nSearch read paths"
+    related_assets = "host:existing-object"
+    form = _create_root_form(root_client.get("/?create_root=1&kind=project").text)
+    created = root_client.post(
+        "/roots",
+        content=_submitted_body(
+            form,
+            {
+                "csrf_token": root_state["owner_session"].csrf_token,
+                "object_id": "cache-rollout",
+                "kind": "project",
+                "primary_name": "Cache rollout",
+                "status": "active",
+                "summary": "",
+                "category": "implementation",
+                "project_status": "active",
+                "started_at": "2026-05-01T09:00:00Z",
+                "objective": "Roll the shared cache out to read paths.",
+                "in_scope": in_scope,
+                "out_of_scope": "Write-heavy batch jobs",
+                "review_after": "2026-08-16T15:00:00Z",
+                "related_assets": related_assets,
+                "related_runbooks": "runbook:linked-runbook",
+                "related_decisions": "decision:linked-decision",
+                "related_projects": "project:linked-project",
+                "next_actions": "Enable the read path\nMeasure p99",
+                "idempotency_key": "project-ui-dedup-0001",
+            },
+        ),
+        headers={"Content-Type": "application/x-www-form-urlencoded"},
+        follow_redirects=False,
+    )
+    assert created.status_code == 303, created.text
+
+    with root_state["session_factory"]() as session:
+        stored = json.loads(session.get(CatalogObject, "cache-rollout").data_json)
+    # No second control can overwrite an entered value with an empty one, and
+    # list order and content survive the canonical normalization unchanged.
+    assert stored["in_scope"] == ["Catalog read paths", "Search read paths"]
+    assert stored["out_of_scope"] == ["Write-heavy batch jobs"]
+    assert stored["review_after"] == "2026-08-16T15:00:00Z"
+    assert stored["related_assets"] == [related_assets]
+    assert stored["related_runbooks"] == ["runbook:linked-runbook"]
+    assert stored["related_decisions"] == ["decision:linked-decision"]
+    assert stored["related_projects"] == ["project:linked-project"]
+    assert stored["next_actions"] == ["Enable the read path", "Measure p99"]
+
+    editor = _project_editor_form(
+        root_client.get("/objects/cache-rollout?edit=project").text
+    )
+    assert f">{in_scope}</textarea>" in editor
+    assert ">Write-heavy batch jobs</textarea>" in editor
+    assert 'value="2026-08-16T15:00:00Z"' in editor
+    assert f">{related_assets}</textarea>" in editor
+    assert ">project:linked-project</textarea>" in editor
+
+    etag = re.search(r'name="if_match" value="([^"]+)"', editor)
+    assert etag is not None
+    edited_scope = "Search read paths\nCatalog read paths\nCache invalidation"
+    edited = root_client.post(
+        "/objects/cache-rollout",
+        data={
+            "csrf_token": root_state["owner_session"].csrf_token,
+            "if_match": unescape(etag.group(1)),
+            "category": "implementation",
+            "project_status": "active",
+            "started_at": "2026-05-01T09:00:00Z",
+            "objective": "Roll the shared cache out to read paths.",
+            "in_scope": edited_scope,
+            "out_of_scope": "Write-heavy batch jobs",
+            "review_after": "2026-08-17T15:00:00Z",
+            "related_assets": related_assets,
+            "related_runbooks": "runbook:linked-runbook",
+            "related_decisions": "decision:linked-decision",
+            "related_projects": "project:linked-project",
+            "next_actions": "Enable the read path\nMeasure p99",
+        },
+        follow_redirects=False,
+    )
+    assert edited.status_code == 303, edited.text
+
+    with root_state["session_factory"]() as session:
+        stored = json.loads(session.get(CatalogObject, "cache-rollout").data_json)
+    assert stored["in_scope"] == [
+        "Search read paths",
+        "Catalog read paths",
+        "Cache invalidation",
+    ]
+    assert stored["out_of_scope"] == ["Write-heavy batch jobs"]
+    assert stored["review_after"] == "2026-08-17T15:00:00Z"
+    assert stored["related_assets"] == [related_assets]
+    assert stored["related_runbooks"] == ["runbook:linked-runbook"]
+    assert stored["related_decisions"] == ["decision:linked-decision"]
+    assert stored["related_projects"] == ["project:linked-project"]
+    assert stored["next_actions"] == ["Enable the read path", "Measure p99"]
+
+    readback = _project_editor_form(
+        root_client.get("/objects/cache-rollout?edit=project").text
+    )
+    assert f">{edited_scope}</textarea>" in readback
+    assert 'value="2026-08-17T15:00:00Z"' in readback
+    assert f">{related_assets}</textarea>" in readback
+    assert ">runbook:linked-runbook</textarea>" in readback
+    assert ">decision:linked-decision</textarea>" in readback
+    assert ">project:linked-project</textarea>" in readback
+
+
+def test_project_editor_renders_each_project_path_once(
+    root_client,  # noqa: F811
+    root_state,  # noqa: F811
+) -> None:
+    created = root_client.post(
+        "/api/v1/roots",
+        headers={
+            "Authorization": f"Bearer {root_state['owner_token']}",
+            "Idempotency-Key": "project-editor-dedup-0001",
+        },
+        json={
+            "id": "editor-uniqueness",
+            "kind": "project",
+            "label": "Editor uniqueness",
+            "data": {
+                "schema_version": 1,
+                "category": "migration",
+                "project_status": "planned",
+            },
+        },
+    )
+    assert created.status_code == 201, created.text
+
+    _browser_session(root_client, root_state)
+    editor = _project_editor_form(
+        root_client.get("/objects/editor-uniqueness?edit=project").text
+    )
+    names = re.findall(r'name="([^"]+)"', editor)
+    for key in (
+        "category",
+        "project_status",
+        "objective",
+        "in_scope",
+        "out_of_scope",
+        "started_at",
+        "completed_at",
+        "review_after",
+        "related_assets",
+        "related_runbooks",
+        "related_decisions",
+        "related_projects",
+        "current_summary",
+        "next_actions",
+        # Category-specific paths of the selected category are equally unique.
+        "verification",
+        "rollback",
+    ):
+        assert names.count(key) == 1, key
 
 
 def test_ui_never_renders_unsafe_legacy_source_values(

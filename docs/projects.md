@@ -119,6 +119,14 @@ editor changes only those reviewed canonical fields and preserves category-speci
 extension fields. Catalog owners can create an unplaced Project through the normal root-creation
 form or `POST /api/v1/roots`, then manage it here without adding a parent.
 
+The root-creation form is one form for every object kind, and several canonical paths belong to
+more than one kind: `review_after` and the typed `related_*` links are Decision, Project, and
+Runbook fields, while `in_scope` and `out_of_scope` are Project and Runbook fields. The form
+therefore renders the union of those kinds' create fields once, with exactly one control per
+canonical data path, so no second control can decide a submitted value or overwrite it with an
+empty one. Labels and help text stay scoped to each kind's own schema and follow the selected
+kind; the Project editor keeps the same one-control-per-path rule.
+
 The Project professional chronology reuses `object_comments` and has exactly seven stable kinds:
 `intent`, `implementation`, `result`, `decision`, `milestone`, `blocker`, and `note`. Each entry
 retains its immutable ID, author snapshot, server-derived origin, source format, source text, and

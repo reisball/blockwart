@@ -366,7 +366,10 @@
   const relationshipLabel = document.querySelector("[data-relationship-label]");
   const relationTargetSelect = document.querySelector("[data-relation-target-select]");
   const relationTypeInput = document.querySelector("[data-relation-type-input]");
-  const createFields = Array.from(document.querySelectorAll("[data-create-field]"));
+  const createRootForm = document.querySelector("[data-create-root-form]");
+  const createFields = Array.from(
+    (createRootForm || document).querySelectorAll("[data-create-field]"),
+  );
   const createGuide = document.querySelector("[data-create-guide]");
   const createParentSummary = document.querySelector("[data-create-parent-summary]");
 
@@ -429,6 +432,19 @@
     }
   }
 
+  function reorderCreateRootFields(schema) {
+    const anchor = createRootForm?.querySelector("[data-create-field-order-anchor]");
+    const reorderCreateFields = window.BlockwartCreateFieldOrder?.reorderCreateFields;
+    if (!anchor || !reorderCreateFields) {
+      return;
+    }
+    const fieldsByKey = new Map(createFields.map((field) => [
+      field.getAttribute("data-create-field"),
+      field,
+    ]));
+    reorderCreateFields(createRootForm, anchor, fieldsByKey, schema.create_field_definitions);
+  }
+
   function updateCreateFields() {
     if (!createKindSelect) {
       return;
@@ -442,6 +458,7 @@
     const fieldDefinitions = new Map(
       (schema.create_field_definitions || []).map((field) => [field.key, field]),
     );
+    reorderCreateRootFields(schema);
     if (primaryNameLabel && schema.primary_name_label) {
       primaryNameLabel.textContent = schema.primary_name_label;
     }
@@ -455,12 +472,21 @@
       const input = key
         ? field.querySelector(`[data-field-input="${CSS.escape(key)}"]`)
         : null;
+      // A canonical path shared by several kinds has exactly one control, so
+      // its help text has to follow the selected kind instead of staying on
+      // whichever kind rendered the page.
+      const help = key
+        ? field.querySelector(`[data-field-help="${CSS.escape(key)}"]`)
+        : null;
       if (label && definition?.label) {
         label.textContent = definition.label;
       }
       if (input && definition) {
         input.placeholder = definition.placeholder || "";
         input.required = Boolean(definition.required);
+      }
+      if (help && definition) {
+        help.textContent = definition.placeholder || "";
       }
     }
     if (platformField) {
