@@ -53,6 +53,7 @@ automatically.
 | MCP (`blockwart-mcp`) | Agent-native catalog reads and authorized commands over stdio | [MCP server](docs/mcp.md) |
 | Object comments | Human and agent operational history, separate from audit | [Object comments](docs/object-comments.md) |
 | Import CLI | Reviewed TOOLS.md/YAML ingestion without resolving secrets | [Markdown import](docs/markdown-import.md) |
+| Source coverage CLI | Closed reviewed Knowledge inventories with dry-run evidence and explicit recording | [Reviewed source coverage](docs/source-coverage-manifest.md) |
 | Knowledge plan CLI | Deterministic private-source classification with no catalog writes | [Knowledge planning](docs/knowledge-planning.md) |
 | Knowledge apply CLI | Offline digest-bound reviewed apply and paired SQLite rollback | [Knowledge apply](docs/knowledge-apply.md) |
 

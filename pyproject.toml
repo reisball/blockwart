@@ -50,6 +50,7 @@ blockwart-knowledge-plan = "blockwart.cli.knowledge_plan:main"
 blockwart-knowledge-apply = "blockwart.cli.knowledge_apply:main"
 blockwart-seed = "blockwart.cli.seed:main"
 blockwart-schema-overrides = "blockwart.cli.schema_overrides:main"
+blockwart-source-coverage = "blockwart.cli.source_coverage:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]

@@ -88,6 +88,9 @@ the source tree, plus the canonical-Runbook classification plan, the write-free 
 Knowledge plan, and the installed reviewed-apply machine schemas. Productive Knowledge apply is
 covered only with synthetic SQLite catalogs in pytest; package smoke never mutates its seeded
 catalog through this workflow.
+The installed-package proof also resolves `blockwart-source-coverage` and validates that its
+manifest, target-evidence, and result schemas can be printed outside the source tree; it does not
+perform a private collection or coverage record.
 
 The container smoke proves that an empty catalog fails the Owner invariant, then starts an
 explicitly bootstrapped candidate and a database at the historical Alembic baseline. Ready

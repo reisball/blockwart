@@ -12,6 +12,7 @@ Tracks review blockers 1, 2, 3, 4, 6 from `reisball/blockwart#163`:
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import threading
@@ -1588,3 +1589,119 @@ def test_postgresql_search_relevance_matches_the_sqlite_contract(
                 sort="relevance",
             )
             assert [item.id for item in page.items] == expected
+
+
+# Source-coverage collector parity is kept in this PostgreSQL CI module so its
+# skip remains deterministic when the local PostgreSQL service is unavailable.
+@PG_SKIP
+def test_postgresql_reviewed_source_coverage_record_and_semantic_noop(
+    migrated_pg_engine: Engine,
+    tmp_path: Path,
+) -> None:
+    from blockwart.services.source_coverage_manifest import (
+        dry_run,
+        record_manifest_snapshot,
+    )
+
+    source_root = tmp_path / "sources"
+    source_directory = source_root / "knowledge"
+    source_directory.mkdir(parents=True)
+    source_file = source_directory / "postgres.md"
+    source_file.write_text("postgres coverage fixture\n", encoding="utf-8")
+    entry_fingerprint = hashlib.sha256(b"postgres-entry").hexdigest()
+    manifest = {
+        "schema_version": 1,
+        "collector_version": "1",
+        "inventory_id": "postgres-parity",
+        "collected_at": "2026-08-20T12:00:00Z",
+        "expected_source_count": 1,
+        "expected_entry_count": 1,
+        "closed_directories": [{"relative_path": "knowledge", "suffix": ".md"}],
+        "sources": [
+            {
+                "source_id": "postgres-source",
+                "source_uri": "workspace://knowledge/postgres.md",
+                "relative_path": "knowledge/postgres.md",
+                "sha256": hashlib.sha256(source_file.read_bytes()).hexdigest(),
+                "expected_entry_count": 1,
+                "entries": [
+                    {
+                        "entry_id": "postgres-entry",
+                        "classification": "operational",
+                        "intent": "expect_object",
+                        "decision_reason": "operational_inventory",
+                        "presence": "present",
+                        "entry_fingerprint": entry_fingerprint,
+                        "mappings": [
+                            {
+                                "object_id": "postgres-target",
+                                "target_kind": "service",
+                                "role": "primary",
+                                "imported_entry_fingerprint": entry_fingerprint,
+                                "imported_at": "2026-08-20T12:00:00Z",
+                                "verified_at": "2026-08-20T12:00:00Z",
+                            }
+                        ],
+                    }
+                ],
+            }
+        ],
+    }
+    manifest_path = tmp_path / "manifest.json"
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+    with migrated_pg_engine.begin() as connection:
+        _insert_principal(
+            connection,
+            principal_id="postgres-coverage-owner",
+            login="postgres.coverage.owner",
+            catalog_role="catalog_owner",
+        )
+        connection.execute(
+            text(
+                "INSERT INTO catalog_objects "
+                "(id, kind, label, status, lifecycle, health, data_json) VALUES "
+                "('postgres-target', 'service', 'Postgres Target', 'active', "
+                "'active', 'healthy', '{}')"
+            )
+        )
+    database_url = migrated_pg_engine.url.render_as_string(hide_password=False)
+    first = dry_run(
+        database_url=database_url,
+        manifest_path=manifest_path,
+        source_root=source_root,
+        principal_id="postgres-coverage-owner",
+    )
+    evidence_path = tmp_path / "evidence.json"
+    evidence_path.write_text(json.dumps(first["target_evidence"]), encoding="utf-8")
+
+    def record(result: dict[str, object]) -> dict[str, object]:
+        snapshot = result["source_snapshot"]
+        evidence = result["target_evidence"]
+        assert isinstance(snapshot, dict) and isinstance(evidence, dict)
+        return record_manifest_snapshot(
+            database_url=database_url,
+            manifest_path=manifest_path,
+            source_root=source_root,
+            target_evidence_path=evidence_path,
+            principal_id="postgres-coverage-owner",
+            expected_manifest_digest=str(result["manifest_digest"]),
+            expected_input_digest=str(result["input_digest"]),
+            expected_snapshot_digest=str(snapshot["digest"]),
+            expected_target_digest=str(evidence["target_snapshot_digest"]),
+        )
+
+    assert record(first)["semantic_noop"] is False
+    second = dry_run(
+        database_url=database_url,
+        manifest_path=manifest_path,
+        source_root=source_root,
+        principal_id="postgres-coverage-owner",
+    )
+    evidence_path.write_text(json.dumps(second["target_evidence"]), encoding="utf-8")
+    assert record(second)["semantic_noop"] is True
+    with migrated_pg_engine.connect() as connection:
+        assert connection.scalar(text("SELECT count(*) FROM source_snapshots")) == 1
+        assert connection.scalar(text("SELECT count(*) FROM source_entries")) == 1
+        assert connection.scalar(text("SELECT count(*) FROM source_entry_mappings")) == 1
+        assert connection.scalar(text("SELECT count(*) FROM catalog_objects")) == 1
+        assert connection.scalar(text("SELECT count(*) FROM audit_events")) == 0
