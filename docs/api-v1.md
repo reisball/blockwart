@@ -63,6 +63,57 @@ tool count is only evidence. The digest is not a signature or supply-chain
 proof. See [MCP server](mcp.md) for local wrapper diagnostics and the scoped
 runtime-catalog refresh contract.
 
+## Needs attention
+
+### `GET /api/v1/attention`
+
+Returns the authorized, catalog-wide attention view: one `summary` plus an
+opaque-cursor page of `items`, both derived from exactly the same authorized,
+filtered set. The request combines signals Blockwart already records. It runs no
+probe, opens no source file, performs no network access, and writes no catalog,
+audit, comment, coverage, or observation row.
+
+Each item carries a closed `category`, `severity`, `reason_code`,
+`signal_state`, a fixed English `description`, an optional `detail_code` from an
+existing closed domain vocabulary, an optional evidence timestamp, and one
+`target` with the canonical `kind:id` reference plus its detail path. Categories
+are `record_integrity`, `monitoring`, `lifecycle`, `endpoint`, `placement`,
+`provenance`, `runbook`, `knowledge`, and `source_coverage`. Severities are
+`critical`, `warning`, and `info`. Item signal states are `current`, `stale`,
+and `unknown`; the summary additionally reports `not_applicable` per category.
+The full reason vocabulary and its meaning are in [Needs
+attention](attention.md).
+
+Filters are exact `category`, `severity`, `reason_code`, `signal_state`, and
+`kind`; `direction` is `asc` or `desc`, and `limit` is 1..100. Ordering is
+severity, then the published category order, then the published reason order,
+then the target reference. At most one item exists per target and category, so a
+single cause is never repeated.
+
+`summary.total`, every severity/category/reason count, the optional `total`, and
+the paginated rows describe exactly that filtered set. `summary.signals` is the
+one deliberate exception: its `evaluated` value reports how many authorized
+inputs the category was judged against before item filters, so
+`not_applicable` stays distinguishable from "filtered away".
+`summary.coverage_snapshot_state` is `collected` or `not_collected` over the
+authorized mapped coverage projection. When no snapshot exists, or none of its
+mapped evidence is authorized, the response reports `not_collected` plus one
+`coverage_not_collected` item rather than claiming zero coverage problems or
+revealing a source-only collection timestamp.
+
+Only objects the caller may read contribute items; discover-only stubs
+contribute nothing. Concealing an object removes its own items and changes no
+other item, count, signal state, order, cursor, or error. Source-only coverage
+facts are never included; they stay behind the platform-admin
+`scope=all` boundary of `GET /api/v1/source-coverage`.
+
+Attention is a derived, time-dependent read model with no persisted state.
+Its cursor follows the general page contract above and binds the principal,
+effective object policy, resource, filters, page size, sort field, direction,
+and digest of the authorized filtered projection. A signal correction therefore
+invalidates a cursor issued for the older derived state. `generated_at` records
+when the page was derived.
+
 ## Source coverage
 
 ### `GET /api/v1/source-coverage`

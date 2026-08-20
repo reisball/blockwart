@@ -24,6 +24,11 @@ from mcp.server.lowlevel import NotificationOptions, Server
 
 from blockwart.config import Settings
 from blockwart.domain.asset_state import ASSET_KINDS
+from blockwart.domain.attention import (
+    ATTENTION_CATEGORY_VALUES,
+    ATTENTION_REASON_VALUES,
+    ATTENTION_SEVERITY_VALUES,
+)
 from blockwart.domain.decisions import (
     APPLIES_TO_MAX_LENGTH,
     APPLIES_TO_PATTERN,
@@ -694,6 +699,54 @@ TOOLS: list[JSON] = [
                     "maximum": CONTEXT_LIMIT_MAX,
                     "default": 5,
                 },
+            },
+            "additionalProperties": False,
+        },
+        "annotations": READ_ONLY_ANNOTATIONS,
+    },
+    {
+        "name": "blockwart.get_attention",
+        "description": (
+            "Read the authorized, catalog-wide needs-attention view. It combines the "
+            "signals Blockwart already resolves - record integrity, canonical "
+            "placement, manual lifecycle health, the provider-neutral monitoring "
+            "projection, endpoint target diagnostics, provenance freshness, Runbook "
+            "readiness, knowledge review state, and recorded source coverage - into "
+            "one deduplicated, severity-ordered list. It runs no probe, opens no "
+            "source file, and changes no catalog state. Every item carries a closed "
+            "category, severity, reason code, signal state, and one authorized "
+            "navigation reference. Manual maintenance suppresses observed incidents; "
+            "planned, retired, and finished records are excluded; stale or missing "
+            "evidence is reported as stale or unknown and never as healthy."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "category": {
+                    "type": "string",
+                    "enum": list(ATTENTION_CATEGORY_VALUES),
+                },
+                "severity": {
+                    "type": "string",
+                    "enum": list(ATTENTION_SEVERITY_VALUES),
+                },
+                "reason_code": {
+                    "type": "string",
+                    "enum": list(ATTENTION_REASON_VALUES),
+                },
+                "signal_state": {
+                    "type": "string",
+                    "enum": ["current", "stale", "unknown"],
+                },
+                "kind": {"type": "string", "enum": list(ALL_OBJECT_KINDS)},
+                "limit": {"type": "integer", "minimum": 1, "maximum": 100, "default": 50},
+                "cursor": {"type": "string", "maxLength": 2048},
+                "direction": {
+                    "type": "string",
+                    "enum": ["asc", "desc"],
+                    "default": "asc",
+                },
+                "include_total": {"type": "boolean", "default": False},
             },
             "additionalProperties": False,
         },
@@ -1623,6 +1676,21 @@ def call_tool(
             fetch("/api/v1/context", _clean_params(args, default_limit=5)),
             args=args,
             items_field="objects",
+        )
+    elif name == "blockwart.get_attention":
+        payload = fetch(
+            "/api/v1/attention",
+            {
+                "category": args.get("category"),
+                "severity": args.get("severity"),
+                "reason_code": args.get("reason_code"),
+                "signal_state": args.get("signal_state"),
+                "kind": args.get("kind"),
+                "limit": args.get("limit", 50),
+                "cursor": args.get("cursor"),
+                "direction": args.get("direction", "asc"),
+                "include_total": args.get("include_total", False),
+            },
         )
     elif name == "blockwart.get_source_coverage":
         payload = fetch(

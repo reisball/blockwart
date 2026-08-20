@@ -70,12 +70,14 @@ COVERAGE_SCOPES: tuple[str, ...] = ("mapped", "all")
 __all__ = [
     "COVERAGE_RESOURCE",
     "COVERAGE_SCOPES",
+    "AuthorizedCoverage",
     "CoverageAuthorityDenied",
     "SourceCoveragePage",
     "SourceCoverageSnapshotInfo",
     "load_current_snapshot",
     "query_source_coverage_page",
     "record_source_snapshot",
+    "resolve_authorized_coverage",
     "resolve_snapshot_coverage",
 ]
 
@@ -186,6 +188,50 @@ def _current_snapshot_row(session: Session) -> SourceSnapshotRow | None:
     ).first()
 
 
+@dataclass(frozen=True, slots=True)
+class AuthorizedCoverage:
+    """The complete authorized coverage view of the current snapshot."""
+
+    snapshot: SourceSnapshot | None
+    details: tuple[CoverageDetail, ...]
+
+
+def resolve_authorized_coverage(
+    session: Session,
+    access: ReadAccess,
+    *,
+    include_source_only: bool = False,
+) -> AuthorizedCoverage:
+    """Resolve the current snapshot for one principal, before any filtering.
+
+    This is the single authorized coverage seam. Both the paginated coverage
+    resource and other read models that need coverage state consume it, so the
+    concealment rules, target lookup, and state vocabulary exist exactly once.
+    The elevated source-only view stays an explicit caller decision and
+    enforces the existing platform-admin boundary here, so another read model
+    cannot accidentally turn source-only facts into ordinary object evidence.
+    """
+    if include_source_only:
+        try:
+            require_platform_admin(access)
+        except PlatformAdminDenied as exc:
+            raise CoverageAuthorityDenied(
+                "source-only coverage requires the platform administrator authority"
+            ) from exc
+    snapshot = load_current_snapshot(session)
+    if snapshot is None:
+        return AuthorizedCoverage(snapshot=None, details=())
+    return AuthorizedCoverage(
+        snapshot=snapshot,
+        details=resolve_visible_coverage(
+            snapshot,
+            _catalog_targets(session, snapshot),
+            visible_object_ids=access.policy.authorized_ids(Permission.READ),
+            include_source_only=include_source_only,
+        ),
+    )
+
+
 def resolve_snapshot_coverage(
     session: Session,
     snapshot: SourceSnapshot,
@@ -230,15 +276,12 @@ def query_source_coverage_page(
         normalized_target_kind is not None and len(normalized_target_kind) > 64
     ):
         raise SourceCoverageError("target kind is invalid")
-    if scope == "all":
-        try:
-            require_platform_admin(access)
-        except PlatformAdminDenied as exc:
-            raise CoverageAuthorityDenied(
-                "source-only coverage requires the platform administrator authority"
-            ) from exc
-
-    snapshot = load_current_snapshot(session)
+    resolved = resolve_authorized_coverage(
+        session,
+        access,
+        include_source_only=scope == "all",
+    )
+    snapshot = resolved.snapshot
     if snapshot is None:
         return SourceCoveragePage(
             snapshot=None,
@@ -249,16 +292,7 @@ def query_source_coverage_page(
             scope=scope,
         )
 
-    targets = _catalog_targets(session, snapshot)
-    visible_object_ids = access.policy.authorized_ids(Permission.READ)
-    authorized = list(
-        resolve_visible_coverage(
-            snapshot,
-            targets,
-            visible_object_ids=visible_object_ids,
-            include_source_only=scope == "all",
-        )
-    )
+    authorized = list(resolved.details)
     authorized_digest = coverage_view_digest(authorized)
     filtered = [
         detail

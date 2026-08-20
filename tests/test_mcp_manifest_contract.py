@@ -13,14 +13,14 @@ from blockwart.mcp.manifest import (
 from blockwart.mcp.server import TOOLS, local_contract_metadata, validate_runtime_catalog
 
 
-def test_compact_projection_tools_have_the_reviewed_manifest_evidence() -> None:
-    metadata = contract_metadata(TOOLS, build_revision="issue-185")
+def test_attention_tool_has_the_reviewed_manifest_evidence() -> None:
+    metadata = contract_metadata(TOOLS, build_revision="issue-176")
 
     assert metadata == {
-        "build_revision": "issue-185",
+        "build_revision": "issue-176",
         "contract_version": "1",
-        "manifest_digest": "3a3b746803ecdfec3004041c7f166311665b6ec970cbb3abf6b194fe9dd14cff",
-        "tool_count": 29,
+        "manifest_digest": "86a4c916c29d1a0032c64d2ed37940d6ec328c67f3ffff4cfcc8cba0f1616605",
+        "tool_count": 30,
     }
 
 
@@ -47,12 +47,12 @@ def _reverse_mapping_order(value):
 
 def test_reduced_catalog_is_incompatible_before_normal_tool_use() -> None:
     local = contract_metadata(TOOLS, build_revision="same-build")
-    reduced = contract_metadata(TOOLS[:21], build_revision="same-build")
+    reduced = contract_metadata(TOOLS[:22], build_revision="same-build")
 
     diagnosis = diagnose_contract(local, api=reduced)
 
-    assert local["tool_count"] == 29
-    assert reduced["tool_count"] == 21
+    assert local["tool_count"] == 30
+    assert reduced["tool_count"] == 22
     assert diagnosis["status"] == "incompatible"
     assert diagnosis["classification"] == "wrapper_drift"
 
@@ -87,7 +87,7 @@ def test_runtime_catalog_verifier_distinguishes_stale_catalog_without_leaking_it
     tmp_path: Path,
 ) -> None:
     local = contract_metadata(TOOLS, build_revision="same-build")
-    stale_tools = copy.deepcopy(TOOLS[:21])
+    stale_tools = copy.deepcopy(TOOLS[:22])
     stale_tools[0]["private_runtime_value"] = "token-should-not-appear"
     runtime = runtime_catalog_evidence(stale_tools)
     catalog_path = tmp_path / "materialized-tools.json"

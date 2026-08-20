@@ -52,6 +52,26 @@ authorized projection. Detail predicates exclude stubs, placement edges
 require discoverable endpoints, and non-placement edges require readable
 endpoints.
 
+## Attention read model
+
+`blockwart.services.attention` is one further FastAPI-independent application
+resolver. It owns no new truth: it classifies the canonical signals the other
+read models already publish - record integrity, canonical placement, manual
+lifecycle/health, the provider-neutral monitoring projection, endpoint target
+diagnostics, provenance freshness, Runbook readiness, knowledge review state,
+and the authorized source-coverage projection - into one deduplicated,
+severity-ordered set with a matching summary.
+
+`blockwart.domain.attention` owns the closed categories, severities, reason
+codes, signal states, priority order, and bounded descriptions, so the HTML
+view, REST v1, and MCP cannot drift apart. The derivation is pure: it performs
+no I/O, reads only scalar record fields rather than typed references, and takes
+the canonical placement state of the stored row instead of the projected one.
+Concealment therefore removes an object's own items and changes no other item,
+count, signal state, order, cursor, or error. Catalog rows, observations, and
+the coverage snapshot are each loaded once per request, so access does not grow
+per readable object. See `attention.md`.
+
 ## Agent context
 
 Agent context is intentionally not the catalog record with a different route.

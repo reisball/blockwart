@@ -4574,6 +4574,457 @@
         "title": "V1AttachedDeviceCreateIn",
         "type": "object"
       },
+      "V1AttentionItemOut": {
+        "additionalProperties": false,
+        "description": "One deduplicated attention item; every value is a closed vocabulary.",
+        "properties": {
+          "category": {
+            "enum": [
+              "record_integrity",
+              "monitoring",
+              "lifecycle",
+              "endpoint",
+              "placement",
+              "provenance",
+              "runbook",
+              "knowledge",
+              "source_coverage"
+            ],
+            "title": "Category",
+            "type": "string"
+          },
+          "description": {
+            "maxLength": 512,
+            "title": "Description",
+            "type": "string"
+          },
+          "detail_code": {
+            "anyOf": [
+              {
+                "enum": [
+                  "accepted",
+                  "active",
+                  "ambiguous_endpoints",
+                  "ambiguous_health_url",
+                  "ambiguous_mapping",
+                  "approved",
+                  "archived",
+                  "cancelled",
+                  "completed",
+                  "connect_failed",
+                  "degraded",
+                  "deprecated",
+                  "dns_failed",
+                  "down",
+                  "draft",
+                  "duplicate_mapping",
+                  "healthy",
+                  "http_client_error",
+                  "http_server_error",
+                  "incomplete_endpoint",
+                  "intentionally_unmapped",
+                  "invalid_endpoints",
+                  "invalid_health_url",
+                  "invalid_monitoring_config",
+                  "invalid_target",
+                  "maintenance",
+                  "mapped_current",
+                  "mapped_stale",
+                  "missing_source",
+                  "no_http_endpoint",
+                  "orphaned_catalog_reference",
+                  "paused",
+                  "planned",
+                  "policy_denied",
+                  "probe_failed",
+                  "proposed",
+                  "redirect_not_supported",
+                  "rejected",
+                  "response_too_large",
+                  "retired",
+                  "source_changed_since_import",
+                  "superseded",
+                  "timeout",
+                  "tls_failed",
+                  "unknown",
+                  "unmapped_operational"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Detail Code"
+          },
+          "observed_at": {
+            "anyOf": [
+              {
+                "maxLength": 64,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Observed At"
+          },
+          "reason_code": {
+            "enum": [
+              "record_corrupt",
+              "monitoring_observed_down",
+              "monitoring_check_error",
+              "monitoring_config_invalid",
+              "monitoring_observation_stale",
+              "monitoring_never_observed",
+              "lifecycle_health_down",
+              "lifecycle_health_degraded",
+              "lifecycle_health_unknown",
+              "lifecycle_maintenance",
+              "endpoint_target_unresolved",
+              "placement_missing",
+              "provenance_stale",
+              "provenance_unverified",
+              "runbook_review_overdue",
+              "runbook_unverified",
+              "runbook_deprecated_unresolved",
+              "knowledge_review_overdue",
+              "knowledge_review_unscheduled",
+              "coverage_import_drift",
+              "coverage_mapping_ambiguous",
+              "coverage_not_collected"
+            ],
+            "title": "Reason Code",
+            "type": "string"
+          },
+          "severity": {
+            "enum": [
+              "critical",
+              "warning",
+              "info"
+            ],
+            "title": "Severity",
+            "type": "string"
+          },
+          "signal_state": {
+            "enum": [
+              "current",
+              "stale",
+              "unknown"
+            ],
+            "title": "Signal State",
+            "type": "string"
+          },
+          "target": {
+            "$ref": "#/components/schemas/V1AttentionTargetOut"
+          }
+        },
+        "required": [
+          "reason_code",
+          "category",
+          "severity",
+          "signal_state",
+          "target",
+          "description"
+        ],
+        "title": "V1AttentionItemOut",
+        "type": "object"
+      },
+      "V1AttentionPageOut": {
+        "additionalProperties": false,
+        "properties": {
+          "direction": {
+            "enum": [
+              "asc",
+              "desc"
+            ],
+            "title": "Direction",
+            "type": "string"
+          },
+          "generated_at": {
+            "maxLength": 64,
+            "title": "Generated At",
+            "type": "string"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/V1AttentionItemOut"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Cursor"
+          },
+          "sort": {
+            "const": "priority",
+            "default": "priority",
+            "title": "Sort",
+            "type": "string"
+          },
+          "summary": {
+            "$ref": "#/components/schemas/V1AttentionSummaryOut"
+          },
+          "total": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Total"
+          }
+        },
+        "required": [
+          "summary",
+          "items",
+          "generated_at",
+          "direction"
+        ],
+        "title": "V1AttentionPageOut",
+        "type": "object"
+      },
+      "V1AttentionSignalOut": {
+        "additionalProperties": false,
+        "properties": {
+          "evaluated": {
+            "minimum": 0.0,
+            "title": "Evaluated",
+            "type": "integer"
+          },
+          "items": {
+            "minimum": 0.0,
+            "title": "Items",
+            "type": "integer"
+          },
+          "state": {
+            "enum": [
+              "current",
+              "stale",
+              "unknown",
+              "not_applicable"
+            ],
+            "title": "State",
+            "type": "string"
+          }
+        },
+        "required": [
+          "state",
+          "evaluated",
+          "items"
+        ],
+        "title": "V1AttentionSignalOut",
+        "type": "object"
+      },
+      "V1AttentionSummaryOut": {
+        "additionalProperties": false,
+        "properties": {
+          "by_category": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "propertyNames": {
+              "enum": [
+                "record_integrity",
+                "monitoring",
+                "lifecycle",
+                "endpoint",
+                "placement",
+                "provenance",
+                "runbook",
+                "knowledge",
+                "source_coverage"
+              ]
+            },
+            "title": "By Category",
+            "type": "object"
+          },
+          "by_reason": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "propertyNames": {
+              "enum": [
+                "record_corrupt",
+                "monitoring_observed_down",
+                "monitoring_check_error",
+                "monitoring_config_invalid",
+                "monitoring_observation_stale",
+                "monitoring_never_observed",
+                "lifecycle_health_down",
+                "lifecycle_health_degraded",
+                "lifecycle_health_unknown",
+                "lifecycle_maintenance",
+                "endpoint_target_unresolved",
+                "placement_missing",
+                "provenance_stale",
+                "provenance_unverified",
+                "runbook_review_overdue",
+                "runbook_unverified",
+                "runbook_deprecated_unresolved",
+                "knowledge_review_overdue",
+                "knowledge_review_unscheduled",
+                "coverage_import_drift",
+                "coverage_mapping_ambiguous",
+                "coverage_not_collected"
+              ]
+            },
+            "title": "By Reason",
+            "type": "object"
+          },
+          "by_severity": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "propertyNames": {
+              "enum": [
+                "critical",
+                "warning",
+                "info"
+              ]
+            },
+            "title": "By Severity",
+            "type": "object"
+          },
+          "coverage_snapshot_state": {
+            "enum": [
+              "collected",
+              "not_collected"
+            ],
+            "title": "Coverage Snapshot State",
+            "type": "string"
+          },
+          "signals": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/V1AttentionSignalOut"
+            },
+            "propertyNames": {
+              "enum": [
+                "record_integrity",
+                "monitoring",
+                "lifecycle",
+                "endpoint",
+                "placement",
+                "provenance",
+                "runbook",
+                "knowledge",
+                "source_coverage"
+              ]
+            },
+            "title": "Signals",
+            "type": "object"
+          },
+          "total": {
+            "minimum": 0.0,
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "total",
+          "by_severity",
+          "by_category",
+          "by_reason",
+          "signals",
+          "coverage_snapshot_state"
+        ],
+        "title": "V1AttentionSummaryOut",
+        "type": "object"
+      },
+      "V1AttentionTargetOut": {
+        "additionalProperties": false,
+        "description": "The authorized navigation reference of one attention item.",
+        "properties": {
+          "detail_path": {
+            "anyOf": [
+              {
+                "maxLength": 512,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Detail Path"
+          },
+          "kind": {
+            "anyOf": [
+              {
+                "enum": [
+                  "host",
+                  "system",
+                  "network",
+                  "device",
+                  "service",
+                  "credential_reference",
+                  "runbook",
+                  "decision",
+                  "project"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Kind"
+          },
+          "label": {
+            "anyOf": [
+              {
+                "maxLength": 255,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Label"
+          },
+          "object_id": {
+            "anyOf": [
+              {
+                "maxLength": 128,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Object Id"
+          },
+          "ref": {
+            "maxLength": 256,
+            "minLength": 1,
+            "title": "Ref",
+            "type": "string"
+          },
+          "scope": {
+            "enum": [
+              "object",
+              "catalog"
+            ],
+            "title": "Scope",
+            "type": "string"
+          }
+        },
+        "required": [
+          "scope",
+          "ref"
+        ],
+        "title": "V1AttentionTargetOut",
+        "type": "object"
+      },
       "V1AuditEventOut": {
         "properties": {
           "action": {
@@ -10902,6 +11353,328 @@
         "summary": "Revoke Admin Principal Token",
         "tags": [
           "api-v1-admin"
+        ]
+      }
+    },
+    "/api/v1/attention": {
+      "get": {
+        "description": "Combine existing canonical signals; this request runs no probe or source read.",
+        "operationId": "get_v1_attention_api_v1_attention_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "category",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "record_integrity",
+                    "monitoring",
+                    "lifecycle",
+                    "endpoint",
+                    "placement",
+                    "provenance",
+                    "runbook",
+                    "knowledge",
+                    "source_coverage"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Category"
+            }
+          },
+          {
+            "in": "query",
+            "name": "severity",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "critical",
+                    "warning",
+                    "info"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Severity"
+            }
+          },
+          {
+            "in": "query",
+            "name": "reason_code",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "record_corrupt",
+                    "monitoring_observed_down",
+                    "monitoring_check_error",
+                    "monitoring_config_invalid",
+                    "monitoring_observation_stale",
+                    "monitoring_never_observed",
+                    "lifecycle_health_down",
+                    "lifecycle_health_degraded",
+                    "lifecycle_health_unknown",
+                    "lifecycle_maintenance",
+                    "endpoint_target_unresolved",
+                    "placement_missing",
+                    "provenance_stale",
+                    "provenance_unverified",
+                    "runbook_review_overdue",
+                    "runbook_unverified",
+                    "runbook_deprecated_unresolved",
+                    "knowledge_review_overdue",
+                    "knowledge_review_unscheduled",
+                    "coverage_import_drift",
+                    "coverage_mapping_ambiguous",
+                    "coverage_not_collected"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Reason Code"
+            }
+          },
+          {
+            "in": "query",
+            "name": "signal_state",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "current",
+                    "stale",
+                    "unknown"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Signal State"
+            }
+          },
+          {
+            "in": "query",
+            "name": "kind",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "host",
+                    "system",
+                    "network",
+                    "device",
+                    "service",
+                    "credential_reference",
+                    "runbook",
+                    "decision",
+                    "project"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Kind"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Opaque cursor returned by the previous page",
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 2048,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Opaque cursor returned by the previous page",
+              "title": "Cursor"
+            }
+          },
+          {
+            "in": "query",
+            "name": "direction",
+            "required": false,
+            "schema": {
+              "default": "asc",
+              "enum": [
+                "asc",
+                "desc"
+              ],
+              "title": "Direction",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Compute the total over the authorized filtered item set",
+            "in": "query",
+            "name": "include_total",
+            "required": false,
+            "schema": {
+              "default": false,
+              "description": "Compute the total over the authorized filtered item set",
+              "title": "Include Total",
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1AttentionPageOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Authentication required"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Permission denied"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Resource not found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "412": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Precondition failed"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Request validation failed"
+          },
+          "428": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Precondition required"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Internal server error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Service unavailable"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Read the authorized catalog-wide attention view",
+        "tags": [
+          "api-v1-readonly"
         ]
       }
     },

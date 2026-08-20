@@ -18,6 +18,7 @@ EXPECTED_OPERATIONS = {
     "/api/objects": {"get"},
     "/api/objects/{object_id}": {"get"},
     "/api/v1/auth/me": {"get"},
+    "/api/v1/attention": {"get"},
     "/api/v1/admin/principals": {"get", "post"},
     "/api/v1/admin/principals/{principal_id}": {"get", "put"},
     "/api/v1/admin/principals/{principal_id}/grants": {"post"},
