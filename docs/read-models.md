@@ -58,19 +58,22 @@ endpoints.
 resolver. It owns no new truth: it classifies the canonical signals the other
 read models already publish - record integrity, canonical placement, manual
 lifecycle/health, the provider-neutral monitoring projection, endpoint target
-diagnostics, provenance freshness, Runbook readiness, knowledge review state,
-and the authorized source-coverage projection - into one deduplicated,
+diagnostics, canonical relationship diagnostics, provenance freshness, Runbook
+readiness (including explicitly critical services), knowledge review state, and
+the authorized source-coverage projection - into one deduplicated,
 severity-ordered set with a matching summary.
 
 `blockwart.domain.attention` owns the closed categories, severities, reason
 codes, signal states, priority order, and bounded descriptions, so the HTML
 view, REST v1, and MCP cannot drift apart. The derivation is pure: it performs
-no I/O, reads only scalar record fields rather than typed references, and takes
-the canonical placement state of the stored row instead of the projected one.
+no I/O, projects typed references and relationships through READ authorization
+before invoking the canonical relationship diagnostics, and takes the
+canonical placement state of the stored row instead of the projected one.
 Concealment therefore removes an object's own items and changes no other item,
-count, signal state, order, cursor, or error. Catalog rows, observations, and
-the coverage snapshot are each loaded once per request, so access does not grow
-per readable object. See `attention.md`.
+count, signal state, order, cursor, or error. Catalog rows and relationships are
+each loaded once and reused; observations and the coverage snapshot are also
+loaded in bounded batches, so access does not grow per readable object. See
+`attention.md`.
 
 ## Agent context
 

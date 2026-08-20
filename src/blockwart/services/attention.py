@@ -37,16 +37,19 @@ from blockwart.domain.attention import (
     AttentionCoverageInput,
     AttentionItem,
     AttentionObjectInput,
+    AttentionRelationshipDiagnosticInput,
     AttentionSummary,
     build_attention_derivation,
     summarize_attention,
 )
-from blockwart.domain.auth import ObjectVisibility
+from blockwart.domain.auth import ObjectVisibility, Permission
+from blockwart.domain.references import TypedReference
+from blockwart.domain.relationships import diagnose_relationship_integrity
 from blockwart.domain.search import SEARCH_LIMIT_MAX, SEARCH_LIMIT_MIN
 from blockwart.domain.timestamps import format_rfc3339_utc
-from blockwart.models import CatalogObject
+from blockwart.models import CatalogObject, Relationship
 from blockwart.schemas.catalog import ObjectKind
-from blockwart.services.catalog import list_objects
+from blockwart.services.catalog import catalog_objects_from_snapshot
 from blockwart.services.pagination import SortDirection, paginate_items
 from blockwart.services.queries import build_monitoring_index, project_catalog_objects
 from blockwart.services.read_access import ReadAccess
@@ -136,6 +139,11 @@ def query_attention_page(
         coverage=scoped_coverage,
         coverage_collected=bool(scoped_coverage),
         now=reference,
+        relationship_diagnostics=tuple(
+            diagnostic
+            for diagnostic in signals.relationship_diagnostics
+            if diagnostic.object_id in scoped_ids
+        ),
     )
     filtered = [
         item
@@ -205,6 +213,7 @@ def _matches_filters(
 class _AttentionSignals:
     objects: tuple[AttentionObjectInput, ...]
     coverage: tuple[AttentionCoverageInput, ...]
+    relationship_diagnostics: tuple[AttentionRelationshipDiagnosticInput, ...]
 
 
 def _load_signals(
@@ -220,7 +229,26 @@ def _load_signals(
     per readable object, and a concealed object performs the same work as an
     absent one: the visibility decision is applied to already loaded rows.
     """
-    canonical = list_objects(session)
+    catalog_rows = list(
+        session.scalars(
+            select(CatalogObject).order_by(CatalogObject.kind, CatalogObject.label)
+        ).all()
+    )
+    relationship_rows = list(
+        session.scalars(
+            select(Relationship).order_by(
+                Relationship.id,
+                Relationship.from_ref,
+                Relationship.relation_type,
+                Relationship.to_ref,
+            )
+        ).all()
+    )
+    canonical = catalog_objects_from_snapshot(
+        catalog_rows,
+        all_objects=catalog_rows,
+        relationships=relationship_rows,
+    )
     projected = project_catalog_objects(canonical, access)
     readable_ids = {
         catalog_object.id
@@ -236,7 +264,7 @@ def _load_signals(
             row,
             retain_schema_invalid_data=True,
         ).data
-        for row in session.scalars(select(CatalogObject)).all()
+        for row in catalog_rows
         if row.id in readable_ids
     }
     monitoring_index = build_monitoring_index(
@@ -253,11 +281,18 @@ def _load_signals(
         catalog_object.id: catalog_object.placement_state
         for catalog_object in canonical
     }
+    suitable_services = _suitable_runbook_service_ids(
+        canonical,
+        raw_data_by_id=raw_data_by_id,
+        relationships=relationship_rows,
+        readable_ids=readable_ids,
+    )
     objects = tuple(
         _object_input(
             catalog_object,
             placement_state=placement_by_id.get(catalog_object.id),
             monitoring=monitoring_index.get(catalog_object.id),
+            has_suitable_runbook=catalog_object.id in suitable_services,
         )
         for catalog_object in projected
         if catalog_object.visibility == ObjectVisibility.DETAIL
@@ -276,6 +311,13 @@ def _load_signals(
     return _AttentionSignals(
         objects=objects,
         coverage=coverage_rows,
+        relationship_diagnostics=_relationship_diagnostic_inputs(
+            canonical,
+            catalog_rows=catalog_rows,
+            relationships=relationship_rows,
+            access=access,
+            readable_ids=readable_ids,
+        ),
     )
 
 
@@ -284,6 +326,7 @@ def _object_input(
     *,
     placement_state: str | None,
     monitoring: dict[str, Any] | None,
+    has_suitable_runbook: bool,
 ) -> AttentionObjectInput:
     provenance = catalog_object.provenance
     return AttentionObjectInput(
@@ -300,7 +343,182 @@ def _object_input(
         provenance_stale_after=provenance.stale_after,
         data=catalog_object.data,
         monitoring=monitoring,
+        has_suitable_runbook=has_suitable_runbook,
     )
+
+
+def _suitable_runbook_service_ids(
+    canonical: list[Any],
+    *,
+    raw_data_by_id: dict[str, dict[str, Any]],
+    relationships: list[Relationship],
+    readable_ids: set[str],
+) -> frozenset[str]:
+    """Resolve authorized approved/active Runbooks applicable to services."""
+    by_id = {item.id: item for item in canonical}
+    suitable_runbooks = {
+        item.id
+        for item in canonical
+        if item.id in readable_ids
+        and item.kind == "runbook"
+        and item.record_state == "valid"
+        and item.data.get("runbook_status") in {"approved", "active"}
+    }
+    service_ids: set[str] = set()
+    for runbook_id in suitable_runbooks:
+        applies_to = raw_data_by_id.get(runbook_id, {}).get("applies_to")
+        if not isinstance(applies_to, list):
+            continue
+        for value in applies_to:
+            reference = _typed_reference(value)
+            if (
+                reference is not None
+                and reference.kind == "service"
+                and reference.object_id in readable_ids
+                and reference.object_id in by_id
+                and by_id[reference.object_id].kind == "service"
+            ):
+                service_ids.add(reference.object_id)
+    for relationship in relationships:
+        if relationship.relation_type != "documents":
+            continue
+        source = _typed_reference(relationship.from_ref)
+        target = _typed_reference(relationship.to_ref)
+        if (
+            source is not None
+            and target is not None
+            and source.kind == "runbook"
+            and target.kind == "service"
+            and source.object_id in suitable_runbooks
+            and target.object_id in readable_ids
+            and target.object_id in by_id
+            and by_id[target.object_id].kind == "service"
+        ):
+            service_ids.add(target.object_id)
+    return frozenset(service_ids)
+
+
+_CONCEALED_REFERENCE = object()
+
+
+def _project_diagnostic_value(value: Any, readable_ids: frozenset[str]) -> Any:
+    """Remove typed references outside READ scope before canonical diagnosis."""
+    if isinstance(value, str):
+        reference = _typed_reference(value)
+        if reference is not None and reference.object_id not in readable_ids:
+            return _CONCEALED_REFERENCE
+        return value
+    if isinstance(value, list):
+        projected = (
+            _project_diagnostic_value(item, readable_ids)
+            for item in value
+        )
+        return [item for item in projected if item is not _CONCEALED_REFERENCE]
+    if isinstance(value, dict):
+        projected = {
+            key: _project_diagnostic_value(item, readable_ids)
+            for key, item in value.items()
+        }
+        return {
+            key: item
+            for key, item in projected.items()
+            if item is not _CONCEALED_REFERENCE
+        }
+    return value
+
+
+def _relationship_diagnostic_inputs(
+    canonical: list[Any],
+    *,
+    catalog_rows: list[CatalogObject],
+    relationships: list[Relationship],
+    access: ReadAccess,
+    readable_ids: set[str],
+) -> tuple[AttentionRelationshipDiagnosticInput, ...]:
+    """Project canonical diagnostics onto authorized, target-bound facts only."""
+    authorized_ids = access.policy.authorized_ids(Permission.READ)
+    valid_ids = {
+        item.id
+        for item in canonical
+        if item.id in readable_ids and item.record_state == "valid"
+    }
+    projected_objects: list[dict[str, str]] = []
+    for row in catalog_rows:
+        if row.id not in valid_ids:
+            continue
+        try:
+            data = json.loads(row.data_json)
+        except (TypeError, json.JSONDecodeError):
+            continue
+        if not isinstance(data, dict):
+            continue
+        projected_objects.append(
+            {
+                "id": row.id,
+                "kind": row.kind,
+                "data_json": json.dumps(
+                    _project_diagnostic_value(data, authorized_ids),
+                    ensure_ascii=True,
+                    separators=(",", ":"),
+                    sort_keys=True,
+                ),
+            }
+        )
+    projected_relationships = [
+        row
+        for row in relationships
+        if _relationship_is_authorized(row, authorized_ids)
+    ]
+    inputs: set[tuple[str, str, str | None]] = set()
+    for diagnostic in diagnose_relationship_integrity(
+        projected_objects,
+        projected_relationships,
+    ):
+        object_id = next(
+            (
+                reference.object_id
+                for value in diagnostic.object_refs
+                if (reference := _typed_reference(value)) is not None
+                and reference.object_id in valid_ids
+            ),
+            None,
+        )
+        if object_id is not None:
+            inputs.add((object_id, diagnostic.code, diagnostic.relation_type))
+    return tuple(
+        AttentionRelationshipDiagnosticInput(
+            object_id=object_id,
+            code=code,
+            relation_type=relation_type,
+        )
+        for object_id, code, relation_type in sorted(
+            inputs,
+            key=lambda item: (item[0], item[1], item[2] or ""),
+        )
+    )
+
+
+def _relationship_is_authorized(
+    relationship: Relationship,
+    authorized_ids: frozenset[str],
+) -> bool:
+    source = _typed_reference(relationship.from_ref)
+    target = _typed_reference(relationship.to_ref)
+    return (
+        source is not None
+        and target is not None
+        and source.object_id in authorized_ids
+        and target.object_id in authorized_ids
+    )
+
+
+def _typed_reference(value: Any) -> TypedReference | None:
+    if not isinstance(value, str):
+        return None
+    try:
+        return TypedReference.parse(value)
+    except ValueError:
+        return None
 
 
 def _aware(value: datetime) -> datetime:

@@ -149,6 +149,25 @@ def _schemas_with_placement(
             )
         ).all()
     )
+    return catalog_objects_from_snapshot(
+        rows,
+        all_objects=all_objects,
+        relationships=relationships,
+    )
+
+
+def catalog_objects_from_snapshot(
+    rows: list[CatalogObject],
+    *,
+    all_objects: list[CatalogObject],
+    relationships: list[Relationship],
+) -> list[CatalogObjectOut]:
+    """Build the canonical catalog read model from one already loaded snapshot.
+
+    Application read models that need catalog rows and relationships for more
+    than one canonical projection can reuse the same bounded scans without
+    changing placement semantics.
+    """
     placement_graph = PlacementGraph(all_objects, relationships)
     return [_to_schema(row, placement_graph) for row in rows]
 

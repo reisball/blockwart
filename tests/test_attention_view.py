@@ -427,6 +427,11 @@ def test_monitoring_disabled_pending_stale_maintenance_down_and_check_error(
             ("maintenance", "maintenance", [_endpoint("maintenance")]),
             ("degraded", "degraded", [_endpoint("degraded")]),
             ("bad-endpoint", "healthy", []),
+            (
+                "ambiguous-endpoint",
+                "healthy",
+                [_endpoint("ambiguous-a"), _endpoint("ambiguous-b")],
+            ),
         ):
             upsert_object(
                 session,
@@ -476,6 +481,7 @@ def test_monitoring_disabled_pending_stale_maintenance_down_and_check_error(
         "maintenance",
         "degraded",
         "bad-endpoint",
+        "ambiguous-endpoint",
     }
     with alembic_session_factory() as session:
         monitoring = _page(session, _access(readable=ids), category="monitoring")
@@ -486,14 +492,22 @@ def test_monitoring_disabled_pending_stale_maintenance_down_and_check_error(
         ("service:observed-down", "monitoring_observed_down"),
         ("service:check-error", "monitoring_check_error"),
         ("service:stale", "monitoring_observation_stale"),
+        ("service:ambiguous-endpoint", "monitoring_never_observed"),
         ("service:bad-endpoint", "monitoring_never_observed"),
         ("service:pending", "monitoring_never_observed"),
     ]
     assert ("service:maintenance", "monitoring_observed_down") not in _reasons(monitoring)
     assert all(item.target.object_id != "disabled" for item in monitoring.items)
     assert _reasons(endpoint) == [
+        ("service:ambiguous-endpoint", "endpoint_target_unresolved"),
         ("service:bad-endpoint", "endpoint_target_unresolved")
     ]
+    assert {
+        item.target.object_id: item.detail_code for item in endpoint.items
+    } == {
+        "ambiguous-endpoint": "ambiguous_endpoints",
+        "bad-endpoint": "no_http_endpoint",
+    }
     assert _reasons(lifecycle) == [
         ("service:degraded", "lifecycle_health_degraded"),
         ("service:maintenance", "lifecycle_maintenance"),
@@ -659,6 +673,218 @@ def test_provenance_runbook_and_knowledge_states_are_independent_and_deduplicate
         ("decision:accepted-overdue", "knowledge_review_overdue"),
         ("decision:accepted-unscheduled", "knowledge_review_unscheduled"),
     ]
+
+
+def test_critical_service_runbook_readiness_is_explicit_authorized_and_correctable(
+    alembic_session_factory,
+) -> None:
+    services = {
+        "missing",
+        "covered-data",
+        "covered-edge",
+        "draft-only",
+        "hidden-only",
+        "standard",
+        "planned",
+        "retired",
+    }
+    with alembic_session_factory() as session, transaction(session):
+        for object_id in services:
+            lifecycle = (
+                "planned"
+                if object_id == "planned"
+                else "retired"
+                if object_id == "retired"
+                else "active"
+            )
+            criticality = "standard" if object_id == "standard" else "critical"
+            upsert_object(
+                session,
+                _asset(
+                    object_id,
+                    "service",
+                    lifecycle=lifecycle,
+                    data={"criticality": criticality},
+                ),
+            )
+        upsert_object(
+            session,
+            _active_runbook("data-book", applies_to=["service:covered-data"]),
+        )
+        upsert_object(session, _active_runbook("edge-book"))
+        upsert_object(
+            session,
+            _knowledge(
+                "draft-book",
+                "runbook",
+                data={
+                    "runbook_status": "draft",
+                    "approval_required": False,
+                    "applies_to": ["service:draft-only"],
+                },
+            ),
+        )
+        upsert_object(
+            session,
+            _active_runbook("hidden-book", applies_to=["service:hidden-only"]),
+        )
+        session.add(
+            Relationship(
+                from_ref="runbook:edge-book",
+                relation_type="documents",
+                to_ref="service:covered-edge",
+            )
+        )
+
+    readable = services | {"data-book", "edge-book", "draft-book"}
+    with alembic_session_factory() as session:
+        page = _page(session, _access(readable=readable), category="runbook")
+    assert {
+        item.target.object_id
+        for item in page.items
+        if item.reason_code == "critical_service_runbook_missing"
+    } == {"missing", "draft-only", "hidden-only"}
+    assert not {
+        "covered-data",
+        "covered-edge",
+        "standard",
+        "planned",
+        "retired",
+    } & {
+        item.target.object_id
+        for item in page.items
+        if item.reason_code == "critical_service_runbook_missing"
+    }
+
+    with alembic_session_factory() as session, transaction(session):
+        upsert_object(
+            session,
+            _active_runbook("correction-book", applies_to=["service:missing"]),
+        )
+    readable.add("correction-book")
+    with alembic_session_factory() as session:
+        corrected = _page(session, _access(readable=readable), category="runbook")
+    assert not any(
+        item.target.object_id == "missing"
+        and item.reason_code == "critical_service_runbook_missing"
+        for item in corrected.items
+    )
+
+
+def test_relationship_diagnostics_are_redacted_target_bound_deduplicated_and_correctable(
+    alembic_session_factory,
+) -> None:
+    ids = {
+        "dangling-book",
+        "mismatch-book",
+        "actual-host",
+        "primary-device",
+        "primary-a",
+        "primary-b",
+        "placement-service",
+        "placement-host",
+        "domain-host",
+        "domain-service",
+    }
+    with alembic_session_factory() as session, transaction(session):
+        upsert_object(session, _active_runbook("dangling-book"))
+        upsert_object(session, _active_runbook("mismatch-book"))
+        upsert_object(session, _asset("actual-host"))
+        upsert_object(
+            session,
+            _asset(
+                "primary-device",
+                "device",
+                data={"device": {"category": "sensor"}},
+            ),
+        )
+        upsert_object(session, _asset("primary-a", "system"))
+        upsert_object(session, _asset("primary-b", "system"))
+        upsert_object(session, _asset("placement-service", "service"))
+        upsert_object(session, _asset("placement-host"))
+        upsert_object(session, _asset("domain-host"))
+        upsert_object(session, _asset("domain-service", "service"))
+        for object_id, applies_to in (
+            ("dangling-book", ["service:missing-service"]),
+            (
+                "mismatch-book",
+                ["service:actual-host", "service:actual-host"],
+            ),
+        ):
+            row = session.get(CatalogObject, object_id)
+            assert row is not None
+            data = json.loads(row.data_json)
+            data["applies_to"] = applies_to
+            row.data_json = json.dumps(data, sort_keys=True)
+        session.add_all(
+            [
+                Relationship(
+                    from_ref="device:primary-device",
+                    relation_type="attached_to",
+                    to_ref=f"system:{target}",
+                    metadata_json='{"primary":true}',
+                )
+                for target in ("primary-a", "primary-b")
+            ]
+        )
+        session.add(
+            Relationship(
+                from_ref="service:placement-service",
+                relation_type="hosts",
+                to_ref="host:placement-host",
+            )
+        )
+        session.add(
+            Relationship(
+                from_ref="host:domain-host",
+                relation_type="supports",
+                to_ref="service:domain-service",
+            )
+        )
+
+    access = _access(readable=ids | {"missing-service"})
+    with alembic_session_factory() as session:
+        relationship_page = _page(
+            session,
+            access,
+            category="relationship_integrity",
+        )
+        placement_page = _page(session, access, category="placement")
+    assert _reasons(relationship_page) == [
+        ("runbook:dangling-book", "relationship_target_unresolved"),
+        ("device:primary-device", "relationship_primary_ambiguous"),
+        ("runbook:mismatch-book", "knowledge_relationship_invalid"),
+        ("host:domain-host", "relationship_domain_invalid"),
+    ]
+    assert _reasons(placement_page) == [
+        ("service:placement-service", "placement_relationship_invalid")
+    ]
+    assert sum(
+        item.target.object_id == "mismatch-book"
+        for item in relationship_page.items
+    ) == 1
+    serialized = repr((relationship_page, placement_page))
+    assert "missing-service" not in serialized
+    assert "service:actual-host" not in serialized
+
+    with alembic_session_factory() as session, transaction(session):
+        for object_id in ("dangling-book", "mismatch-book"):
+            row = session.get(CatalogObject, object_id)
+            assert row is not None
+            data = json.loads(row.data_json)
+            data.pop("applies_to", None)
+            row.data_json = json.dumps(data, sort_keys=True)
+        for row in session.scalars(select(Relationship)).all():
+            session.delete(row)
+    with alembic_session_factory() as session:
+        corrected_relationships = _page(
+            session,
+            access,
+            category="relationship_integrity",
+        )
+        corrected_placement = _page(session, access, category="placement")
+    assert corrected_relationships.items == []
+    assert corrected_placement.items == []
 
 
 def test_coverage_not_collected_drift_ambiguity_and_resolution_after_correction(
@@ -848,6 +1074,13 @@ def test_concealed_objects_mappings_and_discover_stubs_are_observationally_absen
         )
         upsert_object(session, _asset("hidden", health="down"))
         upsert_object(session, _asset("stub", health="down"))
+        session.add(
+            Relationship(
+                from_ref="host:visible",
+                relation_type="related_to",
+                to_ref="host:hidden",
+            )
+        )
         record_source_snapshot(
             session,
             _snapshot(
@@ -963,7 +1196,9 @@ def test_query_count_is_constant_below_the_existing_coverage_batch_bound(
             event.remove(alembic_database.engine, "before_cursor_execute", listener)
         return count
 
-    assert select_count({object_ids[0]}) == select_count(set(object_ids))
+    single_count = select_count({object_ids[0]})
+    assert single_count == select_count(set(object_ids))
+    assert single_count <= 12
 
 
 def test_attention_read_performs_no_write_file_read_or_acquisition(

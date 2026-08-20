@@ -19,7 +19,7 @@ def test_attention_tool_has_the_reviewed_manifest_evidence() -> None:
     assert metadata == {
         "build_revision": "issue-176",
         "contract_version": "1",
-        "manifest_digest": "86a4c916c29d1a0032c64d2ed37940d6ec328c67f3ffff4cfcc8cba0f1616605",
+        "manifest_digest": "fb6d9b9976e106f3b242405eced0cac3dcb512f4b6acf557815c670ca6afacfe",
         "tool_count": 30,
     }
 

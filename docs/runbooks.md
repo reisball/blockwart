@@ -48,6 +48,15 @@ Deprecated Runbooks require a rationale or visible successor recommendation;
 superseded Runbooks require `superseded_by`. Self-links and cycles fail before
 any write is committed.
 
+Service Runbook readiness uses a separate explicit service field:
+`data.criticality` is the closed `standard`/`critical` vocabulary, with a
+missing value interpreted as `standard` for backward compatibility. An active
+critical service is ready when at least one READ-authorized, schema-valid
+`approved` or `active` Runbook names it in `applies_to`, or an authorized
+`documents` relationship connects that Runbook to the service. Names, prose,
+tags, health, monitoring state, concealed Runbooks, and draft/deprecated/
+superseded/retired Runbooks never imply readiness.
+
 Rollback and recovery are deliberately different. Rollback reverses a change.
 Recovery restores a safe or healthy state when reversal alone is insufficient.
 Expected effect describes what one instruction should change; verification is
@@ -274,6 +283,14 @@ benötigen Zweck, Risiko, Voraussetzungen, Schritte, Verifikation und
 Rollback oder Recovery. Ein Rollback macht eine Änderung rückgängig; Recovery
 stellt einen sicheren oder gesunden Zustand wieder her, wenn Umkehr allein
 nicht genügt. Wirkung eines Schritts und Erfolgsprüfung bleiben getrennt.
+
+Die Runbook-Bereitschaft eines Dienstes verwendet das explizite Dienstfeld
+`data.criticality` mit den abgeschlossenen Werten `standard` und `critical`;
+ein fehlender Wert bedeutet abwärtskompatibel `standard`. Ein aktiver kritischer
+Dienst ist bereit, wenn mindestens ein autorisiertes, schemagültiges Runbook im
+Status `approved` oder `active` ihn über `applies_to` oder eine autorisierte
+`documents`-Beziehung benennt. Namen, Freitext, Tags, Zustand, Monitoring sowie
+verborgene oder ungeeignete Runbooks werden nicht als Bereitschaft gedeutet.
 
 Die drei vollständigen Beispiele oben sind zugleich die aktiven deutschen
 Vertragsbeispiele:

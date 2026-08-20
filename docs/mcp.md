@@ -240,7 +240,7 @@ means it deliberately bundles lower-level API concerns behind one agent call.
 | `list_audit_events` | Read an object's system audit timeline | `directly sufficient` | Projects the existing redacted newest-first audit page without mixing in comment content. |
 | `add_comment` | Append an operational work note | `directly sufficient` | Keeps Markdown source and idempotency explicit without exposing audit internals. |
 | `get_context` | Find objects and read details | `directly sufficient` | Search, filters, full details, and per-object write-ready ETags already share one call. |
-| `get_attention` | Find what currently needs work | `directly sufficient` | Projects the shared application attention resolver: one closed category, severity, reason-code, and signal-state vocabulary over record integrity, placement, manual lifecycle, monitoring, endpoints, provenance, Runbooks, knowledge review, and source coverage, deduplicated to one item per target and category. |
+| `get_attention` | Find what currently needs work | `directly sufficient` | Projects the shared application attention resolver: one closed category, severity, reason-code, and signal-state vocabulary over record and relationship integrity, placement, manual lifecycle, monitoring, endpoints, provenance, critical-service Runbook readiness, knowledge review, and source coverage, deduplicated to one item per target and category. |
 | `get_source_coverage` | Inspect source inventory coverage and drift | `directly sufficient` | Projects the authorized REST snapshot with identical filters, state vocabulary, digest-bound cursor, and no workspace access. |
 | `create_child` | Create a placed child | `intent tool`, `response improved` | Resolves the parent internally and proves placement, ownership, revision, and idempotency. |
 | `create_root` | Create a disconnected catalog root | `intent tool`, `response improved` | Requires an already active catalog-owner principal; proves ownership, revision, idempotency, and the absence of a placement parent. Never mutates any catalog role. |
@@ -316,7 +316,9 @@ The call is a read. It triggers no probe, no source file access, no network
 lookup, and no catalog, audit, comment, coverage, or observation write, and it
 has no remediation mode: correcting a signal uses the ordinary authorized write
 tools. Only readable objects contribute items; discover-only stubs contribute
-none, and source-only coverage facts stay behind the platform-admin
+none. Applicable Runbooks and canonical relationship diagnostics are resolved
+only from READ-authorized references and endpoints; diagnostic prose and
+related references are not returned. Source-only coverage facts stay behind the platform-admin
 `scope=all` boundary of `blockwart.get_source_coverage`. Planned, retired, and
 finished records, and services without enabled monitoring, are excluded rather
 than reported as incidents; declared maintenance suppresses the observed

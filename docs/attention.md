@@ -14,7 +14,7 @@ that owns it.
 ## Signals
 
 `blockwart.domain.attention` owns the closed vocabulary; `blockwart.services.attention`
-is the FastAPI-independent application resolver every surface consumes. Nine
+is the FastAPI-independent application resolver every surface consumes. Ten
 categories stay semantically distinct, because they answer different questions
 and are corrected in different places:
 
@@ -25,8 +25,9 @@ and are corrected in different places:
 | `lifecycle` | What did an operator manually record? | canonical `lifecycle`/`health` |
 | `endpoint` | Does the endpoint contract resolve one target? | monitoring target resolution |
 | `placement` | Is the object placed in the canonical hierarchy? | canonical placement state |
+| `relationship_integrity` | Do authorized relationships and typed references satisfy the domain rules? | canonical relationship diagnostics |
 | `provenance` | Is the recorded provenance still fresh? | `provenance.md` |
-| `runbook` | Is the Runbook reviewed and verified? | `runbooks.md` |
+| `runbook` | Is the Runbook reviewed and verified, and does a critical service have one? | `runbooks.md` and explicit service criticality |
 | `knowledge` | Is the Decision/Project review current? | canonical review timestamps |
 | `source_coverage` | Does the mapped inventory still match? | `source-coverage.md` |
 
@@ -53,11 +54,17 @@ The closed reason codes are:
 | `lifecycle_maintenance` | `lifecycle` | `info` | `current` |
 | `endpoint_target_unresolved` | `endpoint` | `warning` | `unknown` |
 | `placement_missing` | `placement` | `warning` | `unknown` |
+| `placement_relationship_invalid` | `placement` | `warning` | `current` |
+| `relationship_target_unresolved` | `relationship_integrity` | `warning` | `unknown` |
+| `relationship_primary_ambiguous` | `relationship_integrity` | `warning` | `current` |
+| `knowledge_relationship_invalid` | `relationship_integrity` | `warning` | `current` |
+| `relationship_domain_invalid` | `relationship_integrity` | `warning` | `current` |
 | `provenance_stale` | `provenance` | `warning` | `stale` |
 | `provenance_unverified` | `provenance` | `info` | `unknown` |
 | `runbook_review_overdue` | `runbook` | `warning` | `stale` |
 | `runbook_unverified` | `runbook` | `warning` | `unknown` |
 | `runbook_deprecated_unresolved` | `runbook` | `info` | `current` |
+| `critical_service_runbook_missing` | `runbook` | `warning` | `unknown` |
 | `knowledge_review_overdue` | `knowledge` | `warning` | `stale` |
 | `knowledge_review_unscheduled` | `knowledge` | `info` | `unknown` |
 | `coverage_import_drift` | `source_coverage` | `warning` | `stale` |
@@ -95,6 +102,10 @@ An intentional state must never be published as a problem:
 - an active asset whose manual health has never been assessed remains
   `unknown`; this is distinct from disabled monitoring and from an observed
   incident;
+- service Runbook readiness applies only when the schema-valid service document
+  explicitly declares `criticality="critical"`; a missing value means
+  `standard`, and no name, prose, tag, health, or monitoring state is used to
+  infer criticality;
 - a service without a monitoring document, or with `enabled=false`, is exactly
   "not monitored" and produces no monitoring or endpoint signal; its category
   reports `not_applicable` when nothing else is monitored either;
@@ -116,14 +127,20 @@ Authorization precedes items, counts, ordering, cursor binding, and errors. Only
 objects the caller may read contribute signals; discover-only stubs contribute
 nothing, so a detail-only fact cannot become a discover-only hint.
 
-The derivation is authorization-stable by construction. It reads only scalar
-record fields, never a typed reference, so the authorized-reference projection
-cannot change a classification. It reads the canonical placement state of the
-stored row rather than the projected one, because a concealed parent downgrades
-the projected state to `unknown`. Coverage rows come from the existing
-authorized resolver, which removes concealed mappings before state resolution.
-Concealing an object therefore removes its own items and changes nothing else:
-not another item, count, signal state, order, cursor, or error.
+The derivation is authorization-stable by construction. Scalar signals are
+read only after the object is readable. Runbook applicability and relationship
+diagnostics use only READ-authorized typed references and relationships; the
+canonical relationship diagnostic resolver runs on that projected snapshot,
+and Attention consumes only its closed code plus a readable target. Diagnostic
+messages, locations, and related references are never returned. A missing
+endpoint is considered only when its ID is itself in the policy's READ scope,
+so hidden, discover-only, and ordinary absent endpoints are equivalent. The
+resolver reads the canonical placement state of the stored row rather than the
+projected one, because a concealed parent downgrades the projected state to
+`unknown`. Coverage rows come from the existing authorized resolver, which
+removes concealed mappings before state resolution. Concealing an object
+therefore removes its own items and changes nothing else: not another item,
+count, signal state, order, cursor, or error.
 
 Attention consumes only the object-scoped `mapped` coverage projection. Its
 `collected` state is derived from that authorized projection and carries no
@@ -134,9 +151,11 @@ platform-admin boundary of
 
 ## Cost
 
-The resolver loads the catalog rows, the observation index, and the bounded
-coverage snapshot once per request. Database access does not grow per readable
-object, and concealed and absent single objects take the same statement path.
+The resolver loads catalog rows and relationships once and reuses that snapshot
+for placement, Runbook applicability, and relationship diagnostics. It also
+loads the observation index and bounded coverage snapshot once per request.
+Database access does not grow per readable object, and concealed and absent
+single objects take the same statement path.
 
 ## Surfaces
 

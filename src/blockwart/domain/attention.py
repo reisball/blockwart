@@ -12,13 +12,12 @@ It deliberately owns no new truth:
 - it performs no I/O, no probe, no crawl, and no write;
 - it never re-implements a domain rule that #135 (monitoring) or #174 (source
   coverage) already owns, it only classifies their published output;
-- it reads only scalar fields of a catalog document, never a typed reference,
-  so an authorized-reference projection cannot change what it reports;
+- typed-reference and relationship facts reach it only as authorization-first,
+  redacted application inputs;
 - every value it emits comes from a closed vocabulary declared below.
 
-Because of the third rule the derivation is authorization-stable: concealing an
-object can remove items (the object is no longer readable) but can never change
-the classification of an object that stays readable.
+Because of the third rule the derivation is authorization-stable: concealed
+facts never reach the pure classifier.
 """
 
 from __future__ import annotations
@@ -39,6 +38,8 @@ from blockwart.domain.object_schema import (
     RUNBOOK_STATUS_VALUES,
 )
 from blockwart.domain.provenance import parse_rfc3339_utc
+from blockwart.domain.relationships import RELATIONSHIP_DIAGNOSTIC_CODES
+from blockwart.domain.service_readiness import service_criticality
 from blockwart.domain.source_coverage import COVERAGE_STATES
 
 AttentionCategory = Literal[
@@ -47,6 +48,7 @@ AttentionCategory = Literal[
     "lifecycle",
     "endpoint",
     "placement",
+    "relationship_integrity",
     "provenance",
     "runbook",
     "knowledge",
@@ -90,11 +92,17 @@ AttentionReason = Literal[
     "lifecycle_maintenance",
     "endpoint_target_unresolved",
     "placement_missing",
+    "placement_relationship_invalid",
+    "relationship_target_unresolved",
+    "relationship_primary_ambiguous",
+    "knowledge_relationship_invalid",
+    "relationship_domain_invalid",
     "provenance_stale",
     "provenance_unverified",
     "runbook_review_overdue",
     "runbook_unverified",
     "runbook_deprecated_unresolved",
+    "critical_service_runbook_missing",
     "knowledge_review_overdue",
     "knowledge_review_unscheduled",
     "coverage_import_drift",
@@ -225,6 +233,41 @@ ATTENTION_REASON_SPECS: tuple[AttentionReasonSpec, ...] = (
         "The object has no canonical placement parent and no declared unassigned state.",
     ),
     _spec(
+        "placement_relationship_invalid",
+        "placement",
+        "warning",
+        "current",
+        "The canonical relationship diagnostic reports an invalid placement edge.",
+    ),
+    _spec(
+        "relationship_target_unresolved",
+        "relationship_integrity",
+        "warning",
+        "unknown",
+        "An authorized relationship or typed reference has no resolvable target.",
+    ),
+    _spec(
+        "relationship_primary_ambiguous",
+        "relationship_integrity",
+        "warning",
+        "current",
+        "Canonical relationship diagnostics report more than one primary target.",
+    ),
+    _spec(
+        "knowledge_relationship_invalid",
+        "relationship_integrity",
+        "warning",
+        "current",
+        "A knowledge record violates a canonical relationship requirement.",
+    ),
+    _spec(
+        "relationship_domain_invalid",
+        "relationship_integrity",
+        "warning",
+        "current",
+        "The canonical relationship diagnostic reports an invalid domain relationship.",
+    ),
+    _spec(
         "provenance_stale",
         "provenance",
         "warning",
@@ -258,6 +301,13 @@ ATTENTION_REASON_SPECS: tuple[AttentionReasonSpec, ...] = (
         "info",
         "current",
         "A deprecated Runbook records neither a rationale nor a successor recommendation.",
+    ),
+    _spec(
+        "critical_service_runbook_missing",
+        "runbook",
+        "warning",
+        "unknown",
+        "This critical active service has no authorized applicable approved or active Runbook.",
     ),
     _spec(
         "knowledge_review_overdue",
@@ -322,6 +372,7 @@ ATTENTION_DETAIL_CODE_VALUES: tuple[str, ...] = tuple(
             *RUNBOOK_STATUS_VALUES,
             *DECISION_STATUS_VALUES,
             *PROJECT_STATUS_VALUES,
+            *RELATIONSHIP_DIAGNOSTIC_CODES,
         }
     )
 )
@@ -410,8 +461,8 @@ class AttentionSummary:
 class AttentionObjectInput:
     """One authorized, already projected readable catalog object.
 
-    Only scalar facts appear here. `data` is passed for the small set of scalar
-    knowledge fields the derivation reads; no typed reference is ever consulted.
+    `data` is passed for a small set of scalar fields. Relationship and Runbook
+    applicability facts arrive separately as redacted booleans/closed codes.
     """
 
     object_id: str
@@ -427,6 +478,16 @@ class AttentionObjectInput:
     provenance_stale_after: str | None
     data: Mapping[str, Any]
     monitoring: Mapping[str, Any] | None = None
+    has_suitable_runbook: bool = False
+
+
+@dataclass(frozen=True, slots=True)
+class AttentionRelationshipDiagnosticInput:
+    """One redacted canonical diagnostic bound to one readable object."""
+
+    object_id: str
+    code: str
+    relation_type: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -453,6 +514,7 @@ def build_attention_derivation(
     coverage: Sequence[AttentionCoverageInput],
     coverage_collected: bool,
     now: datetime,
+    relationship_diagnostics: Sequence[AttentionRelationshipDiagnosticInput] = (),
 ) -> AttentionDerivation:
     """Classify every authorized signal into one deduplicated ordered set."""
 
@@ -521,12 +583,19 @@ def build_attention_derivation(
             continue
         if not _is_live(candidate):
             continue
+        evaluated["relationship_integrity"] += 1
         _derive_placement(candidate, evaluated, emit)
         _derive_lifecycle(candidate, evaluated, emit)
         _derive_monitoring(candidate, evaluated, emit)
         _derive_provenance(candidate, evaluated, emit, now=now)
         _derive_runbook(candidate, evaluated, emit, now=now)
         _derive_knowledge(candidate, evaluated, emit, now=now)
+
+    _derive_relationship_diagnostics(
+        relationship_diagnostics,
+        labels=labels,
+        emit=emit,
+    )
 
     for row in coverage:
         candidate = labels.get(row.object_id)
@@ -779,6 +848,13 @@ def _derive_provenance(candidate, evaluated, emit, *, now: datetime) -> None:
 
 
 def _derive_runbook(candidate, evaluated, emit, *, now: datetime) -> None:
+    if candidate.kind == "service":
+        if service_criticality(candidate.data) != "critical":
+            return
+        evaluated["runbook"] += 1
+        if not candidate.has_suitable_runbook:
+            emit(candidate, "critical_service_runbook_missing")
+        return
     if candidate.kind != "runbook":
         return
     evaluated["runbook"] += 1
@@ -827,6 +903,28 @@ def _derive_knowledge(candidate, evaluated, emit, *, now: datetime) -> None:
         return
     if review_after is None and status in current:
         emit(candidate, "knowledge_review_unscheduled", detail_code=detail_code)
+
+
+def _derive_relationship_diagnostics(diagnostics, *, labels, emit) -> None:
+    for diagnostic in diagnostics:
+        candidate = labels.get(diagnostic.object_id)
+        if (
+            candidate is None
+            or candidate.record_state != "valid"
+            or not _is_live(candidate)
+        ):
+            continue
+        if diagnostic.code == "dangling_typed_reference":
+            reason_code = "relationship_target_unresolved"
+        elif diagnostic.relation_type == "hosts" or diagnostic.code == "multiple_placement_parents":
+            reason_code = "placement_relationship_invalid"
+        elif diagnostic.code == "multiple_primary_relationships":
+            reason_code = "relationship_primary_ambiguous"
+        elif candidate.kind in {"runbook", "decision", "project"}:
+            reason_code = "knowledge_relationship_invalid"
+        else:
+            reason_code = "relationship_domain_invalid"
+        emit(candidate, reason_code, detail_code=diagnostic.code)
 
 
 def _category_signal_state(

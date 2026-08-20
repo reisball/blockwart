@@ -78,7 +78,8 @@ Each item carries a closed `category`, `severity`, `reason_code`,
 existing closed domain vocabulary, an optional evidence timestamp, and one
 `target` with the canonical `kind:id` reference plus its detail path. Categories
 are `record_integrity`, `monitoring`, `lifecycle`, `endpoint`, `placement`,
-`provenance`, `runbook`, `knowledge`, and `source_coverage`. Severities are
+`relationship_integrity`, `provenance`, `runbook`, `knowledge`, and
+`source_coverage`. Severities are
 `critical`, `warning`, and `info`. Item signal states are `current`, `stale`,
 and `unknown`; the summary additionally reports `not_applicable` per category.
 The full reason vocabulary and its meaning are in [Needs
@@ -103,8 +104,11 @@ revealing a source-only collection timestamp.
 
 Only objects the caller may read contribute items; discover-only stubs
 contribute nothing. Concealing an object removes its own items and changes no
-other item, count, signal state, order, cursor, or error. Source-only coverage
-facts are never included; they stay behind the platform-admin
+other item, count, signal state, order, cursor, or error. Runbook applicability
+and canonical relationship diagnostics are evaluated only after their typed
+references and relationship endpoints are projected through READ authorization;
+diagnostic prose and related references are never returned. Source-only
+coverage facts are never included; they stay behind the platform-admin
 `scope=all` boundary of `GET /api/v1/source-coverage`.
 
 Attention is a derived, time-dependent read model with no persisted state.
