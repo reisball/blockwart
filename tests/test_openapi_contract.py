@@ -49,6 +49,7 @@ EXPECTED_OPERATIONS = {
     "/api/v1/object-contexts": {"post"},
     "/api/v1/roots": {"post"},
     "/api/v1/source-coverage": {"get"},
+    "/api/v1/webhooks/gatus": {"post"},
 }
 
 

@@ -2089,7 +2089,10 @@
           "provider": {
             "anyOf": [
               {
-                "const": "builtin_http",
+                "enum": [
+                  "builtin_http",
+                  "gatus"
+                ],
                 "type": "string"
               },
               {
@@ -7529,6 +7532,130 @@
           "label"
         ],
         "title": "V1TopologyStubNodeOut",
+        "type": "object"
+      },
+      "WebhookGatusIn": {
+        "description": "Payload sent by a Gatus custom alert webhook.\n\nThe receiver maps the Gatus endpoint identity (``source``, ``group``,\n``endpoint``) to a Blockwart service through the service's\n``data.gatus`` mapping document.  Alert text, error details, and\nresponse bodies are deliberately not persisted: the observation\ncontract stores only a bounded, redacted state.",
+        "properties": {
+          "alert": {
+            "description": "Gatus alert state: TRIGGERED or RESOLVED",
+            "enum": [
+              "TRIGGERED",
+              "RESOLVED"
+            ],
+            "title": "Alert",
+            "type": "string"
+          },
+          "endpoint": {
+            "maxLength": 255,
+            "minLength": 1,
+            "title": "Endpoint",
+            "type": "string"
+          },
+          "group": {
+            "anyOf": [
+              {
+                "maxLength": 128,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Group"
+          },
+          "http_status": {
+            "anyOf": [
+              {
+                "maximum": 599.0,
+                "minimum": 100.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Http Status"
+          },
+          "latency_ms": {
+            "anyOf": [
+              {
+                "maximum": 600000.0,
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Latency Ms"
+          },
+          "source": {
+            "anyOf": [
+              {
+                "maxLength": 128,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source"
+          },
+          "timestamp": {
+            "anyOf": [
+              {
+                "maxLength": 64,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Optional RFC 3339 timestamp of the Gatus check result",
+            "title": "Timestamp"
+          }
+        },
+        "required": [
+          "endpoint",
+          "alert"
+        ],
+        "title": "WebhookGatusIn",
+        "type": "object"
+      },
+      "WebhookGatusOut": {
+        "description": "Result of ingesting a Gatus alert as a service observation.",
+        "properties": {
+          "checked_at": {
+            "title": "Checked At",
+            "type": "string"
+          },
+          "ingested": {
+            "title": "Ingested",
+            "type": "boolean"
+          },
+          "object_id": {
+            "title": "Object Id",
+            "type": "string"
+          },
+          "provider": {
+            "default": "gatus",
+            "title": "Provider",
+            "type": "string"
+          },
+          "state": {
+            "title": "State",
+            "type": "string"
+          }
+        },
+        "required": [
+          "object_id",
+          "state",
+          "checked_at",
+          "ingested"
+        ],
+        "title": "WebhookGatusOut",
         "type": "object"
       }
     },
@@ -17782,6 +17909,143 @@
           "api-v1-readonly"
         ]
       }
+    },
+    "/api/v1/webhooks/gatus": {
+      "post": {
+        "description": "Ingest one Gatus alert as a canonical service observation.\n\nThe observation's ``checked_at`` (observed time) is the event timestamp\nwhen present, otherwise the server receive time. Storage ``updated_at`` is\nalways the server receive time, so observed and received time are never\nconflated.\n\nArgs:\n    payload: The Gatus custom alert payload with endpoint identity,\n        alert state, and optional check timestamp.\n    request: The incoming FastAPI request.\n    session: The database session for this request.\n    access: Authenticated service-token read access with policy.\n\nReturns:\n    The matched object id, observation state, observed time, and whether a\n    write actually happened. ``ingested`` is truthful: a duplicate or\n    stale replay that the conflict guard rejects reports False.\n\nRaises:\n    HTTPException: 404 for no authorized match, 409 for ambiguous\n        authorized matches, or 422 for an invalid or over-skewed future\n        timestamp.",
+        "operationId": "receive_gatus_webhook_api_v1_webhooks_gatus_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WebhookGatusIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WebhookGatusOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Authentication required"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Permission denied"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Resource not found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "412": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Precondition failed"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Request validation failed"
+          },
+          "428": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Precondition required"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Internal server error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Service unavailable"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Receive Gatus Webhook",
+        "tags": [
+          "api-v1-webhooks"
+        ]
+      }
     }
   },
   "x-blockwart-object-schema": {
@@ -18304,6 +18568,19 @@
               ],
               "normalization": [],
               "path": "monitoring",
+              "reason": "is supported only for service objects",
+              "requirement": "forbidden",
+              "type": "object",
+              "violations": [
+                "field_not_allowed"
+              ]
+            },
+            {
+              "json_types": [
+                "object"
+              ],
+              "normalization": [],
+              "path": "gatus",
               "reason": "is supported only for service objects",
               "requirement": "forbidden",
               "type": "object",
@@ -19099,6 +19376,19 @@
               ],
               "normalization": [],
               "path": "monitoring",
+              "reason": "is supported only for service objects",
+              "requirement": "forbidden",
+              "type": "object",
+              "violations": [
+                "field_not_allowed"
+              ]
+            },
+            {
+              "json_types": [
+                "object"
+              ],
+              "normalization": [],
+              "path": "gatus",
               "reason": "is supported only for service objects",
               "requirement": "forbidden",
               "type": "object",
@@ -19914,6 +20204,19 @@
               "violations": [
                 "field_not_allowed"
               ]
+            },
+            {
+              "json_types": [
+                "object"
+              ],
+              "normalization": [],
+              "path": "gatus",
+              "reason": "is supported only for service objects",
+              "requirement": "forbidden",
+              "type": "object",
+              "violations": [
+                "field_not_allowed"
+              ]
             }
           ],
           "rules": [],
@@ -20628,6 +20931,19 @@
               ],
               "normalization": [],
               "path": "monitoring",
+              "reason": "is supported only for service objects",
+              "requirement": "forbidden",
+              "type": "object",
+              "violations": [
+                "field_not_allowed"
+              ]
+            },
+            {
+              "json_types": [
+                "object"
+              ],
+              "normalization": [],
+              "path": "gatus",
               "reason": "is supported only for service objects",
               "requirement": "forbidden",
               "type": "object",
@@ -21382,7 +21698,8 @@
             {
               "constraint": "must be a supported monitoring provider",
               "enum": [
-                "builtin_http"
+                "builtin_http",
+                "gatus"
               ],
               "json_types": [
                 "string"
@@ -21409,6 +21726,79 @@
               "violations": [
                 "type_mismatch",
                 "value_out_of_range"
+              ]
+            },
+            {
+              "additional_properties": false,
+              "allowed_keys": [
+                "endpoint",
+                "group",
+                "source"
+              ],
+              "json_types": [
+                "object"
+              ],
+              "normalization": [],
+              "path": "gatus",
+              "requirement": "optional",
+              "type": "object",
+              "violations": [
+                "field_not_allowed",
+                "type_mismatch"
+              ]
+            },
+            {
+              "json_types": [
+                "string"
+              ],
+              "max_length": 128,
+              "min_length": 1,
+              "normalization": [
+                "strip_whitespace"
+              ],
+              "path": "gatus.source",
+              "requirement": "optional",
+              "type": "string",
+              "violations": [
+                "type_mismatch",
+                "value_too_long",
+                "value_too_short"
+              ]
+            },
+            {
+              "json_types": [
+                "string"
+              ],
+              "max_length": 128,
+              "min_length": 1,
+              "normalization": [
+                "strip_whitespace"
+              ],
+              "path": "gatus.group",
+              "requirement": "optional",
+              "type": "string",
+              "violations": [
+                "type_mismatch",
+                "value_too_long",
+                "value_too_short"
+              ]
+            },
+            {
+              "json_types": [
+                "string"
+              ],
+              "max_length": 255,
+              "min_length": 1,
+              "normalization": [
+                "strip_whitespace"
+              ],
+              "path": "gatus.endpoint",
+              "requirement": "optional",
+              "type": "string",
+              "violations": [
+                "type_mismatch",
+                "value_too_long",
+                "value_too_short"
               ]
             },
             {
@@ -21799,7 +22189,8 @@
             ]
           },
           "providers": [
-            "builtin_http"
+            "builtin_http",
+            "gatus"
           ],
           "result_semantics": {
             "2xx": "healthy",
@@ -22278,6 +22669,19 @@
               ],
               "normalization": [],
               "path": "monitoring",
+              "reason": "is supported only for service objects",
+              "requirement": "forbidden",
+              "type": "object",
+              "violations": [
+                "field_not_allowed"
+              ]
+            },
+            {
+              "json_types": [
+                "object"
+              ],
+              "normalization": [],
+              "path": "gatus",
               "reason": "is supported only for service objects",
               "requirement": "forbidden",
               "type": "object",
@@ -23630,6 +24034,19 @@
               "violations": [
                 "field_not_allowed"
               ]
+            },
+            {
+              "json_types": [
+                "object"
+              ],
+              "normalization": [],
+              "path": "gatus",
+              "reason": "is supported only for service objects",
+              "requirement": "forbidden",
+              "type": "object",
+              "violations": [
+                "field_not_allowed"
+              ]
             }
           ],
           "rules": [
@@ -24328,6 +24745,19 @@
               ],
               "normalization": [],
               "path": "monitoring",
+              "reason": "is supported only for service objects",
+              "requirement": "forbidden",
+              "type": "object",
+              "violations": [
+                "field_not_allowed"
+              ]
+            },
+            {
+              "json_types": [
+                "object"
+              ],
+              "normalization": [],
+              "path": "gatus",
               "reason": "is supported only for service objects",
               "requirement": "forbidden",
               "type": "object",
@@ -26176,6 +26606,19 @@
               ],
               "normalization": [],
               "path": "monitoring",
+              "reason": "is supported only for service objects",
+              "requirement": "forbidden",
+              "type": "object",
+              "violations": [
+                "field_not_allowed"
+              ]
+            },
+            {
+              "json_types": [
+                "object"
+              ],
+              "normalization": [],
+              "path": "gatus",
               "reason": "is supported only for service objects",
               "requirement": "forbidden",
               "type": "object",

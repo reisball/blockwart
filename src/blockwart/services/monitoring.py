@@ -262,7 +262,8 @@ def record_service_observation(
     observation: MonitoringObservation,
     now: datetime | None = None,
     settings: MonitoringSettings | None = None,
-) -> MonitoringRecord | None:
+    report_written: bool = False,
+) -> MonitoringRecord | None | tuple[MonitoringRecord | None, bool]:
     """Ingest one canonical observation for a service.
 
     This is the seam every provider shares. A push-based receiver validates and
@@ -274,6 +275,13 @@ def record_service_observation(
     Returns ``None`` when that instance no longer exists or is not a service;
     this prevents a delayed check or receiver delivery from crossing an
     object-ID delete/recreate boundary.
+
+    With ``report_written=True`` the return is ``(record, written)`` instead of
+    just ``record``. ``written`` is True only when this delivery actually
+    inserted or advanced a row; a duplicate or stale replay that the conflict
+    guard rejected reports ``(record, False)``. A push receiver uses this to
+    answer "did this delivery land?" truthfully instead of pretending a
+    rejected replay was stored.
     """
 
     resolved = settings or MonitoringSettings()
@@ -342,7 +350,7 @@ def record_service_observation(
             | (excluded.last_checked_at > table.c.last_checked_at)
         ),
     )
-    session.execute(statement)
+    result = session.execute(statement)
     row = session.scalars(
         select(ServiceObservation).where(
             ServiceObservation.object_id == object_id,
@@ -350,7 +358,15 @@ def record_service_observation(
             ServiceObservation.provider == observation.provider,
         )
     ).one()
-    return _record(row)
+    record = _record(row)
+    if report_written:
+        # A genuine insert/update touched exactly one row. A stale or
+        # duplicate delivery that the ``on_conflict_do_update`` guard rejected
+        # performs no write and reports rowcount 0, so ``written`` is False
+        # even though the existing row is returned.
+        written = int(result.rowcount or 0) == 1
+        return record, written
+    return record
 
 
 def synchronize_check_schedule(

@@ -10,7 +10,7 @@ from blockwart.api.errors import (
     install_batch_request_bound,
     install_request_context,
 )
-from blockwart.api.routes import admin, agent, auth, catalog, health, v1
+from blockwart.api.routes import admin, agent, auth, catalog, health, v1, webhooks
 from blockwart.config import Settings, get_settings
 from blockwart.domain.schema_projection import object_schema_projection
 from blockwart.services.login_protection import LoginProtector
@@ -50,6 +50,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(catalog.router, prefix="/api")
     app.include_router(agent.router, prefix="/api")
     app.include_router(v1.router, prefix="/api")
+    app.include_router(webhooks.router, prefix="/api")
     app.include_router(admin.router, prefix="/api")
     app.include_router(auth.router, prefix="/api")
     app.include_router(auth_router)
@@ -92,9 +93,7 @@ async def principal_scoped_cache_control(request: Request, call_next):
         response.headers["Cache-Control"] = "private, no-store"
         response.headers["Pragma"] = "no-cache"
         vary = {
-            value.strip()
-            for value in response.headers.get("Vary", "").split(",")
-            if value.strip()
+            value.strip() for value in response.headers.get("Vary", "").split(",") if value.strip()
         }
         vary.update({"Authorization", "Cookie"})
         response.headers["Vary"] = ", ".join(sorted(vary))

@@ -88,9 +88,7 @@ def has_provider(provider: str) -> bool:
 
 
 def polling_providers() -> tuple[str, ...]:
-    return tuple(
-        sorted(name for name, spec in _REGISTRY.items() if spec.polling)
-    )
+    return tuple(sorted(name for name, spec in _REGISTRY.items() if spec.polling))
 
 
 def registered_providers() -> tuple[str, ...]:
@@ -107,9 +105,14 @@ def _register_builtin_providers() -> None:
             provider="builtin_http",
             polling=True,
             acquire=probe_http_target,
-            description=(
-                "Bounded unauthenticated HTTP(S) GET against one allowlisted target."
-            ),
+            description=("Bounded unauthenticated HTTP(S) GET against one allowlisted target."),
+        )
+    )
+    register_provider(
+        MonitoringProviderSpec(
+            provider="gatus",
+            polling=False,
+            description=("Push-based receiver for Gatus custom alert webhooks."),
         )
     )
 
