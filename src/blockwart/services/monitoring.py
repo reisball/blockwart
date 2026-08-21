@@ -40,6 +40,7 @@ from blockwart.domain.monitoring import (
     MonitoringRecord,
     monitoring_view,
     read_monitoring_config,
+    resolve_gatus_source_target,
     resolve_monitoring_target,
     scheduled_next_due,
 )
@@ -659,7 +660,12 @@ def run_due_service_checks(
                     now=moment,
                 )
                 continue
-        resolution = resolve_monitoring_target(data, object_id=claim.object_id)
+        if claim.provider == "gatus":
+            resolution = resolve_gatus_source_target(data, object_id=claim.object_id)
+            gatus_mapping = _gatus_mapping_from_data(data)
+        else:
+            resolution = resolve_monitoring_target(data, object_id=claim.object_id)
+            gatus_mapping = None
         if resolution.target is None:
             record = record_service_observation(
                 session,
@@ -692,6 +698,7 @@ def run_due_service_checks(
                     target=resolution.target,
                     diagnostic=resolution.diagnostic,
                     limits=settings.limits,
+                    gatus_mapping=gatus_mapping,
                 ),
                 config.interval_seconds,
             )
@@ -875,6 +882,34 @@ def _record(row: ServiceObservation) -> MonitoringRecord:
         next_due_at=_aware_or_none(row.next_due_at),
         object_instance_id=row.object_instance_id,
     )
+
+
+def _gatus_mapping_from_data(data: dict[str, Any]) -> dict[str, str] | None:
+    """Extract the stable Gatus endpoint identity from a service's data.
+
+    Reads ``data.monitoring.gatus`` and returns only the bounded mapping keys
+    (``endpoint``, ``group``, ``source``). Unknown or non-string values are
+    dropped; an absent or malformed document yields ``None``.
+
+    Args:
+        data: The service's catalog data document.
+
+    Returns:
+        A mapping with the string keys Gatus needs, or ``None`` when there is
+        no usable Gatus identity.
+    """
+    document = data.get("monitoring") if isinstance(data, dict) else None
+    gatus = document.get("gatus") if isinstance(document, dict) else None
+    if not isinstance(gatus, dict):
+        return None
+    mapping: dict[str, str] = {}
+    for key in ("endpoint", "group", "source"):
+        value = gatus.get(key)
+        if isinstance(value, str) and value:
+            mapping[key] = value
+    if "endpoint" not in mapping:
+        return None
+    return mapping
 
 
 def _object_data(catalog_object: CatalogObject) -> dict[str, Any]:

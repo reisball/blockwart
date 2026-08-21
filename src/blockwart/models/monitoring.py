@@ -16,7 +16,7 @@ from blockwart.db.base import Base
 # The controlled vocabularies are duplicated as SQL CHECK constraints on
 # purpose: the database refuses an unknown provider, state, or error code even
 # if a future ingestion path bypasses the domain layer.
-_PROVIDERS = "'builtin_http'"
+_PROVIDERS = "'builtin_http','gatus'"
 _STATES = "'unknown','healthy','down','check_error'"
 _ERROR_CODES = (
     "'connect_failed','dns_failed','http_client_error','http_server_error',"

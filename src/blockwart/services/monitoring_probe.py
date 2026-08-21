@@ -32,10 +32,13 @@ from ipaddress import ip_address
 from queue import Empty, Full, Queue
 from threading import Event, Lock, Thread
 from time import monotonic
+from typing import TYPE_CHECKING
 
 from blockwart.domain.monitoring import MonitoringObservation
 from blockwart.domain.monitoring_policy import IPAddress, pin_address
-from blockwart.services.monitoring_registry import ProviderCheckRequest
+
+if TYPE_CHECKING:
+    from blockwart.services.monitoring_registry import ProviderCheckRequest
 
 _PROVIDER = "builtin_http"
 _USER_AGENT = "Blockwart-Healthcheck/1"
@@ -318,6 +321,124 @@ def _request_status(
     finally:
         if sock is not None:
             sock.close()
+
+
+def _request_status_and_body(
+    *,
+    scheme: str,
+    hostname: str,
+    pinned: IPAddress,
+    port: int,
+    path: str,
+    connect_timeout: float,
+    total_timeout: float,
+    max_response_bytes: int,
+    authorization: str | None = None,
+) -> tuple[int, bytes]:
+    """Like ``_request_status`` but also reads a bounded response body.
+
+    Used by adapters that need the response payload (for example the Gatus
+    pull adapter, which parses the statuses JSON). Every SSRF and size control
+    from ``_request_status`` applies identically; the body is read only up to
+    ``max_response_bytes`` and never logged or persisted.
+    """
+    deadline = monotonic() + total_timeout
+    sock: socket.socket | None = None
+    try:
+        try:
+            sock = socket.create_connection(
+                (str(pinned), port),
+                timeout=min(connect_timeout, _remaining(deadline)),
+            )
+        except TimeoutError as exc:
+            raise _ProbeFailure("down", "timeout") from exc
+        except OSError as exc:
+            raise _ProbeFailure("down", "connect_failed") from exc
+
+        if scheme == "https":
+            context = ssl.create_default_context()
+            context.check_hostname = True
+            context.verify_mode = ssl.CERT_REQUIRED
+            try:
+                sock.settimeout(_remaining(deadline))
+                sock = context.wrap_socket(sock, server_hostname=hostname)
+            except ssl.SSLError as exc:
+                raise _ProbeFailure("down", "tls_failed") from exc
+            except TimeoutError as exc:
+                raise _ProbeFailure("down", "timeout") from exc
+            except OSError as exc:
+                raise _ProbeFailure("down", "connect_failed") from exc
+
+        auth_line = f"Authorization: {authorization}\r\n" if authorization else ""
+        request = (
+            f"GET {path or '/'} HTTP/1.1\r\n"
+            f"Host: {_host_header(hostname, port, scheme)}\r\n"
+            f"User-Agent: {_USER_AGENT}\r\n"
+            f"{auth_line}"
+            "Accept: application/json\r\n"
+            "Connection: close\r\n\r\n"
+        ).encode("ascii")
+        try:
+            _send_all(sock, request, deadline)
+            header_block = _read_response_headers(sock, deadline)
+        except TimeoutError as exc:
+            raise _ProbeFailure("down", "timeout") from exc
+        except ssl.SSLError as exc:
+            raise _ProbeFailure("down", "tls_failed") from exc
+        except OSError as exc:
+            raise _ProbeFailure("down", "connect_failed") from exc
+
+        status, headers = _parse_response_headers(header_block)
+        if len(headers) > _MAX_HEADERS:
+            raise _ProbeFailure("check_error", "response_too_large")
+        declared = next(
+            (value for name, value in headers if name.casefold() == "content-length"),
+            None,
+        )
+        if declared is not None and declared.isdigit() and int(declared) > max_response_bytes:
+            raise _ProbeFailure("check_error", "response_too_large")
+        try:
+            body = _read_bounded_body(sock, max_response_bytes, deadline)
+        except _ProbeFailure:
+            raise
+        except TimeoutError as exc:
+            raise _ProbeFailure("down", "timeout") from exc
+        except OSError as exc:
+            raise _ProbeFailure("down", "connect_failed") from exc
+        return status, body
+    finally:
+        if sock is not None:
+            sock.close()
+
+
+def _read_bounded_body(
+    sock: socket.socket,
+    max_bytes: int,
+    deadline: float,
+) -> bytes:
+    """Read a response body up to ``max_bytes`` (plus a sentinel byte).
+
+    The connection is ``Connection: close``, so reading until EOF is correct
+    for both ``Content-Length`` and chunked responses; a transfer chunked body
+    is parsed as JSON downstream, and a framing mismatch fails closed there.
+    """
+    chunks: list[bytes] = []
+    total = 0
+    while True:
+        sock.settimeout(_remaining(deadline))
+        try:
+            chunk = sock.recv(4096)
+        except TimeoutError:
+            raise
+        except OSError:
+            raise
+        if not chunk:
+            break
+        total += len(chunk)
+        if total > max_bytes:
+            raise _ProbeFailure("check_error", "response_too_large")
+        chunks.append(chunk)
+    return b"".join(chunks)
 
 
 def _classify(status: int) -> tuple[str, str | None]:

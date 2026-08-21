@@ -36,7 +36,7 @@ from blockwart.domain.interfaces import (
 )
 from blockwart.domain.timestamps import format_rfc3339_utc
 
-MonitoringProvider = Literal["builtin_http"]
+MonitoringProvider = Literal["builtin_http", "gatus"]
 MonitoringState = Literal["unknown", "healthy", "down", "check_error"]
 MonitoringFreshness = Literal["pending", "fresh", "stale"]
 MonitoringTargetSource = Literal["endpoint_health_url", "derived_health_path"]
@@ -67,7 +67,7 @@ MonitoringErrorCode = Literal[
 # the Gatus receiver tracked in #177) adds exactly one value here plus one
 # adapter registration; no read model, freshness rule, or maintenance rule
 # changes with it.
-MONITORING_PROVIDER_VALUES: tuple[str, ...] = ("builtin_http",)
+MONITORING_PROVIDER_VALUES: tuple[str, ...] = ("builtin_http", "gatus")
 MONITORING_PROVIDERS = frozenset(MONITORING_PROVIDER_VALUES)
 DEFAULT_MONITORING_PROVIDER = "builtin_http"
 
@@ -85,7 +85,7 @@ MONITORING_FRESHNESS_VALUES: tuple[str, ...] = ("pending", "fresh", "stale")
 DEFAULT_MONITORING_INTERVAL_SECONDS = 300
 MIN_MONITORING_INTERVAL_SECONDS = 60
 MAX_MONITORING_INTERVAL_SECONDS = 86400
-MONITORING_DOCUMENT_KEYS = frozenset({"enabled", "provider", "interval_seconds"})
+MONITORING_DOCUMENT_KEYS = frozenset({"enabled", "provider", "interval_seconds", "gatus"})
 
 # Stable, redacted configuration diagnostics.  They describe the catalog record
 # a reader can already see; they never contain a resolver, socket, TLS, or
@@ -98,6 +98,8 @@ MONITORING_DIAGNOSTIC_VALUES: tuple[str, ...] = (
     "invalid_health_url",
     "invalid_monitoring_config",
     "no_http_endpoint",
+    "missing_gatus_source",
+    "invalid_gatus_source_url",
 )
 MONITORING_DIAGNOSTICS = frozenset(MONITORING_DIAGNOSTIC_VALUES)
 
@@ -382,6 +384,44 @@ def resolve_monitoring_target(
             endpoint_id=str(endpoint.get("id") or ""),
         )
     )
+
+
+
+def resolve_gatus_source_target(
+    data: Mapping[str, Any],
+    *,
+    object_id: str = "<service>",
+) -> MonitoringTargetResolution:
+    """Resolve the Gatus status-source URL into exactly one bounded target.
+
+    This is the Gatus pull counterpart to ``resolve_monitoring_target``. The
+    target is the **Gatus API** URL that serves endpoint status, not the
+    monitored service itself. It comes from ``data.monitoring.gatus.source_url``
+    and is validated with the same SSRF controls as ``health_url`` (http/https,
+    plain host, no userinfo or fragment).
+
+    A missing or malformed source URL yields a stable diagnostic; resolution
+    never performs DNS, opens a socket, or probes the API.
+
+    Args:
+        data: The service's catalog data document.
+        object_id: The service id, used only for diagnostics.
+
+    Returns:
+        A resolution with the Gatus API target, or a stable diagnostic when the
+        source URL is missing or unusable.
+    """
+    document = data.get("monitoring") if isinstance(data, Mapping) else None
+    gatus = document.get("gatus") if isinstance(document, Mapping) else None
+    if not isinstance(gatus, Mapping):
+        return MonitoringTargetResolution(None, "missing_gatus_source")
+    source_url = gatus.get("source_url")
+    if not isinstance(source_url, str) or not source_url.strip():
+        return MonitoringTargetResolution(None, "missing_gatus_source")
+    target = _parse_health_url(source_url, source="gatus")
+    if target is None:
+        return MonitoringTargetResolution(None, "invalid_gatus_source_url")
+    return MonitoringTargetResolution(target)
 
 
 def freshness_for(
@@ -689,7 +729,11 @@ def _endpoint_origin(endpoint: Mapping[str, Any]) -> tuple[str, str, int] | None
     return scheme, canonical_host, port
 
 
-def _parse_health_url(value: str) -> MonitoringTarget | None:
+def _parse_health_url(
+    value: str,
+    *,
+    source: MonitoringTargetSource = "endpoint_health_url",
+) -> MonitoringTarget | None:
     if len(value) > 512 or any(ord(character) < 32 or ord(character) == 127 for character in value):
         return None
     try:
@@ -726,7 +770,7 @@ def _parse_health_url(value: str) -> MonitoringTarget | None:
         host=host,
         port=port,
         path=f"{path}{query}",
-        source="endpoint_health_url",
+        source=source,
         endpoint_id="",
     )
 
