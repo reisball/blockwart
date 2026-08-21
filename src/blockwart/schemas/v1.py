@@ -396,6 +396,8 @@ class V1ObjectUpdatePreviewValueOut(BaseModel):
     `redacted`, so no secret-shaped or concealed value can be reconstructed.
     """
 
+    model_config = ConfigDict(extra="forbid")
+
     state: Literal["absent", "value", "redacted", "truncated"]
     type: Literal[
         "absent",
@@ -407,11 +409,13 @@ class V1ObjectUpdatePreviewValueOut(BaseModel):
         "array",
         "object",
     ]
-    text: str | None = Field(default=None, max_length=PREVIEW_DIFF_VALUE_MAX_LENGTH)
+    text: str | None = Field(max_length=PREVIEW_DIFF_VALUE_MAX_LENGTH)
 
 
 class V1ObjectUpdatePreviewDiffEntryOut(BaseModel):
     """One canonical change the proposed update would make."""
+
+    model_config = ConfigDict(extra="forbid")
 
     path: str = Field(
         max_length=PREVIEW_DIFF_PATH_MAX_LENGTH,
@@ -435,6 +439,8 @@ class V1ObjectUpdatePreviewOut(BaseModel):
     revisions, and one stable digest over exactly these safe published fields.
     """
 
+    model_config = ConfigDict(extra="forbid")
+
     preview_contract_version: Literal[PREVIEW_CONTRACT_VERSION]
     object_id: str = Field(
         min_length=1,
@@ -448,7 +454,6 @@ class V1ObjectUpdatePreviewOut(BaseModel):
     expected_result_revision: int = Field(ge=1)
     expected_result_etag: str = Field(pattern=r'^"rev-[1-9][0-9]*"$')
     diff: list[V1ObjectUpdatePreviewDiffEntryOut] = Field(
-        default_factory=list,
         max_length=PREVIEW_DIFF_MAX_ENTRIES,
         description=(
             "Canonically ordered, bounded, redacted structured diff of the "
@@ -462,7 +467,7 @@ class V1ObjectUpdatePreviewOut(BaseModel):
             "including bounded-output omissions and unabridged non-secret values."
         )
     )
-    diff_truncated: bool = False
+    diff_truncated: bool
     preview_digest: str = Field(pattern=r"^sha256:[0-9a-f]{64}$")
 
 

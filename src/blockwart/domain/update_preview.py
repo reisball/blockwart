@@ -19,8 +19,6 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Literal
 
-from blockwart.domain.security import REDACTED_SECRET_VALUE
-
 # Bump deliberately when the safe preview contract itself changes shape.
 PREVIEW_CONTRACT_VERSION = "1"
 # Domain separator for the preview digest. NUL bytes cannot occur in the
@@ -51,9 +49,18 @@ PreviewOperation = Literal["added", "removed", "changed"]
 PreviewPathState = Literal["exact", "hashed"]
 
 _ABSENT = object()
-# Concealed typed references use a distinct internal marker. Neither marker is
-# serialized: both become the same closed ``redacted`` value state.
-REDACTED_PREVIEW_VALUE = "[redacted-preview-value]"
+
+
+class _RedactedPreviewValue:
+    """Unforgeable marker shared by secret and concealment redaction."""
+
+    __slots__ = ()
+
+
+# This sentinel is never serialized. Both stored secrets and concealed typed
+# references become this exact object before diffing, so literal user strings
+# cannot impersonate redaction while all protected values remain equivalent.
+REDACTED_PREVIEW_VALUE = _RedactedPreviewValue()
 
 
 @dataclass(frozen=True, slots=True)
@@ -63,7 +70,7 @@ class PreviewValue:
     state: PreviewValueState
     type: PreviewValueType
     text: str | None
-    semantic_text: str | None
+    semantic_value: object
 
     def as_json(self) -> dict[str, object]:
         return {"state": self.state, "type": self.type, "text": self.text}
@@ -181,7 +188,7 @@ def preview_value(value: object) -> PreviewValue:
             state="absent",
             type="absent",
             text=None,
-            semantic_text=None,
+            semantic_value={"state": "absent"},
         )
     value_type = _value_type(value)
     if _contains_redaction(value):
@@ -189,7 +196,7 @@ def preview_value(value: object) -> PreviewValue:
             state="redacted",
             type=value_type,
             text=None,
-            semantic_text=None,
+            semantic_value=_semantic_projection(value),
         )
     rendered = value if isinstance(value, str) else _canonical_json(value)
     if len(rendered) > PREVIEW_DIFF_VALUE_MAX_LENGTH:
@@ -197,13 +204,13 @@ def preview_value(value: object) -> PreviewValue:
             state="truncated",
             type=value_type,
             text=rendered[:PREVIEW_DIFF_VALUE_MAX_LENGTH],
-            semantic_text=rendered,
+            semantic_value=_semantic_projection(value),
         )
     return PreviewValue(
         state="value",
         type=value_type,
         text=rendered,
-        semantic_text=rendered,
+        semantic_value=_semantic_projection(value),
     )
 
 
@@ -227,13 +234,37 @@ def _value_type(value: object) -> PreviewValueType:
 
 def _contains_redaction(value: object) -> bool:
     """Whether the shared redaction replaced anything inside this value."""
-    if isinstance(value, str):
-        return value in {REDACTED_SECRET_VALUE, REDACTED_PREVIEW_VALUE}
+    if value is REDACTED_PREVIEW_VALUE:
+        return True
     if isinstance(value, Mapping):
         return any(_contains_redaction(item) for item in value.values())
     if isinstance(value, list | tuple):
         return any(_contains_redaction(item) for item in value)
     return False
+
+
+def _semantic_projection(value: object) -> object:
+    """Preserve every safe sibling while collapsing only protected leaves."""
+    if value is REDACTED_PREVIEW_VALUE:
+        return {"state": "redacted"}
+    if isinstance(value, Mapping):
+        return {
+            "state": "object",
+            "value": {
+                str(key): _semantic_projection(item)
+                for key, item in value.items()
+            },
+        }
+    if isinstance(value, list | tuple):
+        return {
+            "state": "array",
+            "value": [_semantic_projection(item) for item in value],
+        }
+    return {
+        "state": "value",
+        "type": _value_type(value),
+        "value": value,
+    }
 
 
 def preview_digest(body: Mapping[str, object]) -> str:
@@ -281,7 +312,7 @@ def _semantic_value(value: PreviewValue) -> dict[str, object]:
     return {
         "state": value.state,
         "type": value.type,
-        "text": value.semantic_text,
+        "value": value.semantic_value,
     }
 
 

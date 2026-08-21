@@ -6250,6 +6250,7 @@
         "type": "object"
       },
       "V1ObjectUpdatePreviewDiffEntryOut": {
+        "additionalProperties": false,
         "description": "One canonical change the proposed update would make.",
         "properties": {
           "after": {
@@ -6294,6 +6295,7 @@
         "type": "object"
       },
       "V1ObjectUpdatePreviewOut": {
+        "additionalProperties": false,
         "description": "The read-only result of one ETag-bound full-object update preview.\n\nThe response deliberately carries no object document: only the redacted\nstructured diff, the canonical no-op answer, the base and expected result\nrevisions, and one stable digest over exactly these safe published fields.",
         "properties": {
           "base_etag": {
@@ -6326,7 +6328,6 @@
             "type": "string"
           },
           "diff_truncated": {
-            "default": false,
             "title": "Diff Truncated",
             "type": "boolean"
           },
@@ -6382,13 +6383,16 @@
           "base_etag",
           "expected_result_revision",
           "expected_result_etag",
+          "diff",
           "diff_digest",
+          "diff_truncated",
           "preview_digest"
         ],
         "title": "V1ObjectUpdatePreviewOut",
         "type": "object"
       },
       "V1ObjectUpdatePreviewValueOut": {
+        "additionalProperties": false,
         "description": "One closed, bounded side of a published preview diff entry.\n\n`state` distinguishes an absent path, a rendered value, a value the shared\nsecret redaction removed, and a rendered value cut at the published bound.\n`text` carries the exact string for a string value and the canonical JSON\nrendering for every other type; it is always `null` for `absent` and\n`redacted`, so no secret-shaped or concealed value can be reconstructed.",
         "properties": {
           "state": {
@@ -6430,7 +6434,8 @@
         },
         "required": [
           "state",
-          "type"
+          "type",
+          "text"
         ],
         "title": "V1ObjectUpdatePreviewValueOut",
         "type": "object"

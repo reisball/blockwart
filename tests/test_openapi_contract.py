@@ -68,3 +68,35 @@ def test_openapi_exposes_only_reviewed_machine_operations() -> None:
 
     assert operations == EXPECTED_OPERATIONS
     assert not any(path.startswith(("/admin", "/objects", "/settings")) for path in operations)
+
+
+def test_update_preview_response_models_are_closed_and_fully_required() -> None:
+    schemas = create_app(settings=Settings()).openapi()["components"]["schemas"]
+    expected_required = {
+        "V1ObjectUpdatePreviewValueOut": {"state", "type", "text"},
+        "V1ObjectUpdatePreviewDiffEntryOut": {
+            "path",
+            "path_state",
+            "operation",
+            "before",
+            "after",
+        },
+        "V1ObjectUpdatePreviewOut": {
+            "preview_contract_version",
+            "object_id",
+            "object_kind",
+            "changed",
+            "base_revision",
+            "base_etag",
+            "expected_result_revision",
+            "expected_result_etag",
+            "diff",
+            "diff_digest",
+            "diff_truncated",
+            "preview_digest",
+        },
+    }
+
+    for name, required in expected_required.items():
+        assert schemas[name]["additionalProperties"] is False
+        assert set(schemas[name]["required"]) == required

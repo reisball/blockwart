@@ -1881,3 +1881,61 @@ def test_postgresql_object_update_preview_mutates_no_row_or_sequence(
             text("SELECT revision FROM catalog_objects WHERE id = 'pg-preview-target'")
         ).scalar_one()
     assert revision == changed.json()["expected_result_revision"]
+
+
+def test_postgresql_noop_apply_rechecks_revision_after_competing_commit(
+    migrated_pg_engine: Engine,
+) -> None:
+    """Interleave two sessions between no-op planning and conditional apply."""
+    from blockwart.db.session import transaction as db_transaction
+    from blockwart.schemas.catalog import CatalogObjectIn
+    from blockwart.services.catalog import (
+        RevisionConflict,
+        apply_object_upsert,
+        plan_object_upsert,
+        upsert_object,
+    )
+
+    sessions = sessionmaker(bind=migrated_pg_engine, autoflush=False, autocommit=False)
+    original = CatalogObjectIn(
+        id="pg-noop-race-target",
+        kind="service",
+        label="No-op race target",
+        lifecycle="active",
+        health="healthy",
+        summary="before",
+        data={"schema_version": 1},
+    )
+    with sessions() as seed_session:
+        with db_transaction(seed_session):
+            created = upsert_object(seed_session, original)
+            assert created.revision == 1
+
+    with sessions() as late_session, sessions() as competing_session:
+        stale_noop = plan_object_upsert(
+            late_session,
+            original,
+            expected_revision=1,
+        )
+        assert stale_noop.unchanged is True
+
+        competing = plan_object_upsert(
+            competing_session,
+            original.model_copy(update={"summary": "competing"}),
+            expected_revision=1,
+        )
+        with db_transaction(competing_session):
+            applied = apply_object_upsert(competing_session, competing)
+            assert applied.revision == 2
+
+        with pytest.raises(RevisionConflict, match="revision does not match"):
+            apply_object_upsert(late_session, stale_noop)
+        late_session.rollback()
+
+    with migrated_pg_engine.connect() as connection:
+        assert connection.execute(
+            text(
+                "SELECT revision FROM catalog_objects "
+                "WHERE id = 'pg-noop-race-target'"
+            )
+        ).scalar_one() == 2

@@ -26,12 +26,13 @@ from blockwart.domain.references import TypedReference
 from blockwart.domain.relationships import (
     RelationshipIntegrityError,
     canonical_relationship_metadata_json,
+    iter_typed_reference_strings,
     relationship_metadata,
     validate_relationship_collection,
     validate_relationship_metadata,
 )
 from blockwart.domain.runbooks import iter_runbook_references
-from blockwart.domain.security import redact_secret_values
+from blockwart.domain.security import REDACTED_SECRET_VALUE, redact_secret_values
 from blockwart.domain.update_preview import (
     PREVIEW_CONTRACT_VERSION,
     REDACTED_PREVIEW_VALUE,
@@ -240,7 +241,12 @@ def plan_object_update(
         raise CommandConflict("payload object id does not match the resource")
     if row.revision != resolved_revision:
         raise CommandPreconditionFailed("object revision changed")
-    _require_knowledge_reference_access(session, current_context, payload)
+    _require_knowledge_reference_access(
+        session,
+        current_context,
+        payload,
+        all_typed_references=True,
+    )
     try:
         upsert_plan = plan_object_upsert(
             session,
@@ -395,7 +401,10 @@ def _current_snapshot(
     reporting `changed` with an empty diff, without widening the existing
     object-audit snapshot contract.
     """
-    snapshot = _object_snapshot(row)
+    snapshot = _object_snapshot(
+        row,
+        redaction_replacement=REDACTED_PREVIEW_VALUE,
+    )
     snapshot["provenance"] = _redacted_json_document(row.provenance_json)
     safe = _redact_concealed_references(snapshot, context)
     return safe if isinstance(safe, dict) else {}
@@ -419,7 +428,10 @@ def _proposed_snapshot(
         "data": json.loads(plan.data_json),
         "provenance": json.loads(plan.provenance_json),
     }
-    redacted = redact_secret_values(snapshot)
+    redacted = redact_secret_values(
+        snapshot,
+        replacement=REDACTED_PREVIEW_VALUE,
+    )
     safe = redacted if isinstance(redacted, dict) else {}
     concealed = _redact_concealed_references(safe, context)
     return concealed if isinstance(concealed, dict) else {}
@@ -454,7 +466,10 @@ def _redacted_json_document(raw_json: str | None) -> object:
         document = json.loads(raw_json or "")
     except (TypeError, json.JSONDecodeError):
         return {"record_state": "corrupt"}
-    return redact_secret_values(document)
+    return redact_secret_values(
+        document,
+        replacement=REDACTED_PREVIEW_VALUE,
+    )
 
 
 def create_child_object(
@@ -1420,7 +1435,11 @@ def _write_command_audit(
     session.flush()
 
 
-def _object_snapshot(row: CatalogObject) -> dict[str, object]:
+def _object_snapshot(
+    row: CatalogObject,
+    *,
+    redaction_replacement: object = REDACTED_SECRET_VALUE,
+) -> dict[str, object]:
     try:
         data = json.loads(row.data_json)
     except json.JSONDecodeError:
@@ -1435,7 +1454,10 @@ def _object_snapshot(row: CatalogObject) -> dict[str, object]:
         "summary": row.summary,
         "data": data,
     }
-    redacted = redact_secret_values(snapshot)
+    redacted = redact_secret_values(
+        snapshot,
+        replacement=redaction_replacement,
+    )
     return redacted if isinstance(redacted, dict) else {}
 
 
@@ -1553,32 +1575,54 @@ def _require_knowledge_reference_access(
     session: Session,
     context: WriteContext,
     payload: CatalogObjectIn,
+    *,
+    all_typed_references: bool = False,
 ) -> None:
-    """Fail closed when a knowledge write names an unreadable target.
+    """Fail closed when a projected write names an unreadable typed target.
 
     Missing, kind-mismatched, and concealed targets intentionally share the
     same public command error. The projected object may name itself here so the
     canonical supersession graph validator can report the self-link rule.
+
+    Existing create commands retain their reviewed knowledge-reference
+    contract. The full-object update planner opts into all typed references so
+    preview and PUT cannot distinguish an unreadable service/asset target from
+    an absent or kind-mismatched one.
     """
     if payload.kind == "runbook":
-        references = iter_runbook_references(payload.data)
+        knowledge_references = iter_runbook_references(payload.data)
         message = "runbook reference target not found"
     elif payload.kind == "decision":
-        references = iter_decision_references(payload.data)
+        knowledge_references = iter_decision_references(payload.data)
         message = "decision reference target not found"
     elif payload.kind == "project":
-        references = iter_project_references(payload.data)
+        knowledge_references = iter_project_references(payload.data)
         message = "project reference target not found"
     else:
-        return
-    for reference in references:
-        if reference.parsed.object_id == payload.id:
+        knowledge_references = ()
+        message = "reference target not found"
+    if all_typed_references:
+        references: set[TypedReference] = set()
+        for reference_value in iter_typed_reference_strings(payload.data):
+            try:
+                references.add(TypedReference.parse(reference_value))
+            except ValueError:
+                # The canonical validator publishes the stable malformed
+                # reference error after this authorization projection.
+                continue
+    else:
+        references = {reference.parsed for reference in knowledge_references}
+    for reference in sorted(
+        references,
+        key=lambda item: (item.kind, item.object_id),
+    ):
+        if reference.object_id == payload.id:
             continue
-        target = session.get(CatalogObject, reference.parsed.object_id)
+        target = session.get(CatalogObject, reference.object_id)
         if (
             target is None
-            or target.kind != reference.parsed.kind
-            or not context.policy.can(Permission.READ, target.id)
+            or target.kind != reference.kind
+            or not context.policy.can(Permission.READ, reference.object_id)
         ):
             raise CommandNotFound(message)
 

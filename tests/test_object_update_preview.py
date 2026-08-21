@@ -29,6 +29,8 @@ from blockwart.domain.update_preview import (
     PREVIEW_DIFF_MAX_ENTRIES,
     PREVIEW_DIFF_VALUE_MAX_LENGTH,
     PREVIEW_DIGEST_DOMAIN,
+    REDACTED_PREVIEW_VALUE,
+    preview_diff,
     preview_digest,
 )
 from blockwart.main import create_app
@@ -729,7 +731,7 @@ REJECTION_CASES: list[tuple[str, str, dict, int]] = [
         "typed_reference_target",
         "service",
         {"schema_version": 1, "credential_refs": ["credential_reference:not-here"]},
-        409,
+        404,
     ),
     (
         "component_reference",
@@ -1310,7 +1312,7 @@ def test_diff_paths_are_unambiguous_canonical_json_pointers(
     assert long_key not in json.dumps(bounded)
 
 
-def test_concealed_typed_identities_are_redacted_from_diff_and_digest(
+def test_concealed_missing_and_kind_mismatched_references_are_indistinguishable(
     preview_client: TestClient,
     preview_state,
 ) -> None:
@@ -1323,28 +1325,57 @@ def test_concealed_typed_identities_are_redacted_from_diff_and_digest(
             data={"schema_version": 1, "opaque_reference": reference},
         ).model_dump(mode="json")
 
-    concealed = _preview(
-        preview_client,
-        preview_state,
-        object_id,
-        proposed("service:preview-concealed"),
-        if_match=etag,
-    ).json()
-    second_concealed = _preview(
-        preview_client,
-        preview_state,
-        object_id,
-        proposed("service:preview-concealed-two"),
-        if_match=etag,
-    ).json()
+    responses = [
+        _preview(
+            preview_client,
+            preview_state,
+            object_id,
+            proposed(reference),
+            if_match=etag,
+        )
+        for reference in (
+            "service:preview-concealed",
+            "credential_reference:preview-concealed",
+            "service:not-present",
+        )
+    ]
 
-    assert concealed == second_concealed
-    reference_change = next(
-        entry for entry in concealed["diff"] if entry["path"] == "/data/opaque_reference"
+    assert [response.status_code for response in responses] == [404, 404, 404]
+    safe_errors = [
+        {
+            key: value
+            for key, value in response.json()["error"].items()
+            if key != "correlation_id"
+        }
+        for response in responses
+    ]
+    assert safe_errors[0] == safe_errors[1] == safe_errors[2]
+    assert "preview-concealed" not in json.dumps(safe_errors)
+    assert "not-present" not in json.dumps(safe_errors)
+
+
+def test_diff_digest_preserves_safe_siblings_and_rejects_forgeable_markers() -> None:
+    first_diff, _, first_digest = preview_diff(
+        {"values": []},
+        {"values": ["public-one", REDACTED_PREVIEW_VALUE]},
     )
-    assert reference_change["after"]["state"] == "redacted"
-    assert "preview-concealed" not in json.dumps(concealed)
-    assert "preview-concealed-two" not in json.dumps(second_concealed)
+    second_diff, _, second_digest = preview_diff(
+        {"values": []},
+        {"values": ["public-two", REDACTED_PREVIEW_VALUE]},
+    )
+    literal_diff, _, literal_digest = preview_diff(
+        {"values": []},
+        {"values": ["public-one", REDACTED_SECRET_VALUE]},
+    )
+
+    assert first_diff[0].after.as_json() == second_diff[0].after.as_json() == {
+        "state": "redacted",
+        "type": "array",
+        "text": None,
+    }
+    assert first_digest != second_digest
+    assert literal_digest != first_digest
+    assert literal_diff[0].after.as_json()["state"] == "value"
 
 
 # ---------------------------------------------------------------------------

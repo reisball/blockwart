@@ -654,6 +654,17 @@ def apply_object_upsert(
     row = plan.row
     target_state = plan.target_state
     if row is not None and plan.unchanged:
+        if plan.expected_revision is not None:
+            current_id = session.scalar(
+                select(CatalogObject.id)
+                .where(
+                    CatalogObject.id == payload.id,
+                    CatalogObject.revision == plan.expected_revision,
+                )
+                .with_for_update()
+            )
+            if current_id is None:
+                raise RevisionConflict("catalog object revision does not match")
         return _to_schema(row)
     changed_at = _now()
     if row is None:
