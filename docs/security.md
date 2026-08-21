@@ -27,6 +27,13 @@ rows, command-line arguments, or generated documentation. See
 Catalog reads are authenticated and object-authorized across UI, REST, Agent
 API, and MCP. No-discover objects are concealed and discover-only objects use
 a strict safe stub. Catalog and grant commands are also object-authorized.
+The ETag-bound object-update preview requires effective `write` on the exact
+object and applies the same concealment, validation, and strong-precondition
+policy as the real update. Its bounded diff redacts secret-shaped values and
+typed identities the caller cannot read before calculating either digest. A
+valid or object-denied preview writes no catalog, authentication timestamp,
+security-event, audit, idempotency, relationship, or sequence state and creates
+no later-apply guarantee.
 The known-ID batch context read (`POST /api/v1/object-contexts` and
 `blockwart.get_object_contexts`) applies the same policy per requested ID:
 readable objects return the full detail, discover-only objects return the

@@ -23,7 +23,8 @@ from pathlib import Path
 
 import pytest
 from alembic import command
-from sqlalchemy import create_engine, inspect, text
+from fastapi.testclient import TestClient
+from sqlalchemy import create_engine, event, inspect, text
 from sqlalchemy.dialects import postgresql, sqlite
 from sqlalchemy.engine import Engine
 from sqlalchemy.exc import IntegrityError
@@ -1705,3 +1706,178 @@ def test_postgresql_reviewed_source_coverage_record_and_semantic_noop(
         assert connection.scalar(text("SELECT count(*) FROM source_entry_mappings")) == 1
         assert connection.scalar(text("SELECT count(*) FROM catalog_objects")) == 1
         assert connection.scalar(text("SELECT count(*) FROM audit_events")) == 0
+
+
+# ---------------------------------------------------------------------------
+# Issue #189: the ETag-bound update preview is read-only on PostgreSQL too
+# ---------------------------------------------------------------------------
+
+
+def test_postgresql_object_update_preview_mutates_no_row_or_sequence(
+    migrated_pg_engine: Engine,
+) -> None:
+    """Prove the preview is read-only where SQLite semantics cannot vouch for it.
+
+    PostgreSQL has real per-table sequences, real transaction/xid visibility,
+    and a real `pg_stat_user_tables` write counter, so it can distinguish a
+    genuinely read-only path from one that writes and rolls back. A simulated
+    write would still advance sequences and `n_tup_ins`; this preview does not.
+    """
+    from blockwart.api.deps import get_session
+    from blockwart.db.session import transaction as db_transaction
+    from blockwart.domain.auth import GrantScope, Role
+    from blockwart.main import create_app
+    from blockwart.schemas.catalog import CatalogObjectIn
+    from blockwart.services.access import create_object_grant
+    from blockwart.services.catalog import upsert_object
+    from blockwart.services.identity import (
+        create_service_account,
+        issue_service_token,
+    )
+    sessions = sessionmaker(bind=migrated_pg_engine, autoflush=False, autocommit=False)
+    with sessions() as session:
+        with db_transaction(session):
+            row = upsert_object(
+                session,
+                CatalogObjectIn(
+                    id="pg-preview-target",
+                    kind="service",
+                    label="Preview Target",
+                    lifecycle="active",
+                    health="healthy",
+                    summary="before",
+                    data={"schema_version": 1},
+                ),
+            )
+            principal = create_service_account(
+                session,
+                login="pg.preview.writer",
+                display_name="PG Preview Writer",
+            )
+            create_object_grant(
+                session,
+                principal_id=principal.id,
+                object_id=row.id,
+                role=Role.EDITOR,
+                scope=GrantScope.SELF,
+            )
+            token = issue_service_token(
+                session,
+                principal_id=principal.id,
+                name="pg-preview",
+            )
+
+    application = create_app()
+
+    def override_get_session():
+        with sessions() as request_session:
+            yield request_session
+
+    application.dependency_overrides[get_session] = override_get_session
+    authorization = {"Authorization": f"Bearer {token.value}"}
+
+    def table_state() -> dict[str, object]:
+        with migrated_pg_engine.connect() as connection:
+            table_names = sorted(inspect(connection).get_table_names())
+            rows = {
+                table: sorted(
+                    (tuple(row) for row in connection.execute(text(f'SELECT * FROM "{table}"'))),
+                    key=repr,
+                )
+                for table in table_names
+            }
+            sequences = sorted(
+                (str(name), int(value))
+                for name, value in connection.execute(
+                    text(
+                        "SELECT sequencename, COALESCE(last_value, -1) "
+                        "FROM pg_sequences WHERE schemaname = 'public'"
+                    )
+                )
+            )
+        return {"rows": rows, "sequences": sequences}
+
+    with TestClient(application) as client:
+        detail = client.get("/api/v1/objects/pg-preview-target", headers=authorization)
+        assert detail.status_code == 200
+        etag = detail.headers["etag"]
+        before = table_state()
+        statements: list[str] = []
+
+        def capture_statement(
+            _connection,
+            _cursor,
+            statement,
+            _parameters,
+            _context,
+            _executemany,
+        ) -> None:
+            statements.append(str(statement))
+
+        event.listen(migrated_pg_engine, "before_cursor_execute", capture_statement)
+
+        proposed = {
+            "id": "pg-preview-target",
+            "kind": "service",
+            "label": "Preview Target",
+            "status": "active",
+            "lifecycle": "active",
+            "health": "degraded",
+            "summary": "after",
+            "data": {"schema_version": 1},
+        }
+        try:
+            changed = client.post(
+                "/api/v1/objects/pg-preview-target/update-preview",
+                headers={**authorization, "If-Match": etag},
+                json=proposed,
+            )
+            noop = client.post(
+                "/api/v1/objects/pg-preview-target/update-preview",
+                headers={**authorization, "If-Match": etag},
+                json={**proposed, "health": "healthy", "summary": "before"},
+            )
+            stale = client.post(
+                "/api/v1/objects/pg-preview-target/update-preview",
+                headers={**authorization, "If-Match": '"rev-99"'},
+                json=proposed,
+            )
+            invalid = client.post(
+                "/api/v1/objects/pg-preview-target/update-preview",
+                headers={**authorization, "If-Match": etag},
+                json={**proposed, "data": {"schema_version": 1, "password": "x"}},
+            )
+        finally:
+            event.remove(migrated_pg_engine, "before_cursor_execute", capture_statement)
+
+        assert changed.status_code == 200, changed.text
+        assert changed.json()["changed"] is True
+        assert noop.json()["changed"] is False
+        assert stale.status_code == 412
+        assert invalid.status_code == 422
+
+        after = table_state()
+        assert after["rows"] == before["rows"]
+        assert after["sequences"] == before["sequences"]
+        normalized_statements = [statement.lstrip().upper() for statement in statements]
+        assert not any(
+            statement.startswith(("INSERT", "UPDATE", "DELETE", "SAVEPOINT"))
+            or " FOR UPDATE" in statement
+            or "NEXTVAL(" in statement
+            for statement in normalized_statements
+        )
+
+        # The very next real update still works and is the only writer.
+        applied = client.put(
+            "/api/v1/objects/pg-preview-target",
+            headers={**authorization, "If-Match": etag},
+            json=proposed,
+        )
+
+    assert applied.status_code == 200, applied.text
+    assert applied.headers["etag"] == changed.json()["expected_result_etag"]
+    with migrated_pg_engine.connect() as connection:
+        revision = connection.execute(
+            text("SELECT revision FROM catalog_objects WHERE id = 'pg-preview-target'")
+        ).scalar_one()
+    assert revision == changed.json()["expected_result_revision"]

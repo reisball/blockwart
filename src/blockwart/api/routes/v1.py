@@ -6,8 +6,12 @@ from sqlalchemy.orm import Session
 
 from blockwart.api.deps import get_session
 from blockwart.api.errors import API_ERROR_RESPONSES
-from blockwart.api.security import require_api_read_access
-from blockwart.api.write_commands import api_write_context, execute_api_command
+from blockwart.api.security import require_api_read_access, require_api_read_only_access
+from blockwart.api.write_commands import (
+    api_write_context,
+    execute_api_command,
+    execute_api_read_only_command,
+)
 from blockwart.config import Settings
 from blockwart.domain.asset_state import AssetHealth, AssetLifecycle
 from blockwart.domain.auth import GrantScope
@@ -85,6 +89,8 @@ from blockwart.schemas.v1 import (
     V1ObjectContextBatchIn,
     V1ObjectContextBatchOut,
     V1ObjectPageOut,
+    V1ObjectUpdatePreviewDiffEntryOut,
+    V1ObjectUpdatePreviewOut,
     V1PrincipalSearchOut,
     V1PrincipalSummaryOut,
     V1ProjectedObjectContextBatchOut,
@@ -112,6 +118,7 @@ from blockwart.services.commands import (
     create_object_relationship,
     delete_catalog_object,
     delete_object_relationship,
+    preview_catalog_object_update,
     revision_etag,
     update_catalog_object,
 )
@@ -1015,6 +1022,7 @@ def update_v1_object(
             object_id=object_id,
             payload=payload,
             expected_revision=if_match,
+            refresh_policy=True,
         ),
     )
     response.headers["ETag"] = result.etag
@@ -1022,6 +1030,64 @@ def update_v1_object(
         catalog_object=result.catalog_object,
         etag=result.etag,
         changed=result.changed,
+    )
+
+
+@router.post(
+    "/objects/{object_id}/update-preview",
+    response_model=V1ObjectUpdatePreviewOut,
+    summary="Preview one ETag-bound full-object update without writing",
+)
+def preview_v1_object_update(
+    object_id: str,
+    payload: CatalogObjectIn,
+    request: Request,
+    response: Response,
+    session: Annotated[Session, Depends(get_session)],
+    access: Annotated[ReadAccess, Depends(require_api_read_only_access)],
+    if_match: Annotated[str | None, Header(alias="If-Match")] = None,
+) -> V1ObjectUpdatePreviewOut:
+    """Resolve the proposed full-object update read-only and publish its diff.
+
+    The request is exactly the request of `PUT /api/v1/objects/{object_id}`:
+    the exact object ID, the current strong `If-Match` ETag, and the complete
+    proposed object. Effective `write` on that exact object is required even
+    though nothing is written, and every authorization, precondition, schema,
+    normalization, secret, reference, relationship, lifecycle, placement,
+    monitoring, component, provenance, and kind rule is the shared one. The
+    preview creates no lock, reservation, or later-apply guarantee: a write
+    between preview and apply fails the ordinary precondition.
+    """
+    context = api_write_context(request, access)
+    result = execute_api_read_only_command(
+        session,
+        context,
+        lambda: preview_catalog_object_update(
+            session,
+            context,
+            object_id=object_id,
+            payload=payload,
+            expected_revision=if_match,
+            refresh_policy=True,
+        ),
+    )
+    response.headers["ETag"] = result.base_etag
+    return V1ObjectUpdatePreviewOut(
+        preview_contract_version=result.contract_version,
+        object_id=result.object_id,
+        object_kind=result.object_kind,
+        changed=result.changed,
+        base_revision=result.base_revision,
+        base_etag=result.base_etag,
+        expected_result_revision=result.expected_result_revision,
+        expected_result_etag=result.expected_result_etag,
+        diff=[
+            V1ObjectUpdatePreviewDiffEntryOut.model_validate(entry.as_json())
+            for entry in result.diff
+        ],
+        diff_digest=result.diff_digest,
+        diff_truncated=result.diff_truncated,
+        preview_digest=result.preview_digest,
     )
 
 

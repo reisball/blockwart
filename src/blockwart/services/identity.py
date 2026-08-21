@@ -511,6 +511,7 @@ def authenticate_service_token(
     request_id: str | None = None,
     now: datetime | None = None,
     record_failure_event: bool = True,
+    update_last_used: bool = True,
 ) -> PrincipalContext | None:
     timestamp = now or utc_now()
     token_id = _opaque_id(token, SERVICE_TOKEN_PREFIX)
@@ -541,8 +542,9 @@ def authenticate_service_token(
         )
     if not authenticated:
         return None
-    row.last_used_at = timestamp
-    session.flush()
+    if update_last_used:
+        row.last_used_at = timestamp
+        session.flush()
     return principal_context(principal, service_token_audience=row.audience)
 
 
@@ -554,6 +556,7 @@ def authenticate_bearer_header(
     request_id: str | None = None,
     now: datetime | None = None,
     record_failure_event: bool = True,
+    update_last_used: bool = True,
 ) -> PrincipalContext | None:
     if authorization is None:
         token = ""
@@ -567,6 +570,7 @@ def authenticate_bearer_header(
         request_id=request_id,
         now=now,
         record_failure_event=record_failure_event,
+        update_last_used=update_last_used,
     )
 
 

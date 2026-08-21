@@ -81,6 +81,7 @@ It wraps the object-authorized v1 API:
 - blockwart.create_child -> POST /api/v1/objects/{parent_id}/children
 - blockwart.create_root -> POST /api/v1/roots
 - blockwart.update_object -> PUT /api/v1/objects/{object_id}
+- blockwart.preview_object_update -> POST /api/v1/objects/{object_id}/update-preview
 - blockwart.delete_object -> DELETE /api/v1/objects/{object_id}
 - blockwart.create_relationship -> POST /api/v1/objects/{object_id}/relationships
 - blockwart.delete_relationship -> DELETE /api/v1/objects/{object_id}/relationships
@@ -194,6 +195,15 @@ deletion leaves no object or successor ETag to read. Discover-only stubs
 contain neither field, so they cannot be used to infer or attempt a write
 precondition.
 
+Before a reviewed full-object update, `blockwart.preview_object_update` accepts
+the exact `object_id`, `if_match`, and complete `object` arguments of
+`blockwart.update_object`. It requires effective `write` but is annotated
+read-only and directly returns REST's bounded redacted diff, canonical no-op
+answer, base and expected result revision/ETag, complete safe-diff digest, and
+versioned preview digest. It creates no lock or reservation; clients still pass
+the original ETag to the real update and receive the ordinary precondition
+failure if anything changed in between.
+
 For `service`, the same generic context and object write tools carry the
 canonical bounded `data.components` document. `blockwart.describe_schema`
 publishes its local identity, role, direction, cycle, limit, ordering, and
@@ -245,6 +255,7 @@ means it deliberately bundles lower-level API concerns behind one agent call.
 | `create_child` | Create a placed child | `intent tool`, `response improved` | Resolves the parent internally and proves placement, ownership, revision, and idempotency. |
 | `create_root` | Create a disconnected catalog root | `intent tool`, `response improved` | Requires an already active catalog-owner principal; proves ownership, revision, idempotency, and the absence of a placement parent. Never mutates any catalog role. |
 | `update_object` | Update one known object | `directly sufficient` | The explicit current ETag preserves visible optimistic concurrency. |
+| `preview_object_update` | Review one proposed full-object update | `directly sufficient` | Uses the exact update arguments and shared plan, but returns only the bounded redacted diff and digest without mutating catalog or authentication state. |
 | `delete_object` | Delete one known object | `directly sufficient` | The destructive action and current ETag remain explicit. |
 | `create_relationship` | Link existing objects | `directly sufficient` | Its published schema carries the closed relationship vocabulary and the type-dependent metadata; its response contains the exact relationship, metadata, revision, and ETag. |
 | `delete_relationship` | Unlink existing objects | `directly sufficient` | The exact edge and current ETag remain explicit; the same closed vocabulary applies. |
@@ -357,6 +368,11 @@ and rollback implementation as REST and the browser UI. Update and delete
 arguments carry the last full-read body `etag` unchanged as `if_match`. Child creation carries an
 `idempotency_key`; credentials remain runtime configuration and are never tool
 arguments. Delete tools publish MCP's destructive annotation.
+
+The preview tool uses the planning half of that update command and the same
+field-accurate failures, but performs no write, token-use timestamp update, or
+denial audit. Its output and digests use only the safe redacted preview
+contract; raw object documents and concealed typed identities are absent.
 
 `blockwart.add_comment` carries `object_id`, exact Markdown `body`, and
 `idempotency_key`. It intentionally has no `if_match`: appends are independent,
@@ -496,7 +512,8 @@ and validated correlation ID. Legacy or malformed upstream error bodies become
 unchanged. See `api-boundary-contract.md`.
 
 Object-write and relationship tool validation failures (`blockwart.create_root`,
-`blockwart.create_child`, `blockwart.update_object`, `blockwart.create_attached_device`,
+`blockwart.create_child`, `blockwart.update_object`, `blockwart.preview_object_update`,
+`blockwart.create_attached_device`,
 `blockwart.create_relationship`, and `blockwart.delete_relationship`) return field-accurate,
 sanitized `details` on the `invalid_arguments` error. Each detail carries exactly the canonical
 fields the schema projection publishes: `code` (stable violation type), `location` (rejected

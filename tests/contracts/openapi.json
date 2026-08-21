@@ -6249,6 +6249,192 @@
         "title": "V1ObjectPageOut",
         "type": "object"
       },
+      "V1ObjectUpdatePreviewDiffEntryOut": {
+        "description": "One canonical change the proposed update would make.",
+        "properties": {
+          "after": {
+            "$ref": "#/components/schemas/V1ObjectUpdatePreviewValueOut"
+          },
+          "before": {
+            "$ref": "#/components/schemas/V1ObjectUpdatePreviewValueOut"
+          },
+          "operation": {
+            "enum": [
+              "added",
+              "removed",
+              "changed"
+            ],
+            "title": "Operation",
+            "type": "string"
+          },
+          "path": {
+            "description": "Canonical RFC 6901 JSON Pointer into the normalized object, or a fixed SHA-256 pointer when the exact pointer exceeds the bound.",
+            "maxLength": 512,
+            "pattern": "^/(?:[^~/]|~[01])*(?:/(?:[^~/]|~[01])*)*$",
+            "title": "Path",
+            "type": "string"
+          },
+          "path_state": {
+            "enum": [
+              "exact",
+              "hashed"
+            ],
+            "title": "Path State",
+            "type": "string"
+          }
+        },
+        "required": [
+          "path",
+          "path_state",
+          "operation",
+          "before",
+          "after"
+        ],
+        "title": "V1ObjectUpdatePreviewDiffEntryOut",
+        "type": "object"
+      },
+      "V1ObjectUpdatePreviewOut": {
+        "description": "The read-only result of one ETag-bound full-object update preview.\n\nThe response deliberately carries no object document: only the redacted\nstructured diff, the canonical no-op answer, the base and expected result\nrevisions, and one stable digest over exactly these safe published fields.",
+        "properties": {
+          "base_etag": {
+            "pattern": "^\"rev-[1-9][0-9]*\"$",
+            "title": "Base Etag",
+            "type": "string"
+          },
+          "base_revision": {
+            "minimum": 1.0,
+            "title": "Base Revision",
+            "type": "integer"
+          },
+          "changed": {
+            "title": "Changed",
+            "type": "boolean"
+          },
+          "diff": {
+            "description": "Canonically ordered, bounded, redacted structured diff of the normalized proposal against the current record.",
+            "items": {
+              "$ref": "#/components/schemas/V1ObjectUpdatePreviewDiffEntryOut"
+            },
+            "maxItems": 200,
+            "title": "Diff",
+            "type": "array"
+          },
+          "diff_digest": {
+            "description": "Domain-separated SHA-256 digest of the complete safe semantic diff, including bounded-output omissions and unabridged non-secret values.",
+            "pattern": "^sha256:[0-9a-f]{64}$",
+            "title": "Diff Digest",
+            "type": "string"
+          },
+          "diff_truncated": {
+            "default": false,
+            "title": "Diff Truncated",
+            "type": "boolean"
+          },
+          "expected_result_etag": {
+            "pattern": "^\"rev-[1-9][0-9]*\"$",
+            "title": "Expected Result Etag",
+            "type": "string"
+          },
+          "expected_result_revision": {
+            "minimum": 1.0,
+            "title": "Expected Result Revision",
+            "type": "integer"
+          },
+          "object_id": {
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[a-z0-9][a-z0-9_-]*[a-z0-9]$|^[a-z0-9]$",
+            "title": "Object Id",
+            "type": "string"
+          },
+          "object_kind": {
+            "enum": [
+              "host",
+              "system",
+              "network",
+              "device",
+              "service",
+              "credential_reference",
+              "runbook",
+              "decision",
+              "project"
+            ],
+            "title": "Object Kind",
+            "type": "string"
+          },
+          "preview_contract_version": {
+            "const": "1",
+            "title": "Preview Contract Version",
+            "type": "string"
+          },
+          "preview_digest": {
+            "pattern": "^sha256:[0-9a-f]{64}$",
+            "title": "Preview Digest",
+            "type": "string"
+          }
+        },
+        "required": [
+          "preview_contract_version",
+          "object_id",
+          "object_kind",
+          "changed",
+          "base_revision",
+          "base_etag",
+          "expected_result_revision",
+          "expected_result_etag",
+          "diff_digest",
+          "preview_digest"
+        ],
+        "title": "V1ObjectUpdatePreviewOut",
+        "type": "object"
+      },
+      "V1ObjectUpdatePreviewValueOut": {
+        "description": "One closed, bounded side of a published preview diff entry.\n\n`state` distinguishes an absent path, a rendered value, a value the shared\nsecret redaction removed, and a rendered value cut at the published bound.\n`text` carries the exact string for a string value and the canonical JSON\nrendering for every other type; it is always `null` for `absent` and\n`redacted`, so no secret-shaped or concealed value can be reconstructed.",
+        "properties": {
+          "state": {
+            "enum": [
+              "absent",
+              "value",
+              "redacted",
+              "truncated"
+            ],
+            "title": "State",
+            "type": "string"
+          },
+          "text": {
+            "anyOf": [
+              {
+                "maxLength": 120,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Text"
+          },
+          "type": {
+            "enum": [
+              "absent",
+              "null",
+              "boolean",
+              "integer",
+              "number",
+              "string",
+              "array",
+              "object"
+            ],
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "state",
+          "type"
+        ],
+        "title": "V1ObjectUpdatePreviewValueOut",
+        "type": "object"
+      },
       "V1PrincipalSearchOut": {
         "properties": {
           "items": {
@@ -16415,6 +16601,170 @@
           }
         ],
         "summary": "Get V1 Topology",
+        "tags": [
+          "api-v1-readonly"
+        ]
+      }
+    },
+    "/api/v1/objects/{object_id}/update-preview": {
+      "post": {
+        "description": "Resolve the proposed full-object update read-only and publish its diff.\n\nThe request is exactly the request of `PUT /api/v1/objects/{object_id}`:\nthe exact object ID, the current strong `If-Match` ETag, and the complete\nproposed object. Effective `write` on that exact object is required even\nthough nothing is written, and every authorization, precondition, schema,\nnormalization, secret, reference, relationship, lifecycle, placement,\nmonitoring, component, provenance, and kind rule is the shared one. The\npreview creates no lock, reservation, or later-apply guarantee: a write\nbetween preview and apply fails the ordinary precondition.",
+        "operationId": "preview_v1_object_update_api_v1_objects__object_id__update_preview_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "object_id",
+            "required": true,
+            "schema": {
+              "title": "Object Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "If-Match",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "If-Match"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CatalogObjectIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ObjectUpdatePreviewOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Authentication required"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Permission denied"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Resource not found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "412": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Precondition failed"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Request validation failed"
+          },
+          "428": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Precondition required"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Internal server error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Service unavailable"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Preview one ETag-bound full-object update without writing",
         "tags": [
           "api-v1-readonly"
         ]

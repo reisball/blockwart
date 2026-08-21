@@ -22,6 +22,7 @@ from blockwart.domain.auth import (
 )
 from blockwart.domain.decisions import iter_decision_references
 from blockwart.domain.projects import iter_project_references
+from blockwart.domain.references import TypedReference
 from blockwart.domain.relationships import (
     RelationshipIntegrityError,
     canonical_relationship_metadata_json,
@@ -31,6 +32,13 @@ from blockwart.domain.relationships import (
 )
 from blockwart.domain.runbooks import iter_runbook_references
 from blockwart.domain.security import redact_secret_values
+from blockwart.domain.update_preview import (
+    PREVIEW_CONTRACT_VERSION,
+    REDACTED_PREVIEW_VALUE,
+    PreviewDiffEntry,
+    preview_diff,
+    preview_digest,
+)
 from blockwart.models import (
     CatalogObject,
     IdempotencyRecord,
@@ -41,16 +49,19 @@ from blockwart.models import (
 from blockwart.schemas.catalog import CatalogObjectIn, CatalogObjectOut
 from blockwart.services.audit import add_audit_event
 from blockwart.services.catalog import (
+    ObjectUpsertPlan,
     RevisionConflict,
+    apply_object_upsert,
     create_relationship,
     delete_object,
     delete_relationship,
     get_object,
+    plan_object_upsert,
     relationship_endpoint_descriptors,
     upsert_object,
 )
 from blockwart.services.identity import record_security_event
-from blockwart.services.policy import PolicySnapshot
+from blockwart.services.policy import PolicySnapshot, policy_for_principal
 from blockwart.services.read_access import ReadAccess
 
 _ETAG_PATTERN = re.compile(r'^"rev-([1-9][0-9]*)"$')
@@ -158,6 +169,95 @@ def parse_if_match(value: str | None) -> int:
     return int(match.group(1))
 
 
+@dataclass(frozen=True, slots=True)
+class ObjectUpdatePlan:
+    """The shared read-only decision behind both update and update preview."""
+
+    row: CatalogObject
+    payload: CatalogObjectIn
+    expected_revision: int
+    upsert: ObjectUpsertPlan
+    context: WriteContext
+
+    @property
+    def changed(self) -> bool:
+        return not self.upsert.unchanged
+
+
+@dataclass(frozen=True, slots=True)
+class ObjectUpdatePreviewResult:
+    object_id: str
+    object_kind: str
+    changed: bool
+    base_revision: int
+    base_etag: str
+    expected_result_revision: int
+    expected_result_etag: str
+    diff: list[PreviewDiffEntry]
+    diff_truncated: bool
+    diff_digest: str
+    contract_version: str
+    preview_digest: str
+
+
+def plan_object_update(
+    session: Session,
+    context: WriteContext,
+    *,
+    object_id: str,
+    payload: CatalogObjectIn,
+    expected_revision: int | str | None,
+    refresh_policy: bool = False,
+) -> ObjectUpdatePlan:
+    """Resolve one full-object update completely, without mutating anything.
+
+    This is the single shared gate for the real update and its read-only
+    preview: object authorization and concealment, the current strong ETag
+    precondition, the exact resource identity, knowledge-reference readability,
+    and the canonical schema, normalization, reference, relationship,
+    lifecycle, placement, monitoring, component, provenance, kind, and no-op
+    rules of :func:`plan_object_upsert`. Nothing here writes, flushes, reserves
+    an ID, advances a sequence, or touches idempotency state.
+    """
+    current_context = (
+        WriteContext(
+            principal=context.principal,
+            policy=policy_for_principal(session, context.principal.id),
+            channel=context.channel,
+            request_id=context.request_id,
+        )
+        if refresh_policy
+        else context
+    )
+    row = _require_permission(
+        session,
+        current_context,
+        object_id=object_id,
+        permission=Permission.WRITE,
+    )
+    resolved_revision = _resolve_expected_revision(expected_revision)
+    if payload.id != object_id:
+        raise CommandConflict("payload object id does not match the resource")
+    if row.revision != resolved_revision:
+        raise CommandPreconditionFailed("object revision changed")
+    _require_knowledge_reference_access(session, current_context, payload)
+    try:
+        upsert_plan = plan_object_upsert(
+            session,
+            payload,
+            expected_revision=resolved_revision,
+        )
+    except RevisionConflict as exc:
+        raise CommandPreconditionFailed("object revision changed") from exc
+    return ObjectUpdatePlan(
+        row=row,
+        payload=payload,
+        expected_revision=resolved_revision,
+        upsert=upsert_plan,
+        context=current_context,
+    )
+
+
 def update_catalog_object(
     session: Session,
     context: WriteContext,
@@ -165,33 +265,35 @@ def update_catalog_object(
     object_id: str,
     payload: CatalogObjectIn,
     expected_revision: int | str | None,
+    refresh_policy: bool = False,
 ) -> ObjectCommandResult:
-    row = _require_permission(
+    """Plan and apply one authorized full-object update in this transaction.
+
+    The plan is always resolved again here, inside the write transaction, so a
+    concurrent write between an earlier preview and this call fails the normal
+    precondition. A preview grants no lock, reservation, or later-apply
+    guarantee.
+    """
+    plan = plan_object_update(
         session,
         context,
         object_id=object_id,
-        permission=Permission.WRITE,
+        payload=payload,
+        expected_revision=expected_revision,
+        refresh_policy=refresh_policy,
     )
-    expected_revision = _resolve_expected_revision(expected_revision)
-    if payload.id != object_id:
-        raise CommandConflict("payload object id does not match the resource")
-    if row.revision != expected_revision:
-        raise CommandPreconditionFailed("object revision changed")
-    _require_knowledge_reference_access(session, context, payload)
+    row = plan.row
+    context = plan.context
+    expected_revision = plan.expected_revision
     before = _object_snapshot(row)
     try:
-        upsert_object(
-            session,
-            payload,
-            expected_revision=expected_revision,
-            write_audit=False,
-        )
+        apply_object_upsert(session, plan.upsert, write_audit=False)
     except RevisionConflict as exc:
         raise CommandPreconditionFailed("object revision changed") from exc
     session.flush()
     session.expire(row)
     session.refresh(row)
-    changed = row.revision != expected_revision
+    changed = plan.changed
     result = get_object(session, object_id)
     if result is None:
         raise CommandNotFound("catalog object not found")
@@ -221,6 +323,138 @@ def update_catalog_object(
         etag=revision_etag(result.revision),
         changed=changed,
     )
+
+
+def preview_catalog_object_update(
+    session: Session,
+    context: WriteContext,
+    *,
+    object_id: str,
+    payload: CatalogObjectIn,
+    expected_revision: int | str | None,
+    refresh_policy: bool = False,
+) -> ObjectUpdatePreviewResult:
+    """Resolve the same update read-only and publish its safe bounded preview.
+
+    The proposed record is never written, flushed, or rolled back: it is only
+    projected. The published diff compares the shared redacted snapshot of the
+    current row with the shared redacted snapshot of the normalized proposal,
+    so no concealed field, credential value, secret-shaped value, or raw
+    proposed document can reach the response.
+    """
+    plan = plan_object_update(
+        session,
+        context,
+        object_id=object_id,
+        payload=payload,
+        expected_revision=expected_revision,
+        refresh_policy=refresh_policy,
+    )
+    before = _current_snapshot(plan.row, plan.context)
+    after = _proposed_snapshot(plan.upsert, plan.context)
+    diff, diff_truncated, diff_digest = preview_diff(before, after)
+    base_revision = plan.expected_revision
+    result_revision = base_revision + 1 if plan.changed else base_revision
+    body: dict[str, object] = {
+        "base_etag": revision_etag(base_revision),
+        "base_revision": base_revision,
+        "changed": plan.changed,
+        "preview_contract_version": PREVIEW_CONTRACT_VERSION,
+        "diff": [entry.as_json() for entry in diff],
+        "diff_digest": diff_digest,
+        "diff_truncated": diff_truncated,
+        "expected_result_etag": revision_etag(result_revision),
+        "expected_result_revision": result_revision,
+        "object_id": object_id,
+        "object_kind": plan.payload.kind,
+    }
+    return ObjectUpdatePreviewResult(
+        object_id=object_id,
+        object_kind=plan.payload.kind,
+        changed=plan.changed,
+        base_revision=base_revision,
+        base_etag=revision_etag(base_revision),
+        expected_result_revision=result_revision,
+        expected_result_etag=revision_etag(result_revision),
+        diff=diff,
+        diff_truncated=diff_truncated,
+        diff_digest=diff_digest,
+        contract_version=PREVIEW_CONTRACT_VERSION,
+        preview_digest=preview_digest(body),
+    )
+
+
+def _current_snapshot(
+    row: CatalogObject,
+    context: WriteContext,
+) -> dict[str, object]:
+    """Extend the shared audit snapshot with the record's stored provenance.
+
+    Provenance is part of the canonical no-op calculation, so the preview must
+    diff it too. Including it here keeps a provenance-only proposal from
+    reporting `changed` with an empty diff, without widening the existing
+    object-audit snapshot contract.
+    """
+    snapshot = _object_snapshot(row)
+    snapshot["provenance"] = _redacted_json_document(row.provenance_json)
+    safe = _redact_concealed_references(snapshot, context)
+    return safe if isinstance(safe, dict) else {}
+
+
+def _proposed_snapshot(
+    plan: ObjectUpsertPlan,
+    context: WriteContext,
+) -> dict[str, object]:
+    """Redact the normalized proposal into the same shape as a stored snapshot."""
+    payload = plan.payload
+    target_state = plan.target_state
+    snapshot = {
+        "id": payload.id,
+        "kind": payload.kind,
+        "label": payload.label,
+        "status": plan.target_status,
+        "lifecycle": target_state.lifecycle if target_state is not None else None,
+        "health": target_state.health if target_state is not None else None,
+        "summary": payload.summary,
+        "data": json.loads(plan.data_json),
+        "provenance": json.loads(plan.provenance_json),
+    }
+    redacted = redact_secret_values(snapshot)
+    safe = redacted if isinstance(redacted, dict) else {}
+    concealed = _redact_concealed_references(safe, context)
+    return concealed if isinstance(concealed, dict) else {}
+
+
+def _redact_concealed_references(
+    value: object,
+    context: WriteContext,
+) -> object:
+    """Remove typed identities the principal cannot read from preview material."""
+    if isinstance(value, Mapping):
+        return {
+            str(key): _redact_concealed_references(item, context)
+            for key, item in value.items()
+        }
+    if isinstance(value, list | tuple):
+        return [_redact_concealed_references(item, context) for item in value]
+    if not isinstance(value, str):
+        return value
+    try:
+        reference = TypedReference.parse(value)
+    except ValueError:
+        return value
+    if context.policy.can(Permission.READ, reference.object_id):
+        return value
+    return REDACTED_PREVIEW_VALUE
+
+
+def _redacted_json_document(raw_json: str | None) -> object:
+    """Load one stored JSON document safely, never echoing the broken value."""
+    try:
+        document = json.loads(raw_json or "")
+    except (TypeError, json.JSONDecodeError):
+        return {"record_state": "corrupt"}
+    return redact_secret_values(document)
 
 
 def create_child_object(

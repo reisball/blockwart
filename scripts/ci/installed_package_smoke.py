@@ -154,6 +154,7 @@ async def check_mcp(
                 "blockwart.create_child",
                 "blockwart.create_root",
                 "blockwart.update_object",
+                "blockwart.preview_object_update",
                 "blockwart.delete_object",
                 "blockwart.create_relationship",
                 "blockwart.delete_relationship",
@@ -193,6 +194,7 @@ async def check_mcp(
                         "blockwart.preview_grant_scope",
                         "blockwart.get_device_graph",
                         "blockwart.get_network_topology",
+                        "blockwart.preview_object_update",
                     }
                     else not tool.annotations.readOnlyHint
                 )
@@ -571,21 +573,29 @@ async def check_mcp(
                 relationship_args,
             )
             relationship_deleted_payload = _tool_payload(relationship_deleted)
-            updated = await session.call_tool(
-                "blockwart.update_object",
-                {
-                    "object_id": "package-smoke-child",
-                    "if_match": str(relationship_deleted_payload["etag"]),
-                    "object": {
-                        "id": "package-smoke-child",
-                        "kind": "service",
-                        "label": "Package Smoke Child Updated",
-                        "status": "active",
-                        "data": {"schema_version": 1},
-                    },
+            update_args = {
+                "object_id": "package-smoke-child",
+                "if_match": str(relationship_deleted_payload["etag"]),
+                "object": {
+                    "id": "package-smoke-child",
+                    "kind": "service",
+                    "label": "Package Smoke Child Updated",
+                    "status": "active",
+                    "data": {"schema_version": 1},
                 },
+            }
+            previewed = await session.call_tool(
+                "blockwart.preview_object_update",
+                update_args,
             )
+            previewed_payload = _tool_payload(previewed)
+            assert previewed_payload["changed"] is True
+            assert previewed_payload["base_etag"] == update_args["if_match"]
+            assert previewed_payload["diff"]
+            assert previewed_payload["preview_digest"].startswith("sha256:")
+            updated = await session.call_tool("blockwart.update_object", update_args)
             updated_payload = _tool_payload(updated)
+            assert updated_payload["etag"] == previewed_payload["expected_result_etag"]
             placement_deleted = await session.call_tool(
                 "blockwart.delete_relationship",
                 {
@@ -757,7 +767,7 @@ def main() -> None:
     print(
         "installed_package=ok "
         f"cwd={Path.cwd()} revision={readiness['revision']} "
-        f"openapi_paths={len(openapi['paths'])} mcp_protocol={protocol} mcp_calls=37 "
+        f"openapi_paths={len(openapi['paths'])} mcp_protocol={protocol} mcp_calls=38 "
         "mcp_contract=compatible"
     )
 
