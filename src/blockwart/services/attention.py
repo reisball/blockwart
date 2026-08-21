@@ -42,7 +42,7 @@ from blockwart.domain.attention import (
     build_attention_derivation,
     summarize_attention,
 )
-from blockwart.domain.auth import ObjectVisibility, Permission
+from blockwart.domain.auth import ObjectVisibility
 from blockwart.domain.references import TypedReference
 from blockwart.domain.relationships import diagnose_relationship_integrity
 from blockwart.domain.search import SEARCH_LIMIT_MAX, SEARCH_LIMIT_MIN
@@ -315,7 +315,6 @@ def _load_signals(
             canonical,
             catalog_rows=catalog_rows,
             relationships=relationship_rows,
-            access=access,
             readable_ids=readable_ids,
         ),
     )
@@ -398,31 +397,28 @@ def _suitable_runbook_service_ids(
     return frozenset(service_ids)
 
 
-_CONCEALED_REFERENCE = object()
+# Catalog ids use a closed printable grammar. This NUL-prefixed id is therefore
+# impossible for a valid catalog object but remains a valid internal
+# TypedReference for the canonical resolver. Every endpoint outside the
+# authorized resolvable projection maps to this same opaque value, so hidden and
+# absent targets are indistinguishable even inside diagnostic prose that never
+# reaches a response.
+_UNRESOLVED_REFERENCE_ID = "\x00attention-unresolved"
 
 
-def _project_diagnostic_value(value: Any, readable_ids: frozenset[str]) -> Any:
-    """Remove typed references outside READ scope before canonical diagnosis."""
+def _project_diagnostic_value(value: Any, resolvable_ids: set[str]) -> Any:
+    """Erase endpoint identity outside the resolvable authorized projection."""
     if isinstance(value, str):
         reference = _typed_reference(value)
-        if reference is not None and reference.object_id not in readable_ids:
-            return _CONCEALED_REFERENCE
+        if reference is not None and reference.object_id not in resolvable_ids:
+            return f"{reference.kind}:{_UNRESOLVED_REFERENCE_ID}"
         return value
     if isinstance(value, list):
-        projected = (
-            _project_diagnostic_value(item, readable_ids)
-            for item in value
-        )
-        return [item for item in projected if item is not _CONCEALED_REFERENCE]
+        return [_project_diagnostic_value(item, resolvable_ids) for item in value]
     if isinstance(value, dict):
-        projected = {
-            key: _project_diagnostic_value(item, readable_ids)
-            for key, item in value.items()
-        }
         return {
-            key: item
-            for key, item in projected.items()
-            if item is not _CONCEALED_REFERENCE
+            key: _project_diagnostic_value(item, resolvable_ids)
+            for key, item in value.items()
         }
     return value
 
@@ -432,11 +428,9 @@ def _relationship_diagnostic_inputs(
     *,
     catalog_rows: list[CatalogObject],
     relationships: list[Relationship],
-    access: ReadAccess,
     readable_ids: set[str],
 ) -> tuple[AttentionRelationshipDiagnosticInput, ...]:
     """Project canonical diagnostics onto authorized, target-bound facts only."""
-    authorized_ids = access.policy.authorized_ids(Permission.READ)
     valid_ids = {
         item.id
         for item in canonical
@@ -457,7 +451,7 @@ def _relationship_diagnostic_inputs(
                 "id": row.id,
                 "kind": row.kind,
                 "data_json": json.dumps(
-                    _project_diagnostic_value(data, authorized_ids),
+                    _project_diagnostic_value(data, valid_ids),
                     ensure_ascii=True,
                     separators=(",", ":"),
                     sort_keys=True,
@@ -465,9 +459,9 @@ def _relationship_diagnostic_inputs(
             }
         )
     projected_relationships = [
-        row
+        projected
         for row in relationships
-        if _relationship_is_authorized(row, authorized_ids)
+        if (projected := _project_relationship(row, valid_ids)) is not None
     ]
     inputs: set[tuple[str, str, str | None]] = set()
     for diagnostic in diagnose_relationship_integrity(
@@ -498,18 +492,31 @@ def _relationship_diagnostic_inputs(
     )
 
 
-def _relationship_is_authorized(
+def _project_relationship(
     relationship: Relationship,
-    authorized_ids: frozenset[str],
-) -> bool:
+    resolvable_ids: set[str],
+) -> dict[str, Any] | None:
+    """Keep an edge only when a readable endpoint can own a safe diagnostic."""
     source = _typed_reference(relationship.from_ref)
     target = _typed_reference(relationship.to_ref)
-    return (
-        source is not None
-        and target is not None
-        and source.object_id in authorized_ids
-        and target.object_id in authorized_ids
-    )
+    if not (
+        (source is not None and source.object_id in resolvable_ids)
+        or (target is not None and target.object_id in resolvable_ids)
+    ):
+        return None
+    return {
+        "id": relationship.id,
+        "from_ref": _project_diagnostic_value(
+            relationship.from_ref,
+            resolvable_ids,
+        ),
+        "relation_type": relationship.relation_type,
+        "to_ref": _project_diagnostic_value(
+            relationship.to_ref,
+            resolvable_ids,
+        ),
+        "metadata_json": relationship.metadata_json,
+    }
 
 
 def _typed_reference(value: Any) -> TypedReference | None:

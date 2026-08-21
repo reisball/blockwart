@@ -128,19 +128,25 @@ objects the caller may read contribute signals; discover-only stubs contribute
 nothing, so a detail-only fact cannot become a discover-only hint.
 
 The derivation is authorization-stable by construction. Scalar signals are
-read only after the object is readable. Runbook applicability and relationship
-diagnostics use only READ-authorized typed references and relationships; the
-canonical relationship diagnostic resolver runs on that projected snapshot,
-and Attention consumes only its closed code plus a readable target. Diagnostic
-messages, locations, and related references are never returned. A missing
-endpoint is considered only when its ID is itself in the policy's READ scope,
-so hidden, discover-only, and ordinary absent endpoints are equivalent. The
-resolver reads the canonical placement state of the stored row rather than the
-projected one, because a concealed parent downgrades the projected state to
-`unknown`. Coverage rows come from the existing authorized resolver, which
-removes concealed mappings before state resolution. Concealing an object
-therefore removes its own items and changes nothing else: not another item,
-count, signal state, order, cursor, or error.
+read only after the object is readable. A stored typed reference on that
+readable source remains a source-owned integrity fact even when its endpoint is
+not readable. Before canonical diagnosis, every concealed, discover-only,
+missing, deleted, or otherwise unresolvable endpoint is replaced by the same
+impossible opaque reference. A stored relationship is treated the same way
+when at least one valid readable endpoint can own the generic signal. The
+canonical resolver therefore reports `dangling_typed_reference` identically for
+an existing concealed endpoint and an absent endpoint; Attention publishes only
+`relationship_target_unresolved` on the readable source/endpoint. Endpoint ids,
+references, labels, existence state, diagnostic messages, and locations are
+never returned or included in cursor material. Relationships with no readable
+endpoint remain absent entirely. Runbook applicability still uses only fully
+READ-authorized Runbooks and targets. The resolver reads the canonical
+placement state of the stored row rather than the projected one, because a
+concealed parent downgrades the projected state to `unknown`. Coverage rows
+come from the existing authorized resolver, which removes concealed mappings
+before state resolution. Concealing an object therefore changes no item, count,
+signal state, order, cursor, or error except for removing that object's own
+readable detail signals.
 
 Attention consumes only the object-scoped `mapped` coverage projection. Its
 `collected` state is derived from that authorized projection and carries no

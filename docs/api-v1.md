@@ -107,8 +107,12 @@ contribute nothing. Concealing an object removes its own items and changes no
 other item, count, signal state, order, cursor, or error. Runbook applicability
 and canonical relationship diagnostics are evaluated only after their typed
 references and relationship endpoints are projected through READ authorization;
-diagnostic prose and related references are never returned. Source-only
-coverage facts are never included; they stay behind the platform-admin
+an endpoint outside that resolvable projection becomes the same generic
+`relationship_target_unresolved` item whether it exists concealed or is absent.
+Only the readable source/endpoint is targeted; diagnostic prose, related
+references, target identity, and target existence are never returned or bound
+into a cursor. Source-only coverage facts are never included; they stay behind
+the platform-admin
 `scope=all` boundary of `GET /api/v1/source-coverage`.
 
 Attention is a derived, time-dependent read model with no persisted state.

@@ -67,8 +67,11 @@ severity-ordered set with a matching summary.
 codes, signal states, priority order, and bounded descriptions, so the HTML
 view, REST v1, and MCP cannot drift apart. The derivation is pure: it performs
 no I/O, projects typed references and relationships through READ authorization
-before invoking the canonical relationship diagnostics, and takes the
-canonical placement state of the stored row instead of the projected one.
+before invoking the canonical relationship diagnostics, replaces every
+unresolvable endpoint with one opaque impossible reference, and attributes only
+the generic unresolved signal to a valid readable source/endpoint. Existing
+concealed and absent endpoints are therefore indistinguishable. It also takes
+the canonical placement state of the stored row instead of the projected one.
 Concealment therefore removes an object's own items and changes no other item,
 count, signal state, order, cursor, or error. Catalog rows and relationships are
 each loaded once and reused; observations and the coverage snapshot are also

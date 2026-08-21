@@ -7,7 +7,7 @@ endpoint, path, credential, token, or instance mapping is part of this file.
 from __future__ import annotations
 
 import json
-from dataclasses import replace
+from dataclasses import asdict, replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -842,7 +842,7 @@ def test_relationship_diagnostics_are_redacted_target_bound_deduplicated_and_cor
             )
         )
 
-    access = _access(readable=ids | {"missing-service"})
+    access = _access(readable=ids)
     with alembic_session_factory() as session:
         relationship_page = _page(
             session,
@@ -885,6 +885,129 @@ def test_relationship_diagnostics_are_redacted_target_bound_deduplicated_and_cor
         corrected_placement = _page(session, access, category="placement")
     assert corrected_relationships.items == []
     assert corrected_placement.items == []
+
+
+def test_unresolved_reference_and_edge_targets_conceal_existence_and_correct_cleanly(
+    alembic_database,
+    alembic_session_factory,
+) -> None:
+    source_ids = {
+        "typed-hidden-source",
+        "typed-missing-source",
+        "edge-hidden-source",
+        "edge-missing-source",
+    }
+    with alembic_session_factory() as session, transaction(session):
+        upsert_object(session, _active_runbook("typed-hidden-source"))
+        upsert_object(session, _active_runbook("typed-missing-source"))
+        upsert_object(session, _asset("edge-hidden-source"))
+        upsert_object(session, _asset("edge-missing-source"))
+        upsert_object(session, _asset("opaque-existing-typed", "service"))
+        upsert_object(session, _asset("opaque-existing-edge", "service"))
+        for object_id, target_ref in (
+            ("typed-hidden-source", "service:opaque-existing-typed"),
+            ("typed-missing-source", "service:opaque-missing-typed"),
+        ):
+            row = session.get(CatalogObject, object_id)
+            assert row is not None
+            data = json.loads(row.data_json)
+            data["applies_to"] = [target_ref]
+            row.data_json = json.dumps(data, sort_keys=True)
+        session.add_all(
+            [
+                Relationship(
+                    from_ref="host:edge-hidden-source",
+                    relation_type="related_to",
+                    to_ref="service:opaque-existing-edge",
+                ),
+                Relationship(
+                    from_ref="service:opaque-missing-edge",
+                    relation_type="related_to",
+                    to_ref="host:edge-missing-source",
+                ),
+            ]
+        )
+
+    access = _access(readable=source_ids)
+
+    def read_and_count(*, cursor: str | None = None):
+        statements: list[str] = []
+
+        def listener(_conn, _cursor, statement, _parameters, _context, _executemany):
+            if statement.lstrip().upper().startswith("SELECT"):
+                statements.append(statement)
+
+        event.listen(alembic_database.engine, "before_cursor_execute", listener)
+        try:
+            with alembic_session_factory() as session:
+                page = _page(
+                    session,
+                    access,
+                    category="relationship_integrity",
+                    limit=2,
+                    cursor=cursor,
+                )
+        finally:
+            event.remove(alembic_database.engine, "before_cursor_execute", listener)
+        return page, len(statements)
+
+    before, before_queries = read_and_count()
+    assert before.summary.total == before.total == 4
+    assert before.next_cursor is not None
+    assert {item.reason_code for item in before.items} == {
+        "relationship_target_unresolved"
+    }
+    second_before, _ = read_and_count(cursor=before.next_cursor)
+
+    serialized = json.dumps(asdict(before), sort_keys=True)
+    for concealed_or_missing_id in (
+        "opaque-existing-typed",
+        "opaque-missing-typed",
+        "opaque-existing-edge",
+        "opaque-missing-edge",
+    ):
+        assert concealed_or_missing_id not in serialized
+
+    with alembic_session_factory() as session, transaction(session):
+        for object_id in ("opaque-existing-typed", "opaque-existing-edge"):
+            row = session.get(CatalogObject, object_id)
+            assert row is not None
+            session.delete(row)
+
+    after, after_queries = read_and_count()
+    assert after.summary == before.summary
+    assert after.items == before.items
+    assert after.next_cursor == before.next_cursor
+    assert after.total == before.total
+    assert after_queries == before_queries
+    second_after, _ = read_and_count(cursor=before.next_cursor)
+    assert second_after == second_before
+
+    with alembic_session_factory() as session, transaction(session):
+        for object_id in ("typed-hidden-source", "typed-missing-source"):
+            row = session.get(CatalogObject, object_id)
+            assert row is not None
+            data = json.loads(row.data_json)
+            data.pop("applies_to", None)
+            row.data_json = json.dumps(data, sort_keys=True)
+        for row in session.scalars(select(Relationship)).all():
+            session.delete(row)
+
+    with alembic_session_factory() as session:
+        corrected = _page(
+            session,
+            access,
+            category="relationship_integrity",
+        )
+        assert corrected.items == []
+        with pytest.raises(InvalidCursor):
+            _page(
+                session,
+                access,
+                category="relationship_integrity",
+                limit=2,
+                cursor=before.next_cursor,
+            )
 
 
 def test_coverage_not_collected_drift_ambiguity_and_resolution_after_correction(
@@ -1120,7 +1243,7 @@ def test_concealed_objects_mappings_and_discover_stubs_are_observationally_absen
         return page, len(statements)
 
     before, before_queries = read_and_count()
-    assert before.summary.total == before.total == 2
+    assert before.summary.total == before.total == 3
     assert before.next_cursor is not None
     assert {item.target.object_id for item in before.items if item.target.object_id} == {
         "visible"

@@ -317,13 +317,15 @@ lookup, and no catalog, audit, comment, coverage, or observation write, and it
 has no remediation mode: correcting a signal uses the ordinary authorized write
 tools. Only readable objects contribute items; discover-only stubs contribute
 none. Applicable Runbooks and canonical relationship diagnostics are resolved
-only from READ-authorized references and endpoints; diagnostic prose and
-related references are not returned. Source-only coverage facts stay behind the platform-admin
-`scope=all` boundary of `blockwart.get_source_coverage`. Planned, retired, and
-finished records, and services without enabled monitoring, are excluded rather
-than reported as incidents; declared maintenance suppresses the observed
-incident; stale or missing evidence stays `stale` or `unknown`. See
-`attention.md`.
+from the authorized source projection. Concealed and absent relationship
+targets both produce the same generic unresolved signal on a readable
+source/endpoint; diagnostic prose, target identity, existence state, and related
+references are not returned. Source-only coverage facts stay behind the
+platform-admin `scope=all` boundary of `blockwart.get_source_coverage`. Planned,
+retired, and finished records, and services without enabled monitoring, are
+excluded rather than reported as incidents; declared maintenance suppresses
+the observed incident; stale or missing evidence stays `stale` or `unknown`.
+See `attention.md`.
 
 `blockwart.get_source_coverage` accepts exact `source`, `classification`,
 `state`, and `target_kind` filters plus `scope`, `limit`, `cursor`, `direction`,
