@@ -1431,3 +1431,11 @@ pre {
     scroll-behavior: auto;
   }
 }
+
+.attention-severity-critical { border-inline-start: .3rem solid #b54040; }
+.attention-severity-warning { border-inline-start: .3rem solid #9b6b13; }
+.attention-severity-info { border-inline-start: .3rem solid #7b8490; }
+.attention-state-current { border-inline-start: .3rem solid #24835b; }
+.attention-state-stale { border-inline-start: .3rem solid #9b6b13; }
+.attention-state-unknown { border-inline-start: .3rem solid #7b8490; }
+.attention-state-not_applicable { border-inline-start: .3rem solid #7b8490; }

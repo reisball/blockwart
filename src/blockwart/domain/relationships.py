@@ -4,7 +4,7 @@ import json
 import re
 from collections import Counter
 from collections.abc import Callable, Collection, Iterable, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from types import MappingProxyType
 from typing import Any, Literal
 
@@ -375,6 +375,19 @@ RELATIONSHIP_VIOLATIONS: Mapping[str, str] = MappingProxyType(
     }
 )
 
+# Diagnostics additionally include legacy stored-document failures that cannot
+# arise from a relationship command. Attention and other read models consume
+# this closed code vocabulary, never diagnostic prose.
+RELATIONSHIP_DIAGNOSTIC_CODES: tuple[str, ...] = tuple(
+    sorted(
+        {
+            *RELATIONSHIP_REJECTIONS,
+            "invalid_object_json",
+            "obsolete_data_dependencies",
+        }
+    )
+)
+
 
 class RelationshipIntegrityError(ValueError):
     """A relationship violates the canonical registry contract.
@@ -407,6 +420,10 @@ class RelationshipDiagnostic:
     code: str
     location: str
     message: str
+    # Structured attribution is safe for application projections to consume;
+    # the legacy location/message remain diagnostic-only and may contain refs.
+    object_refs: tuple[str, ...] = field(default=(), compare=False)
+    relation_type: str | None = field(default=None, compare=False)
 
 
 def object_kind_map(objects: Iterable[Any]) -> dict[str, str]:
@@ -831,6 +848,8 @@ def relationship_graph_diagnostics(
                     from_ref,
                     f"{from_ref} has multiple primary {relation_type} targets: "
                     f"{', '.join(sorted(target_refs))}",
+                    (from_ref, *sorted(target_refs)),
+                    relation_type,
                 )
             )
 
@@ -845,6 +864,8 @@ def relationship_graph_diagnostics(
                     "relationship_cycle",
                     relation_type,
                     f"{relation_type} graph contains a cycle: {' -> '.join(cycle)}",
+                    tuple(dict.fromkeys(cycle)),
+                    relation_type,
                 )
             )
     return sorted(set(diagnostics))
@@ -1026,7 +1047,13 @@ def diagnose_relationship_integrity(
             relationship_metadata(relationship, relation_type=relation_type)
         except RelationshipIntegrityError as exc:
             diagnostics.append(
-                RelationshipDiagnostic(exc.code, location, str(exc))
+                RelationshipDiagnostic(
+                    exc.code,
+                    location,
+                    str(exc),
+                    (from_ref, to_ref),
+                    relation_type,
+                )
             )
             continue
         triplets.append((from_ref, relation_type, to_ref))
@@ -1051,6 +1078,8 @@ def diagnose_relationship_integrity(
                     "duplicate_relationship",
                     "relationships",
                     f"{count} copies of {' '.join(triplet)}",
+                    (triplet[0], triplet[2]),
+                    triplet[1],
                 )
             )
     for child_ref, parent_refs in sorted(placement_parents.items()):
@@ -1060,6 +1089,8 @@ def diagnose_relationship_integrity(
                     "multiple_placement_parents",
                     child_ref,
                     f"multiple placement parents: {', '.join(sorted(parent_refs))}",
+                    (child_ref, *sorted(parent_refs)),
+                    CANONICAL_PLACEMENT_RELATION_TYPE,
                 )
             )
 
@@ -1074,6 +1105,7 @@ def diagnose_relationship_integrity(
                     "invalid_object_json",
                     f"catalog_objects[{object_id}]",
                     "data_json is not valid JSON",
+                    (f"{_record_value(row, 'kind')}:{object_id}",),
                 )
             )
             continue
@@ -1083,6 +1115,7 @@ def diagnose_relationship_integrity(
                     "invalid_object_json",
                     f"catalog_objects[{object_id}]",
                     "data_json must contain an object",
+                    (f"{_record_value(row, 'kind')}:{object_id}",),
                 )
             )
             continue
@@ -1092,6 +1125,7 @@ def diagnose_relationship_integrity(
                     "obsolete_data_dependencies",
                     f"catalog_objects[{object_id}]",
                     "data.dependencies must be stored as depends_on relationships",
+                    (f"{_record_value(row, 'kind')}:{object_id}",),
                 )
             )
         for index, reference in enumerate(iter_typed_reference_strings(data)):
@@ -1107,6 +1141,7 @@ def diagnose_relationship_integrity(
                         exc.code,
                         f"catalog_objects[{object_id}]",
                         str(exc),
+                        (f"{_record_value(row, 'kind')}:{object_id}", reference),
                     )
                 )
 

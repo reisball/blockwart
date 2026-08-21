@@ -60,6 +60,15 @@ describe the same authorized filtered set. Coverage cursors bind principal and
 effective policy, normalized filters, scope, direction, page size, ordering,
 and the authorized projection digest.
 
+The catalog-wide attention view reuses the same authorized resolver through one
+shared seam and consumes only the object-scoped `mapped` projection. Source-only
+facts stay behind the platform-admin `scope=all` boundary and never reach it.
+Its collection state is based on authorized mapped evidence and exposes no
+global snapshot timestamp. When no snapshot has been recorded, attention
+reports an explicit "not collected" state rather than zero coverage problems.
+`mapped_stale` is reported there as object provenance, not a second time as
+coverage. See `attention.md`.
+
 ## Lifecycle
 
 1. Run the Markdown command without flags to review the dry-run states.

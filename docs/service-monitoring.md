@@ -90,6 +90,12 @@ receive the configuration, target, observation, freshness, timestamps, count,
 or an indication that a row exists. Concealed and absent objects retain the
 existing indistinguishable behavior.
 
+The catalog-wide attention view consumes exactly this projection; it adds no
+provider-, instance-, or vendor-specific rule of its own. A disabled service is
+"not monitored" there rather than an incident, declared maintenance stays
+authoritative, and a pending or stale observation stays `unknown` or `stale`
+instead of becoming a healthy claim. See `attention.md`.
+
 ## Outbound security boundary
 
 The target allowlist is empty by default. A check is possible only when the

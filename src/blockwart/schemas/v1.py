@@ -10,6 +10,13 @@ from pydantic import (
     model_validator,
 )
 
+from blockwart.domain.attention import (
+    ATTENTION_CATEGORY_VALUES,
+    ATTENTION_DETAIL_CODE_VALUES,
+    ATTENTION_REASON_VALUES,
+    ATTENTION_SEVERITY_VALUES,
+    ATTENTION_SIGNAL_STATE_VALUES,
+)
 from blockwart.domain.auth import GrantScope, Permission, Role
 from blockwart.domain.read_projection import (
     FIELDS_DESCRIPTION,
@@ -57,6 +64,14 @@ MappingRoleValue = Literal[MAPPING_ROLES]
 EntryPresenceValue = Literal[ENTRY_PRESENCES]
 DecisionReasonValue = Literal[DECISION_REASONS]
 CoverageScopeValue = Literal["mapped", "all"]
+# The attention vocabulary is projected from the domain registry, so the
+# published REST contract can never carry a second, drifting copy of it.
+AttentionCategoryValue = Literal[ATTENTION_CATEGORY_VALUES]
+AttentionSeverityValue = Literal[ATTENTION_SEVERITY_VALUES]
+AttentionReasonValue = Literal[ATTENTION_REASON_VALUES]
+AttentionSignalStateValue = Literal[ATTENTION_SIGNAL_STATE_VALUES]
+AttentionItemSignalStateValue = Literal["current", "stale", "unknown"]
+AttentionDetailCodeValue = Literal[ATTENTION_DETAIL_CODE_VALUES]
 
 
 class McpContractMetadataOut(BaseModel):
@@ -173,6 +188,65 @@ class V1SourceCoveragePageOut(BaseModel):
     total: int | None = None
     scope: CoverageScopeValue
     sort: Literal["source_uri"] = "source_uri"
+    direction: SortDirection
+
+
+class V1AttentionTargetOut(BaseModel):
+    """The authorized navigation reference of one attention item."""
+
+    model_config = ConfigDict(from_attributes=True, extra="forbid")
+
+    scope: Literal["object", "catalog"]
+    ref: str = Field(min_length=1, max_length=256)
+    object_id: str | None = Field(default=None, max_length=128)
+    kind: ObjectKind | None = None
+    label: str | None = Field(default=None, max_length=255)
+    detail_path: str | None = Field(default=None, max_length=512)
+
+
+class V1AttentionItemOut(BaseModel):
+    """One deduplicated attention item; every value is a closed vocabulary."""
+
+    model_config = ConfigDict(from_attributes=True, extra="forbid")
+
+    reason_code: AttentionReasonValue
+    category: AttentionCategoryValue
+    severity: AttentionSeverityValue
+    signal_state: AttentionItemSignalStateValue
+    target: V1AttentionTargetOut
+    description: str = Field(max_length=512)
+    detail_code: AttentionDetailCodeValue | None = None
+    observed_at: str | None = Field(default=None, max_length=64)
+
+
+class V1AttentionSignalOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True, extra="forbid")
+
+    state: AttentionSignalStateValue
+    evaluated: int = Field(ge=0)
+    items: int = Field(ge=0)
+
+
+class V1AttentionSummaryOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True, extra="forbid")
+
+    total: int = Field(ge=0)
+    by_severity: dict[AttentionSeverityValue, int]
+    by_category: dict[AttentionCategoryValue, int]
+    by_reason: dict[AttentionReasonValue, int]
+    signals: dict[AttentionCategoryValue, V1AttentionSignalOut]
+    coverage_snapshot_state: Literal["collected", "not_collected"]
+
+
+class V1AttentionPageOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True, extra="forbid")
+
+    summary: V1AttentionSummaryOut
+    items: list[V1AttentionItemOut]
+    next_cursor: str | None = None
+    total: int | None = None
+    generated_at: str = Field(max_length=64)
+    sort: Literal["priority"] = "priority"
     direction: SortDirection
 
 

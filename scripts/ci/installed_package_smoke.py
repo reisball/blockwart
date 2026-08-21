@@ -17,6 +17,11 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from blockwart.db.session import build_engine, transaction
+from blockwart.domain.attention import (
+    ATTENTION_CATEGORY_VALUES,
+    ATTENTION_REASON_VALUES,
+    ATTENTION_SEVERITY_VALUES,
+)
 from blockwart.domain.auth import CatalogRole, GrantScope, PlatformRole, Role
 from blockwart.models import CatalogObject
 from blockwart.services.access import create_object_grant
@@ -145,6 +150,7 @@ async def check_mcp(
                 "blockwart.add_comment",
                 "blockwart.get_context",
                 "blockwart.get_source_coverage",
+                "blockwart.get_attention",
                 "blockwart.create_child",
                 "blockwart.create_root",
                 "blockwart.update_object",
@@ -179,6 +185,7 @@ async def check_mcp(
                         "blockwart.list_audit_events",
                         "blockwart.get_context",
                         "blockwart.get_source_coverage",
+                        "blockwart.get_attention",
                         "blockwart.get_object_access",
                         "blockwart.search_principals",
                         "blockwart.list_admin_principals",
@@ -352,6 +359,10 @@ async def check_mcp(
                 ),
                 await session.call_tool("blockwart.get_context", {"limit": 1}),
                 await session.call_tool("blockwart.get_source_coverage", {"limit": 1}),
+                await session.call_tool(
+                    "blockwart.get_attention",
+                    {"limit": 1, "include_total": True},
+                ),
                 admin_first_page,
                 admin_second_page,
                 await session.call_tool(
@@ -360,6 +371,22 @@ async def check_mcp(
                 ),
             ]
             assert all(not result.isError for result in read_results)
+            # The installed wrapper must project the same closed attention
+            # vocabulary the application resolver owns, not a wrapper-local copy.
+            attention_payload = _tool_payload(read_results[5])
+            assert attention_payload["sort"] == "priority"
+            assert set(attention_payload["summary"]["signals"]) == set(
+                ATTENTION_CATEGORY_VALUES
+            )
+            assert set(attention_payload["summary"]["by_reason"]) == set(
+                ATTENTION_REASON_VALUES
+            )
+            assert set(attention_payload["summary"]["by_severity"]) == set(
+                ATTENTION_SEVERITY_VALUES
+            )
+            assert attention_payload["summary"]["coverage_snapshot_state"] == (
+                "not_collected"
+            )
             batch_payload = _tool_payload(read_results[2])
             assert batch_payload["count"] == 1
             assert batch_payload["objects"][0]["id"] == object_id
@@ -730,7 +757,7 @@ def main() -> None:
     print(
         "installed_package=ok "
         f"cwd={Path.cwd()} revision={readiness['revision']} "
-        f"openapi_paths={len(openapi['paths'])} mcp_protocol={protocol} mcp_calls=36 "
+        f"openapi_paths={len(openapi['paths'])} mcp_protocol={protocol} mcp_calls=37 "
         "mcp_contract=compatible"
     )
 

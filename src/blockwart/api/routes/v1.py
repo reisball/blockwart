@@ -59,6 +59,10 @@ from blockwart.schemas.projects import (
 )
 from blockwart.schemas.v1 import (
     MAX_BATCH_RESPONSE_BYTES,
+    AttentionCategoryValue,
+    AttentionItemSignalStateValue,
+    AttentionReasonValue,
+    AttentionSeverityValue,
     CoverageScopeValue,
     CoverageStateValue,
     McpContractMetadataOut,
@@ -66,6 +70,7 @@ from blockwart.schemas.v1 import (
     SortDirection,
     SourceClassificationValue,
     V1AttachedDeviceCreateIn,
+    V1AttentionPageOut,
     V1AuditPageOut,
     V1ContextPageOut,
     V1DeleteCommandOut,
@@ -95,6 +100,10 @@ from blockwart.services.agent import (
     query_agent_context_page,
     query_agent_object_contexts,
     query_agent_objects_page,
+)
+from blockwart.services.attention import (
+    AttentionQueryError,
+    query_attention_page,
 )
 from blockwart.services.commands import (
     create_attached_device,
@@ -242,6 +251,58 @@ IncludeRecentComments = Annotated[
     bool | None,
     Query(description=RECENT_COMMENTS_DESCRIPTION),
 ]
+
+
+@router.get(
+    "/attention",
+    response_model=V1AttentionPageOut,
+    summary="Read the authorized catalog-wide attention view",
+)
+def get_v1_attention(
+    session: Annotated[Session, Depends(get_session)],
+    access: Annotated[ReadAccess, Depends(require_api_read_access)],
+    category: AttentionCategoryValue | None = None,
+    severity: AttentionSeverityValue | None = None,
+    reason_code: AttentionReasonValue | None = None,
+    signal_state: AttentionItemSignalStateValue | None = None,
+    kind: ObjectKind | None = None,
+    limit: PageLimit = 50,
+    cursor: CursorParameter = None,
+    direction: SortDirection = "asc",
+    include_total: Annotated[
+        bool,
+        Query(description="Compute the total over the authorized filtered item set"),
+    ] = False,
+) -> V1AttentionPageOut:
+    """Combine existing canonical signals; this request runs no probe or source read."""
+    try:
+        page = query_attention_page(
+            session,
+            access,
+            category=category,
+            severity=severity,
+            reason_code=reason_code,
+            signal_state=signal_state,
+            kind=kind,
+            limit=limit,
+            cursor=cursor,
+            direction=direction,
+            include_total=include_total,
+        )
+    except InvalidCursor as exc:
+        raise _invalid_cursor() from exc
+    except AttentionQueryError as exc:
+        raise HTTPException(status_code=400, detail="Invalid attention request") from exc
+    return V1AttentionPageOut.model_validate(
+        {
+            "summary": page.summary,
+            "items": page.items,
+            "next_cursor": page.next_cursor,
+            "total": page.total,
+            "generated_at": page.generated_at,
+            "direction": direction,
+        }
+    )
 
 
 @router.get(

@@ -336,6 +336,7 @@
         <a {% if view == "catalog" %}class="active"{% endif %} href="/?view=catalog&q={{ q|urlencode }}&kind={{ kind }}">{{ t("nav.catalog") }}</a>
         <a {% if view == "topology" %}class="active"{% endif %} href="/?view=topology&q={{ q|urlencode }}&kind={{ kind }}{% if view == 'topology' and topology_mode == 'network' %}&topology_mode=network{% if network_category %}&network_category={{ network_category }}{% endif %}{% if include_inherited_services %}&services=1{% endif %}{% endif %}">{{ t("nav.topology") }}</a>
         <a href="/projects">{{ t("project.workspace.overview_title") }}</a>
+        <a href="/attention">{{ t("nav.attention") }}</a>
       </nav>
 
       <form class="top-search" method="get" action="/">

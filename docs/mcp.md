@@ -76,6 +76,7 @@ It wraps the object-authorized v1 API:
 - blockwart.list_audit_events -> GET /api/v1/objects/{object_id}/audit-events
 - blockwart.add_comment -> POST /api/v1/objects/{object_id}/comments
 - blockwart.get_context -> GET /api/v1/context
+- blockwart.get_attention -> GET /api/v1/attention
 - blockwart.get_source_coverage -> GET /api/v1/source-coverage
 - blockwart.create_child -> POST /api/v1/objects/{parent_id}/children
 - blockwart.create_root -> POST /api/v1/roots
@@ -158,6 +159,10 @@ Choose the smallest tool that directly answers the intent:
 - Use `blockwart.search` with `projection=compact` for candidate lists. With a
   `q` term, pass `sort=relevance` to receive the published rank ladder instead
   of the default `id` order.
+- Use `blockwart.get_attention` first when the intent is "what needs work?".
+  It returns one deduplicated, severity-ordered list over the signals
+  Blockwart already records, so an agent does not have to page the whole
+  catalog and re-derive them. It performs no probe and no source read.
 - Use `blockwart.get_source_coverage` to inspect the latest recorded inventory
   coverage/drift snapshot. Its default mapped scope follows object visibility;
   the full source-only scope requires platform-admin authority.
@@ -235,6 +240,7 @@ means it deliberately bundles lower-level API concerns behind one agent call.
 | `list_audit_events` | Read an object's system audit timeline | `directly sufficient` | Projects the existing redacted newest-first audit page without mixing in comment content. |
 | `add_comment` | Append an operational work note | `directly sufficient` | Keeps Markdown source and idempotency explicit without exposing audit internals. |
 | `get_context` | Find objects and read details | `directly sufficient` | Search, filters, full details, and per-object write-ready ETags already share one call. |
+| `get_attention` | Find what currently needs work | `directly sufficient` | Projects the shared application attention resolver: one closed category, severity, reason-code, and signal-state vocabulary over record and relationship integrity, placement, manual lifecycle, monitoring, endpoints, provenance, critical-service Runbook readiness, knowledge review, and source coverage, deduplicated to one item per target and category. |
 | `get_source_coverage` | Inspect source inventory coverage and drift | `directly sufficient` | Projects the authorized REST snapshot with identical filters, state vocabulary, digest-bound cursor, and no workspace access. |
 | `create_child` | Create a placed child | `intent tool`, `response improved` | Resolves the parent internally and proves placement, ownership, revision, and idempotency. |
 | `create_root` | Create a disconnected catalog root | `intent tool`, `response improved` | Requires an already active catalog-owner principal; proves ownership, revision, idempotency, and the absence of a placement parent. Never mutates any catalog role. |
@@ -296,6 +302,30 @@ inherited paths, completion states, relationship metadata, and truncation signal
 as API v1; it does not reconstruct topology in the MCP wrapper.
 All tools require a service-account token and receive exactly that
 principal's authorized detail/stub projection.
+
+`blockwart.get_attention` accepts exact `category`, `severity`, `reason_code`,
+`signal_state`, and `kind` filters plus `limit`, `cursor`, `direction`, and
+`include_total`. It returns REST's `summary` and item page unchanged, so the
+tool cannot hold a second copy of the vocabulary. Every item is bounded: a
+closed classification, a fixed English description, an optional `detail_code`
+from an existing closed domain vocabulary, an optional evidence timestamp, and
+one authorized `kind:id` navigation reference. No message, exception text,
+endpoint, path, credential, or source excerpt is part of the contract.
+
+The call is a read. It triggers no probe, no source file access, no network
+lookup, and no catalog, audit, comment, coverage, or observation write, and it
+has no remediation mode: correcting a signal uses the ordinary authorized write
+tools. Only readable objects contribute items; discover-only stubs contribute
+none. Applicable Runbooks and canonical relationship diagnostics are resolved
+from the authorized source projection. Concealed and absent relationship
+targets both produce the same generic unresolved signal on a readable
+source/endpoint; diagnostic prose, target identity, existence state, and related
+references are not returned. Source-only coverage facts stay behind the
+platform-admin `scope=all` boundary of `blockwart.get_source_coverage`. Planned,
+retired, and finished records, and services without enabled monitoring, are
+excluded rather than reported as incidents; declared maintenance suppresses
+the observed incident; stale or missing evidence stays `stale` or `unknown`.
+See `attention.md`.
 
 `blockwart.get_source_coverage` accepts exact `source`, `classification`,
 `state`, and `target_kind` filters plus `scope`, `limit`, `cursor`, `direction`,

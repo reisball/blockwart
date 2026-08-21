@@ -80,9 +80,10 @@ docker build \
 
 The package smoke builds a wheel, installs it into a clean virtual environment, changes to a
 directory outside the repository, starts `blockwart-start`, loads packaged templates and static
-assets, runs the relationship-integrity diagnostic, and exercises all 29
-tools through 36 read/write, Project-workspace, coverage, comment, audit, and grant-management calls to the installed
-`blockwart-mcp` console command. It also runs the read-only service-interface
+assets, runs the relationship-integrity diagnostic, and exercises all 30
+tools through 37 read/write, Project-workspace, coverage, attention, comment,
+audit, and grant-management calls to the installed `blockwart-mcp` console
+command. It also runs the read-only service-interface
 normalization, placement-state, network-classification, and canonical-Project plans from outside
 the source tree, plus the canonical-Runbook classification plan, the write-free synthetic
 Knowledge plan, and the installed reviewed-apply machine schemas. Productive Knowledge apply is
