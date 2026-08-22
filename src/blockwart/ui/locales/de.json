@@ -17,6 +17,7 @@
   "auth.password": "Passwort",
   "auth.principal_id": "Principal-ID",
   "auth.rate_limited": "Zu viele Anmeldeversuche. Bitte vor dem nächsten Versuch kurz warten.",
+  "auth.remember": "Angemeldet bleiben",
   "auth.restricted_object": "Eingeschränktes Objekt",
   "auth.restricted_short": "Eingeschränkt",
   "auth.stub_notice": "Du darfst dieses Objekt und seine freigegebene Position entdecken, seine Betriebsdetails sind für deine Identität jedoch nicht freigegeben.",

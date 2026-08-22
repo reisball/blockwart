@@ -39,8 +39,27 @@ bearer credential is required by `/api/objects`, `/api/agent`, and `/api/v1`.
 
 The browser identity page is available at `/auth`. Login uses a one-time,
 server-stored pre-authentication challenge. Authenticated browser sessions are
-opaque, revocable, time-limited, `Secure`, `HttpOnly`, and `SameSite=Strict`; state
-changes require the session-bound CSRF value.
+opaque, revocable, time-limited, `Secure`, `HttpOnly`, `SameSite=Strict`, and
+limited to `Path=/`; state changes require the session-bound CSRF value. Login
+responses and the identity page remain `Cache-Control: no-store`.
+
+Interactive human login offers the localized **Keep me signed in** / **Angemeldet
+bleiben** checkbox. It is unchecked by default and affects no bearer-token,
+service-account, REST, or MCP authentication. When unchecked, the server-side
+session has the configured absolute lifetime of `300..3600` seconds (one hour
+maximum), while both the identity and CSRF cookies are browser-session cookies
+without `Max-Age` or `Expires`. When checked, the server chooses the dedicated
+`BLOCKWART_AUTH_REMEMBER_SESSION_TTL_SECONDS` lifetime (30 days by default,
+bounded to `86400..7776000` seconds) for the server-side session and the matching
+`Max-Age` on both cookies. The browser never supplies a TTL or expiry. Missing,
+unknown, manipulated, or duplicated checkbox values select the standard mode;
+extra form fields cannot change persistence or cookie flags.
+
+Both lifetimes are absolute and non-sliding. Authentication, CSRF verification,
+and ordinary use do not change `expires_at` or reissue either cookie. Logout,
+password rotation, principal deactivation, explicit revocation, and absolute
+expiry invalidate standard and remembered sessions identically. A later visit
+to `/auth` clears stale identity and CSRF cookies with the same security flags.
 
 ## Role axes
 
@@ -483,6 +502,14 @@ security-event stream. Successful service-token use updates only its
 contain stable event codes, channel, principal where known, request ID, and
 redacted structured details. User-supplied login names, passwords, tokens,
 cookies, and hashes are not recorded.
+
+Browser-session issuance records `browser_session_issued` with only the
+server-selected `session_mode` and bounded `lifetime_seconds`. Single and bulk
+revocation evidence (`browser_session_revoked` and `browser_sessions_revoked`)
+records only the mode or per-mode counts and a stable server-selected reason;
+`browser_logout` also carries the mode. Cookie values, session values, CSRF
+values, password material, and hashes are never included. These events reuse
+the request correlation ID and transaction of the triggering operation.
 
 Security events are immutable while retained. Periodic login-path maintenance
 removes events older than the configured retention and caps the remaining row

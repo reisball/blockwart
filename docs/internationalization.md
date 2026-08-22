@@ -48,6 +48,11 @@ A valid query selection is persisted for one year. Every HTML surface includes
 the same language switcher: catalog, topology, object details/editing, schema
 settings, and identity access.
 
+The identity login form localizes its default-off persistence control as **Keep
+me signed in** in English and **Angemeldet bleiben** in German. Its submitted
+backend value remains the canonical fixed English marker `remember=on`; labels
+never become stored session metadata or client-selected lifetime input.
+
 Catalogs live in:
 
 - `src/blockwart/ui/locales/en.json`

@@ -8,6 +8,11 @@ Current local keys:
 - `BLOCKWART_BUILD_REVISION` (non-secret build evidence exposed by health and MCP contract metadata)
 - `BLOCKWART_DATABASE_URL`
 - `BLOCKWART_SECRET_REFERENCE`
+- `BLOCKWART_AUTH_SESSION_TTL_SECONDS` (default `3600`, allowed `300..3600`;
+  absolute lifetime for standard human browser login)
+- `BLOCKWART_AUTH_REMEMBER_SESSION_TTL_SECONDS` (default `2592000` / 30 days,
+  allowed `86400..7776000`; absolute lifetime for the default-off **Keep me
+  signed in** choice)
 - `BLOCKWART_IDEMPOTENCY_TTL_SECONDS` (default `86400`, allowed
   `300..604800`)
 - `BLOCKWART_AUTH_SERVICE_TOKEN_RATE_WINDOW_SECONDS`
@@ -37,6 +42,14 @@ Current local keys:
 - `BLOCKWART_MONITORING_POLL_INTERVAL_SECONDS` (default `5`, allowed `1..60`)
 
 `BLOCKWART_SECRET_REFERENCE` is a reference label only. It must never contain a raw secret value.
+
+Browser-session settings apply only to interactive human login under `/auth`.
+The standard setting controls only the server-side absolute expiry; its
+identity and CSRF cookies remain browser-session cookies. The remembered
+setting controls the server-side absolute expiry and the matching persistent
+`Max-Age` of both cookies. Neither mode slides or accepts lifetime, expiry, or
+cookie-security input from the login form. Values outside the declared bounds
+fail settings validation and stop startup rather than falling back.
 
 Monitoring configuration is deny-by-default at both levels: the process poller
 must be enabled and the concrete target must fall within the explicit network

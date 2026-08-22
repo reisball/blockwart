@@ -17,6 +17,7 @@
   "auth.password": "Password",
   "auth.principal_id": "Principal ID",
   "auth.rate_limited": "Too many sign-in requests. Please wait before trying again.",
+  "auth.remember": "Keep me signed in",
   "auth.restricted_object": "Restricted object",
   "auth.restricted_short": "Restricted",
   "auth.stub_notice": "You may discover this object and its approved placement position, but its operational details are not available to your identity.",

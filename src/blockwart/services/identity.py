@@ -43,6 +43,12 @@ AUTH_OUTCOMES = frozenset({"success", "failure", "denied"})
 SERVICE_TOKEN_PREFIX = "bwst"
 BROWSER_SESSION_PREFIX = "bwss"
 LOGIN_CHALLENGE_PREFIX = "bwlc"
+BROWSER_SESSION_MODE_STANDARD = "standard"
+BROWSER_SESSION_MODE_REMEMBER = "remember"
+BROWSER_SESSION_MIN_TTL_SECONDS = 300
+BROWSER_SESSION_MAX_TTL_SECONDS = 3600
+REMEMBER_SESSION_MIN_TTL_SECONDS = 86400
+REMEMBER_SESSION_MAX_TTL_SECONDS = 7776000
 MIN_PASSWORD_LENGTH = 12
 MAX_PASSWORD_BYTES = 1024
 
@@ -88,6 +94,8 @@ class IssuedBrowserSession:
     value: str = field(repr=False)
     csrf_token: str = field(repr=False)
     expires_at: datetime | None = None
+    mode: str = BROWSER_SESSION_MODE_STANDARD
+    ttl_seconds: int = BROWSER_SESSION_MAX_TTL_SECONDS
 
 
 @dataclass(frozen=True)
@@ -246,6 +254,9 @@ def set_human_password(
     revoke_all_browser_sessions(
         session,
         principal_id=principal_id,
+        channel=channel,
+        request_id=request_id,
+        reason="password_rotation",
         now=timestamp,
     )
     record_security_event(
@@ -579,8 +590,18 @@ def issue_browser_session(
     *,
     principal_id: str,
     ttl_seconds: int,
+    remember: bool = False,
+    channel: str = "ui",
+    request_id: str | None = None,
     now: datetime | None = None,
 ) -> IssuedBrowserSession:
+    """Issue one opaque browser session with a server-selected absolute lifetime.
+
+    ``remember`` selects the deliberately longer persistent bound of the
+    interactive "keep me signed in" choice. Both modes are absolute: the caller
+    supplies a configured lifetime, never a client-supplied one, and no later
+    authentication renews the stored expiry.
+    """
     principal = session.get(Principal, principal_id)
     if (
         principal is None
@@ -588,13 +609,25 @@ def issue_browser_session(
         or principal.principal_type != PrincipalType.HUMAN
     ):
         raise IdentityNotFound("active human principal not found")
-    if ttl_seconds < 300 or ttl_seconds > 86400:
-        raise IdentityError("browser session TTL must be between 300 and 86400 seconds")
+    minimum, maximum = (
+        (REMEMBER_SESSION_MIN_TTL_SECONDS, REMEMBER_SESSION_MAX_TTL_SECONDS)
+        if remember
+        else (BROWSER_SESSION_MIN_TTL_SECONDS, BROWSER_SESSION_MAX_TTL_SECONDS)
+    )
+    if ttl_seconds < minimum or ttl_seconds > maximum:
+        raise IdentityError(
+            f"browser session TTL must be between {minimum} and {maximum} seconds"
+        )
     timestamp = now or utc_now()
     session_id = str(uuid4())
     value = _new_opaque_value(BROWSER_SESSION_PREFIX, session_id)
     csrf_token = secrets.token_urlsafe(32)
     expires_at = timestamp + timedelta(seconds=ttl_seconds)
+    mode = (
+        BROWSER_SESSION_MODE_REMEMBER
+        if remember
+        else BROWSER_SESSION_MODE_STANDARD
+    )
     session.add(
         BrowserSession(
             id=session_id,
@@ -605,13 +638,27 @@ def issue_browser_session(
             created_at=timestamp,
         )
     )
-    session.flush()
+    record_security_event(
+        session,
+        event_type="browser_session_issued",
+        outcome="success",
+        channel=channel,
+        principal_id=principal.id,
+        request_id=request_id,
+        details={
+            "session_mode": mode,
+            "lifetime_seconds": ttl_seconds,
+        },
+        now=timestamp,
+    )
     return IssuedBrowserSession(
         session_id=session_id,
         principal=principal_context(principal),
         value=value,
         csrf_token=csrf_token,
         expires_at=expires_at,
+        mode=mode,
+        ttl_seconds=ttl_seconds,
     )
 
 
@@ -625,6 +672,24 @@ def authenticate_browser_session(
     if row is None or principal is None:
         return None
     return principal_context(principal)
+
+
+def browser_session_mode(
+    session: Session,
+    *,
+    value: str | None,
+    now: datetime | None = None,
+) -> str | None:
+    """Return the persistence mode of one live browser session, or ``None``.
+
+    The mode is derived from the stored absolute lifetime, which is the only
+    server-selected difference between the two issuance paths. No cookie,
+    session, or CSRF value is returned or logged.
+    """
+    row, principal = _browser_session_record(session, value=value, now=now)
+    if row is None or principal is None:
+        return None
+    return _browser_session_mode(row)
 
 
 def verify_browser_csrf(
@@ -651,6 +716,9 @@ def revoke_browser_session(
     session: Session,
     *,
     value: str | None,
+    channel: str = "system",
+    request_id: str | None = None,
+    reason: str = "explicit",
     now: datetime | None = None,
 ) -> bool:
     timestamp = now or utc_now()
@@ -661,7 +729,19 @@ def revoke_browser_session(
     if row.revoked_at is not None:
         return False
     row.revoked_at = timestamp
-    session.flush()
+    record_security_event(
+        session,
+        event_type="browser_session_revoked",
+        outcome="success",
+        channel=channel,
+        principal_id=row.principal_id,
+        request_id=request_id,
+        details={
+            "session_mode": _browser_session_mode(row),
+            "reason": reason,
+        },
+        now=timestamp,
+    )
     return True
 
 
@@ -669,6 +749,9 @@ def revoke_all_browser_sessions(
     session: Session,
     *,
     principal_id: str,
+    channel: str = "system",
+    request_id: str | None = None,
+    reason: str = "explicit",
     now: datetime | None = None,
 ) -> int:
     timestamp = now or utc_now()
@@ -680,9 +763,28 @@ def revoke_all_browser_sessions(
             )
         ).all()
     )
+    mode_counts = {
+        BROWSER_SESSION_MODE_STANDARD: 0,
+        BROWSER_SESSION_MODE_REMEMBER: 0,
+    }
     for row in rows:
+        mode_counts[_browser_session_mode(row)] += 1
         row.revoked_at = timestamp
-    session.flush()
+    if rows:
+        record_security_event(
+            session,
+            event_type="browser_sessions_revoked",
+            outcome="success",
+            channel=channel,
+            principal_id=principal_id,
+            request_id=request_id,
+            details={
+                "reason": reason,
+                "standard_count": mode_counts[BROWSER_SESSION_MODE_STANDARD],
+                "remember_count": mode_counts[BROWSER_SESSION_MODE_REMEMBER],
+            },
+            now=timestamp,
+        )
     return len(rows)
 
 
@@ -776,6 +878,9 @@ def deactivate_principal(
     revoke_all_browser_sessions(
         session,
         principal_id=principal_id,
+        channel=channel,
+        request_id=request_id,
+        reason="principal_deactivation",
         now=timestamp,
     )
     tokens = list(
@@ -946,6 +1051,15 @@ def _browser_session_record(
     ):
         return None, None
     return row, principal
+
+
+def _browser_session_mode(row: BrowserSession) -> str:
+    lifetime = row.expires_at - row.created_at
+    return (
+        BROWSER_SESSION_MODE_REMEMBER
+        if lifetime > timedelta(seconds=BROWSER_SESSION_MAX_TTL_SECONDS)
+        else BROWSER_SESSION_MODE_STANDARD
+    )
 
 
 def _validate_password(password: str) -> None:
