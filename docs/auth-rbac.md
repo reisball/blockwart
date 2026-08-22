@@ -69,13 +69,15 @@ Blockwart stores three independent authorization axes on a principal:
 |---|---|---|
 | identity administration | `platform_role = admin` | identity and credential administration |
 | global catalog authority | `catalog_role = catalog_owner` | all six permissions on every object |
+| global catalog read-only | `catalog_role = catalog_viewer` | exactly `discover` and `read` on every object |
 | scoped catalog access | `object_grants` rows | one role at one object, `self` or `subtree` |
 
 The axes never imply each other. A platform admin has no catalog permission
-unless it also holds grants or the catalog-owner role, and a catalog owner
+unless it also holds grants or a catalog role, and a catalog owner or viewer
 cannot administer identities or credentials. Both role columns are nullable and
-constrained to their single allowed value, and both are guarded by SQLite
-triggers plus service checks that refuse to remove the last active holder.
+constrained to their closed allowed values. The last-active-holder service and
+database guards remain specific to platform admins and catalog owners; viewers
+are freely revocable through the protected catalog-role command.
 
 ## Platform administration
 
@@ -83,7 +85,7 @@ Identity administration is a separate authorization axis. A principal may
 have the optional platform role `admin`, which permits user, service-account,
 credential-metadata, and lifecycle administration. It never grants catalog
 `discover`, `read`, `write`, `manage_access`, or `delete`; those permissions
-still come only from explicit object grants or the global catalog-owner role.
+still come only from explicit object grants or an explicit global catalog role.
 
 The admin-only browser UI lives at `/admin/principals`. It provides principal
 search, lifecycle changes, direct and effective assignment views, password
@@ -144,7 +146,7 @@ Other relationship types do not propagate grants. Effective authorization is
 calculated from the current graph in one recursive database query, so
 reparenting changes access without a stale application cache.
 
-## Global catalog owner
+## Global catalog roles
 
 An active principal with `catalog_role = catalog_owner` holds `discover`,
 `read`, `write`, `create_child`, `manage_access`, and `delete` on every object
@@ -159,6 +161,25 @@ unchanged. The provenance is part of the policy fingerprint, so assigning or
 removing the role immediately invalidates existing cursors and principal-scoped
 read state. An inactive catalog owner receives nothing.
 
+An active human or service-account principal with
+`catalog_role = catalog_viewer` holds exactly `discover` and `read` on the same
+complete current catalog and every object created later, including a new
+disconnected root. It never implies `write`, `create_child`, `manage_access`,
+`delete`, platform administration, credential administration, or token
+administration. Login, a valid browser session or token, and platform admin
+alone likewise never imply catalog viewing. The viewer is a distinct typed
+global policy source; it is not an object grant and is never materialized into
+per-object rows.
+
+Object grants remain additive. A catalog viewer with an explicit `owner/subtree`
+grant has the normal Owner permissions only within that canonical subtree and
+remains globally read-only everywhere else. All UI, REST v1, Agent API, MCP,
+search, count, relationship, comment, audit, and coverage reads consume this
+same policy snapshot, preserving their existing concealment and field-redaction
+rules. Policy is rebuilt from current database state on every request without a
+long-lived authorization cache; role assignment or revocation changes the
+policy fingerprint, so bound cursors fail closed.
+
 Owner-coverage computation treats any active catalog owner as covering every
 current object without creating a grant. Exclusion-based coverage checks used
 for deactivation and deletion ignore the excluded principal and then fall back
@@ -172,11 +193,13 @@ catalog owners, described below; it never assigns or removes any role. Until a
 catalog owner exists, the protected local commands below remain the only
 first-owner and recovery path.
 
-## Catalog-owner administration
+## Catalog-role administration
 
-The dedicated catalog-role command assigns or removes `catalog_owner` on an
-existing principal. It is separate from generic principal create/update, which
-never touches `catalog_role`.
+The dedicated catalog-role command assigns, replaces, or removes
+`catalog_owner` and `catalog_viewer` on an existing active principal. It is
+separate from generic principal create/update, which never touches
+`catalog_role`; migration, upgrade, startup, and bootstrap never assign a
+viewer.
 
 Authorization requires the actor to be simultaneously active and both a platform
 admin and a catalog owner; neither axis alone is sufficient. Human actors must
@@ -189,24 +212,24 @@ The command requires the current principal ETag through `If-Match` (or the
 hidden UI field); a missing or stale precondition uses the established 428/412
 behavior. An unchanged requested role is an idempotent no-op: no revision bump
 and no success audit event. A real change advances the target principal revision
-exactly once and writes a redacted structured `catalog_owner_role_changed`
+exactly once and writes a redacted structured `catalog_role_changed`
 security event with actor, target, before/after role, channel, request ID, and
 resulting revision. Passwords, tokens, raw request bodies, and secrets are never
 recorded.
 
-Removing or deactivating the last active catalog owner remains impossible at both
+Removing, replacing, or deactivating the last active catalog owner remains impossible at both
 service and SQLite-trigger levels, including concurrent writers. The command
 cannot bypass the strict zero-owner bootstrap contract: if no active catalog
 owner exists, normal REST/UI administration cannot mint the first one, because
 the dual-role gate cannot be satisfied.
 
-The role is never assigned to an inactive principal, because such a principal
+No catalog role is assigned to an inactive principal, because such a principal
 could later be activated through the generic principal update and gain global
 catalog permissions without the dual-role gate or its audit event. Assigning
-`catalog_owner` to an inactive target is rejected with the stable principal
+either role to an inactive target is rejected with the stable principal
 conflict, and — for legacy rows or raw writes that already hold that state —
 generic principal update refuses to activate a principal that currently carries
-`catalog_owner`. The safe sequence is to remove the role through catalog-role
+any catalog role. The safe sequence is to remove the role through catalog-role
 administration first, activate the principal, and reassign the role under the
 dual-role gate. Generic principal update still never accepts a password or a
 catalog-role field; its `principal_updated` security event now also records the
@@ -238,7 +261,8 @@ shows the current catalog role in the principal list and detail views without
 implying platform-admin equivalence. The canonical principal, admin summary, and
 API schemas carry the nullable `catalog_role`, and the admin principal detail
 exposes the typed `global_authorities` effective-permission explanation for an
-active catalog owner.
+active catalog owner or viewer. REST schemas and the EN/DE UI represent
+`catalog_owner`, `catalog_viewer`, and no role as three distinct states.
 
 MCP may only read/display the catalog role and its effective authority through the
 existing read-only `list_admin_principals` and `get_admin_principal` projections.
@@ -268,6 +292,9 @@ leaves credentials, revisions, idempotency records, sessions, and the audit trai
 untouched apart from the denial event. Targets without the catalog-owner role
 keep the established platform-admin contract, including one-time secret
 disclosure, ETag preconditions, idempotent replay, and stable error envelopes.
+That includes catalog-viewer targets: the viewer role adds no credential or
+token administration authority and does not broaden the established
+platform-admin credential workflow.
 
 ## Catalog-owner root creation
 
@@ -471,6 +498,16 @@ batch table rebuild for the new constraint, the migration also recreates the
 existing last-platform-admin triggers verbatim. Downgrading past it drops the
 column and therefore every catalog-owner assignment while leaving principals,
 credentials, and object grants intact; reselect an owner after upgrading again.
+
+Alembic revision `20260822_0019` expands only the existing catalog-role check
+constraint to accept `catalog_viewer`. It changes no existing role, principal,
+credential, grant, or owner counter and assigns nobody. PostgreSQL replaces the
+constraint in place; SQLite rebuilds `principals` and recreates the established
+platform-admin and catalog-owner guard/counter triggers verbatim. Downgrade to
+`20260818_0018` is data-preserving when no viewer remains and fails closed while
+any principal still carries `catalog_viewer`; operators must explicitly remove
+those roles through the protected lifecycle before retrying. No grant is ever
+removed or rewritten.
 
 Service-account tokens use a protected output file:
 

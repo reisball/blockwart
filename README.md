@@ -36,8 +36,9 @@ automatically.
   REST, and MCP commands;
 - keep an append-only, Markdown-capable operational comment timeline per
   object through UI, REST, and MCP;
-- manage human and service-account identities separately from object grants;
-- enforce object-scoped RBAC, optimistic concurrency, idempotency, audit, and
+- manage human and service-account identities, explicit global catalog-owner
+  and read-only catalog-viewer roles, and additive object grants separately;
+- enforce centralized RBAC, optimistic concurrency, idempotency, audit, and
   last-owner safeguards;
 - import reviewed infrastructure data from Markdown/YAML with a dry-run-first
   workflow;

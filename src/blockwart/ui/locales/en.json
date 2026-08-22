@@ -70,6 +70,7 @@
   "admin.catalog_role.title": "Catalog role",
   "admin.catalog_role.hint": "Requires dual platform-admin and catalog-owner authority plus current password reauthentication. Independent of the platform role.",
   "admin.catalog_role.catalog_owner": "Catalog owner",
+  "admin.catalog_role.catalog_viewer": "Catalog viewer",
   "admin.role.admin": "Administrator",
   "admin.role.none": "No platform role",
   "admin.status.active": "Active",

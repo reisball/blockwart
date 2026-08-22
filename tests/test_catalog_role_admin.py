@@ -325,7 +325,7 @@ def test_set_catalog_role_idempotent_noop_emits_no_audit_and_no_revision_bump(
         access = read_access_for_principal(session, dual)
         before_events = session.scalars(
             select(SecurityEvent).where(
-                SecurityEvent.event_type == "catalog_owner_role_changed"
+                SecurityEvent.event_type == "catalog_role_changed"
             )
         ).all()
 
@@ -343,7 +343,7 @@ def test_set_catalog_role_idempotent_noop_emits_no_audit_and_no_revision_bump(
         assert result.principal.revision == 1
         after_events = session.scalars(
             select(SecurityEvent).where(
-                SecurityEvent.event_type == "catalog_owner_role_changed"
+                SecurityEvent.event_type == "catalog_role_changed"
             )
         ).all()
         assert after_events == before_events
@@ -386,7 +386,7 @@ def test_set_catalog_role_assignment_writes_redacted_audit_event(
 
         event = session.scalar(
             select(SecurityEvent).where(
-                SecurityEvent.event_type == "catalog_owner_role_changed",
+                SecurityEvent.event_type == "catalog_role_changed",
                 SecurityEvent.principal_id == target.id,
             )
         )
@@ -402,6 +402,103 @@ def test_set_catalog_role_assignment_writes_redacted_audit_event(
             "revision": 2,
         }
         assert PASSWORD not in event.details_json
+
+
+def test_set_catalog_viewer_role_uses_same_protected_lifecycle(
+    alembic_session_factory,
+) -> None:
+    with alembic_session_factory() as session:
+        with transaction(session):
+            dual = _make_dual_admin(session, login="viewer.role.admin")
+            target = create_service_account(
+                session,
+                login="viewer.role.target",
+                display_name="Viewer Role Target",
+            )
+        access = read_access_for_principal(session, dual)
+
+        with transaction(session):
+            assigned = set_managed_catalog_role(
+                session,
+                access,
+                principal_id=target.id,
+                expected_revision='"rev-1"',
+                catalog_role=CatalogRole.CATALOG_VIEWER,
+                actor_password=PASSWORD,
+                channel="api",
+                request_id="catalog-viewer-assign-0001",
+            )
+        with transaction(session):
+            unchanged = set_managed_catalog_role(
+                session,
+                access,
+                principal_id=target.id,
+                expected_revision='"rev-2"',
+                catalog_role=CatalogRole.CATALOG_VIEWER,
+                actor_password=PASSWORD,
+                channel="api",
+                request_id="catalog-viewer-noop-0001",
+            )
+        with transaction(session):
+            removed = set_managed_catalog_role(
+                session,
+                access,
+                principal_id=target.id,
+                expected_revision='"rev-2"',
+                catalog_role=None,
+                actor_password=PASSWORD,
+                channel="api",
+                request_id="catalog-viewer-remove-0001",
+            )
+
+        events = session.scalars(
+            select(SecurityEvent)
+            .where(
+                SecurityEvent.event_type == "catalog_role_changed",
+                SecurityEvent.principal_id == target.id,
+            )
+            .order_by(SecurityEvent.created_at, SecurityEvent.id)
+        ).all()
+
+    assert assigned.changed is True
+    assert assigned.principal.catalog_role == CatalogRole.CATALOG_VIEWER
+    assert assigned.principal.revision == 2
+    assert unchanged.changed is False
+    assert unchanged.principal.revision == 2
+    assert removed.changed is True
+    assert removed.principal.catalog_role is None
+    assert removed.principal.revision == 3
+    assert [json.loads(event.details_json)["after_catalog_role"] for event in events] == [
+        "catalog_viewer",
+        "none",
+    ]
+    assert all(PASSWORD not in event.details_json for event in events)
+
+
+def test_last_catalog_owner_cannot_be_replaced_with_catalog_viewer(
+    alembic_session_factory,
+) -> None:
+    with alembic_session_factory() as session:
+        with transaction(session):
+            dual = _make_dual_admin(session, login="last.owner.to.viewer")
+        access = read_access_for_principal(session, dual)
+
+        with pytest.raises(ManagedPrincipalConflict, match="catalog owner"):
+            with transaction(session):
+                set_managed_catalog_role(
+                    session,
+                    access,
+                    principal_id=dual.id,
+                    expected_revision='"rev-1"',
+                    catalog_role=CatalogRole.CATALOG_VIEWER,
+                    actor_password=PASSWORD,
+                    channel="ui",
+                )
+
+        stored = session.get(Principal, dual.id)
+        assert stored is not None
+        assert stored.catalog_role == CatalogRole.CATALOG_OWNER
+        assert stored.revision == 1
 
 
 def test_set_catalog_role_removal_with_another_owner_succeeds(
@@ -665,6 +762,38 @@ def test_rest_catalog_role_assigns_role_via_browser_session(
         assert stored is not None
         assert stored.catalog_role == CatalogRole.CATALOG_OWNER
         assert stored.revision == 2
+
+
+def test_rest_catalog_viewer_assignment_and_projection_are_unambiguous(
+    catalog_role_api_client: TestClient,
+    catalog_role_api_state,
+) -> None:
+    target_id = catalog_role_api_state["target_id"]
+    issued = catalog_role_api_state["issued"]
+    admin_token = catalog_role_api_state["admin_token"]
+    _login_browser(catalog_role_api_client, issued)
+
+    response = catalog_role_api_client.post(
+        f"/api/v1/admin/principals/{target_id}/catalog-role",
+        headers=_browser_headers(issued, if_match='"rev-1"'),
+        json={"catalog_role": "catalog_viewer", "current_admin_password": PASSWORD},
+    )
+    detail = catalog_role_api_client.get(
+        f"/api/v1/admin/principals/{target_id}",
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+
+    assert response.status_code == 200
+    assert response.headers["etag"] == '"rev-2"'
+    assert response.json()["principal"]["catalog_role"] == "catalog_viewer"
+    assert detail.status_code == 200
+    assert detail.json()["principal"]["catalog_role"] == "catalog_viewer"
+    assert detail.json()["global_authorities"] == [
+        {
+            "source": "catalog_viewer",
+            "permissions": ["discover", "read"],
+        }
+    ]
 
 
 def test_rest_catalog_role_removal_with_another_owner_succeeds(
@@ -1101,6 +1230,38 @@ def test_ui_catalog_role_control_assigns_role_and_shows_in_views(
     assert "Catalog owner" in reloaded.text
 
 
+def test_ui_catalog_viewer_option_and_german_label_are_distinct(
+    catalog_role_ui_client: TestClient,
+    catalog_role_ui_state,
+) -> None:
+    issued = catalog_role_ui_state["issued"]
+    target_id = catalog_role_ui_state["target_id"]
+    _login(catalog_role_ui_client, issued)
+
+    initial = catalog_role_ui_client.get(f"/admin/principals/{target_id}")
+    response = catalog_role_ui_client.post(
+        f"/admin/principals/{target_id}/catalog-role",
+        data={
+            "csrf_token": issued.csrf_token,
+            "if_match": '"rev-1"',
+            "catalog_role": "catalog_viewer",
+            "current_admin_password": PASSWORD,
+        },
+        follow_redirects=False,
+    )
+    english = catalog_role_ui_client.get(f"/admin/principals/{target_id}")
+    german = catalog_role_ui_client.get(
+        f"/admin/principals/{target_id}", params={"lang": "de"}
+    )
+
+    assert initial.status_code == 200
+    assert 'value="catalog_owner"' in initial.text
+    assert 'value="catalog_viewer"' in initial.text
+    assert response.status_code == 303
+    assert "Catalog viewer" in english.text
+    assert "Katalog-Viewer" in german.text
+
+
 def test_ui_catalog_role_etag_precondition_behavior(
     catalog_role_ui_client: TestClient,
     catalog_role_ui_state,
@@ -1277,7 +1438,7 @@ def test_ui_catalog_role_idempotent_noop_no_revision_bump(
         assert stored.revision == 1
         event = session.scalar(
             select(SecurityEvent).where(
-                SecurityEvent.event_type == "catalog_owner_role_changed",
+                SecurityEvent.event_type == "catalog_role_changed",
                 SecurityEvent.principal_id == target_id,
             )
         )
@@ -1307,7 +1468,7 @@ def test_ui_catalog_role_audit_event_is_redacted(
     with sessions() as session:
         event = session.scalar(
             select(SecurityEvent).where(
-                SecurityEvent.event_type == "catalog_owner_role_changed",
+                SecurityEvent.event_type == "catalog_role_changed",
                 SecurityEvent.principal_id == target_id,
             )
         )

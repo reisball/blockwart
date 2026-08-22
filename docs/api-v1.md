@@ -4,6 +4,16 @@ Blockwart's stable machine-readable API lives under `/api/v1`. Every request
 requires a service-account bearer token and is object-authorized. Reads and
 writes use the same effective object policy as the browser UI and MCP.
 
+An active principal may carry the explicit global `catalog_viewer` role. It is
+a distinct policy source with exactly `discover` and `read` over every current
+and future catalog object, including disconnected roots. Additive object grants
+may supply more permissions only on their own object or canonical subtree. The
+role never authorizes object, relationship, comment, or grant mutation; access,
+principal, credential, or token administration; or root/child creation.
+Platform admin, login, and token possession do not imply the role. Current
+database state is evaluated per request, and role changes invalidate
+policy-bound cursors.
+
 ## Page contract
 
 List resources return the same envelope:
@@ -551,6 +561,7 @@ POST     /api/v1/admin/principals/{principal_id}/password
 POST     /api/v1/admin/principals/{principal_id}/tokens
 POST     /api/v1/admin/principals/{principal_id}/tokens/rotate
 DELETE   /api/v1/admin/principals/{principal_id}/tokens/{token_name}
+POST     /api/v1/admin/principals/{principal_id}/catalog-role
 ```
 
 Lifecycle and credential mutations advance the principal revision. Token
@@ -560,6 +571,16 @@ Replaying the completed request proves completion but does not redisclose the
 secret. Existing password, token, session, and hash values are never readable.
 The last-active-admin and independent last-effective-owner invariants fail
 atomically.
+
+The dedicated catalog-role route accepts the closed nullable values
+`catalog_owner`, `catalog_viewer`, and `null`. It alone uses an active human
+browser session, double-submit CSRF, current-password reauthentication, the
+target principal `If-Match` ETag, and a current-state dual platform-admin plus
+catalog-owner authorization check. Real changes advance the principal revision
+once and emit redacted `catalog_role_changed` security evidence; no-ops preserve
+the revision and emit no success event. Replacing or removing the last active
+catalog owner remains forbidden. Viewer targets receive no special credential
+authority or token behavior.
 
 The principal-targeted grant routes are administrative aliases for the shared
 object grant command layer. They require both the platform `admin` role and the

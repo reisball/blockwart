@@ -50,8 +50,9 @@ scoped catalog access still comes only from the listed Owner anchors.
 role in the same transaction; without it, startup and readiness fail with
 `catalog_owner_missing`. For an existing database upgraded from an earlier
 release, explicitly run `blockwart-auth promote-admin --login kai` and
-`blockwart-auth bootstrap-catalog-owner --login kai`; migrations `0012` and
-`0015` never guess an admin or catalog-owner identity.
+`blockwart-auth bootstrap-catalog-owner --login kai`; migrations `0012`,
+`0015`, and `0019` never guess an admin, catalog-owner, or catalog-viewer
+identity.
 
 Then run the migration/readiness-gated launcher:
 
@@ -92,6 +93,15 @@ proxy-header processing disabled. Migration errors use the redacted
 active global catalog owner has been selected yet; see `auth-rbac.md` for the explicit
 `--catalog-owner` bootstrap choice and the `bootstrap-catalog-owner` recovery command. Nothing
 promotes an existing principal automatically.
+
+Revision `20260822_0019` only expands the catalog-role constraint for the
+explicit `catalog_viewer` value. It creates no role and no grant. Before a
+downgrade to `20260818_0018`, remove every viewer role through the protected
+catalog-role UI/REST lifecycle; downgrade fails closed otherwise. SQLite
+recreates the existing platform-admin and catalog-owner invariant triggers and
+counters during its table rebuild, while PostgreSQL retains those owner-specific
+objects unchanged. Back up and test the upgrade/downgrade against the normal
+restored candidate before changing traffic.
 
 The image healthcheck calls `/api/health/ready`. An unhealthy result therefore means the process
 may still be alive but must not receive normal traffic.
@@ -418,7 +428,8 @@ document only after the written JSON and its complete structure validate. A malf
 or unreadable existing document fails diagnostically instead of silently falling back to defaults.
 The configured directory must therefore be writable by the application process.
 
-Catalog access now requires principals and object grants. `/auth` uses the
+Catalog access now requires principals and an effective policy from object
+grants or an explicit catalog role. `/auth` uses the
 `BLOCKWART_AUTH_*` settings for browser sessions; service-account bearer
 tokens authenticate and filter `/api/objects`, `/api/agent`, and `/api/v1`.
 Production bootstrap, token injection, writable authorization, and deployment
@@ -444,7 +455,13 @@ wrapper into OpenClaw/Gateway config is a separate approval step.
 For an approved MCP deployment, inject a service-account token through the
 protected `BLOCKWART_API_TOKEN_FILE`. `BLOCKWART_API_TOKEN` is an environment
 fallback; configuring both sources is an error. The service account must have
-the exact object grants needed by its tools. To enable comment writes, rotate
+the exact object grants needed by its tools, or explicitly receive
+`catalog_viewer` through the protected admin lifecycle when complete read-only
+catalog access is the approved requirement. Migration, startup, bootstrap,
+login, token injection, and platform-admin assignment never make that choice.
+Any private-instance role assignment is a separate rollout with named principal,
+approval, verification, and rollback; this repository change performs none.
+To enable comment writes, rotate
 the exact named runtime token with `blockwart-auth rotate-token --audience mcp`
 to a new protected output file, atomically replace the runtime secret file, and
 verify `blockwart.list_comments` plus one explicitly approved idempotent

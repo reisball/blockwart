@@ -632,16 +632,16 @@ def update_managed_principal(
         raise ManagedPrincipalNotFound("principal not found")
     if row.revision != expected:
         raise ManagedPrincipalPreconditionFailed("principal revision changed")
-    # Activating a principal that already carries the catalog-owner role would
+    # Activating a principal that already carries a catalog role would
     # grant global catalog authority through the generic platform-admin path,
     # bypassing the dedicated dual-role gate and its audit. Newly assigning the
     # role to an inactive principal is rejected, but legacy rows and raw writes
     # can still hold that state, so activation fails closed here as well. The
     # safe sequence is to remove the role under the catalog-role workflow first
     # and to reassign it there after activation.
-    if active and not row.active and row.catalog_role == CatalogRole.CATALOG_OWNER:
+    if active and not row.active and row.catalog_role is not None:
         raise ManagedPrincipalConflict(
-            "an inactive catalog owner must have its catalog role removed "
+            "an inactive principal must have its catalog role removed "
             "through catalog-role administration before it can be activated"
         )
     normalized_name = normalize_display_name(display_name)
@@ -878,7 +878,7 @@ def set_managed_catalog_role(
     channel: str,
     request_id: str | None = None,
 ) -> PrincipalMutationResult:
-    """Assign or remove the global catalog-owner role on an existing principal.
+    """Assign, replace, or remove a global catalog role on an existing principal.
 
     The actor must be simultaneously an active platform admin and an active catalog
     owner; neither axis alone is sufficient. Human actors must reauthenticate with
@@ -923,11 +923,14 @@ def set_managed_catalog_role(
     # principal update, which produces global catalog permissions without this
     # gate or its audit event, so the role is never parked on an inactive
     # principal in the first place.
-    if resolved_role == CatalogRole.CATALOG_OWNER and not row.active:
+    if resolved_role is not None and not row.active:
         raise ManagedPrincipalConflict(
-            "the catalog-owner role cannot be assigned to an inactive principal"
+            "a catalog role cannot be assigned to an inactive principal"
         )
-    if resolved_role is None and before_role == CatalogRole.CATALOG_OWNER:
+    if (
+        before_role == CatalogRole.CATALOG_OWNER
+        and resolved_role != CatalogRole.CATALOG_OWNER
+    ):
         try:
             ensure_active_catalog_owner_remains(
                 session,
@@ -953,7 +956,7 @@ def set_managed_catalog_role(
     session.refresh(row)
     record_security_event(
         session,
-        event_type="catalog_owner_role_changed",
+        event_type="catalog_role_changed",
         outcome="success",
         channel=channel,
         principal_id=row.id,

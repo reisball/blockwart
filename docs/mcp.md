@@ -97,6 +97,16 @@ It wraps the object-authorized v1 API:
 - blockwart.update_grant -> PUT /api/v1/objects/{object_id}/access/grants/{grant_id}
 - blockwart.revoke_grant -> DELETE /api/v1/objects/{object_id}/access/grants/{grant_id}
 
+All read tools consume the API's current shared policy. An explicit active
+`catalog_viewer` service principal therefore receives exactly `discover` and
+`read` across current and future catalog objects for search, context, counts,
+relationships, comments, audit, and coverage, with the same concealment and
+field redaction as REST and UI. Additive object grants can authorize existing
+write tools only at their explicit object/subtree scope; the global viewer
+source itself never authorizes a write. An MCP token, platform admin, or login
+alone never implies catalog viewing, and role revocation applies on the next
+upstream request and invalidates policy-bound cursors.
+
 ## Versioned agent read projections
 
 `blockwart.search`, `blockwart.get_context`, and
@@ -425,7 +435,8 @@ principal with an `mcp`-audience token and an `idempotency_key`, and it never
 assigns or removes any catalog role. Its additive result fields are
 `parent_ref` (always `null`, proving the disconnected root), the same
 `owner_assignment` Owner/self proof, and `revision` alongside `etag`,
-`changed`, and `replayed`. The catalog role itself remains read-only in MCP
+`changed`, and `replayed`. The catalog role (`catalog_owner`, `catalog_viewer`,
+or none) itself remains read-only in MCP
 through the admin principal projections.
 
 Grant read tools expose only minimized principal identity, separated direct
