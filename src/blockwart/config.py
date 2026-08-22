@@ -35,8 +35,17 @@ class Settings(BaseSettings):
     auth_session_ttl_seconds: int = Field(
         default=3600,
         ge=300,
-        le=86400,
+        le=3600,
         description="Absolute lifetime of an authenticated browser session.",
+    )
+    auth_remember_session_ttl_seconds: int = Field(
+        default=2592000,
+        ge=86400,
+        le=7776000,
+        description=(
+            "Absolute lifetime of a browser session issued with the opt-in "
+            "'keep me signed in' choice. Server-selected and never sliding."
+        ),
     )
     auth_login_challenge_ttl_seconds: int = Field(
         default=600,

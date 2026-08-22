@@ -13,8 +13,10 @@ from blockwart.api.errors import request_correlation_id
 from blockwart.config import Settings
 from blockwart.db.session import transaction
 from blockwart.services.identity import (
+    BROWSER_SESSION_MODE_REMEMBER,
     authenticate_browser_session,
     authenticate_password,
+    browser_session_mode,
     consume_login_challenge,
     issue_browser_session,
     issue_login_challenge,
@@ -34,6 +36,14 @@ from blockwart.ui.security import (
 
 templates = Jinja2Templates(directory=TEMPLATE_DIR)
 router = APIRouter(prefix="/auth", tags=["ui"], include_in_schema=False)
+
+REMEMBER_FORM_FIELD = "remember"
+REMEMBER_FORM_VALUE = "on"
+
+
+async def _remember_session_requested(request: Request) -> bool:
+    values = (await request.form()).getlist(REMEMBER_FORM_FIELD)
+    return values == [REMEMBER_FORM_VALUE]
 
 
 @router.get("", response_class=HTMLResponse)
@@ -95,6 +105,7 @@ def auth_page(
 @router.post("/login", response_class=HTMLResponse)
 def login(
     request: Request,
+    remember: Annotated[bool, Depends(_remember_session_requested)],
     login: Annotated[str, Form(max_length=128)],
     password: Annotated[str, Form(max_length=1024)],
     login_challenge: Annotated[str, Form(max_length=512)],
@@ -169,7 +180,14 @@ def login(
                     issue_browser_session(
                         session,
                         principal_id=principal.id,
-                        ttl_seconds=settings.auth_session_ttl_seconds,
+                        ttl_seconds=(
+                            settings.auth_remember_session_ttl_seconds
+                            if remember
+                            else settings.auth_session_ttl_seconds
+                        ),
+                        remember=remember,
+                        channel="ui",
+                        request_id=request_id,
                     )
                     if principal is not None
                     else None
@@ -177,10 +195,15 @@ def login(
 
     if issued_session is not None:
         response = RedirectResponse(url="/", status_code=303)
+        max_age = (
+            issued_session.ttl_seconds
+            if issued_session.mode == BROWSER_SESSION_MODE_REMEMBER
+            else None
+        )
         response.set_cookie(
             key=AUTH_SESSION_COOKIE_NAME,
             value=issued_session.value,
-            max_age=settings.auth_session_ttl_seconds,
+            max_age=max_age,
             httponly=True,
             secure=True,
             samesite="strict",
@@ -189,7 +212,7 @@ def login(
         response.set_cookie(
             key=AUTH_CSRF_COOKIE_NAME,
             value=issued_session.csrf_token,
-            max_age=settings.auth_session_ttl_seconds,
+            max_age=max_age,
             httponly=True,
             secure=True,
             samesite="strict",
@@ -261,9 +284,13 @@ def logout(
                 details={"reason": "invalid_csrf"},
             )
         else:
+            mode = browser_session_mode(session, value=session_value)
             revoke_browser_session(
                 session,
                 value=session_value,
+                channel="ui",
+                request_id=request_id,
+                reason="logout",
             )
             record_security_event(
                 session,
@@ -272,7 +299,7 @@ def logout(
                 channel="ui",
                 principal_id=principal.id,
                 request_id=request_id,
-                details={},
+                details={"session_mode": mode},
             )
     if principal is None:
         raise HTTPException(status_code=403, detail="CSRF validation failed")
