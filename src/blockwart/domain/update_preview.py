@@ -1,7 +1,8 @@
 """Canonical, bounded, redacted projection of one proposed object update.
 
-This module is pure: it never reads a session, a request, or a clock. It turns
-two already redacted object snapshots into the closed public preview diff, and
+This module is pure: it never reads a session, a request, or a clock. It
+compares two canonical object snapshots before lossy rendering, turns their
+separately supplied safe projections into the closed public preview diff, and
 turns the published safe preview contract into one stable, versioned,
 domain-separated digest.
 
@@ -49,6 +50,7 @@ PreviewOperation = Literal["added", "removed", "changed"]
 PreviewPathState = Literal["exact", "hashed"]
 
 _ABSENT = object()
+_USE_RENDERED_VALUE = object()
 
 
 class _RedactedPreviewValue:
@@ -98,16 +100,37 @@ class PreviewDiffEntry:
 def preview_diff(
     before: Mapping[str, object],
     after: Mapping[str, object],
+    *,
+    rendered_before: Mapping[str, object] | None = None,
+    rendered_after: Mapping[str, object] | None = None,
+    digest_before: Mapping[str, object] | None = None,
+    digest_after: Mapping[str, object] | None = None,
 ) -> tuple[list[PreviewDiffEntry], bool, str]:
-    """Project two redacted snapshots onto the canonical bounded diff.
+    """Project two canonical snapshots onto the canonical bounded safe diff.
 
-    Both inputs must already have passed the shared secret redaction. Paths are
-    RFC 6901 JSON Pointers, mappings are walked into leaf paths, and every other
-    value is compared whole. The result is sorted by path and truncated to the
-    published bound.
+    ``before`` and ``after`` are compared before any lossy rendering redaction,
+    so distinct values cannot disappear merely because both public sides are
+    redacted. The optional rendered projections control response values; the
+    optional digest projections control the safe semantic identity of each
+    side. Callers that do not need separate projections may omit them. Paths
+    are RFC 6901 JSON Pointers, mappings are walked into leaf paths, and every
+    other value is compared whole. The result is sorted by path and truncated
+    to the published bound.
     """
+    published_before = rendered_before if rendered_before is not None else before
+    published_after = rendered_after if rendered_after is not None else after
+    semantic_before = digest_before if digest_before is not None else published_before
+    semantic_after = digest_after if digest_after is not None else published_after
     entries = sorted(
-        _walk(before, after, ""),
+        _walk(
+            before,
+            after,
+            "",
+            rendered_before=published_before,
+            rendered_after=published_after,
+            digest_before=semantic_before,
+            digest_after=semantic_after,
+        ),
         key=lambda entry: entry.semantic_path,
     )
     truncated = len(entries) > PREVIEW_DIFF_MAX_ENTRIES
@@ -122,31 +145,48 @@ def _walk(
     before: Mapping[str, object],
     after: Mapping[str, object],
     path: str,
+    *,
+    rendered_before: Mapping[str, object],
+    rendered_after: Mapping[str, object],
+    digest_before: Mapping[str, object],
+    digest_after: Mapping[str, object],
 ) -> list[PreviewDiffEntry]:
     entries: list[PreviewDiffEntry] = []
     for key in sorted({str(key) for key in before} | {str(key) for key in after}):
         field = f"{path}/{_pointer_segment(key)}"
         old_value = before.get(key, _ABSENT)
         new_value = after.get(key, _ABSENT)
+        old_rendered = rendered_before.get(key, _ABSENT)
+        new_rendered = rendered_after.get(key, _ABSENT)
+        old_digest = digest_before.get(key, _ABSENT)
+        new_digest = digest_after.get(key, _ABSENT)
         if old_value is not _ABSENT and new_value is not _ABSENT and old_value == new_value:
             continue
-        if isinstance(old_value, Mapping) and (
-            isinstance(new_value, Mapping) or new_value is _ABSENT
-        ) and (old_value or isinstance(new_value, Mapping) and new_value):
+        if _can_recurse(
+            old_value,
+            new_value,
+            old_rendered,
+            new_rendered,
+        ):
             entries.extend(
                 _walk(
-                    old_value,
+                    old_value if isinstance(old_value, Mapping) else {},
                     new_value if isinstance(new_value, Mapping) else {},
                     field,
+                    rendered_before=(
+                        old_rendered if isinstance(old_rendered, Mapping) else {}
+                    ),
+                    rendered_after=(
+                        new_rendered if isinstance(new_rendered, Mapping) else {}
+                    ),
+                    digest_before=(
+                        old_digest if isinstance(old_digest, Mapping) else {}
+                    ),
+                    digest_after=(
+                        new_digest if isinstance(new_digest, Mapping) else {}
+                    ),
                 )
             )
-            continue
-        if (
-            old_value is _ABSENT
-            and isinstance(new_value, Mapping)
-            and new_value
-        ):
-            entries.extend(_walk({}, new_value, field))
             continue
         published_path, path_state = _published_path(field)
         entries.append(
@@ -154,12 +194,33 @@ def _walk(
                 path=published_path,
                 path_state=path_state,
                 operation=_operation(old_value, new_value),
-                before=preview_value(old_value),
-                after=preview_value(new_value),
+                before=preview_value(old_rendered, semantic_value=old_digest),
+                after=preview_value(new_rendered, semantic_value=new_digest),
                 semantic_path=field,
             )
         )
     return entries
+
+
+def _can_recurse(
+    before: object,
+    after: object,
+    rendered_before: object,
+    rendered_after: object,
+) -> bool:
+    """Walk mappings only while their safe rendered structure remains visible."""
+    before_mapping = isinstance(before, Mapping)
+    after_mapping = isinstance(after, Mapping)
+    if before_mapping and after_mapping:
+        return isinstance(rendered_before, Mapping) and isinstance(
+            rendered_after,
+            Mapping,
+        )
+    if before_mapping and after is _ABSENT and before:
+        return isinstance(rendered_before, Mapping)
+    if before is _ABSENT and after_mapping and after:
+        return isinstance(rendered_after, Mapping)
+    return False
 
 
 def _pointer_segment(value: str) -> str:
@@ -181,8 +242,13 @@ def _operation(before: object, after: object) -> PreviewOperation:
     return "changed"
 
 
-def preview_value(value: object) -> PreviewValue:
-    """Render one already redacted value in the closed bounded representation."""
+def preview_value(
+    value: object,
+    *,
+    semantic_value: object = _USE_RENDERED_VALUE,
+) -> PreviewValue:
+    """Render one safe value while retaining its separately safe semantics."""
+    digest_value = value if semantic_value is _USE_RENDERED_VALUE else semantic_value
     if value is _ABSENT:
         return PreviewValue(
             state="absent",
@@ -196,7 +262,7 @@ def preview_value(value: object) -> PreviewValue:
             state="redacted",
             type=value_type,
             text=None,
-            semantic_value=_semantic_projection(value),
+            semantic_value=_semantic_projection(digest_value),
         )
     rendered = value if isinstance(value, str) else _canonical_json(value)
     if len(rendered) > PREVIEW_DIFF_VALUE_MAX_LENGTH:
@@ -204,13 +270,13 @@ def preview_value(value: object) -> PreviewValue:
             state="truncated",
             type=value_type,
             text=rendered[:PREVIEW_DIFF_VALUE_MAX_LENGTH],
-            semantic_value=_semantic_projection(value),
+            semantic_value=_semantic_projection(digest_value),
         )
     return PreviewValue(
         state="value",
         type=value_type,
         text=rendered,
-        semantic_value=_semantic_projection(value),
+        semantic_value=_semantic_projection(digest_value),
     )
 
 
@@ -283,10 +349,11 @@ def _complete_diff_digest(entries: list[PreviewDiffEntry]) -> str:
     """Fingerprint every safe semantic change, including omitted diff entries.
 
     The public diff truncates long values and caps its entry count. This second
-    domain-separated digest is computed from the complete closed diff after
-    secret and concealment redaction, so changing a safe suffix or an omitted
-    path still changes the top-level preview digest. Deliberately redacted
-    values all collapse to one marker and cannot become a digest oracle.
+    domain-separated digest is computed from the complete closed diff using
+    the caller-supplied safe semantic projections, so changing a safe suffix,
+    an omitted path, or a caller-known proposed concealed value still changes
+    the top-level preview digest. Stored protected values remain collapsed and
+    cannot become a digest oracle.
     """
     complete = [_semantic_entry(entry) for entry in entries]
     material = (

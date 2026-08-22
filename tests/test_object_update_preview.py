@@ -941,6 +941,153 @@ def test_a_knowledge_reference_to_a_concealed_target_stays_indistinguishable(
     assert "preview-concealed" not in preview.text
 
 
+def test_service_update_preserves_an_unchanged_stored_concealed_reference(
+    preview_state,
+) -> None:
+    """The shared planner exempts only the byte-identical stored value."""
+    session_factory = preview_state["session_factory"]
+    object_id = _kind_object_id("service")
+    stored_data = {
+        "schema_version": 1,
+        "credential": "service:preview-concealed",
+    }
+    with session_factory() as session:
+        with transaction(session):
+            row = session.get(CatalogObject, object_id)
+            assert row is not None
+            row.data_json = json.dumps(stored_data, sort_keys=True)
+
+    payload = _object(
+        object_id,
+        summary="service-layer change",
+        data=stored_data,
+    )
+    with session_factory() as session:
+        target = session.get(CatalogObject, object_id)
+        assert target is not None
+        seeded_revision = target.revision
+        principal = session.get(Principal, preview_state["principal_id"])
+        assert principal is not None
+        context = WriteContext(
+            principal=principal_context(principal),
+            policy=policy_for_principal(session, principal.id),
+            channel="api",
+        )
+        preview = preview_catalog_object_update(
+            session,
+            context,
+            object_id=object_id,
+            payload=payload,
+            expected_revision=seeded_revision,
+        )
+        assert preview.changed is True
+        assert [entry.path for entry in preview.diff] == ["/summary"]
+
+    with session_factory() as session:
+        with transaction(session):
+            principal = session.get(Principal, preview_state["principal_id"])
+            assert principal is not None
+            context = WriteContext(
+                principal=principal_context(principal),
+                policy=policy_for_principal(session, principal.id),
+                channel="api",
+            )
+            applied = update_catalog_object(
+                session,
+                context,
+                object_id=object_id,
+                payload=payload,
+                expected_revision=seeded_revision,
+            )
+            assert applied.changed is True
+            assert applied.catalog_object.revision == seeded_revision + 1
+            assert applied.catalog_object.data == stored_data
+
+
+def test_rest_update_preserves_only_an_unchanged_stored_concealed_reference(
+    preview_client: TestClient,
+    preview_state,
+) -> None:
+    session_factory = preview_state["session_factory"]
+    object_id = _kind_object_id("service")
+    stored_data = {
+        "schema_version": 1,
+        "credential": "service:preview-concealed",
+    }
+    with session_factory() as session:
+        with transaction(session):
+            row = session.get(CatalogObject, object_id)
+            assert row is not None
+            row.data_json = json.dumps(stored_data, sort_keys=True)
+
+    etag = _etag(preview_client, preview_state, object_id)
+    payload = _object(
+        object_id,
+        summary="REST change",
+        data=stored_data,
+    ).model_dump(mode="json")
+    preview = _preview(
+        preview_client,
+        preview_state,
+        object_id,
+        payload,
+        if_match=etag,
+    )
+    applied = preview_client.put(
+        f"/api/v1/objects/{object_id}",
+        headers={**_auth(preview_state), "If-Match": etag},
+        json=payload,
+    )
+
+    assert preview.status_code == applied.status_code == 200
+    assert preview.json()["expected_result_etag"] == applied.headers["etag"]
+    current_etag = applied.headers["etag"]
+
+    def changed_reference(reference: str) -> dict:
+        return _object(
+            object_id,
+            summary="REST change",
+            data={"schema_version": 1, "credential": reference},
+        ).model_dump(mode="json")
+
+    failures = []
+    for reference in ("service:preview-concealed-two", "service:not-present"):
+        proposed = changed_reference(reference)
+        failures.extend(
+            (
+                _preview(
+                    preview_client,
+                    preview_state,
+                    object_id,
+                    proposed,
+                    if_match=current_etag,
+                ),
+                preview_client.put(
+                    f"/api/v1/objects/{object_id}",
+                    headers={
+                        **_auth(preview_state),
+                        "If-Match": current_etag,
+                    },
+                    json=proposed,
+                ),
+            )
+        )
+
+    assert [response.status_code for response in failures] == [404, 404, 404, 404]
+    safe_errors = [
+        {
+            key: value
+            for key, value in response.json()["error"].items()
+            if key != "correlation_id"
+        }
+        for response in failures
+    ]
+    assert all(error == safe_errors[0] for error in safe_errors[1:])
+    serialized = json.dumps(safe_errors)
+    assert "preview-concealed-two" not in serialized
+    assert "not-present" not in serialized
+
+
 # ---------------------------------------------------------------------------
 # Diff and digest contract
 # ---------------------------------------------------------------------------
@@ -1086,6 +1233,7 @@ def test_the_digest_is_stable_versioned_and_domain_separated(
         "object_id": first["object_id"],
         "object_kind": first["object_kind"],
     }
+    assert set(body) == set(first) - {"preview_digest"}
     assert preview_digest(body) == first["preview_digest"]
     assert SECRET_MARKER not in first["preview_digest"]
 
@@ -1352,6 +1500,67 @@ def test_concealed_missing_and_kind_mismatched_references_are_indistinguishable(
     assert safe_errors[0] == safe_errors[1] == safe_errors[2]
     assert "preview-concealed" not in json.dumps(safe_errors)
     assert "not-present" not in json.dumps(safe_errors)
+
+
+def test_distinct_caller_supplied_concealed_proposals_bind_distinct_digests(
+    preview_client: TestClient,
+    preview_state,
+) -> None:
+    """Compare canonical values first, then redact only the public rendering."""
+    session_factory = preview_state["session_factory"]
+    object_id = _kind_object_id("service")
+    concealed_values = (
+        "service:preview-concealed",
+        "service:preview-concealed-two",
+        "service:preview-concealed-three",
+    )
+    with session_factory() as session:
+        with transaction(session):
+            upsert_object(
+                session,
+                _object("preview-concealed-three", summary="concealed three"),
+            )
+            row = session.get(CatalogObject, object_id)
+            assert row is not None
+            row.summary = concealed_values[0]
+
+    etag = _etag(preview_client, preview_state, object_id)
+    unchanged = _preview(
+        preview_client,
+        preview_state,
+        object_id,
+        _object(object_id, summary=concealed_values[0]).model_dump(mode="json"),
+        if_match=etag,
+    ).json()
+    proposals = [
+        _preview(
+            preview_client,
+            preview_state,
+            object_id,
+            _object(object_id, summary=value).model_dump(mode="json"),
+            if_match=etag,
+        ).json()
+        for value in concealed_values[1:]
+    ]
+
+    assert unchanged["changed"] is False
+    assert unchanged["diff"] == []
+    assert unchanged["expected_result_etag"] == etag
+    assert all(proposal["changed"] is True for proposal in proposals)
+    for proposal in proposals:
+        assert proposal["diff_truncated"] is False
+        assert len(proposal["diff"]) == 1
+        entry = proposal["diff"][0]
+        assert entry["path"] == "/summary"
+        assert entry["before"] == entry["after"] == {
+            "state": "redacted",
+            "type": "string",
+            "text": None,
+        }
+    assert proposals[0]["diff_digest"] != proposals[1]["diff_digest"]
+    assert proposals[0]["preview_digest"] != proposals[1]["preview_digest"]
+    serialized = json.dumps([unchanged, *proposals])
+    assert all(value not in serialized for value in concealed_values)
 
 
 def test_diff_digest_preserves_safe_siblings_and_rejects_forgeable_markers() -> None:

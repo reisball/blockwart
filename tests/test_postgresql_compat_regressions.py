@@ -1883,6 +1883,174 @@ def test_postgresql_object_update_preview_mutates_no_row_or_sequence(
     assert revision == changed.json()["expected_result_revision"]
 
 
+def test_postgresql_preview_preserves_and_safely_digests_concealed_references(
+    migrated_pg_engine: Engine,
+) -> None:
+    """Cover the F1/F2 reference semantics on the PostgreSQL REST path."""
+    from blockwart.api.deps import get_session
+    from blockwart.db.session import transaction as db_transaction
+    from blockwart.domain.auth import GrantScope, Role
+    from blockwart.main import create_app
+    from blockwart.schemas.catalog import CatalogObjectIn
+    from blockwart.services.access import create_object_grant
+    from blockwart.services.catalog import upsert_object
+    from blockwart.services.identity import create_service_account, issue_service_token
+
+    sessions = sessionmaker(bind=migrated_pg_engine, autoflush=False, autocommit=False)
+    hidden_ids = ("pg-hidden-a", "pg-hidden-b", "pg-hidden-c")
+    with sessions() as session:
+        with db_transaction(session):
+            for hidden_id in hidden_ids:
+                upsert_object(
+                    session,
+                    CatalogObjectIn(
+                        id=hidden_id,
+                        kind="service",
+                        label=hidden_id,
+                        lifecycle="active",
+                        health="healthy",
+                        data={"schema_version": 1},
+                    ),
+                )
+            target = upsert_object(
+                session,
+                CatalogObjectIn(
+                    id="pg-reference-target",
+                    kind="service",
+                    label="Reference target",
+                    lifecycle="active",
+                    health="healthy",
+                    summary=f"service:{hidden_ids[0]}",
+                    data={
+                        "schema_version": 1,
+                        "credential": f"service:{hidden_ids[0]}",
+                    },
+                ),
+            )
+            principal = create_service_account(
+                session,
+                login="pg.reference.writer",
+                display_name="PG Reference Writer",
+            )
+            create_object_grant(
+                session,
+                principal_id=principal.id,
+                object_id=target.id,
+                role=Role.EDITOR,
+                scope=GrantScope.SELF,
+            )
+            token = issue_service_token(
+                session,
+                principal_id=principal.id,
+                name="pg-reference-preview",
+            )
+
+    application = create_app()
+
+    def override_get_session():
+        with sessions() as request_session:
+            yield request_session
+
+    application.dependency_overrides[get_session] = override_get_session
+    authorization = {"Authorization": f"Bearer {token.value}"}
+    with TestClient(application) as client:
+        detail = client.get(
+            "/api/v1/objects/pg-reference-target",
+            headers=authorization,
+        )
+        assert detail.status_code == 200
+        etag = detail.headers["etag"]
+        unchanged_reference = {
+            "id": "pg-reference-target",
+            "kind": "service",
+            "label": "Reference target changed",
+            "status": "active",
+            "lifecycle": "active",
+            "health": "healthy",
+            "summary": f"service:{hidden_ids[0]}",
+            "data": {
+                "schema_version": 1,
+                "credential": f"service:{hidden_ids[0]}",
+            },
+        }
+        preview = client.post(
+            "/api/v1/objects/pg-reference-target/update-preview",
+            headers={**authorization, "If-Match": etag},
+            json=unchanged_reference,
+        )
+        applied = client.put(
+            "/api/v1/objects/pg-reference-target",
+            headers={**authorization, "If-Match": etag},
+            json=unchanged_reference,
+        )
+
+        assert preview.status_code == applied.status_code == 200
+        current_etag = applied.headers["etag"]
+        noop = client.post(
+            "/api/v1/objects/pg-reference-target/update-preview",
+            headers={**authorization, "If-Match": current_etag},
+            json=unchanged_reference,
+        )
+        assert noop.status_code == 200
+        assert noop.json()["changed"] is False
+        assert noop.json()["diff"] == []
+
+        failures = []
+        for reference in (f"service:{hidden_ids[1]}", "service:pg-not-present"):
+            changed_reference = {
+                **unchanged_reference,
+                "data": {"schema_version": 1, "credential": reference},
+            }
+            failures.extend(
+                (
+                    client.post(
+                        "/api/v1/objects/pg-reference-target/update-preview",
+                        headers={**authorization, "If-Match": current_etag},
+                        json=changed_reference,
+                    ),
+                    client.put(
+                        "/api/v1/objects/pg-reference-target",
+                        headers={**authorization, "If-Match": current_etag},
+                        json=changed_reference,
+                    ),
+                )
+            )
+        assert [response.status_code for response in failures] == [404] * 4
+        safe_errors = [
+            {
+                key: value
+                for key, value in response.json()["error"].items()
+                if key != "correlation_id"
+            }
+            for response in failures
+        ]
+        assert all(error == safe_errors[0] for error in safe_errors[1:])
+
+        proposals = []
+        for hidden_id in hidden_ids[1:]:
+            response = client.post(
+                "/api/v1/objects/pg-reference-target/update-preview",
+                headers={**authorization, "If-Match": current_etag},
+                json={**unchanged_reference, "summary": f"service:{hidden_id}"},
+            )
+            assert response.status_code == 200, response.text
+            proposals.append(response.json())
+
+    for proposal in proposals:
+        assert proposal["changed"] is True
+        assert len(proposal["diff"]) == 1
+        assert proposal["diff"][0]["path"] == "/summary"
+        assert proposal["diff"][0]["before"] == proposal["diff"][0]["after"] == {
+            "state": "redacted",
+            "type": "string",
+            "text": None,
+        }
+    assert proposals[0]["diff_digest"] != proposals[1]["diff_digest"]
+    assert proposals[0]["preview_digest"] != proposals[1]["preview_digest"]
+    serialized = json.dumps([noop.json(), safe_errors, *proposals])
+    assert all(hidden_id not in serialized for hidden_id in (*hidden_ids, "pg-not-present"))
+
+
 def test_postgresql_noop_apply_rechecks_revision_after_competing_commit(
     migrated_pg_engine: Engine,
 ) -> None:

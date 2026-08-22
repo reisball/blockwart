@@ -3,7 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
-from collections.abc import Mapping
+from collections.abc import Collection, Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
@@ -241,11 +241,18 @@ def plan_object_update(
         raise CommandConflict("payload object id does not match the resource")
     if row.revision != resolved_revision:
         raise CommandPreconditionFailed("object revision changed")
+    stored_data = _raw_object_snapshot(row).get("data")
+    preexisting_typed_references = frozenset(
+        iter_typed_reference_strings(stored_data)
+        if isinstance(stored_data, Mapping)
+        else ()
+    )
     _require_knowledge_reference_access(
         session,
         current_context,
         payload,
         all_typed_references=True,
+        preexisting_typed_references=preexisting_typed_references,
     )
     try:
         upsert_plan = plan_object_upsert(
@@ -343,10 +350,11 @@ def preview_catalog_object_update(
     """Resolve the same update read-only and publish its safe bounded preview.
 
     The proposed record is never written, flushed, or rolled back: it is only
-    projected. The published diff compares the shared redacted snapshot of the
-    current row with the shared redacted snapshot of the normalized proposal,
-    so no concealed field, credential value, secret-shaped value, or raw
-    proposed document can reach the response.
+    projected. The diff compares canonical snapshots before rendering, then
+    publishes only their shared redacted projections. Stored protected values
+    remain collapsed in digest material, while distinct caller-supplied safe
+    proposals remain semantically distinct without exposing either raw object
+    document in the response.
     """
     plan = plan_object_update(
         session,
@@ -356,9 +364,19 @@ def preview_catalog_object_update(
         expected_revision=expected_revision,
         refresh_policy=refresh_policy,
     )
-    before = _current_snapshot(plan.row, plan.context)
-    after = _proposed_snapshot(plan.upsert, plan.context)
-    diff, diff_truncated, diff_digest = preview_diff(before, after)
+    before = _current_snapshot(plan.row)
+    after = _proposed_snapshot(plan.upsert)
+    rendered_before = _render_preview_snapshot(before, context=plan.context)
+    rendered_after = _render_preview_snapshot(after, context=plan.context)
+    digest_after = _render_preview_snapshot(after)
+    diff, diff_truncated, diff_digest = preview_diff(
+        before,
+        after,
+        rendered_before=rendered_before,
+        rendered_after=rendered_after,
+        digest_before=rendered_before,
+        digest_after=digest_after,
+    )
     base_revision = plan.expected_revision
     result_revision = base_revision + 1 if plan.changed else base_revision
     body: dict[str, object] = {
@@ -392,29 +410,23 @@ def preview_catalog_object_update(
 
 def _current_snapshot(
     row: CatalogObject,
-    context: WriteContext,
 ) -> dict[str, object]:
-    """Extend the shared audit snapshot with the record's stored provenance.
+    """Build the canonical stored snapshot before lossy preview rendering.
 
     Provenance is part of the canonical no-op calculation, so the preview must
     diff it too. Including it here keeps a provenance-only proposal from
     reporting `changed` with an empty diff, without widening the existing
     object-audit snapshot contract.
     """
-    snapshot = _object_snapshot(
-        row,
-        redaction_replacement=REDACTED_PREVIEW_VALUE,
-    )
-    snapshot["provenance"] = _redacted_json_document(row.provenance_json)
-    safe = _redact_concealed_references(snapshot, context)
-    return safe if isinstance(safe, dict) else {}
+    snapshot = _raw_object_snapshot(row)
+    snapshot["provenance"] = _json_document(row.provenance_json)
+    return snapshot
 
 
 def _proposed_snapshot(
     plan: ObjectUpsertPlan,
-    context: WriteContext,
 ) -> dict[str, object]:
-    """Redact the normalized proposal into the same shape as a stored snapshot."""
+    """Build the normalized proposal before lossy preview rendering."""
     payload = plan.payload
     target_state = plan.target_state
     snapshot = {
@@ -428,11 +440,28 @@ def _proposed_snapshot(
         "data": json.loads(plan.data_json),
         "provenance": json.loads(plan.provenance_json),
     }
+    return snapshot
+
+
+def _render_preview_snapshot(
+    snapshot: Mapping[str, object],
+    *,
+    context: WriteContext | None = None,
+) -> dict[str, object]:
+    """Return one safe rendering or digest projection of a canonical snapshot.
+
+    Secret-shaped values always collapse. A response rendering also collapses
+    typed identities the caller cannot read. The caller-supplied proposed
+    digest projection omits only that second lossy step, allowing distinct
+    proposals to remain distinct without placing their values in the response.
+    """
     redacted = redact_secret_values(
         snapshot,
         replacement=REDACTED_PREVIEW_VALUE,
     )
     safe = redacted if isinstance(redacted, dict) else {}
+    if context is None:
+        return safe
     concealed = _redact_concealed_references(safe, context)
     return concealed if isinstance(concealed, dict) else {}
 
@@ -460,16 +489,13 @@ def _redact_concealed_references(
     return REDACTED_PREVIEW_VALUE
 
 
-def _redacted_json_document(raw_json: str | None) -> object:
+def _json_document(raw_json: str | None) -> object:
     """Load one stored JSON document safely, never echoing the broken value."""
     try:
         document = json.loads(raw_json or "")
     except (TypeError, json.JSONDecodeError):
         return {"record_state": "corrupt"}
-    return redact_secret_values(
-        document,
-        replacement=REDACTED_PREVIEW_VALUE,
-    )
+    return document
 
 
 def create_child_object(
@@ -1440,11 +1466,21 @@ def _object_snapshot(
     *,
     redaction_replacement: object = REDACTED_SECRET_VALUE,
 ) -> dict[str, object]:
+    snapshot = _raw_object_snapshot(row)
+    redacted = redact_secret_values(
+        snapshot,
+        replacement=redaction_replacement,
+    )
+    return redacted if isinstance(redacted, dict) else {}
+
+
+def _raw_object_snapshot(row: CatalogObject) -> dict[str, object]:
+    """Load one stored object snapshot without applying rendering policy."""
     try:
         data = json.loads(row.data_json)
-    except json.JSONDecodeError:
+    except (TypeError, json.JSONDecodeError):
         data = {"record_state": "corrupt"}
-    snapshot = {
+    return {
         "id": row.id,
         "kind": row.kind,
         "label": row.label,
@@ -1454,11 +1490,6 @@ def _object_snapshot(
         "summary": row.summary,
         "data": data,
     }
-    redacted = redact_secret_values(
-        snapshot,
-        replacement=redaction_replacement,
-    )
-    return redacted if isinstance(redacted, dict) else {}
 
 
 def _structured_changes(
@@ -1577,6 +1608,7 @@ def _require_knowledge_reference_access(
     payload: CatalogObjectIn,
     *,
     all_typed_references: bool = False,
+    preexisting_typed_references: Collection[str] = (),
 ) -> None:
     """Fail closed when a projected write names an unreadable typed target.
 
@@ -1584,10 +1616,13 @@ def _require_knowledge_reference_access(
     same public command error. The projected object may name itself here so the
     canonical supersession graph validator can report the self-link rule.
 
-    Existing create commands retain their reviewed knowledge-reference
-    contract. The full-object update planner opts into all typed references so
-    preview and PUT cannot distinguish an unreadable service/asset target from
-    an absent or kind-mismatched one.
+    Existing create commands and declared knowledge fields retain their
+    reviewed knowledge-reference contract. The full-object update planner opts
+    into all other typed references, exempting only byte-identical values
+    already present in the stored canonical data. Newly introduced or changed
+    values therefore cannot distinguish an unreadable target from an absent or
+    kind-mismatched one, while an unrelated edit does not re-authorize an
+    unchanged stored reference.
     """
     if payload.kind == "runbook":
         knowledge_references = iter_runbook_references(payload.data)
@@ -1601,17 +1636,26 @@ def _require_knowledge_reference_access(
     else:
         knowledge_references = ()
         message = "reference target not found"
+    knowledge_reference_values = {
+        reference.value for reference in knowledge_references
+    }
     if all_typed_references:
-        references: set[TypedReference] = set()
-        for reference_value in iter_typed_reference_strings(payload.data):
-            try:
-                references.add(TypedReference.parse(reference_value))
-            except ValueError:
-                # The canonical validator publishes the stable malformed
-                # reference error after this authorization projection.
-                continue
+        reference_values = {
+            reference_value
+            for reference_value in iter_typed_reference_strings(payload.data)
+            if reference_value not in preexisting_typed_references
+            or reference_value in knowledge_reference_values
+        }
     else:
-        references = {reference.parsed for reference in knowledge_references}
+        reference_values = knowledge_reference_values
+    references: set[TypedReference] = set()
+    for reference_value in sorted(reference_values):
+        try:
+            references.add(TypedReference.parse(reference_value))
+        except ValueError:
+            # The canonical validator publishes the stable malformed
+            # reference error after this authorization projection.
+            continue
     for reference in sorted(
         references,
         key=lambda item: (item.kind, item.object_id),

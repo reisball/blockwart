@@ -458,11 +458,14 @@ Each diff side has exactly `state`, `type`, and `text`. State is
 `absent|value|redacted|truncated`; type is
 `absent|null|boolean|integer|number|string|array|object`. Strings use their
 exact normalized text and other values use canonical JSON, capped at 120
-characters. `text` is null for absent and redacted values. Secret-shaped values
-and typed identities the caller cannot read collapse to one redacted state
-before either digest is calculated, so neither digest is a secret or
-concealment oracle. The response never includes the current or proposed object
-document.
+characters. `text` is null for absent and redacted values. Canonical values are
+compared before this lossy rendering, so an unchanged concealed value remains a
+no-op while a material change still emits a redacted diff entry. Stored
+secret-shaped values and typed identities the caller cannot read collapse
+before digest calculation. A distinct caller-supplied proposed concealed value
+binds the semantic diff digest without appearing in the response, so proposals
+cannot collide and the digest cannot reveal a stored protected identity. The
+response never includes the current or proposed object document.
 
 An exact pointer is published with `path_state=exact`. A pointer longer than
 512 characters is replaced by one fixed `/@sha256:<hex>` pointer with
@@ -473,9 +476,14 @@ ambiguous.
 Planning runs the same authorization, ETag, canonical normalization/no-op,
 schema, secret, ACL-shaped-key, typed-reference, relationship, lifecycle,
 health, placement, monitoring, component, provenance, and kind/domain checks
-as the real update. The real `PUT` plans again in its own transaction. A write
-after preview therefore makes the old ETag stale in the ordinary way; preview
-creates no lock, reservation, or later-apply guarantee.
+as the real update. For the all-data concealment gate, a byte-identical typed
+reference already present in stored canonical data is not re-authorized during
+an unrelated edit; every newly introduced or changed reference is still
+checked with indistinguishable concealed, missing, and kind-mismatched failure.
+Declared knowledge-reference rules and create paths are unchanged. The real
+`PUT` plans again in its own transaction. A write after preview therefore makes
+the old ETag stale in the ordinary way; preview creates no lock, reservation,
+or later-apply guarantee.
 
 An authenticated preview issues reads only. It does not flush, reserve an ID,
 advance a sequence, create a savepoint, update the service token's

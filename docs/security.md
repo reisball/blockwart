@@ -30,10 +30,13 @@ a strict safe stub. Catalog and grant commands are also object-authorized.
 The ETag-bound object-update preview requires effective `write` on the exact
 object and applies the same concealment, validation, and strong-precondition
 policy as the real update. Its bounded diff redacts secret-shaped values and
-typed identities the caller cannot read before calculating either digest. A
-valid or object-denied preview writes no catalog, authentication timestamp,
-security-event, audit, idempotency, relationship, or sequence state and creates
-no later-apply guarantee.
+typed identities the caller cannot read from the published representation.
+Canonical comparison happens before that lossy rendering: stored protected
+values remain collapsed in digest material, while distinct caller-supplied
+proposals bind distinct semantic digests without disclosing a stored target
+identity. A valid or object-denied preview writes no catalog, authentication
+timestamp, security-event, audit, idempotency, relationship, or sequence state
+and creates no later-apply guarantee.
 The known-ID batch context read (`POST /api/v1/object-contexts` and
 `blockwart.get_object_contexts`) applies the same policy per requested ID:
 readable objects return the full detail, discover-only objects return the
