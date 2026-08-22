@@ -92,6 +92,10 @@ catalog through this workflow.
 The installed-package proof also resolves `blockwart-source-coverage` and validates that its
 manifest, target-evidence, and result schemas can be printed outside the source tree; it does not
 perform a private collection or coverage record.
+It also resolves the installed `blockwart-release` entry point and validates
+that the release specification, manifest, report, pointer, status, and error
+JSON Schemas can be printed outside the source tree. CI never invokes its apply
+mode or touches a host service.
 
 The container smoke proves that an empty catalog fails the Owner invariant, then starts an
 explicitly bootstrapped candidate and a database at the historical Alembic baseline. Ready

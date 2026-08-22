@@ -49,6 +49,23 @@ require their dedicated rollout and approval. Browser identity, challenge, CSRF,
 and clearing cookies are always `Secure`; deploy the browser surface only behind
 an explicitly trusted HTTPS reverse proxy that adds HSTS.
 
+The packaged host-side release controller has a separate non-secret evidence
+boundary. Its immutable bundles and reports contain only source, image,
+artifact, schema, gate, pointer, backup-digest, and rollback evidence. Runtime
+paths, environment-file locations or values, database content, private
+endpoints, credentials, and process output are excluded. Host state, backup,
+data, and optional environment files must be owned and protected; layouts and
+bundle artifacts reject symlinks and digest drift. Candidate containers mount
+only a restored SQLite copy and have no network. Image builds use an extracted
+exact-commit archive rather than the host checkout, excluding ignored private
+files. Daemon inspection verifies the effective mounts, ports, restart/network
+policy, and environment without emitting their values. A failed rollback gate
+stops and removes the unverified restored service while retaining evidence.
+Post-verification hooks use
+explicit argv and allowlisted non-secret context and are not an authorization
+to rewrite external client/agent configuration. See
+[`release-workflow.md`](release-workflow.md).
+
 Object comments use the same object policy and global secret detector. Their
 Markdown source is stored exactly, but browser HTML is produced only through a
 CommonMark parser with raw HTML disabled and an independent sanitizer. Images,

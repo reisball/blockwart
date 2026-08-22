@@ -57,6 +57,7 @@ automatically.
 | Source coverage CLI | Closed reviewed Knowledge inventories with dry-run evidence and explicit recording | [Reviewed source coverage](docs/source-coverage-manifest.md) |
 | Knowledge plan CLI | Deterministic private-source classification with no catalog writes | [Knowledge planning](docs/knowledge-planning.md) |
 | Knowledge apply CLI | Offline digest-bound reviewed apply and paired SQLite rollback | [Knowledge apply](docs/knowledge-apply.md) |
+| Release CLI | Dry-run-first container release with restored-copy proof and verified automatic rollback | [Atomic release workflow](docs/release-workflow.md) |
 
 ## Agent quick start
 

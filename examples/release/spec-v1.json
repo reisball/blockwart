@@ -1,0 +1,49 @@
+{
+  "backup": {
+    "root": "/var/backups/blockwart-releases"
+  },
+  "expected_schema_revision": "20260818_0018",
+  "hooks": [
+    {
+      "argv": [
+        "/usr/local/bin/blockwart-post-verify",
+        "--release-proof"
+      ],
+      "name": "release-proof",
+      "timeout_seconds": 60
+    }
+  ],
+  "image": {
+    "containerfile": "Dockerfile",
+    "mode": "build",
+    "repository": "blockwart",
+    "runtime": "docker"
+  },
+  "service": {
+    "container_data_path": "/data",
+    "container_name": "blockwart",
+    "data_directory": "/var/lib/blockwart",
+    "database_filename": "blockwart.sqlite3",
+    "environment_file": "/etc/blockwart/runtime.env",
+    "publish": "127.0.0.1:8000:8000"
+  },
+  "source": {
+    "commit": "1111111111111111111111111111111111111111",
+    "repository_root": "/srv/blockwart/source"
+  },
+  "spec_version": 1,
+  "state": {
+    "retention": 5,
+    "root": "/var/lib/blockwart-release"
+  },
+  "timeouts": {
+    "build_seconds": 1800,
+    "command_seconds": 300,
+    "cutover_seconds": 300,
+    "health_seconds": 120,
+    "poll_interval_seconds": 1.0,
+    "readiness_seconds": 120,
+    "rollback_seconds": 600,
+    "stop_seconds": 30
+  }
+}
