@@ -373,11 +373,11 @@ def test_postgresql_catalog_viewer_migration_upgrade_and_safe_downgrade(
         assert _table_rows(engine, {"principals", "principal_invariant_counts"}) == before
         with pytest.raises(IntegrityError):
             with engine.begin() as connection:
-                connection.execute(
-                    text(
-                        "UPDATE principals SET catalog_role = 'catalog_viewer' "
-                        "WHERE id = '00000000-0000-0000-0000-000000000171'"
-                    )
+                _insert_principal(
+                    connection,
+                    principal_id="00000000-0000-0000-0000-000000000174",
+                    login="rejected-viewer-171",
+                    catalog_role="catalog_viewer",
                 )
         with pytest.raises(Exception, match="last active catalog owner"):
             with engine.begin() as connection:
