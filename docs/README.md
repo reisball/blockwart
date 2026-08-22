@@ -9,6 +9,9 @@ deleted by this classification.
 - [Configuration](config.md) and [deployment readiness](deployment.md)
 - [Reproducible builds and CI](ci.md), including the host-neutral parity
   contract for `.gitea/workflows/ci.yml` and `.github/workflows/ci.yml`
+- [Atomic container release workflow](release-workflow.md), including the
+  versioned specification, immutable evidence, candidate gates, cutover, and
+  verified backup/image rollback contract
 - [Markdown import](markdown-import.md) and [canonical English/UI
   localization](internationalization.md)
 - [Write-free Knowledge planning](knowledge-planning.md)

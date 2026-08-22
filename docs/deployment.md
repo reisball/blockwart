@@ -206,6 +206,15 @@ For an authentication-denial incident:
 
 Treat application code and its database revision as one release. Before updating the live image:
 
+For a containerized self-hosted installation, the packaged
+[`blockwart-release`](release-workflow.md) controller implements this proof as
+a dry-run-first, single-writer state machine. It creates the SQLite online
+backup, migrates and checks only a restored candidate copy, separates internal
+readiness from fresh container health, and automatically restores the exact
+previous image/backup pair after any post-stop failure. It never uses database
+downgrade. The manual steps below remain the underlying recovery contract and
+apply to installations that have not adopted the managed release state.
+
 Revision `0013` deliberately keeps legacy Network rows without `data.network.category` readable
 while rejecting every write to them. It does not classify or mutate those rows. Do not deploy that
 transitional revision to production until the separately reviewed Network classification dry run,
