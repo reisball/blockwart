@@ -24,6 +24,19 @@ Plaintext credential material must never enter logs, audit details, database
 rows, command-line arguments, or generated documentation. See
 `auth-rbac.md`.
 
+Human login under `/auth` is non-persistent by default: its server-side session
+expires absolutely within one hour, and its identity and CSRF cookies contain
+neither `Max-Age` nor `Expires`. The explicit localized **Keep me signed in**
+choice uses one validated server-configured lifetime (30 days by default) for
+the stored absolute expiry and both persistent cookies. It is bounded,
+non-sliding, and never accepts a client TTL or expiry. Missing, extra,
+duplicated, or manipulated form values cannot weaken `Secure`, `HttpOnly`,
+`SameSite=Strict`, or `Path=/`, and cannot create an unbounded session. Both
+modes retain the one-time login challenge, session-bound CSRF, rate limiting,
+revocation, stale-cookie clearing, and `no-store` response behavior. Redacted
+security events distinguish standard and remembered issuance and revocation
+without storing any session, cookie, CSRF, password, or hash value.
+
 Catalog reads are authenticated and object-authorized across UI, REST, Agent
 API, and MCP. No-discover objects are concealed and discover-only objects use
 a strict safe stub. Catalog and grant commands are also object-authorized.

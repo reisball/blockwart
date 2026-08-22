@@ -11,7 +11,7 @@
         document.documentElement.dataset.theme = "light";
       }
     </script>
-    <link rel="stylesheet" href="/static/app.css?v=062" />
+    <link rel="stylesheet" href="/static/app.css?v=063" />
     <script src="/static/theme.js?v=054" defer></script>
   </head>
   <body>
@@ -74,6 +74,10 @@
                 maxlength="1024"
                 required
               />
+            </label>
+            <label class="checkbox-field">
+              <input type="checkbox" name="remember" value="on" />
+              <span>{{ t("auth.remember") }}</span>
             </label>
             <div class="button-row">
               <button type="submit">{{ t("auth.login_submit") }}</button>

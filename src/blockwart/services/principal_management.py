@@ -691,7 +691,14 @@ def update_managed_principal(
     if result.rowcount != 1:
         raise ManagedPrincipalPreconditionFailed("principal revision changed")
     if deactivating:
-        revoke_all_browser_sessions(session, principal_id=row.id, now=timestamp)
+        revoke_all_browser_sessions(
+            session,
+            principal_id=row.id,
+            channel=channel,
+            request_id=request_id,
+            reason="principal_deactivation",
+            now=timestamp,
+        )
         session.execute(
             update(ServiceToken)
             .where(

@@ -359,7 +359,10 @@ Optional:
 - `BLOCKWART_ENV`
 - `BLOCKWART_BUILD_REVISION` (default `unknown`; inject the deployed Git commit at image build)
 - `BLOCKWART_SECRET_REFERENCE`
-- `BLOCKWART_AUTH_SESSION_TTL_SECONDS` (default `3600`, allowed `300..86400`)
+- `BLOCKWART_AUTH_SESSION_TTL_SECONDS` (default `3600`, allowed `300..3600`;
+  absolute standard human browser-session lifetime)
+- `BLOCKWART_AUTH_REMEMBER_SESSION_TTL_SECONDS` (default `2592000`, allowed
+  `86400..7776000`; absolute opt-in persistent human browser-session lifetime)
 - `BLOCKWART_AUTH_LOGIN_CHALLENGE_TTL_SECONDS` (default `600`, allowed
   `60..3600`)
 - `BLOCKWART_AUTH_LOGIN_RATE_WINDOW_SECONDS` (default `60`, allowed `10..3600`)
@@ -420,6 +423,16 @@ Catalog access now requires principals and object grants. `/auth` uses the
 tokens authenticate and filter `/api/objects`, `/api/agent`, and `/api/v1`.
 Production bootstrap, token injection, writable authorization, and deployment
 rollout each require explicit approval. See `auth-rbac.md`.
+
+Changing either browser-session lifetime affects only sessions issued by a
+later successful `/auth/login`; it never extends an existing session. Keep the
+standard value at or below one hour and choose the remembered value within its
+validated bounds. Invalid values prevent settings initialization. Deployment
+smoke checks should verify that unchecked login sets session-only identity and
+CSRF cookies, checked login gives both cookies the same configured `Max-Age`,
+and both responses preserve `Secure`, `HttpOnly`, `SameSite=Strict`, `Path=/`,
+and `Cache-Control: no-store`. Do not add proxy cookie rewriting or sliding
+renewal.
 
 ## Agent Access
 
