@@ -22,6 +22,27 @@ def spec_json_schema() -> dict[str, Any]:
     schema = ReleaseSpec.model_json_schema()
     schema["$schema"] = "https://json-schema.org/draft/2020-12/schema"
     schema["title"] = "BlockwartReleaseSpecV1"
+    schema.setdefault("allOf", []).append(
+        {
+            "if": {
+                "properties": {
+                    "image": {
+                        "properties": {"mode": {"const": "existing"}},
+                        "required": ["mode"],
+                    }
+                },
+                "required": ["image"],
+            },
+            "then": {
+                "properties": {
+                    "image": {
+                        "properties": {"digest": dict(_IMAGE_DIGEST)},
+                        "required": ["digest"],
+                    }
+                }
+            },
+        }
+    )
     return schema
 
 
@@ -223,7 +244,17 @@ def report_json_schema() -> dict[str, Any]:
                         "failed_database_preserved": {"type": "boolean"},
                         "pointers_restored": {"type": "boolean"},
                         "service_restored": {"type": "boolean"},
+                        "service_contained": {"type": "boolean"},
                         "readiness_revision": {"type": ["string", "null"]},
+                        "containment_error": {
+                            "additionalProperties": False,
+                            "properties": {
+                                "gate": {"const": "rollback_containment", "type": "string"},
+                                "code": {"type": "string"},
+                            },
+                            "required": ["code", "gate"],
+                            "type": "object",
+                        },
                         "rollback_error": {
                             "additionalProperties": False,
                             "properties": {
@@ -242,6 +273,7 @@ def report_json_schema() -> dict[str, Any]:
                         "previous_image_digest",
                         "previous_release_id",
                         "restored_backup_sha256",
+                        "service_contained",
                         "triggered_by",
                     ],
                     "type": "object",

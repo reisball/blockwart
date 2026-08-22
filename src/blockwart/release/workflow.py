@@ -2,12 +2,15 @@ from __future__ import annotations
 
 import json
 import math
+import os
 import shutil
+import tarfile
+import tempfile
 from collections.abc import Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import datetime
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any
 
 from blockwart.release.backup import (
@@ -20,6 +23,7 @@ from blockwart.release.backup import (
 )
 from blockwart.release.canonical import (
     domain_digest,
+    fsync_directory,
     is_image_digest,
     require_disjoint,
     require_protected_directory,
@@ -44,6 +48,7 @@ from blockwart.release.spec import (
     REPORT_SCHEMA_VERSION,
     ReleaseSpec,
     ResolvedPaths,
+    runtime_environment,
     runtime_layout_digest,
     spec_digest,
 )
@@ -201,12 +206,14 @@ class ReleaseWorkflow:
                     "candidate_schema",
                     "candidate_db_check",
                     "candidate_integrity",
+                    "candidate_runtime_layout",
                     "candidate_readiness",
                     "candidate_health",
                     "candidate_cleanup",
                     "cutover_service_stopped",
                     "cutover_database_snapshot",
                     "cutover_service_started",
+                    "cutover_runtime_layout",
                     "cutover_readiness",
                     "cutover_health",
                     "cutover_schema",
@@ -259,8 +266,12 @@ class ReleaseWorkflow:
                 )
             )
 
-    def apply(self, *, expect_current: str | None = None) -> ReleaseOutcome:
+    def apply(self, *, expect_current: str) -> ReleaseOutcome:
         """Execute the release with automatic, verified rollback."""
+        if expect_current != "none" and not expect_current:
+            raise ReleaseError(
+                "expect_current_required", gate="current_pointer_verified"
+            )
         gates = GateLog()
         started_at = self._timestamp()
         token = _attempt_token(self.clock.now())
@@ -520,6 +531,8 @@ class ReleaseWorkflow:
             )
             if not result.ok:
                 raise ReleaseError("candidate_start_failed", gate="candidate_started")
+        with gates.gate("candidate_runtime_layout"):
+            self._verify_candidate_runtime_layout(state)
         with gates.gate("candidate_readiness"):
             state.candidate_readiness = self._await_readiness(
                 candidate_name,
@@ -573,6 +586,13 @@ class ReleaseWorkflow:
                 raise ReleaseError("cutover_timeout", gate="cutover_service_started")
             if not result.ok:
                 raise ReleaseError("cutover_start_failed", gate="cutover_service_started")
+        with gates.gate("cutover_runtime_layout"):
+            self._verify_service_runtime_layout(
+                name,
+                image_digest=state.image_digest,
+                build_revision=self.spec.source.commit,
+                gate="cutover_runtime_layout",
+            )
         with gates.gate("cutover_readiness"):
             state.service_readiness = self._await_readiness(
                 name,
@@ -642,6 +662,12 @@ class ReleaseWorkflow:
 
     def _commit_pointers(self, *, gates: GateLog, state: _ApplyState) -> None:
         with gates.gate("pointers_committed"):
+            layout_digest = self._verify_service_runtime_layout(
+                self.spec.service.container_name,
+                image_digest=state.image_digest,
+                build_revision=self.spec.source.commit,
+                gate="pointers_committed",
+            )
             generation = self.store.next_generation()
             pointer = Pointer(
                 release_id=self.release_id,
@@ -650,7 +676,7 @@ class ReleaseWorkflow:
                 image_digest=state.image_digest,
                 source_commit=self.spec.source.commit,
                 schema_revision=self.spec.expected_schema_revision,
-                runtime_layout_digest=runtime_layout_digest(self.spec),
+                runtime_layout_digest=layout_digest,
                 updated_at=self._timestamp(),
             )
             state.pointer_mutation_started = True
@@ -676,10 +702,14 @@ class ReleaseWorkflow:
         gates: GateLog,
         state: _ApplyState,
         diagnostics: list[dict[str, str]],
-    ) -> None:
+    ) -> str:
         protected = [self.release_id]
         if state.committed_previous is not None:
             protected.append(state.committed_previous.release_id)
+        if state.previous is not None:
+            # Completion-report persistence can still restore the complete
+            # pre-transaction current/previous pointer pair.
+            protected.append(state.previous.release_id)
         try:
             removed = self.store.prune(
                 retention=self.spec.state.retention, protected=protected
@@ -753,6 +783,7 @@ class ReleaseWorkflow:
             "database_restored": False,
             "failed_database_preserved": False,
             "pointers_restored": False,
+            "service_contained": False,
         }
         name = self.spec.service.container_name
         try:
@@ -808,6 +839,10 @@ class ReleaseWorkflow:
                 self._restore_pointers(state)
                 evidence["pointers_restored"] = True
         except ReleaseError as exc:
+            contained, containment_error = self._contain_failed_service(name)
+            evidence["service_contained"] = contained
+            if containment_error is not None:
+                evidence["containment_error"] = containment_error
             evidence["rollback_error"] = {"gate": exc.gate, "code": exc.code}
             state.rollback_evidence = evidence
             raise ReleaseRollbackError(
@@ -815,6 +850,7 @@ class ReleaseWorkflow:
             ) from exc
 
         state.rollback_evidence = evidence
+        evidence["service_contained"] = False
         report = self._report(
             mode=APPLY_MODE,
             outcome=OUTCOME_ROLLED_BACK,
@@ -887,6 +923,7 @@ class ReleaseWorkflow:
             # service stays stopped rather than being started from a guess.
             for gate_name in (
                 "rollback_service_started",
+                "rollback_runtime_layout",
                 "rollback_readiness",
                 "rollback_health",
                 "rollback_schema",
@@ -911,6 +948,17 @@ class ReleaseWorkflow:
                 raise ReleaseError("rollback_timeout", gate="rollback_service_started")
             if not result.ok:
                 raise ReleaseError("rollback_start_failed", gate="rollback_service_started")
+        with gates.gate("rollback_runtime_layout"):
+            self._verify_service_runtime_layout(
+                name,
+                image_digest=state.previous_image_digest,
+                build_revision=(
+                    state.current.source_commit
+                    if state.current is not None
+                    else self.spec.source.commit
+                ),
+                gate="rollback_runtime_layout",
+            )
         with gates.gate("rollback_readiness"):
             readiness = self._await_readiness(
                 name,
@@ -950,6 +998,25 @@ class ReleaseWorkflow:
             if not result.ok:
                 raise ReleaseError("rollback_integrity_failed", gate="rollback_integrity")
         evidence["service_restored"] = True
+
+    def _contain_failed_service(
+        self, name: str
+    ) -> tuple[bool, dict[str, str] | None]:
+        """Ensure an unverified restored service cannot remain published."""
+        if not self.engine.container_exists(name):
+            return True, None
+        stopped = self.engine.stop_container(
+            name, stop_seconds=self.spec.timeouts.stop_seconds
+        )
+        removed = self.engine.remove_container(
+            name, stop_seconds=self.spec.timeouts.stop_seconds
+        )
+        if removed.ok and not removed.timed_out and not self.engine.container_exists(name):
+            return True, None
+        code = "rollback_containment_timeout" if (
+            stopped.timed_out or removed.timed_out
+        ) else "rollback_containment_failed"
+        return False, {"gate": "rollback_containment", "code": code}
 
     def _restore_pointers(self, state: _ApplyState) -> None:
         if not state.pointer_mutation_started:
@@ -1074,7 +1141,9 @@ class ReleaseWorkflow:
         name = self.spec.service.container_name
         running_image = self.engine.container_image_id(name)
         if current is not None:
-            if current.runtime_layout_digest != runtime_layout_digest(self.spec):
+            if current.runtime_layout_digest != runtime_layout_digest(
+                self.spec, build_revision=current.source_commit
+            ):
                 raise ReleaseError(
                     "current_runtime_layout_drift", gate="current_pointer_verified"
                 )
@@ -1117,7 +1186,103 @@ class ReleaseWorkflow:
             raise ReleaseError("current_pointer_image_drift", gate="current_pointer_verified")
         if self.engine.container_state(name) != "running":
             raise ReleaseError("current_service_not_running", gate="current_pointer_verified")
+        self._verify_service_runtime_layout(
+            name,
+            image_digest=current.image_digest,
+            build_revision=current.source_commit,
+            gate="current_pointer_verified",
+        )
         return current
+
+    def _verify_service_runtime_layout(
+        self,
+        name: str,
+        *,
+        image_digest: str,
+        build_revision: str,
+        gate: str,
+    ) -> None:
+        configuration = self.engine.container_configuration(name)
+        image_environment = _environment_mapping(
+            self.engine.image_environment(image_digest, gate=gate)
+        )
+        actual_environment = (
+            _environment_mapping(configuration.environment)
+            if configuration is not None
+            else None
+        )
+        expected_environment = dict(image_environment or {})
+        expected_environment.update(
+            runtime_environment(self.spec, build_revision=build_revision)
+        )
+        host_ip, host_port, container_port = self.spec.service.publish.split(":")
+        expected_mounts = (
+            (
+                "bind",
+                str(self.paths.data_directory),
+                self.spec.service.container_data_path,
+                True,
+            ),
+        )
+        expected_ports = ((f"{container_port}/tcp", host_ip, host_port),)
+        if (
+            configuration is None
+            or image_environment is None
+            or actual_environment is None
+            or configuration.mounts != expected_mounts
+            or configuration.published_ports != expected_ports
+            or configuration.restart_policy != "unless-stopped"
+            or configuration.network_mode
+            != ("default" if self.spec.image.runtime == "docker" else "bridge")
+            or actual_environment != expected_environment
+        ):
+            code = (
+                "current_runtime_layout_drift"
+                if gate == "current_pointer_verified"
+                else f"{gate}_drift"
+            )
+            raise ReleaseError(code, gate=gate)
+        # The digest is accepted only after every field above came from daemon
+        # inspection and matched the effective service contract.
+        return runtime_layout_digest(self.spec, build_revision=build_revision)
+
+    def _verify_candidate_runtime_layout(self, state: _ApplyState) -> None:
+        configuration = self.engine.container_configuration(
+            state.candidate_container(self.spec)
+        )
+        image_environment = _environment_mapping(
+            self.engine.image_environment(state.image_digest, gate="candidate_runtime_layout")
+        )
+        actual_environment = (
+            _environment_mapping(configuration.environment)
+            if configuration is not None
+            else None
+        )
+        expected_environment = dict(image_environment or {})
+        expected_environment.update(
+            runtime_environment(self.spec, build_revision=self.spec.source.commit)
+        )
+        expected_mounts = (
+            (
+                "bind",
+                str(state.candidate_directory(self.paths)),
+                self.spec.service.container_data_path,
+                True,
+            ),
+        )
+        if (
+            configuration is None
+            or image_environment is None
+            or actual_environment is None
+            or configuration.mounts != expected_mounts
+            or configuration.published_ports
+            or configuration.restart_policy != "no"
+            or configuration.network_mode != "none"
+            or actual_environment != expected_environment
+        ):
+            raise ReleaseError(
+                "candidate_runtime_layout_drift", gate="candidate_runtime_layout"
+            )
 
     def _is_replay(self, state: _ApplyState) -> bool:
         current = state.current
@@ -1151,13 +1316,14 @@ class ReleaseWorkflow:
         if self.spec.image.mode == "existing":
             return self._resolve_existing_image(source)
         tag = self._image_tag()
-        result = self.engine.build_image(
-            context=str(self.paths.repository_root),
-            containerfile=str(self.paths.containerfile),
-            tag=tag,
-            build_revision=source.commit,
-            timeout_seconds=self.spec.timeouts.build_seconds,
-        )
+        with self._exact_build_context(source) as context:
+            result = self.engine.build_image(
+                context=str(context),
+                containerfile=str(context / self.spec.image.containerfile),
+                tag=tag,
+                build_revision=source.commit,
+                timeout_seconds=self.spec.timeouts.build_seconds,
+            )
         if result.timed_out:
             raise ReleaseError("image_build_timeout", gate="image_resolved")
         if not result.ok:
@@ -1167,6 +1333,80 @@ class ReleaseWorkflow:
             raise ReleaseError("image_digest_unresolved", gate="image_resolved")
         self._require_image_build_revision(digest, source.commit)
         return digest
+
+    @contextmanager
+    def _exact_build_context(self, source: SourceEvidence) -> Iterator[Path]:
+        """Materialize only the tracked tree bound by the verified commit.
+
+        `git archive` cannot include ignored or untracked host files. Archive
+        entries are then extracted with an allowlist that rejects links,
+        devices, and traversal before the directory is handed to the runtime.
+        """
+        temporary = Path(
+            tempfile.mkdtemp(prefix=".build-context-", dir=self.paths.state_root)
+        )
+        os.chmod(temporary, 0o750)
+        archive = temporary / "source.tar"
+        context = temporary / "tree"
+        context.mkdir(mode=0o750)
+        try:
+            result = self.runner.run(
+                (
+                    "git",
+                    "-C",
+                    str(self.paths.repository_root),
+                    "--no-pager",
+                    "archive",
+                    "--format=tar",
+                    f"--output={archive}",
+                    source.commit,
+                ),
+                timeout_seconds=self.spec.timeouts.command_seconds,
+            )
+            if result.timed_out:
+                raise ReleaseError("source_archive_timeout", gate="image_resolved")
+            if not result.ok or not archive.is_file() or archive.is_symlink():
+                raise ReleaseError("source_archive_failed", gate="image_resolved")
+            self._extract_source_archive(archive, context)
+            containerfile = context / self.spec.image.containerfile
+            if not containerfile.is_file() or containerfile.is_symlink():
+                raise ReleaseError("source_containerfile_missing", gate="image_resolved")
+            yield context
+        finally:
+            shutil.rmtree(temporary, ignore_errors=True)
+
+    @staticmethod
+    def _extract_source_archive(archive: Path, context: Path) -> None:
+        try:
+            with tarfile.open(archive, mode="r:") as source:
+                for member in source.getmembers():
+                    relative = PurePosixPath(member.name)
+                    if (
+                        relative.is_absolute()
+                        or not relative.parts
+                        or ".." in relative.parts
+                        or member.issym()
+                        or member.islnk()
+                        or not (member.isdir() or member.isfile())
+                    ):
+                        raise ReleaseError(
+                            "unsafe_source_archive", gate="image_resolved"
+                        )
+                    target = context.joinpath(*relative.parts)
+                    if member.isdir():
+                        target.mkdir(mode=0o750, parents=True, exist_ok=True)
+                        continue
+                    target.parent.mkdir(mode=0o750, parents=True, exist_ok=True)
+                    extracted = source.extractfile(member)
+                    if extracted is None:
+                        raise ReleaseError(
+                            "unsafe_source_archive", gate="image_resolved"
+                        )
+                    with extracted, target.open("xb") as destination:
+                        shutil.copyfileobj(extracted, destination)
+                    os.chmod(target, member.mode & 0o755)
+        except (OSError, tarfile.TarError) as exc:
+            raise ReleaseError("source_archive_failed", gate="image_resolved") from exc
 
     def _resolve_existing_image(self, source: SourceEvidence) -> str:
         declared = self.spec.image.digest
@@ -1196,14 +1436,11 @@ class ReleaseWorkflow:
             raise ReleaseError("image_build_revision_mismatch", gate=gate)
 
     def _verify_packaged_schema(self, image_digest: str) -> str:
-        result = self.engine.run_once(
-            (image_digest, "python", "-c", PACKAGED_SCHEMA_PROBE),
-            timeout_seconds=self.spec.timeouts.command_seconds,
+        result = self._run_named_once(
+            name=f"{self.spec.service.container_name}-release-{self.release_id}-packaged-schema",
+            argv=(image_digest, "python", "-c", PACKAGED_SCHEMA_PROBE),
+            gate="packaged_schema",
         )
-        if result.timed_out:
-            raise ReleaseError("packaged_schema_timeout", gate="packaged_schema")
-        if not result.ok:
-            raise ReleaseError("packaged_schema_unreadable", gate="packaged_schema")
         payload = _parse_probe_json(result.stdout)
         if not isinstance(payload, list) or len(payload) != 1 or not isinstance(payload[0], str):
             raise ReleaseError("packaged_schema_unreadable", gate="packaged_schema")
@@ -1231,25 +1468,70 @@ class ReleaseWorkflow:
         argv: Sequence[str],
         gate: str,
     ) -> CommandResult:
-        result = self.engine.run_once(
-            (
-                "--name",
-                f"{state.candidate_container(self.spec)}-{step}",
+        result = self._run_named_once(
+            name=f"{state.candidate_container(self.spec)}-{step}",
+            argv=(
                 *self._candidate_mount_argv(state),
                 state.image_digest,
                 *argv,
             ),
+            gate=gate,
+        )
+        return result
+
+    def _run_named_once(
+        self, *, name: str, argv: Sequence[str], gate: str
+    ) -> CommandResult:
+        if self.engine.container_exists(name):
+            stale = self.engine.remove_container(
+                name, stop_seconds=self.spec.timeouts.stop_seconds
+            )
+            if stale.timed_out or not stale.ok:
+                raise ReleaseError(f"{gate}_cleanup_failed", gate=gate)
+        result = self.engine.run_once(
+            ("--name", name, *argv),
             timeout_seconds=self.spec.timeouts.command_seconds,
         )
+        cleanup_failed = False
+        if self.engine.container_exists(name):
+            cleanup = self.engine.remove_container(
+                name, stop_seconds=self.spec.timeouts.stop_seconds
+            )
+            cleanup_failed = cleanup.timed_out or not cleanup.ok
+        if cleanup_failed:
+            raise ReleaseError(f"{gate}_cleanup_failed", gate=gate)
         if result.timed_out:
             raise ReleaseError(f"{gate}_timeout", gate=gate)
         if not result.ok:
-            raise ReleaseError(f"{gate}_failed", gate=gate)
+            code = (
+                "packaged_schema_unreadable"
+                if gate == "packaged_schema"
+                else f"{gate}_failed"
+            )
+            raise ReleaseError(code, gate=gate)
         return result
 
     def _create_backup(self, state: _ApplyState) -> BackupReceipt:
+        root = self.paths.backup_root
+        if not root.exists():
+            try:
+                root.mkdir(mode=0o750, parents=False)
+                os.chmod(root, 0o750)
+                fsync_directory(root.parent)
+            except FileExistsError:
+                pass
+            except OSError as exc:
+                raise ReleaseError("unsafe_backup_root", gate="database_backup") from exc
+        require_protected_directory(root, code="unsafe_backup_root")
         directory = state.backup_directory(self.paths)
-        directory.mkdir(mode=0o750, parents=True, exist_ok=True)
+        try:
+            directory.mkdir(mode=0o750, parents=False, exist_ok=False)
+            os.chmod(directory, 0o750)
+            fsync_directory(root)
+        except FileExistsError:
+            pass
+        except OSError as exc:
+            raise ReleaseError("unsafe_backup_root", gate="database_backup") from exc
         require_protected_directory(directory, code="unsafe_backup_root")
         receipt = create_online_backup(
             database_path=self.paths.database_path,
@@ -1622,3 +1904,15 @@ def _parse_probe_json(raw: str) -> Any:
         return json.loads(text[-1])
     except json.JSONDecodeError:
         return None
+
+
+def _environment_mapping(items: Sequence[str]) -> dict[str, str] | None:
+    values: dict[str, str] = {}
+    for item in items:
+        if "=" not in item:
+            return None
+        key, value = item.split("=", 1)
+        if not key or key in values:
+            return None
+        values[key] = value
+    return values

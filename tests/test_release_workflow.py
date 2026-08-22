@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+import os
 import sqlite3
+import stat
+import subprocess
 from pathlib import Path
 from typing import Any
 
 import pytest
-from jsonschema import validate
+from jsonschema import Draft202012Validator, ValidationError, validate
 from release_support import (
     COMMIT,
     NEW_IMAGE,
@@ -16,6 +19,7 @@ from release_support import (
     build_installation,
     build_spec,
     default_images,
+    spec_document,
 )
 
 from blockwart.release.canonical import (
@@ -24,8 +28,10 @@ from blockwart.release.canonical import (
     json_artifact_digest,
 )
 from blockwart.release.errors import ReleaseError
+from blockwart.release.runtime import SubprocessCommandRunner
 from blockwart.release.schemas import json_schema
-from blockwart.release.spec import runtime_layout_digest
+from blockwart.release.source import SourceEvidence
+from blockwart.release.spec import parse_spec, runtime_layout_digest
 from blockwart.release.state import CURRENT_POINTER, PREVIOUS_POINTER, Pointer, release_lock
 from blockwart.release.workflow import (
     EXIT_FAILED,
@@ -115,7 +121,9 @@ class Installation:
             image_digest=OLD_IMAGE,
             source_commit="c" * 40,
             schema_revision=SCHEMA_REVISION,
-            runtime_layout_digest=runtime_layout_digest(self.spec),
+            runtime_layout_digest=runtime_layout_digest(
+                self.spec, build_revision="c" * 40
+            ),
             updated_at="2026-08-01T00:00:00Z",
         )
         store.write_pointer(CURRENT_POINTER, pointer)
@@ -130,7 +138,15 @@ class Installation:
                 "committed_at": "2026-08-01T00:00:00Z",
             }
         )
-        self.host.start_container("blockwart", OLD_IMAGE)
+        self.host._start_from_argv(  # noqa: SLF001 - deterministic runtime fixture
+            "blockwart",
+            OLD_IMAGE,
+            list(
+                self.workflow._service_run_argv(  # noqa: SLF001
+                    OLD_IMAGE, build_revision="c" * 40
+                )
+            ),
+        )
         return pointer
 
 
@@ -206,6 +222,21 @@ def test_plan_resolves_and_binds_an_existing_image(tmp_path: Path) -> None:
     assert report["manifest_digest"] is None
 
 
+def test_existing_image_schema_and_parser_both_require_digest(tmp_path: Path) -> None:
+    document = Installation(tmp_path).spec.model_dump(mode="json")
+    document["image"]["mode"] = "existing"
+    document["image"]["digest"] = None
+    schema = json_schema("spec")
+
+    Draft202012Validator.check_schema(schema)
+    with pytest.raises(ValidationError):
+        validate(document, schema)
+    with pytest.raises(ReleaseError) as failure:
+        parse_spec(document)
+
+    assert failure.value.code == "image_digest_required"
+
+
 # ----------------------------------------------------------------------
 # source verification before any mutation
 # ----------------------------------------------------------------------
@@ -227,7 +258,7 @@ def test_apply_rejects_unsafe_source_state_before_mutation(
     installation = Installation(tmp_path)
     setattr(installation.host, attribute, value)
 
-    outcome = installation.workflow.apply()
+    outcome = installation.workflow.apply(expect_current="none")
 
     assert outcome.outcome == OUTCOME_FAILED
     assert outcome.exit_code == EXIT_FAILED
@@ -240,7 +271,7 @@ def test_apply_rejects_unsafe_source_state_before_mutation(
 def test_apply_rejects_missing_image_build_evidence(tmp_path: Path) -> None:
     installation = Installation(tmp_path, image={"build_revision_present": False})
 
-    outcome = installation.workflow.apply()
+    outcome = installation.workflow.apply(expect_current="none")
 
     assert outcome.report["error"] == "image_build_revision_missing"
     assert list(installation.layout["backups"].iterdir()) == []
@@ -249,7 +280,7 @@ def test_apply_rejects_missing_image_build_evidence(tmp_path: Path) -> None:
 def test_apply_rejects_image_built_from_another_commit(tmp_path: Path) -> None:
     installation = Installation(tmp_path, image={"build_revision": "9" * 40})
 
-    outcome = installation.workflow.apply()
+    outcome = installation.workflow.apply(expect_current="none")
 
     assert outcome.report["error"] == "image_build_revision_mismatch"
 
@@ -257,7 +288,7 @@ def test_apply_rejects_image_built_from_another_commit(tmp_path: Path) -> None:
 def test_apply_rejects_packaged_schema_drift(tmp_path: Path) -> None:
     installation = Installation(tmp_path, image={"packaged_head": "20260101_0001"})
 
-    outcome = installation.workflow.apply()
+    outcome = installation.workflow.apply(expect_current="none")
 
     assert outcome.report["error"] == "packaged_schema_mismatch"
     assert gate(outcome.report, "packaged_schema")["status"] == "failed"
@@ -267,11 +298,86 @@ def test_apply_rejects_packaged_schema_drift(tmp_path: Path) -> None:
 def test_source_drift_during_build_is_rejected_before_backup(tmp_path: Path) -> None:
     installation = Installation(tmp_path, host={"drift_source_after_build": True})
 
-    outcome = installation.workflow.apply()
+    outcome = installation.workflow.apply(expect_current="none")
 
     assert outcome.report["error"] == "source_ref_drift"
     assert gate(outcome.report, "source_reverified")["status"] == "failed"
     assert list(installation.layout["backups"].iterdir()) == []
+
+
+def test_build_context_contains_only_exact_commit_files(tmp_path: Path) -> None:
+    installation = Installation(tmp_path)
+    (installation.layout["repository"] / ".env").write_text(
+        "PRIVATE_TOKEN=must-not-enter-build\n", encoding="utf-8"
+    )
+    (installation.layout["repository"] / "private.sqlite3").write_bytes(b"private")
+
+    outcome = installation.workflow.apply(expect_current="none")
+
+    assert outcome.outcome == OUTCOME_SUCCEEDED
+    assert installation.host.build_context_entries == ("Dockerfile",)
+    build_call = next(call for call in installation.host.calls if call[1] == "build")
+    assert build_call[-1] != str(installation.layout["repository"])
+    assert "PRIVATE_TOKEN" not in canonical_json_text(outcome.report)
+
+
+def test_real_git_archive_context_excludes_ignored_private_files(tmp_path: Path) -> None:
+    layout = build_installation(tmp_path)
+    repository = layout["repository"]
+    (repository / ".gitignore").write_text(".env\n*.sqlite3\n", encoding="utf-8")
+    (repository / ".env").write_text("PRIVATE_TOKEN=ignored\n", encoding="utf-8")
+    (repository / "private.sqlite3").write_bytes(b"ignored")
+
+    def git(*argv: str) -> str:
+        completed = subprocess.run(  # noqa: S603 - fixed git argv in a temp repository
+            ("git", "-C", str(repository), *argv),
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        return completed.stdout.strip()
+
+    git("init", "--quiet")
+    git("add", "Dockerfile", ".gitignore")
+    git(
+        "-c",
+        "user.name=Blockwart Test",
+        "-c",
+        "user.email=release-test@example.invalid",
+        "commit",
+        "--quiet",
+        "-m",
+        "fixture",
+    )
+    commit = git("rev-parse", "HEAD")
+    tree = git("rev-parse", f"{commit}^{{tree}}")
+    document = spec_document(layout)
+    document["source"]["commit"] = commit
+    spec = parse_spec(document)
+    workflow = ReleaseWorkflow(
+        spec, runner=SubprocessCommandRunner(), clock=FakeClock()
+    )
+    workflow.store.prepare()
+
+    with workflow._exact_build_context(  # noqa: SLF001 - focused boundary proof
+        SourceEvidence(commit=commit, tree=tree, clean=True)
+    ) as context:
+        assert (context / "Dockerfile").is_file()
+        assert (context / ".gitignore").is_file()
+        assert not (context / ".env").exists()
+        assert not (context / "private.sqlite3").exists()
+
+
+def test_exported_apply_requires_compare_and_set_argument(tmp_path: Path) -> None:
+    installation = Installation(tmp_path)
+
+    with pytest.raises(TypeError):
+        installation.workflow.apply()  # type: ignore[call-arg]
+    with pytest.raises(ReleaseError) as failure:
+        installation.workflow.apply(expect_current=None)  # type: ignore[arg-type]
+
+    assert failure.value.code == "expect_current_required"
+    assert not installation.layout["state"].exists()
 
 
 # ----------------------------------------------------------------------
@@ -295,10 +401,12 @@ def test_apply_completes_candidate_and_cutover(tmp_path: Path) -> None:
         "candidate_schema",
         "candidate_db_check",
         "candidate_integrity",
+        "candidate_runtime_layout",
         "candidate_readiness",
         "candidate_health",
         "cutover_service_stopped",
         "cutover_service_started",
+        "cutover_runtime_layout",
         "cutover_readiness",
         "cutover_health",
         "cutover_schema",
@@ -322,7 +430,7 @@ def test_release_bundle_is_immutable_and_binds_release_evidence(tmp_path: Path) 
     installation = Installation(tmp_path)
     installation.seed_running_release()
 
-    installation.workflow.apply()
+    installation.workflow.apply(expect_current=PREVIOUS_RELEASE_ID)
 
     store = installation.workflow.store
     release_id = installation.workflow.release_id
@@ -359,7 +467,7 @@ def test_manifest_and_report_are_schema_valid_and_host_configuration_free(
     )
     installation.seed_running_release()
 
-    outcome = installation.workflow.apply()
+    outcome = installation.workflow.apply(expect_current=PREVIOUS_RELEASE_ID)
     manifest = installation.workflow.store.read_manifest(installation.workflow.release_id)
     current = installation.workflow.store.read_pointer(CURRENT_POINTER)
 
@@ -376,11 +484,13 @@ def test_manifest_and_report_are_schema_valid_and_host_configuration_free(
 def test_repeated_apply_replays_without_a_second_cutover(tmp_path: Path) -> None:
     installation = Installation(tmp_path)
     installation.seed_running_release()
-    first = installation.workflow.apply()
+    first = installation.workflow.apply(expect_current=PREVIOUS_RELEASE_ID)
     assert first.outcome == OUTCOME_SUCCEEDED
     calls_after_first = len(installation.host.calls)
 
-    second = installation.workflow.apply()
+    second = installation.workflow.apply(
+        expect_current=installation.workflow.release_id
+    )
 
     assert second.outcome == OUTCOME_SUCCEEDED
     assert second.report["changed"] is False
@@ -412,7 +522,7 @@ def test_missing_current_bundle_artifact_fails_before_backup(tmp_path: Path) -> 
     )
     artifact.unlink()
 
-    outcome = installation.workflow.apply()
+    outcome = installation.workflow.apply(expect_current=PREVIOUS_RELEASE_ID)
 
     assert outcome.report["error"] == "bundle_artifact_missing"
     assert gate(outcome.report, "current_pointer_verified")["status"] == "failed"
@@ -426,7 +536,7 @@ def test_backup_is_consistent_verified_and_outside_the_data_path(tmp_path: Path)
     installation = Installation(tmp_path)
     installation.seed_running_release()
 
-    report = installation.workflow.apply().report
+    report = installation.workflow.apply(expect_current=PREVIOUS_RELEASE_ID).report
 
     backup_directories = sorted(installation.layout["backups"].iterdir())
     assert len(backup_directories) == 1
@@ -444,12 +554,30 @@ def test_backup_is_consistent_verified_and_outside_the_data_path(tmp_path: Path)
         connection.close()
 
 
+def test_missing_backup_root_is_created_protected_under_umask_zero(
+    tmp_path: Path,
+) -> None:
+    installation = Installation(tmp_path)
+    installation.seed_running_release()
+    installation.layout["backups"].rmdir()
+    previous_umask = os.umask(0o000)
+    try:
+        outcome = installation.workflow.apply(expect_current=PREVIOUS_RELEASE_ID)
+    finally:
+        os.umask(previous_umask)
+
+    assert outcome.outcome == OUTCOME_SUCCEEDED
+    assert stat.S_IMODE(installation.layout["backups"].stat().st_mode) == 0o750
+    attempt = next(installation.layout["backups"].iterdir())
+    assert stat.S_IMODE(attempt.stat().st_mode) == 0o750
+
+
 def test_candidate_never_touches_the_live_database(tmp_path: Path) -> None:
     installation = Installation(tmp_path)
     installation.seed_running_release()
     before = _digest(installation.database_path)
 
-    installation.workflow.apply()
+    installation.workflow.apply(expect_current=PREVIOUS_RELEASE_ID)
 
     candidate_calls = [
         command
@@ -467,7 +595,7 @@ def test_candidate_migration_failure_stops_before_cutover(tmp_path: Path) -> Non
     installation = Installation(tmp_path, image={"migration_ok": False})
     installation.seed_running_release()
 
-    outcome = installation.workflow.apply()
+    outcome = installation.workflow.apply(expect_current=PREVIOUS_RELEASE_ID)
 
     assert outcome.outcome == OUTCOME_FAILED
     assert outcome.report["error"] == "candidate_migration_failed"
@@ -478,11 +606,29 @@ def test_candidate_migration_failure_stops_before_cutover(tmp_path: Path) -> Non
     )
 
 
+def test_timed_out_one_shot_candidate_is_removed_without_touching_unrelated(
+    tmp_path: Path,
+) -> None:
+    installation = Installation(tmp_path, image={"migration_timeout": True})
+    installation.seed_running_release()
+    installation.host.start_container("unrelated-issue210-test", OLD_IMAGE)
+
+    outcome = installation.workflow.apply(expect_current=PREVIOUS_RELEASE_ID)
+
+    assert outcome.report["error"] == "candidate_migration_timeout"
+    assert "unrelated-issue210-test" in installation.host.containers
+    assert all(
+        not name.endswith("-migration") for name in installation.host.containers
+    )
+    removals = [call for call in installation.host.calls if call[1:3] == ("rm", "--force")]
+    assert any(call[-1].endswith("-migration") for call in removals)
+
+
 def test_candidate_readiness_failure_stops_before_cutover(tmp_path: Path) -> None:
     installation = Installation(tmp_path, image={"candidate_readiness": "never"})
     installation.seed_running_release()
 
-    outcome = installation.workflow.apply()
+    outcome = installation.workflow.apply(expect_current=PREVIOUS_RELEASE_ID)
 
     assert outcome.report["error"] == "candidate_readiness_timeout"
     assert gate(outcome.report, "candidate_readiness")["status"] == "failed"
@@ -495,7 +641,7 @@ def test_candidate_health_failure_stops_before_cutover(tmp_path: Path) -> None:
     )
     installation.seed_running_release()
 
-    outcome = installation.workflow.apply()
+    outcome = installation.workflow.apply(expect_current=PREVIOUS_RELEASE_ID)
 
     assert outcome.report["error"] == "candidate_health_unhealthy"
     assert gate(outcome.report, "candidate_readiness")["status"] == "passed"
@@ -510,7 +656,7 @@ def test_readiness_and_health_are_distinct_ordered_gates(tmp_path: Path) -> None
     )
     installation.seed_running_release()
 
-    outcome = installation.workflow.apply()
+    outcome = installation.workflow.apply(expect_current=PREVIOUS_RELEASE_ID)
     names = gate_names(outcome.report)
 
     assert outcome.report["error"] == "candidate_health_stale"
@@ -525,7 +671,7 @@ def test_candidate_health_accepts_a_probe_finished_after_readiness(tmp_path: Pat
     )
     installation.seed_running_release()
 
-    outcome = installation.workflow.apply()
+    outcome = installation.workflow.apply(expect_current=PREVIOUS_RELEASE_ID)
 
     assert outcome.outcome == OUTCOME_SUCCEEDED
     assert gate(outcome.report, "candidate_health")["status"] == "passed"
@@ -547,7 +693,7 @@ def test_live_database_drift_after_candidate_preserves_new_writes_and_aborts(
 
     installation.host.candidate_start_side_effect = write_after_candidate
 
-    outcome = installation.workflow.apply()
+    outcome = installation.workflow.apply(expect_current=PREVIOUS_RELEASE_ID)
 
     assert outcome.outcome == OUTCOME_ROLLED_BACK
     assert outcome.report["error"] == "stale_live_database"
@@ -614,7 +760,7 @@ def test_every_post_cutover_failure_restores_the_previous_pair(
     installation = _migrating_installation(tmp_path, image=image_behaviour)
     pre_release_rows = row_count(installation.database_path)
 
-    outcome = installation.workflow.apply()
+    outcome = installation.workflow.apply(expect_current=PREVIOUS_RELEASE_ID)
     report = outcome.report
     validate(report, json_schema("report"))
 
@@ -651,7 +797,7 @@ def test_cutover_stop_timeout_rolls_back(tmp_path: Path) -> None:
     installation = _migrating_installation(tmp_path)
     installation.host.stop_timeout = True
 
-    outcome = installation.workflow.apply()
+    outcome = installation.workflow.apply(expect_current=PREVIOUS_RELEASE_ID)
 
     assert outcome.outcome == OUTCOME_ROLLED_BACK
     assert outcome.report["error"] == "cutover_timeout"
@@ -673,7 +819,7 @@ def test_pointer_commit_failure_after_cutover_restores_the_previous_release(
 
     store.write_pointers = refuse  # type: ignore[method-assign]
 
-    outcome = installation.workflow.apply()
+    outcome = installation.workflow.apply(expect_current=PREVIOUS_RELEASE_ID)
 
     assert outcome.outcome == OUTCOME_ROLLED_BACK
     assert outcome.report["error"] == "pointer_write_failed"
@@ -690,7 +836,7 @@ def test_completion_report_failure_rolls_back_and_returns_redacted_evidence(
 
     installation.workflow.store.write_report = refuse_report  # type: ignore[method-assign]
 
-    outcome = installation.workflow.apply()
+    outcome = installation.workflow.apply(expect_current=PREVIOUS_RELEASE_ID)
 
     assert outcome.outcome == OUTCOME_ROLLED_BACK
     assert outcome.report["error"] == "completion_report_write_failed"
@@ -708,7 +854,7 @@ def test_failed_rollback_is_reported_fail_closed_without_destroying_evidence(
     installation.old_image.service_start_ok = False
     pre_release_rows = row_count(installation.database_path)
 
-    outcome = installation.workflow.apply()
+    outcome = installation.workflow.apply(expect_current=PREVIOUS_RELEASE_ID)
     report = outcome.report
     validate(report, json_schema("report"))
 
@@ -732,10 +878,29 @@ def test_failed_rollback_is_reported_fail_closed_without_destroying_evidence(
     assert persisted, "a fail-closed rollback still writes its report"
 
 
+def test_failed_rollback_verification_contains_the_unverified_service(
+    tmp_path: Path,
+) -> None:
+    installation = _migrating_installation(
+        tmp_path, image={"service_integrity_ok": False}
+    )
+    installation.old_image.service_readiness = "never"
+
+    outcome = installation.workflow.apply(expect_current=PREVIOUS_RELEASE_ID)
+
+    assert outcome.outcome == OUTCOME_ROLLBACK_FAILED
+    assert outcome.report["error"] == "rollback_readiness_timeout"
+    assert outcome.report["rollback"]["service_contained"] is True
+    assert "blockwart" not in installation.host.containers
+    assert gate(outcome.report, "rollback_readiness")["status"] == "failed"
+    backup_directory = next(installation.layout["backups"].iterdir())
+    assert (backup_directory / "failed.sqlite3").is_file()
+
+
 def test_rollback_never_runs_a_database_downgrade(tmp_path: Path) -> None:
     installation = _migrating_installation(tmp_path, image={"service_integrity_ok": False})
 
-    installation.workflow.apply()
+    installation.workflow.apply(expect_current=PREVIOUS_RELEASE_ID)
 
     for command in installation.host.calls:
         assert "downgrade" not in command
@@ -769,17 +934,42 @@ def test_running_image_drift_from_the_current_pointer_fails_closed(tmp_path: Pat
     installation.seed_running_release()
     installation.host.start_container("blockwart", NEW_IMAGE)
 
-    outcome = installation.workflow.apply()
+    outcome = installation.workflow.apply(expect_current=PREVIOUS_RELEASE_ID)
 
     assert outcome.report["error"] == "current_pointer_image_drift"
     assert list(installation.layout["backups"].iterdir()) == []
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("mounts", (("bind", "/wrong/data", "/data", True),)),
+        ("published_ports", (("8000/tcp", "0.0.0.0", "8000"),)),
+        ("restart_policy", "always"),
+        ("environment", ("BLOCKWART_DATABASE_URL=sqlite:////wrong.sqlite3",)),
+    ],
+)
+def test_actual_current_runtime_layout_drift_fails_before_mutation(
+    tmp_path: Path, field: str, value: Any
+) -> None:
+    installation = Installation(tmp_path)
+    installation.seed_running_release()
+    setattr(installation.host.containers["blockwart"], field, value)
+
+    outcome = installation.workflow.apply(expect_current=PREVIOUS_RELEASE_ID)
+
+    assert outcome.report["error"] == "current_runtime_layout_drift"
+    assert gate(outcome.report, "current_pointer_verified")["status"] == "failed"
+    assert list(installation.layout["backups"].iterdir()) == []
+    assert not any(call[1] == "build" for call in installation.host.calls if len(call) > 1)
+    assert "/wrong" not in canonical_json_text(outcome.report)
 
 
 def test_unmanaged_running_service_is_rejected(tmp_path: Path) -> None:
     installation = Installation(tmp_path)
     installation.host.start_container("blockwart", OLD_IMAGE)
 
-    outcome = installation.workflow.apply()
+    outcome = installation.workflow.apply(expect_current="none")
 
     assert outcome.report["error"] == "unmanaged_service_state"
 
@@ -809,7 +999,7 @@ def test_hook_receives_only_allowlisted_non_secret_context(tmp_path: Path) -> No
     )
     installation.seed_running_release()
 
-    outcome = installation.workflow.apply()
+    outcome = installation.workflow.apply(expect_current=PREVIOUS_RELEASE_ID)
 
     assert outcome.outcome == OUTCOME_SUCCEEDED
     assert outcome.report["hooks"] == [
@@ -843,7 +1033,7 @@ def test_hook_failure_rolls_back_before_the_pointers_move(
     )
     installation.host.hook_results[str(hook)] = behaviour
 
-    outcome = installation.workflow.apply()
+    outcome = installation.workflow.apply(expect_current=PREVIOUS_RELEASE_ID)
 
     assert outcome.outcome == OUTCOME_ROLLED_BACK
     assert outcome.report["error"] == code
@@ -865,10 +1055,85 @@ def test_retention_never_removes_the_active_or_rollback_release(tmp_path: Path) 
         stale.mkdir(mode=0o750, parents=True)
         (stale / "manifest.json").write_text("{}", encoding="utf-8")
 
-    report = installation.workflow.apply().report
+    report = installation.workflow.apply(expect_current=PREVIOUS_RELEASE_ID).report
 
     remaining = {path.name for path in store.releases_dir.iterdir()}
     assert installation.workflow.release_id in remaining
     assert PREVIOUS_RELEASE_ID in remaining
     assert report["retention"]["removed"]
     assert all(name.startswith("stale-release-") for name in report["retention"]["removed"])
+
+
+def test_report_failure_restores_complete_pointer_pair_with_existing_bundles(
+    tmp_path: Path,
+) -> None:
+    installation = Installation(tmp_path, spec={"state": {"retention": 2}})
+    current = installation.seed_running_release()
+    store = installation.workflow.store
+    older_id = "bbbbbbbbbbbb-eeeeeeeeeeee"
+    artifacts = {
+        "build": {"release": older_id},
+        "contract": {"release": older_id},
+        "source": {"release": older_id},
+    }
+    manifest = {
+        "manifest_version": 1,
+        "release_id": older_id,
+        "contract_digest": "e" * 64,
+        "source": {"commit": "c" * 40, "tree": "e" * 40, "clean": True},
+        "image": {
+            "repository": "blockwart",
+            "tag": f"blockwart:{older_id}",
+            "digest": OLD_IMAGE,
+            "runtime": "docker",
+            "mode": "build",
+            "build_revision": "c" * 40,
+        },
+        "schema": {
+            "expected_revision": SCHEMA_REVISION,
+            "packaged_revision": SCHEMA_REVISION,
+        },
+        "artifacts": [
+            {"name": name, "sha256": json_artifact_digest(artifacts[name])}
+            for name in ("build", "contract", "source")
+        ],
+    }
+    record = store.write_bundle(older_id, manifest=manifest, artifacts=artifacts)
+    older = Pointer(
+        release_id=older_id,
+        generation=1,
+        manifest_digest=record.manifest_digest,
+        image_digest=OLD_IMAGE,
+        source_commit="c" * 40,
+        schema_revision=SCHEMA_REVISION,
+        runtime_layout_digest=runtime_layout_digest(
+            installation.spec, build_revision="c" * 40
+        ),
+        updated_at="2026-07-01T00:00:00Z",
+    )
+    store.write_pointers(current=current, previous=older)
+    store.append_history(
+        {
+            "generation": 1,
+            "release_id": older_id,
+            "image_digest": OLD_IMAGE,
+            "manifest_digest": record.manifest_digest,
+            "source_commit": "c" * 40,
+            "outcome": OUTCOME_SUCCEEDED,
+            "committed_at": older.updated_at,
+        }
+    )
+
+    def refuse_report(_name: str, _payload: Any) -> str:
+        raise ReleaseError("report_storage_failed", gate="completion_report")
+
+    store.write_report = refuse_report  # type: ignore[method-assign]
+    outcome = installation.workflow.apply(expect_current=PREVIOUS_RELEASE_ID)
+
+    assert outcome.outcome == OUTCOME_ROLLED_BACK
+    restored_current = store.read_pointer(CURRENT_POINTER)
+    restored_previous = store.read_pointer(PREVIOUS_POINTER)
+    assert restored_current == current
+    assert restored_previous == older
+    assert restored_current is not None and store.bundle_dir(restored_current.release_id).is_dir()
+    assert restored_previous is not None and store.bundle_dir(restored_previous.release_id).is_dir()

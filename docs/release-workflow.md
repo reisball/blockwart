@@ -61,6 +61,11 @@ refs, missing objects, non-commit objects, and commits unreachable from every
 ref are rejected. The repository must be at that exact `HEAD` with a clean
 index and worktree. Source evidence is checked again after image resolution so
 a concurrent ref or tree change cannot reach backup or cutover.
+Build mode never passes the host checkout to Docker/Podman. It materializes a
+temporary archive of the accepted commit, rejects archive links, devices, and
+traversal, and builds with the container file from that tracked-tree context.
+Ignored or untracked `.env`, SQLite, credential, and other private host files
+therefore cannot enter an image even when `.dockerignore` does not name them.
 
 ## Host layout and trust boundary
 
@@ -70,6 +75,12 @@ database, and optional environment files must be owned by the invoking user
 and not group/world writable. The service is always published on explicit
 IPv4 loopback using `127.0.0.1:HOST_PORT:CONTAINER_PORT`; TLS and the trusted
 reverse proxy remain outside this tool.
+
+When the configured backup root is absent, apply creates that single directory
+as the invoking user with mode `0750`, durably records the parent update, and
+validates it before creating an attempt directory. Missing parents, symlinks,
+foreign ownership, and group/world-writable roots fail closed; caller umask
+cannot make a newly created root more permissive.
 
 The release state root contains only non-secret release evidence:
 
@@ -92,7 +103,12 @@ manifest digest, packaged schema revision, and an opaque digest of the
 persistent runtime layout. Before a new release, the controller verifies the
 complete current bundle and every artifact digest, the exact local rollback
 image and its embedded `BLOCKWART_BUILD_REVISION`, the running container image,
-and unchanged runtime layout. Missing evidence, a stopped/missing managed
+and daemon-reported runtime layout. The inspected bind mounts and read/write
+mode, published address/ports, restart policy, network mode, and effective
+environment are compared to the image plus configured service overrides. Only
+an opaque digest is persisted; environment values and paths are never emitted.
+A same-name, same-image container with different wiring fails before backup.
+Missing evidence, a stopped/missing managed
 service, or drift fails before backup or cutover.
 
 Bundles are staged in the release store, fsynced, renamed atomically, and
@@ -105,8 +121,10 @@ environment-file locations/values, database content, endpoints, credentials,
 and hook commands are not copied into the bundle or manifest.
 
 The configured retention is bounded to `2..100`. Successful housekeeping
-keeps the newest managed bundles/backups plus the active and immediate rollback
-bundles; it also removes the old release/rollback image tags associated with a
+keeps the newest managed bundles/backups plus every bundle named by both the
+committed and pre-transaction current/previous pairs until completion evidence
+is durable. Thus a late report failure can restore two pointers that still
+name complete bundles. Housekeeping also removes image tags associated with a
 pruned bundle and never deletes the current invocation's backup. Unrelated content
 in the backup root is never considered managed. A rollback failure does not
 run retention, so its backup, failed database, bundle, and report remain for
@@ -133,6 +151,12 @@ bounded gates are:
 4. `blockwart-db integrity` for catalog/relationship integrity;
 5. Blockwart's internal `/api/health/ready` contract; and
 6. the OCI container healthcheck.
+
+The daemon-reported candidate mount, environment, restart policy, network mode,
+and absence of published ports are verified before readiness. Each migration,
+schema, and database-check container has a deterministic release-scoped name;
+after success, failure, or client timeout the controller force-removes that
+exact name and never enumerates or cleans unrelated containers.
 
 Readiness and container health are different gates. A readiness success can
 arrive before Docker/Podman records its next health probe. A `healthy` value is
@@ -162,13 +186,18 @@ from that point through hooks or pointer/history commit automatically:
 3. moves the failed live database and SQLite sidecars into preserved evidence;
 4. restores the verified backup by durable replacement;
 5. starts the exact previous image digest; and
-6. verifies rollback readiness, a fresh health probe, packaged schema, and
+6. verifies its daemon-reported runtime layout, rollback readiness, a fresh
+   health probe, packaged schema, and
    relationship integrity before restoring the pointer pair.
 
 Rollback never invokes Alembic downgrade. If no managed predecessor exists,
 the database is restored and the service stays stopped rather than selecting
 an image by guess. A rollback failure returns exit `4`, keeps all evidence,
-and reports both the original and rollback errors.
+and reports both the original and rollback errors. If the restored service
+fails runtime-layout, readiness, health, schema, or integrity verification, its
+exact managed container is stopped and force-removed so an unverified
+published/restart-enabled service cannot remain running; containment status is
+part of the rollback evidence.
 
 ## Reports and hooks
 

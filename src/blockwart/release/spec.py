@@ -291,19 +291,72 @@ def public_contract_payload(spec: ReleaseSpec) -> dict[str, Any]:
     return payload
 
 
-def runtime_layout_digest(spec: ReleaseSpec) -> str:
-    """Bind pointer state to the non-secret persistent runtime layout.
+def runtime_environment(spec: ReleaseSpec, *, build_revision: str) -> dict[str, str]:
+    """Return deterministic container overrides without serializing their values.
 
-    Only the digest is persisted.  The bind address and host paths themselves
-    never enter a bundle, manifest, report, pointer, or history entry.
+    The returned mapping is used only for an in-memory comparison with daemon
+    inspection data and as input to a one-way layout digest.  Callers must not
+    include it in reports, manifests, logs, or exceptions.
     """
+    values: dict[str, str] = {}
+    if spec.service.environment_file is not None:
+        path = safe_absolute_path(
+            spec.service.environment_file, code="unsafe_environment_file"
+        )
+        try:
+            lines = path.read_text(encoding="utf-8").splitlines()
+        except (OSError, UnicodeError) as exc:
+            raise ReleaseError("unsafe_environment_file") from exc
+        for line in lines:
+            stripped = line.strip()
+            if not stripped or stripped.startswith("#"):
+                continue
+            if "=" not in stripped:
+                raise ReleaseError("invalid_environment_file")
+            key, value = stripped.split("=", 1)
+            if (
+                not key
+                or key != key.strip()
+                or "\x00" in key
+                or "\x00" in value
+                or any(character.isspace() for character in key)
+            ):
+                raise ReleaseError("invalid_environment_file")
+            values[key] = value
+    values["BLOCKWART_DATABASE_URL"] = (
+        f"sqlite:///{spec.service.container_data_path}/"
+        f"{spec.service.database_filename}"
+    )
+    values["BLOCKWART_BUILD_REVISION"] = build_revision
+    return values
+
+
+def runtime_layout_digest(
+    spec: ReleaseSpec, *, build_revision: str | None = None
+) -> str:
+    """Bind pointer state to the effective, secret-free runtime contract.
+
+    Environment values participate in this one-way digest but are never
+    returned or persisted.  The daemon-reported configuration must separately
+    match the same payload before this digest is trusted.
+    """
+    revision = build_revision or spec.source.commit
     payload = {
         "container_name": spec.service.container_name,
-        "data_directory": spec.service.data_directory,
-        "database_filename": spec.service.database_filename,
-        "publish": spec.service.publish,
-        "environment_file": spec.service.environment_file,
-        "container_data_path": spec.service.container_data_path,
+        "mounts": [
+            {
+                "type": "bind",
+                "source": spec.service.data_directory,
+                "destination": spec.service.container_data_path,
+                "read_write": True,
+            }
+        ],
+        "published_ports": [spec.service.publish],
+        "restart_policy": "unless-stopped",
+        "network_mode": "default" if spec.image.runtime == "docker" else "bridge",
+        "configured_environment": sorted(
+            runtime_environment(spec, build_revision=revision).items()
+        ),
     }
     return domain_digest("runtime-layout", payload)
 

@@ -132,6 +132,21 @@ class ReadinessObservation:
     observed_at: datetime
 
 
+@dataclass(frozen=True, slots=True)
+class ContainerConfiguration:
+    """Allowlisted daemon evidence for one managed container.
+
+    Environment values remain process-local and must never be rendered in a
+    release report or exception.
+    """
+
+    mounts: tuple[tuple[str, str, str, bool], ...]
+    published_ports: tuple[tuple[str, str, str], ...]
+    environment: tuple[str, ...]
+    restart_policy: str
+    network_mode: str
+
+
 @dataclass(frozen=True)
 class ContainerEngine:
     """Thin argv wrapper around a local OCI runtime (``docker`` or ``podman``)."""
@@ -210,6 +225,64 @@ class ContainerEngine:
         if not result.ok:
             return None
         return result.stdout.strip() or None
+
+    def container_configuration(self, name: str) -> ContainerConfiguration | None:
+        result = self._run(("container", "inspect", "--format", "{{json .}}", name))
+        if not result.ok:
+            return None
+        try:
+            payload = json.loads(result.stdout.strip())
+            config = payload["Config"]
+            host = payload["HostConfig"]
+            raw_mounts = payload["Mounts"]
+            raw_ports = host["PortBindings"] or {}
+            raw_environment = config["Env"] or []
+            restart_policy = host["RestartPolicy"]["Name"]
+            network_mode = host["NetworkMode"]
+        except (KeyError, TypeError, json.JSONDecodeError):
+            return None
+        if (
+            not isinstance(raw_mounts, list)
+            or not isinstance(raw_ports, dict)
+            or not isinstance(raw_environment, list)
+            or not isinstance(restart_policy, str)
+            or not isinstance(network_mode, str)
+        ):
+            return None
+        mounts: list[tuple[str, str, str, bool]] = []
+        try:
+            for mount in raw_mounts:
+                mounts.append(
+                    (
+                        str(mount["Type"]),
+                        str(mount["Source"]),
+                        str(mount["Destination"]),
+                        bool(mount["RW"]),
+                    )
+                )
+            ports: list[tuple[str, str, str]] = []
+            for container_port, bindings in raw_ports.items():
+                if not isinstance(bindings, list):
+                    return None
+                for binding in bindings:
+                    ports.append(
+                        (
+                            str(container_port),
+                            str(binding["HostIp"]),
+                            str(binding["HostPort"]),
+                        )
+                    )
+        except (KeyError, TypeError):
+            return None
+        if any(not isinstance(item, str) or "=" not in item for item in raw_environment):
+            return None
+        return ContainerConfiguration(
+            mounts=tuple(sorted(mounts)),
+            published_ports=tuple(sorted(ports)),
+            environment=tuple(raw_environment),
+            restart_policy=restart_policy,
+            network_mode=network_mode,
+        )
 
     def health(self, name: str, *, timeout_seconds: int | None = None) -> HealthObservation:
         result = self._run(

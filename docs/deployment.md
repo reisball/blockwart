@@ -325,6 +325,13 @@ downgrade because its two SQLite rebuilds require the matching pre-migration bac
 recovery remains the matching verified pre-upgrade database plus pinned old image. Never supply a
 retired global-bypass credential to an old image.
 
+The packaged `blockwart-release` workflow additionally compares the daemon's
+actual managed-container mounts, loopback publication, environment, network
+mode, and restart policy with the release contract before mutation and after
+both cutover and rollback start. A restored service that cannot pass those and
+the readiness/health/schema/integrity gates is stopped and removed; it is never
+left restart-enabled while rollback is reported failed.
+
 Revision `0018` similarly refuses downgrade while any typed Project chronology
 entry exists. Untyped legacy rows can remain object comments across downgrade;
 typed semantic metadata requires the matching pre-upgrade backup rather than a
