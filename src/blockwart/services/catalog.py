@@ -1,5 +1,6 @@
 import json
 from collections.abc import Collection, Iterable, Mapping
+from dataclasses import dataclass
 from datetime import UTC, datetime
 
 from sqlalchemy import select, update
@@ -517,14 +518,42 @@ def _validate_placement_relationship(
         )
 
 
-def upsert_object(
+@dataclass(frozen=True, slots=True)
+class ObjectUpsertPlan:
+    """The complete read-only decision of one canonical catalog object write.
+
+    Planning resolves the existing row, every shared schema, reference,
+    integrity, kind, placement, and lifecycle rule, the normalized target
+    record, and the canonical no-op answer without touching the database.
+    Applying the plan performs the only mutation. Preview uses planning alone;
+    the real write plans and applies inside its own transaction.
+    """
+
+    payload: CatalogObjectIn
+    row: CatalogObject | None
+    data_json: str
+    provenance_json: str
+    target_state: AssetState | None
+    target_status: str
+    expected_revision: int | None
+    unchanged: bool
+    action: str
+    audit_details: dict[str, object]
+
+
+def plan_object_upsert(
     session: Session,
     payload: CatalogObjectIn,
     *,
     known_object_kinds: Mapping[str, str] | None = None,
     expected_revision: int | None = None,
-    write_audit: bool = True,
-) -> CatalogObjectOut:
+) -> ObjectUpsertPlan:
+    """Resolve one canonical object write without mutating any state.
+
+    Every rejection raised here is raised at the same stage, with the same
+    type and canonical path, as the applied write, because the applied write
+    runs exactly this function first.
+    """
     row = session.get(CatalogObject, payload.id)
     object_kinds = current_object_kinds(session)
     if known_object_kinds is not None:
@@ -577,35 +606,19 @@ def upsert_object(
     provenance_json = dump_provenance(payload.provenance)
     if row is not None and expected_revision is not None and row.revision != expected_revision:
         raise RevisionConflict("catalog object revision does not match")
-    if row is not None and _object_matches_target(
+    unchanged = row is not None and _object_matches_target(
         row,
         payload,
         data_json,
         provenance_json,
         target_state=target_state,
         target_status=target_status,
-    ):
-        return _to_schema(row)
-    changed_at = _now()
+    )
     if row is None:
         action = "create"
         audit_details: dict[str, object] = {
             "object_ref": f"{payload.kind}:{payload.id}",
         }
-        row = CatalogObject(
-            id=payload.id,
-            kind=payload.kind,
-            label=payload.label,
-            status=target_status,
-            lifecycle=target_state.lifecycle if target_state is not None else None,
-            health=target_state.health if target_state is not None else None,
-            summary=payload.summary,
-            data_json=data_json,
-            provenance_json=provenance_json,
-            created_at=changed_at,
-            updated_at=changed_at,
-        )
-        session.add(row)
     else:
         action = "update"
         audit_details = _update_audit_details(
@@ -616,47 +629,117 @@ def upsert_object(
             target_state=target_state,
             target_status=target_status,
         )
-        if expected_revision is None:
-            row.kind = payload.kind
-            row.label = payload.label
-            row.status = target_status
-            row.lifecycle = target_state.lifecycle if target_state is not None else None
-            row.health = target_state.health if target_state is not None else None
-            row.summary = payload.summary
-            row.data_json = data_json
-            row.provenance_json = provenance_json
-            row.revision += 1
-            row.updated_at = changed_at
-        else:
-            result = session.execute(
-                update(CatalogObject)
+    return ObjectUpsertPlan(
+        payload=payload,
+        row=row,
+        data_json=data_json,
+        provenance_json=provenance_json,
+        target_state=target_state,
+        target_status=target_status,
+        expected_revision=expected_revision,
+        unchanged=unchanged,
+        action=action,
+        audit_details=audit_details,
+    )
+
+
+def apply_object_upsert(
+    session: Session,
+    plan: ObjectUpsertPlan,
+    *,
+    write_audit: bool = True,
+) -> CatalogObjectOut:
+    """Perform the single mutation an already resolved plan describes."""
+    payload = plan.payload
+    row = plan.row
+    target_state = plan.target_state
+    if row is not None and plan.unchanged:
+        if plan.expected_revision is not None:
+            current_id = session.scalar(
+                select(CatalogObject.id)
                 .where(
                     CatalogObject.id == payload.id,
-                    CatalogObject.revision == expected_revision,
+                    CatalogObject.revision == plan.expected_revision,
                 )
-                .values(
-                    kind=payload.kind,
-                    label=payload.label,
-                    status=target_status,
-                    lifecycle=target_state.lifecycle if target_state is not None else None,
-                    health=target_state.health if target_state is not None else None,
-                    summary=payload.summary,
-                    data_json=data_json,
-                    provenance_json=provenance_json,
-                    revision=CatalogObject.revision + 1,
-                    updated_at=changed_at,
-                )
-                .execution_options(synchronize_session=False)
+                .with_for_update()
             )
-            if result.rowcount != 1:
+            if current_id is None:
                 raise RevisionConflict("catalog object revision does not match")
-            session.expire(row)
+        return _to_schema(row)
+    changed_at = _now()
+    if row is None:
+        row = CatalogObject(
+            id=payload.id,
+            kind=payload.kind,
+            label=payload.label,
+            status=plan.target_status,
+            lifecycle=target_state.lifecycle if target_state is not None else None,
+            health=target_state.health if target_state is not None else None,
+            summary=payload.summary,
+            data_json=plan.data_json,
+            provenance_json=plan.provenance_json,
+            created_at=changed_at,
+            updated_at=changed_at,
+        )
+        session.add(row)
+    elif plan.expected_revision is None:
+        row.kind = payload.kind
+        row.label = payload.label
+        row.status = plan.target_status
+        row.lifecycle = target_state.lifecycle if target_state is not None else None
+        row.health = target_state.health if target_state is not None else None
+        row.summary = payload.summary
+        row.data_json = plan.data_json
+        row.provenance_json = plan.provenance_json
+        row.revision += 1
+        row.updated_at = changed_at
+    else:
+        result = session.execute(
+            update(CatalogObject)
+            .where(
+                CatalogObject.id == payload.id,
+                CatalogObject.revision == plan.expected_revision,
+            )
+            .values(
+                kind=payload.kind,
+                label=payload.label,
+                status=plan.target_status,
+                lifecycle=target_state.lifecycle if target_state is not None else None,
+                health=target_state.health if target_state is not None else None,
+                summary=payload.summary,
+                data_json=plan.data_json,
+                provenance_json=plan.provenance_json,
+                revision=CatalogObject.revision + 1,
+                updated_at=changed_at,
+            )
+            .execution_options(synchronize_session=False)
+        )
+        if result.rowcount != 1:
+            raise RevisionConflict("catalog object revision does not match")
+        session.expire(row)
 
     if write_audit:
-        _write_audit(session, payload.id, action, audit_details)
+        _write_audit(session, payload.id, plan.action, plan.audit_details)
     session.flush()
     session.refresh(row)
     return _to_schema(row)
+
+
+def upsert_object(
+    session: Session,
+    payload: CatalogObjectIn,
+    *,
+    known_object_kinds: Mapping[str, str] | None = None,
+    expected_revision: int | None = None,
+    write_audit: bool = True,
+) -> CatalogObjectOut:
+    plan = plan_object_upsert(
+        session,
+        payload,
+        known_object_kinds=known_object_kinds,
+        expected_revision=expected_revision,
+    )
+    return apply_object_upsert(session, plan, write_audit=write_audit)
 
 
 def ensure_projected_relationship_endpoints_valid(

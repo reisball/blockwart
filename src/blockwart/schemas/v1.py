@@ -45,6 +45,12 @@ from blockwart.domain.source_coverage import (
     MAPPING_ROLES,
     SOURCE_CLASSIFICATIONS,
 )
+from blockwart.domain.update_preview import (
+    PREVIEW_CONTRACT_VERSION,
+    PREVIEW_DIFF_MAX_ENTRIES,
+    PREVIEW_DIFF_PATH_MAX_LENGTH,
+    PREVIEW_DIFF_VALUE_MAX_LENGTH,
+)
 from blockwart.schemas.agent import (
     AgentCatalogBatchItem,
     AgentCatalogContextRead,
@@ -378,6 +384,91 @@ class V1ObjectCommandOut(BaseModel):
     etag: str
     changed: bool
     replayed: bool = False
+
+
+class V1ObjectUpdatePreviewValueOut(BaseModel):
+    """One closed, bounded side of a published preview diff entry.
+
+    `state` distinguishes an absent path, a rendered value, a value the shared
+    secret redaction removed, and a rendered value cut at the published bound.
+    `text` carries the exact string for a string value and the canonical JSON
+    rendering for every other type; it is always `null` for `absent` and
+    `redacted`, so no secret-shaped or concealed value can be reconstructed.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    state: Literal["absent", "value", "redacted", "truncated"]
+    type: Literal[
+        "absent",
+        "null",
+        "boolean",
+        "integer",
+        "number",
+        "string",
+        "array",
+        "object",
+    ]
+    text: str | None = Field(max_length=PREVIEW_DIFF_VALUE_MAX_LENGTH)
+
+
+class V1ObjectUpdatePreviewDiffEntryOut(BaseModel):
+    """One canonical change the proposed update would make."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    path: str = Field(
+        max_length=PREVIEW_DIFF_PATH_MAX_LENGTH,
+        pattern=r"^/(?:[^~/]|~[01])*(?:/(?:[^~/]|~[01])*)*$",
+        description=(
+            "Canonical RFC 6901 JSON Pointer into the normalized object, or a "
+            "fixed SHA-256 pointer when the exact pointer exceeds the bound."
+        ),
+    )
+    path_state: Literal["exact", "hashed"]
+    operation: Literal["added", "removed", "changed"]
+    before: V1ObjectUpdatePreviewValueOut
+    after: V1ObjectUpdatePreviewValueOut
+
+
+class V1ObjectUpdatePreviewOut(BaseModel):
+    """The read-only result of one ETag-bound full-object update preview.
+
+    The response deliberately carries no object document: only the redacted
+    structured diff, the canonical no-op answer, the base and expected result
+    revisions, and one stable digest over exactly these safe published fields.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    preview_contract_version: Literal[PREVIEW_CONTRACT_VERSION]
+    object_id: str = Field(
+        min_length=1,
+        max_length=128,
+        pattern=r"^[a-z0-9][a-z0-9_-]*[a-z0-9]$|^[a-z0-9]$",
+    )
+    object_kind: ObjectKind
+    changed: bool
+    base_revision: int = Field(ge=1)
+    base_etag: str = Field(pattern=r'^"rev-[1-9][0-9]*"$')
+    expected_result_revision: int = Field(ge=1)
+    expected_result_etag: str = Field(pattern=r'^"rev-[1-9][0-9]*"$')
+    diff: list[V1ObjectUpdatePreviewDiffEntryOut] = Field(
+        max_length=PREVIEW_DIFF_MAX_ENTRIES,
+        description=(
+            "Canonically ordered, bounded, redacted structured diff of the "
+            "normalized proposal against the current record."
+        ),
+    )
+    diff_digest: str = Field(
+        pattern=r"^sha256:[0-9a-f]{64}$",
+        description=(
+            "Domain-separated SHA-256 digest of the complete safe semantic diff, "
+            "including bounded-output omissions and unabridged non-secret values."
+        )
+    )
+    diff_truncated: bool
+    preview_digest: str = Field(pattern=r"^sha256:[0-9a-f]{64}$")
 
 
 class V1DeleteCommandOut(BaseModel):

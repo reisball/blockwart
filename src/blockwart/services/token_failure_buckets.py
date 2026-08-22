@@ -58,6 +58,7 @@ def precheck_service_token_failure(
     channel: str,
     request_id: str | None,
     now: datetime | None = None,
+    record_denial_event: bool = True,
 ) -> TokenFailureDecision:
     _validate_policy_limits(policy)
     timestamp = now or utc_now()
@@ -71,14 +72,15 @@ def precheck_service_token_failure(
             )
         )
         if bucket is not None and bucket.failure_count >= limit:
-            _emit_aggregate_event_if_due(
-                session,
-                bucket=bucket,
-                limit=limit,
-                channel=channel,
-                request_id=request_id,
-                now=timestamp,
-            )
+            if record_denial_event:
+                _emit_aggregate_event_if_due(
+                    session,
+                    bucket=bucket,
+                    limit=limit,
+                    channel=channel,
+                    request_id=request_id,
+                    now=timestamp,
+                )
             return TokenFailureDecision(False, dimension, bucket.failure_count)
     return TokenFailureDecision(True)
 

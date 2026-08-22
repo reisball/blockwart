@@ -166,6 +166,14 @@ WRITE_ANNOTATIONS: JSON = {
     "idempotentHint": False,
     "openWorldHint": True,
 }
+# A read-only projection of one proposed write. It requires the same write
+# authority as the real update and reaches the catalog API, but mutates nothing.
+PREVIEW_WRITE_ANNOTATIONS: JSON = {
+    "readOnlyHint": True,
+    "destructiveHint": False,
+    "idempotentHint": True,
+    "openWorldHint": True,
+}
 DELETE_ANNOTATIONS: JSON = {
     "readOnlyHint": False,
     "destructiveHint": True,
@@ -249,13 +257,22 @@ WRITE_INTENT_TOOLS: tuple[str, ...] = (
     "blockwart.update_object",
     "blockwart.create_attached_device",
 )
+# The read-only preview of a full-object update. It is not a write intent,
+# so it never appears in the describe_schema write-intent projection, but its
+# rejected arguments use the same field-accurate contract as the update it
+# previews.
+PREVIEW_TOOLS: tuple[str, ...] = ("blockwart.preview_object_update",)
 RELATIONSHIP_TOOLS: tuple[str, ...] = (
     "blockwart.create_relationship",
     "blockwart.delete_relationship",
 )
 # Tools whose rejected arguments are published as field-accurate details on the
 # canonical violation contract.
-FIELD_ACCURATE_TOOLS: tuple[str, ...] = (*WRITE_INTENT_TOOLS, *RELATIONSHIP_TOOLS)
+FIELD_ACCURATE_TOOLS: tuple[str, ...] = (
+    *WRITE_INTENT_TOOLS,
+    *PREVIEW_TOOLS,
+    *RELATIONSHIP_TOOLS,
+)
 # The read tools whose rejected page size publishes one narrowly scoped
 # field-accurate detail. Every other rejected read argument keeps the opaque
 # invalid_arguments shape, so no other input is described or echoed.
@@ -908,6 +925,29 @@ TOOLS: list[JSON] = [
             "additionalProperties": False,
         },
         "annotations": WRITE_ANNOTATIONS,
+    },
+    {
+        "name": "blockwart.preview_object_update",
+        "description": (
+            "Preview one authorized full-object update without writing anything. "
+            "Takes exactly the blockwart.update_object arguments and returns the "
+            "redacted structured diff, the canonical no-op answer, the base and "
+            "expected result revisions/ETags, and one stable preview digest. The "
+            "preview creates no lock or reservation: a write in between still "
+            "fails the ETag precondition of the real update."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "object_id": {"type": "string", "minLength": 1, "maxLength": 128},
+                "if_match": ETAG_SCHEMA,
+                "object": OBJECT_WRITE_SCHEMA,
+            },
+            "required": ["object_id", "if_match", "object"],
+            "additionalProperties": False,
+        },
+        # Requires effective write on the exact object, but changes nothing.
+        "annotations": PREVIEW_WRITE_ANNOTATIONS,
     },
     {
         "name": "blockwart.delete_object",
@@ -1748,6 +1788,17 @@ def call_tool(
         payload = request(
             "PUT",
             f"/api/v1/objects/{quote(object_id, safe='')}",
+            _required_object(args, "object"),
+            {
+                "If-Match": _required_string(args, "if_match"),
+                "X-Blockwart-Channel": "mcp",
+            },
+        )
+    elif name == "blockwart.preview_object_update":
+        object_id = _required_string(args, "object_id")
+        payload = request(
+            "POST",
+            f"/api/v1/objects/{quote(object_id, safe='')}/update-preview",
             _required_object(args, "object"),
             {
                 "If-Match": _required_string(args, "if_match"),

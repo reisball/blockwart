@@ -81,18 +81,35 @@ def find_acl_data_violations(data: Any, path: str = "data") -> list[str]:
     return violations
 
 
-def redact_secret_values(data: Any) -> Any:
+def redact_secret_values(
+    data: Any,
+    *,
+    replacement: Any = REDACTED_SECRET_VALUE,
+) -> Any:
+    """Return a recursively redacted copy of ``data``.
+
+    Callers that only render a public string use the stable default marker.
+    Security-sensitive semantic projections may supply an opaque sentinel so
+    a legitimate input string equal to the public marker cannot impersonate a
+    redaction.
+    """
     if isinstance(data, Mapping):
         safe: dict[str, Any] = {}
         for key, value in data.items():
             key_text = str(key)
             if key_text.lower() in FORBIDDEN_SECRET_KEYS:
-                safe[key_text] = REDACTED_SECRET_VALUE
+                safe[key_text] = replacement
             else:
-                safe[key_text] = redact_secret_values(value)
+                safe[key_text] = redact_secret_values(
+                    value,
+                    replacement=replacement,
+                )
         return safe
     if isinstance(data, list):
-        return [redact_secret_values(value) for value in data]
+        return [
+            redact_secret_values(value, replacement=replacement)
+            for value in data
+        ]
     if isinstance(data, str) and looks_like_secret(data):
-        return REDACTED_SECRET_VALUE
+        return replacement
     return data

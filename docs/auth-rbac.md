@@ -366,6 +366,13 @@ append. Appends do not use optimistic `If-Match`, because they cannot overwrite
 another entry, but they are idempotent and advance the object revision.
 Discover-only stubs never release comments. See `object-comments.md`.
 
+The object-update preview is the one authenticated catalog operation that
+requires effective `write` while deliberately issuing database reads only. A
+valid credential is checked against the same current token and policy state,
+but a successful or object-denied preview does not update token `last_used_at`
+or append a denial security event. Invalid credentials never reach planning
+and retain the normal shared failure buckets and bounded security evidence.
+
 The focused Project overview and chronology apply this same boundary before
 filtering, counting, ordering, or reading activity. A Project with only
 `discover` is a strict stub only on direct generic reads; it does not appear in
