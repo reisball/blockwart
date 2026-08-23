@@ -94,7 +94,7 @@ class PrincipalTokenOut(BaseModel):
 class GlobalAuthorityOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
-    source: Literal["catalog_owner"]
+    source: Literal["catalog_owner", "catalog_viewer"]
     permissions: list[Permission]
 
 

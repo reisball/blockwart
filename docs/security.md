@@ -40,6 +40,15 @@ without storing any session, cookie, CSRF, password, or hash value.
 Catalog reads are authenticated and object-authorized across UI, REST, Agent
 API, and MCP. No-discover objects are concealed and discover-only objects use
 a strict safe stub. Catalog and grant commands are also object-authorized.
+The explicit global `catalog_viewer` role enters only this shared policy and
+contributes exactly `discover` and `read` over current and future objects.
+Object grants remain additive. It grants no mutation, access management,
+platform administration, credential administration, or token administration;
+platform admin, authentication, or token possession alone grants no catalog
+visibility. Each request resolves current database role state, and cursor policy
+fingerprints reject reuse after assignment or revocation. Existing field-level
+secret redaction and no-discover concealment remain downstream of the same
+policy.
 The ETag-bound object-update preview requires effective `write` on the exact
 object and applies the same concealment, validation, and strong-precondition
 policy as the real update. Its bounded diff redacts secret-shaped values and

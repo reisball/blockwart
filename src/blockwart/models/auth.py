@@ -36,7 +36,8 @@ class Principal(Base):
             name="ck_principals_platform_role",
         ),
         CheckConstraint(
-            "catalog_role IS NULL OR catalog_role = 'catalog_owner'",
+            "catalog_role IS NULL OR "
+            "catalog_role IN ('catalog_owner','catalog_viewer')",
             name="ck_principals_catalog_role",
         ),
         CheckConstraint(

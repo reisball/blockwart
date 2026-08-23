@@ -63,7 +63,8 @@ PG_TEST_URL = os.environ.get(
 
 CATALOG_OWNER_REVISION = "20260806_0015"
 SOURCE_COVERAGE_REVISION = "20260811_0016"
-HEAD_REVISION = "20260818_0018"
+PROJECT_CHRONOLOGY_REVISION = "20260818_0018"
+HEAD_REVISION = "20260822_0019"
 
 
 def _pg_url(database: str) -> str:
@@ -302,6 +303,90 @@ def test_postgresql_fresh_migrations_match_model_schema(
             "source_entry_mappings",
             "source_snapshots",
         } <= tables
+    finally:
+        engine.dispose()
+
+
+@PG_SKIP
+def test_postgresql_catalog_viewer_migration_upgrade_and_safe_downgrade(
+    pg_database_name: str,
+) -> None:
+    database_url = _pg_url(pg_database_name)
+    _upgrade_to(database_url, PROJECT_CHRONOLOGY_REVISION)
+    engine = build_engine(database_url)
+    try:
+        with engine.begin() as connection:
+            _insert_principal(
+                connection,
+                principal_id="00000000-0000-0000-0000-000000000171",
+                login="preserved-owner-171",
+                platform_role="admin",
+                catalog_role="catalog_owner",
+            )
+        before = _table_rows(engine, {"principals", "principal_invariant_counts"})
+    finally:
+        engine.dispose()
+
+    _upgrade_to(database_url, HEAD_REVISION)
+    engine = build_engine(database_url)
+    try:
+        assert _table_rows(engine, {"principals", "principal_invariant_counts"}) == before
+        with engine.begin() as connection:
+            _insert_principal(
+                connection,
+                principal_id="00000000-0000-0000-0000-000000000172",
+                login="human-viewer-171",
+                catalog_role="catalog_viewer",
+            )
+            _insert_principal(
+                connection,
+                principal_id="00000000-0000-0000-0000-000000000173",
+                login="service-viewer-171",
+                catalog_role="catalog_viewer",
+            )
+        with pytest.raises(IntegrityError):
+            with engine.begin() as connection:
+                connection.execute(
+                    text(
+                        "UPDATE principals SET catalog_role = 'catalog_editor' "
+                        "WHERE id = '00000000-0000-0000-0000-000000000172'"
+                    )
+                )
+    finally:
+        engine.dispose()
+
+    config = build_alembic_config(database_url)
+    with pytest.raises(RuntimeError, match="explicitly removed before downgrade"):
+        command.downgrade(config, PROJECT_CHRONOLOGY_REVISION)
+
+    engine = build_engine(database_url)
+    try:
+        with engine.begin() as connection:
+            connection.execute(
+                text("DELETE FROM principals WHERE catalog_role = 'catalog_viewer'")
+            )
+    finally:
+        engine.dispose()
+    command.downgrade(config, PROJECT_CHRONOLOGY_REVISION)
+    engine = build_engine(database_url)
+    try:
+        assert _table_rows(engine, {"principals", "principal_invariant_counts"}) == before
+        with pytest.raises(IntegrityError):
+            with engine.begin() as connection:
+                _insert_principal(
+                    connection,
+                    principal_id="00000000-0000-0000-0000-000000000174",
+                    login="rejected-viewer-171",
+                    catalog_role="catalog_viewer",
+                )
+        with pytest.raises(Exception, match="last active catalog owner"):
+            with engine.begin() as connection:
+                connection.execute(
+                    text(
+                        "UPDATE principals SET catalog_role = NULL "
+                        "WHERE id = '00000000-0000-0000-0000-000000000171'"
+                    )
+                )
     finally:
         engine.dispose()
 
