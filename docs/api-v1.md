@@ -4,6 +4,16 @@ Blockwart's stable machine-readable API lives under `/api/v1`. Every request
 requires a service-account bearer token and is object-authorized. Reads and
 writes use the same effective object policy as the browser UI and MCP.
 
+An active principal may carry the explicit global `catalog_viewer` role. It is
+a distinct policy source with exactly `discover` and `read` over every current
+and future catalog object, including disconnected roots. Additive object grants
+may supply more permissions only on their own object or canonical subtree. The
+role never authorizes object, relationship, comment, or grant mutation; access,
+principal, credential, or token administration; or root/child creation.
+Platform admin, login, and token possession do not imply the role. Current
+database state is evaluated per request, and role changes invalidate
+policy-bound cursors.
+
 ## Page contract
 
 List resources return the same envelope:
@@ -34,6 +44,22 @@ skipped equal-sort rows.
 count. Set `include_total=true` when an exact authorized matching count is
 needed.
 
+## Agent read projections
+
+`GET /objects`, `GET /context`, and `POST /object-contexts` add an opt-in,
+versioned, closed read projection for agent clients. `projection` is one of
+`compact`, `context`, or `full`; the closed `fields` mask may only narrow it.
+Non-default responses include the resolved version and sections plus one
+response-level `capability_sets` table, which items reference by
+`capability_set`. Only byte-identical effective permission sets share a key.
+
+`include_recent_comments` controls the bounded comment preview on context and
+batch reads. It defaults off for compact/context and on for full; the historical
+no-argument full response remains unchanged. `list_comments` remains the full
+history. Projections never alter visibility, authorization, concealment,
+ordering, cursors, revisions, or ETags. The exact profile and budget contract
+is documented in [Agent read projections](agent-read-projections.md).
+
 ## MCP contract metadata
 
 ### `GET /api/v1/mcp-contract`
@@ -46,6 +72,65 @@ host data. Consumers compare build revision, contract version, and digest;
 tool count is only evidence. The digest is not a signature or supply-chain
 proof. See [MCP server](mcp.md) for local wrapper diagnostics and the scoped
 runtime-catalog refresh contract.
+
+## Needs attention
+
+### `GET /api/v1/attention`
+
+Returns the authorized, catalog-wide attention view: one `summary` plus an
+opaque-cursor page of `items`, both derived from exactly the same authorized,
+filtered set. The request combines signals Blockwart already records. It runs no
+probe, opens no source file, performs no network access, and writes no catalog,
+audit, comment, coverage, or observation row.
+
+Each item carries a closed `category`, `severity`, `reason_code`,
+`signal_state`, a fixed English `description`, an optional `detail_code` from an
+existing closed domain vocabulary, an optional evidence timestamp, and one
+`target` with the canonical `kind:id` reference plus its detail path. Categories
+are `record_integrity`, `monitoring`, `lifecycle`, `endpoint`, `placement`,
+`relationship_integrity`, `provenance`, `runbook`, `knowledge`, and
+`source_coverage`. Severities are
+`critical`, `warning`, and `info`. Item signal states are `current`, `stale`,
+and `unknown`; the summary additionally reports `not_applicable` per category.
+The full reason vocabulary and its meaning are in [Needs
+attention](attention.md).
+
+Filters are exact `category`, `severity`, `reason_code`, `signal_state`, and
+`kind`; `direction` is `asc` or `desc`, and `limit` is 1..100. Ordering is
+severity, then the published category order, then the published reason order,
+then the target reference. At most one item exists per target and category, so a
+single cause is never repeated.
+
+`summary.total`, every severity/category/reason count, the optional `total`, and
+the paginated rows describe exactly that filtered set. `summary.signals` is the
+one deliberate exception: its `evaluated` value reports how many authorized
+inputs the category was judged against before item filters, so
+`not_applicable` stays distinguishable from "filtered away".
+`summary.coverage_snapshot_state` is `collected` or `not_collected` over the
+authorized mapped coverage projection. When no snapshot exists, or none of its
+mapped evidence is authorized, the response reports `not_collected` plus one
+`coverage_not_collected` item rather than claiming zero coverage problems or
+revealing a source-only collection timestamp.
+
+Only objects the caller may read contribute items; discover-only stubs
+contribute nothing. Concealing an object removes its own items and changes no
+other item, count, signal state, order, cursor, or error. Runbook applicability
+and canonical relationship diagnostics are evaluated only after their typed
+references and relationship endpoints are projected through READ authorization;
+an endpoint outside that resolvable projection becomes the same generic
+`relationship_target_unresolved` item whether it exists concealed or is absent.
+Only the readable source/endpoint is targeted; diagnostic prose, related
+references, target identity, and target existence are never returned or bound
+into a cursor. Source-only coverage facts are never included; they stay behind
+the platform-admin
+`scope=all` boundary of `GET /api/v1/source-coverage`.
+
+Attention is a derived, time-dependent read model with no persisted state.
+Its cursor follows the general page contract above and binds the principal,
+effective object policy, resource, filters, page size, sort field, direction,
+and digest of the authorized filtered projection. A signal correction therefore
+invalidates a cursor issued for the older derived state. `generated_at` records
+when the page was derived.
 
 ## Source coverage
 
@@ -352,6 +437,71 @@ document. It is written through this same command and therefore uses `write`,
 bypass endpoint. An absent document is disabled. See
 [Service monitoring](service-monitoring.md).
 
+### `POST /api/v1/objects/{object_id}/update-preview`
+
+Previews exactly the safe full-object `PUT` above without applying it. The path
+ID, complete `CatalogObjectIn` JSON body, and current strong `If-Match` are the
+same inputs. Effective `write` on that exact object is still required. Missing
+and concealed path IDs remain the same `404`; discover-only and read-only
+principals receive `403` without a preview. Missing `If-Match` is
+`428 precondition_required`, while a malformed, weak, or stale value is
+`412 precondition_failed` with the same safe envelope as `PUT`.
+
+The response is a closed `V1ObjectUpdatePreviewOut` document:
+
+- `preview_contract_version`: currently the literal `"1"`;
+- `object_id` and `object_kind`;
+- `changed`, calculated from the same normalized persisted target as `PUT`;
+- `base_revision`/`base_etag` and
+  `expected_result_revision`/`expected_result_etag` (unchanged for a canonical
+  no-op, otherwise exactly one revision later);
+- `diff`: at most 200 entries ordered by the canonical source RFC 6901 JSON
+  Pointer, each with bounded `path`, `path_state`, an
+  `added|removed|changed` operation, and closed `before`/`after` values;
+- `diff_truncated`, plus `diff_digest`, a domain-separated SHA-256 identity of
+  the complete safe semantic diff even when entries or values are abbreviated;
+  and
+- `preview_digest`, a versioned, domain-separated SHA-256 identity over the
+  complete published safe preview contract other than itself.
+
+Each diff side has exactly `state`, `type`, and `text`. State is
+`absent|value|redacted|truncated`; type is
+`absent|null|boolean|integer|number|string|array|object`. Strings use their
+exact normalized text and other values use canonical JSON, capped at 120
+characters. `text` is null for absent and redacted values. Canonical values are
+compared before this lossy rendering, so an unchanged concealed value remains a
+no-op while a material change still emits a redacted diff entry. Stored
+secret-shaped values and typed identities the caller cannot read collapse
+before digest calculation. A distinct caller-supplied proposed concealed value
+binds the semantic diff digest without appearing in the response, so proposals
+cannot collide and the digest cannot reveal a stored protected identity. The
+response never includes the current or proposed object document.
+
+An exact pointer is published with `path_state=exact`. A pointer longer than
+512 characters is replaced by one fixed `/@sha256:<hex>` pointer with
+`path_state=hashed`; the complete safe-diff digest still binds the unabridged
+source pointer. This bounds extension keys without making two nested shapes
+ambiguous.
+
+Planning runs the same authorization, ETag, canonical normalization/no-op,
+schema, secret, ACL-shaped-key, typed-reference, relationship, lifecycle,
+health, placement, monitoring, component, provenance, and kind/domain checks
+as the real update. For the all-data concealment gate, a byte-identical typed
+reference already present in stored canonical data is not re-authorized during
+an unrelated edit; every newly introduced or changed reference is still
+checked with indistinguishable concealed, missing, and kind-mismatched failure.
+Declared knowledge-reference rules and create paths are unchanged. The real
+`PUT` plans again in its own transaction. A write after preview therefore makes
+the old ETag stale in the ordinary way; preview creates no lock, reservation,
+or later-apply guarantee.
+
+An authenticated preview issues reads only. It does not flush, reserve an ID,
+advance a sequence, create a savepoint, update the service token's
+`last_used_at`, or write object, revision, timestamp, audit, security, comment,
+grant, idempotency, relationship, monitoring, or source-coverage state.
+Invalid credentials retain the normal authentication failure throttling and
+security evidence and never reach preview planning.
+
 ### `DELETE /api/v1/objects/{object_id}`
 
 Requires the separate `delete` permission plus current `If-Match`. Referenced
@@ -411,6 +561,7 @@ POST     /api/v1/admin/principals/{principal_id}/password
 POST     /api/v1/admin/principals/{principal_id}/tokens
 POST     /api/v1/admin/principals/{principal_id}/tokens/rotate
 DELETE   /api/v1/admin/principals/{principal_id}/tokens/{token_name}
+POST     /api/v1/admin/principals/{principal_id}/catalog-role
 ```
 
 Lifecycle and credential mutations advance the principal revision. Token
@@ -420,6 +571,16 @@ Replaying the completed request proves completion but does not redisclose the
 secret. Existing password, token, session, and hash values are never readable.
 The last-active-admin and independent last-effective-owner invariants fail
 atomically.
+
+The dedicated catalog-role route accepts the closed nullable values
+`catalog_owner`, `catalog_viewer`, and `null`. It alone uses an active human
+browser session, double-submit CSRF, current-password reauthentication, the
+target principal `If-Match` ETag, and a current-state dual platform-admin plus
+catalog-owner authorization check. Real changes advance the principal revision
+once and emit redacted `catalog_role_changed` security evidence; no-ops preserve
+the revision and emit no success event. Replacing or removing the last active
+catalog owner remains forbidden. Viewer targets receive no special credential
+authority or token behavior.
 
 The principal-targeted grant routes are administrative aliases for the shared
 object grant command layer. They require both the platform `admin` role and the

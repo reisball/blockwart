@@ -36,8 +36,9 @@ automatically.
   REST, and MCP commands;
 - keep an append-only, Markdown-capable operational comment timeline per
   object through UI, REST, and MCP;
-- manage human and service-account identities separately from object grants;
-- enforce object-scoped RBAC, optimistic concurrency, idempotency, audit, and
+- manage human and service-account identities, explicit global catalog-owner
+  and read-only catalog-viewer roles, and additive object grants separately;
+- enforce centralized RBAC, optimistic concurrency, idempotency, audit, and
   last-owner safeguards;
 - import reviewed infrastructure data from Markdown/YAML with a dry-run-first
   workflow;
@@ -53,8 +54,11 @@ automatically.
 | MCP (`blockwart-mcp`) | Agent-native catalog reads and authorized commands over stdio | [MCP server](docs/mcp.md) |
 | Object comments | Human and agent operational history, separate from audit | [Object comments](docs/object-comments.md) |
 | Import CLI | Reviewed TOOLS.md/YAML ingestion without resolving secrets | [Markdown import](docs/markdown-import.md) |
+| Needs attention | One authorized read-only view over record and relationship integrity, placement, lifecycle, monitoring, endpoints, provenance, Runbook readiness, knowledge review, and source coverage | [Needs attention](docs/attention.md) |
+| Source coverage CLI | Closed reviewed Knowledge inventories with dry-run evidence and explicit recording | [Reviewed source coverage](docs/source-coverage-manifest.md) |
 | Knowledge plan CLI | Deterministic private-source classification with no catalog writes | [Knowledge planning](docs/knowledge-planning.md) |
 | Knowledge apply CLI | Offline digest-bound reviewed apply and paired SQLite rollback | [Knowledge apply](docs/knowledge-apply.md) |
+| Release CLI | Dry-run-first container release with restored-copy proof and verified automatic rollback | [Atomic release workflow](docs/release-workflow.md) |
 
 ## Agent quick start
 
@@ -72,7 +76,8 @@ blockwart-mcp
 The service-account token must have the exact object grants required by the
 requested tools. Credential references may be returned; credential values are
 never resolved. See the [MCP tool list](docs/mcp.md), [REST API](docs/api-v1.md),
-and [authorization model](docs/auth-rbac.md) before integrating a client.
+the [agent read-projection guide](docs/agent-read-projections.md), and
+[authorization model](docs/auth-rbac.md) before integrating a client.
 
 ## Local setup
 

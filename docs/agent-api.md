@@ -5,7 +5,11 @@ Blockwart exposes a read-only compatibility agent namespace under /api/agent.
 The namespace is intentionally separate from the catalog read API. Authorized
 machine commands live in `/api/v1` and are documented in `api-v1.md`; agents
 and integrations never resolve credential values. Every request requires a service-account bearer
-token and is filtered by its current object grants. Catalog changes are
+token and is filtered by its current effective policy: additive object grants
+plus an explicit `catalog_owner` or `catalog_viewer` role when present. A
+`catalog_viewer` contributes exactly `discover` and `read` over all current and
+future objects; token possession and platform admin alone contribute nothing.
+Catalog changes are
 restricted to the authenticated `/api/v1`, MCP, and UI command surfaces.
 
 The catalog model is the faithful stored-object projection: validated data, canonical asset and
@@ -34,6 +38,12 @@ Authorization is projection-based: `read` returns the documented summary or
 context, `discover` returns only a strict identity/placement/capability stub,
 and no `discover` is indistinguishable from an absent object. Detail filters
 never evaluate stub-only objects.
+
+The Agent API builds that policy from current database state for each request,
+so viewer revocation takes effect on the next call and invalidates any
+policy-bound cursor. Its context, relationship, count, comment, audit, and
+coverage-related projections retain the shared concealment and secret-redaction
+contracts; the role never enables an Agent write path.
 
 ## Endpoints
 
@@ -174,7 +184,7 @@ field as the single-object resource. Discover-only stubs expose neither
 `ETag` header. Concealed objects remain omitted from collections and return
 the same `404` as absent IDs on direct reads.
 
-Readable contexts expose `recent_comments`; discover-only stubs do not. The
+Full readable contexts expose `recent_comments`; discover-only stubs do not. The
 complete timeline and append command live only in REST v1 and MCP. Agent
 responses return Markdown or legacy plain-text source, never rendered HTML;
 see `object-comments.md`.
@@ -216,3 +226,8 @@ preserving its established `results` and `objects` payload fields:
 
 The MCP server also exposes authorized create, update, relationship, and delete
 commands through the shared `/api/v1` command surface. See `mcp.md`.
+
+MCP read tools additionally support the versioned closed compact/context/full
+projection contract, capability-set deduplication, explicit comment previews,
+and scoped generated schema reads. The legacy Agent API namespace keeps its
+established full response shape. See `agent-read-projections.md`.

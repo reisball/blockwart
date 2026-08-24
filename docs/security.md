@@ -24,9 +24,41 @@ Plaintext credential material must never enter logs, audit details, database
 rows, command-line arguments, or generated documentation. See
 `auth-rbac.md`.
 
+Human login under `/auth` is non-persistent by default: its server-side session
+expires absolutely within one hour, and its identity and CSRF cookies contain
+neither `Max-Age` nor `Expires`. The explicit localized **Keep me signed in**
+choice uses one validated server-configured lifetime (30 days by default) for
+the stored absolute expiry and both persistent cookies. It is bounded,
+non-sliding, and never accepts a client TTL or expiry. Missing, extra,
+duplicated, or manipulated form values cannot weaken `Secure`, `HttpOnly`,
+`SameSite=Strict`, or `Path=/`, and cannot create an unbounded session. Both
+modes retain the one-time login challenge, session-bound CSRF, rate limiting,
+revocation, stale-cookie clearing, and `no-store` response behavior. Redacted
+security events distinguish standard and remembered issuance and revocation
+without storing any session, cookie, CSRF, password, or hash value.
+
 Catalog reads are authenticated and object-authorized across UI, REST, Agent
 API, and MCP. No-discover objects are concealed and discover-only objects use
 a strict safe stub. Catalog and grant commands are also object-authorized.
+The explicit global `catalog_viewer` role enters only this shared policy and
+contributes exactly `discover` and `read` over current and future objects.
+Object grants remain additive. It grants no mutation, access management,
+platform administration, credential administration, or token administration;
+platform admin, authentication, or token possession alone grants no catalog
+visibility. Each request resolves current database role state, and cursor policy
+fingerprints reject reuse after assignment or revocation. Existing field-level
+secret redaction and no-discover concealment remain downstream of the same
+policy.
+The ETag-bound object-update preview requires effective `write` on the exact
+object and applies the same concealment, validation, and strong-precondition
+policy as the real update. Its bounded diff redacts secret-shaped values and
+typed identities the caller cannot read from the published representation.
+Canonical comparison happens before that lossy rendering: stored protected
+values remain collapsed in digest material, while distinct caller-supplied
+proposals bind distinct semantic digests without disclosing a stored target
+identity. A valid or object-denied preview writes no catalog, authentication
+timestamp, security-event, audit, idempotency, relationship, or sequence state
+and creates no later-apply guarantee.
 The known-ID batch context read (`POST /api/v1/object-contexts` and
 `blockwart.get_object_contexts`) applies the same policy per requested ID:
 readable objects return the full detail, discover-only objects return the
@@ -38,6 +70,23 @@ Production identity bootstrap, persistent services, and infrastructure exposure
 require their dedicated rollout and approval. Browser identity, challenge, CSRF,
 and clearing cookies are always `Secure`; deploy the browser surface only behind
 an explicitly trusted HTTPS reverse proxy that adds HSTS.
+
+The packaged host-side release controller has a separate non-secret evidence
+boundary. Its immutable bundles and reports contain only source, image,
+artifact, schema, gate, pointer, backup-digest, and rollback evidence. Runtime
+paths, environment-file locations or values, database content, private
+endpoints, credentials, and process output are excluded. Host state, backup,
+data, and optional environment files must be owned and protected; layouts and
+bundle artifacts reject symlinks and digest drift. Candidate containers mount
+only a restored SQLite copy and have no network. Image builds use an extracted
+exact-commit archive rather than the host checkout, excluding ignored private
+files. Daemon inspection verifies the effective mounts, ports, restart/network
+policy, and environment without emitting their values. A failed rollback gate
+stops and removes the unverified restored service while retaining evidence.
+Post-verification hooks use
+explicit argv and allowlisted non-secret context and are not an authorization
+to rewrite external client/agent configuration. See
+[`release-workflow.md`](release-workflow.md).
 
 Object comments use the same object policy and global secret detector. Their
 Markdown source is stored exactly, but browser HTML is produced only through a

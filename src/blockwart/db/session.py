@@ -267,6 +267,35 @@ def transaction(session: Session) -> Iterator[None]:
         raise
 
 
+@contextmanager
+def read_only_transaction(session: Session) -> Iterator[None]:
+    """Run one truly read-only use case and end its transaction without writing.
+
+    The block is never committed, so it can neither flush pending state nor
+    leave an open transaction behind on SQLite or PostgreSQL. A block that did
+    stage any object mutation fails closed instead of silently discarding it,
+    because staging one at all would mean a read-only path grew a write.
+    """
+
+    try:
+        yield
+        if _has_pending_mutations(session):
+            raise DatabaseTransactionError("read-only use case staged a mutation")
+    except SQLAlchemyError as exc:
+        raise DatabaseTransactionError("Database transaction failed") from exc
+    finally:
+        session.rollback()
+
+
+def _has_pending_mutations(session: Session) -> bool:
+    if session.new or session.deleted:
+        return True
+    return any(
+        session.is_modified(instance, include_collections=False)
+        for instance in session.dirty
+    )
+
+
 def get_session() -> Generator[Session, None, None]:
     with SessionLocal() as session:
         yield session

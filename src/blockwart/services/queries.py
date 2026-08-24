@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 from collections import Counter
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any, Literal, NotRequired, TypedDict
@@ -297,6 +297,24 @@ class CatalogDetailReadModel:
     monitoring: dict[str, Any] | None
 
 
+def project_catalog_objects(
+    objects: Sequence[CatalogObjectOut],
+    access: ReadAccess,
+) -> list[CatalogObjectReadOut]:
+    """Apply the object visibility decision to already loaded canonical rows.
+
+    Callers that also need a canonical, authorization-independent fact of the
+    stored row (for example its true placement state before a concealed parent
+    truncates the visible path) can load the rows once and pair them with this
+    projection instead of querying the catalog twice.
+    """
+    return [
+        projected
+        for catalog_object in objects
+        if (projected := _project_catalog_object(catalog_object, access)) is not None
+    ]
+
+
 def list_catalog_objects(
     session: Session,
     access: ReadAccess,
@@ -305,11 +323,7 @@ def list_catalog_objects(
     health: AssetHealth | None = None,
 ) -> list[CatalogObjectReadOut]:
     """Return the canonical catalog read model used by the JSON API."""
-    projected_objects = [
-        projected
-        for catalog_object in list_objects(session)
-        if (projected := _project_catalog_object(catalog_object, access)) is not None
-    ]
+    projected_objects = project_catalog_objects(list_objects(session), access)
     if lifecycle is None and health is None:
         return projected_objects
     return [
@@ -426,6 +440,9 @@ def query_catalog_browse(
 def build_monitoring_index(
     session: Session,
     objects: list[CatalogObjectReadOut],
+    *,
+    now: datetime | None = None,
+    data_by_id: Mapping[str, Mapping[str, Any]] | None = None,
 ) -> dict[str, dict[str, Any]]:
     """Project monitoring for every readable service in one bounded read.
 
@@ -445,7 +462,7 @@ def build_monitoring_index(
         session,
         object_ids=readable_service_ids,
     )
-    now = datetime.now(UTC)
+    reference = now or datetime.now(UTC)
     index: dict[str, dict[str, Any]] = {}
     for catalog_object in objects:
         if (
@@ -456,10 +473,10 @@ def build_monitoring_index(
         view = monitoring_projection(
             kind=catalog_object.kind,
             object_id=catalog_object.id,
-            data=catalog_object.data,
+            data=(data_by_id or {}).get(catalog_object.id, catalog_object.data),
             catalog_health=catalog_object.health,
             observations=observations,
-            now=now,
+            now=reference,
             settings=settings,
         )
         if view is not None:

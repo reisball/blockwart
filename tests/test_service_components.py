@@ -13,6 +13,7 @@ from blockwart.domain.service_components import (
     put_service_component_dependency,
     remove_service_component,
 )
+from blockwart.domain.service_readiness import SERVICE_CRITICALITY_VALUES
 from blockwart.models import AuditEvent, CatalogObject
 from blockwart.schemas.catalog import CatalogObjectIn
 from blockwart.services.catalog import upsert_object
@@ -234,6 +235,8 @@ def test_component_contract_projection_is_complete_and_generated() -> None:
     assert fields["components.items[].role"]["enum"] == sorted(
         SERVICE_COMPONENT_ROLE_VALUES
     )
+    assert set(fields["criticality"]["enum"]) == set(SERVICE_CRITICALITY_VALUES)
+    assert fields["criticality"]["requirement"] == "optional"
 
 
 def test_component_edit_helpers_rename_edges_and_remove_incident_edges() -> None:

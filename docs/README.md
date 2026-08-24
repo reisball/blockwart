@@ -9,6 +9,9 @@ deleted by this classification.
 - [Configuration](config.md) and [deployment readiness](deployment.md)
 - [Reproducible builds and CI](ci.md), including the host-neutral parity
   contract for `.gitea/workflows/ci.yml` and `.github/workflows/ci.yml`
+- [Atomic container release workflow](release-workflow.md), including the
+  versioned specification, immutable evidence, candidate gates, cutover, and
+  verified backup/image rollback contract
 - [Markdown import](markdown-import.md) and [canonical English/UI
   localization](internationalization.md)
 - [Write-free Knowledge planning](knowledge-planning.md)
@@ -20,6 +23,9 @@ deleted by this classification.
 - [Agent API](agent-api.md), [API v1](api-v1.md), and the [API boundary
   contract](api-boundary-contract.md)
 - [MCP server](mcp.md)
+- [Agent read projections](agent-read-projections.md), including the versioned
+  compact/context/full profiles, the closed field mask, capability
+  deduplication, scoped schema reads, and the synthetic context budgets
 - [Object comments](object-comments.md)
 
 ## Active Security Documentation
@@ -43,9 +49,13 @@ deleted by this classification.
   evidence, typed links, and reviewed migration
 - [Canonical Runbook contracts / Kanonische Runbook-Verträge](runbooks.md), including
   operating, rollback, recovery, authorization, and reviewed legacy migration
-- [Application read models](read-models.md) and [service
+- [Application read models](read-models.md), [agent read
+  projections](agent-read-projections.md), and [service
   interfaces](service-interfaces.md)
+- [Needs attention](attention.md)
 - [Source coverage and import drift](source-coverage.md)
+- [Reviewed Knowledge source coverage](source-coverage-manifest.md), including
+  the closed manifest, dry-run evidence, record gates, and recovery boundary
 - [Append-only object comments](object-comments.md)
 - [Catalog provenance and freshness](provenance.md)
 

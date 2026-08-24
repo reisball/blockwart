@@ -43,8 +43,9 @@ CATALOG_OWNER_REVISION = "20260806_0015"
 SOURCE_COVERAGE_REVISION = "20260811_0016"
 SERVICE_MONITORING_REVISION = "20260818_0017"
 PROJECT_CHRONOLOGY_REVISION = "20260818_0018"
-GATUS_PROVIDER_REVISION = "20260819_0019"
-HEAD_REVISION = GATUS_PROVIDER_REVISION
+CATALOG_VIEWER_REVISION = "20260822_0019"
+GATUS_SOURCE_REVISION = "20260824_0020"
+HEAD_REVISION = GATUS_SOURCE_REVISION
 PROJECT_ALEMBIC_CONFIG = Path(__file__).resolve().parents[1] / "alembic.ini"
 LEGACY_SNAPSHOT = Path(__file__).resolve().parent / "fixtures" / "legacy_snapshot.sql"
 
@@ -2434,6 +2435,140 @@ def test_catalog_owner_migration_is_additive_and_guards_the_last_active_owner(
         assert connection.execute(
             "SELECT principal_id, object_id, role, scope FROM object_grants"
         ).fetchall() == [("legacy-admin", "legacy-root", "owner", "subtree")]
+        assert connection.execute("PRAGMA foreign_key_check").fetchall() == []
+    finally:
+        connection.close()
+
+
+def test_catalog_viewer_migration_preserves_data_and_has_safe_round_trip(
+    tmp_path: Path,
+) -> None:
+    database_path = tmp_path / "catalog-viewer.sqlite3"
+    database_url = _database_url(database_path)
+    config = build_alembic_config(database_url)
+    command.upgrade(config, PROJECT_CHRONOLOGY_REVISION)
+    connection = sqlite3.connect(database_path)
+    try:
+        connection.execute(
+            "INSERT INTO principals "
+            "(id, principal_type, login, display_name, active, platform_role, "
+            "catalog_role, revision) VALUES "
+            "('preserved-owner', 'human', 'preserved.owner', 'Preserved Owner', "
+            "1, 'admin', 'catalog_owner', 7), "
+            "('preserved-plain', 'service_account', 'preserved.plain', "
+            "'Preserved Plain', 1, NULL, NULL, 4)"
+        )
+        connection.execute(
+            "INSERT INTO catalog_objects "
+            "(id, kind, label, status, lifecycle, health, data_json, "
+            "provenance_json, revision) VALUES "
+            "('preserved-root', 'host', 'Preserved Root', 'active', 'active', "
+            "'healthy', '{\"schema_version\":1}', '{}', 3)"
+        )
+        connection.execute(
+            "INSERT INTO object_grants "
+            "(principal_id, object_id, role, scope, created_by_principal_id) "
+            "VALUES ('preserved-plain', 'preserved-root', 'viewer', 'self', "
+            "'preserved-owner')"
+        )
+        connection.commit()
+        before_principals = connection.execute(
+            "SELECT id, active, platform_role, catalog_role, revision "
+            "FROM principals ORDER BY id"
+        ).fetchall()
+        before_grants = connection.execute(
+            "SELECT principal_id, object_id, role, scope FROM object_grants"
+        ).fetchall()
+    finally:
+        connection.close()
+
+    command.upgrade(config, CATALOG_VIEWER_REVISION)
+    connection = sqlite3.connect(database_path)
+    try:
+        assert connection.execute(
+            "SELECT id, active, platform_role, catalog_role, revision "
+            "FROM principals ORDER BY id"
+        ).fetchall() == before_principals
+        assert connection.execute(
+            "SELECT principal_id, object_id, role, scope FROM object_grants"
+        ).fetchall() == before_grants
+        assert connection.execute(
+            "SELECT COUNT(*) FROM principals WHERE catalog_role = 'catalog_viewer'"
+        ).fetchone() == (0,)
+        connection.execute(
+            "INSERT INTO principals "
+            "(id, principal_type, login, display_name, active, catalog_role, revision) "
+            "VALUES "
+            "('human-viewer', 'human', 'human.viewer', 'Human Viewer', 1, "
+            "'catalog_viewer', 1), "
+            "('service-viewer', 'service_account', 'service.viewer', "
+            "'Service Viewer', 1, 'catalog_viewer', 1)"
+        )
+        connection.commit()
+        assert connection.execute(
+            "SELECT COUNT(*) FROM object_grants"
+        ).fetchone() == (1,)
+        with pytest.raises(sqlite3.IntegrityError, match="CHECK constraint failed"):
+            connection.execute(
+                "UPDATE principals SET catalog_role = 'catalog_editor' "
+                "WHERE id = 'human-viewer'"
+            )
+        connection.rollback()
+        triggers = {
+            str(row[0])
+            for row in connection.execute(
+                "SELECT name FROM sqlite_master WHERE type = 'trigger'"
+            )
+        }
+        assert {
+            "ck_principals_last_active_admin_update",
+            "ck_principals_last_active_admin_delete",
+            "ck_principals_last_active_catalog_owner_update",
+            "ck_principals_last_active_catalog_owner_delete",
+            "ck_principals_active_admin_counter_insert",
+            "ck_principals_active_catalog_owner_counter_insert",
+        } <= triggers
+        assert connection.execute(
+            "SELECT active_count FROM principal_invariant_counts "
+            "WHERE invariant = 'catalog_owner'"
+        ).fetchone() == (1,)
+    finally:
+        connection.close()
+
+    with pytest.raises(RuntimeError, match="explicitly removed before downgrade"):
+        command.downgrade(config, PROJECT_CHRONOLOGY_REVISION)
+    assert _revision(database_url) == CATALOG_VIEWER_REVISION
+
+    connection = sqlite3.connect(database_path)
+    try:
+        connection.execute(
+            "DELETE FROM principals WHERE catalog_role = 'catalog_viewer'"
+        )
+        connection.commit()
+    finally:
+        connection.close()
+    command.downgrade(config, PROJECT_CHRONOLOGY_REVISION)
+    connection = sqlite3.connect(database_path)
+    try:
+        assert connection.execute(
+            "SELECT id, active, platform_role, catalog_role, revision "
+            "FROM principals ORDER BY id"
+        ).fetchall() == before_principals
+        assert connection.execute(
+            "SELECT principal_id, object_id, role, scope FROM object_grants"
+        ).fetchall() == before_grants
+        with pytest.raises(sqlite3.IntegrityError, match="CHECK constraint failed"):
+            connection.execute(
+                "UPDATE principals SET catalog_role = 'catalog_viewer' "
+                "WHERE id = 'preserved-plain'"
+            )
+        connection.rollback()
+        with pytest.raises(sqlite3.IntegrityError, match="last active catalog owner"):
+            connection.execute(
+                "UPDATE principals SET catalog_role = NULL "
+                "WHERE id = 'preserved-owner'"
+            )
+        connection.rollback()
         assert connection.execute("PRAGMA foreign_key_check").fetchall() == []
     finally:
         connection.close()

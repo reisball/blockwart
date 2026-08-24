@@ -111,6 +111,7 @@
         "type": "object"
       },
       "AgentCatalogConcealed": {
+        "additionalProperties": false,
         "properties": {
           "id": {
             "title": "Id",
@@ -130,6 +131,7 @@
         "type": "object"
       },
       "AgentCatalogObjectContext": {
+        "additionalProperties": false,
         "properties": {
           "applies_to": {
             "items": {
@@ -557,6 +559,7 @@
         "type": "object"
       },
       "AgentCatalogObjectStub": {
+        "additionalProperties": false,
         "properties": {
           "capabilities": {
             "items": {
@@ -654,6 +657,7 @@
         "type": "object"
       },
       "AgentCatalogObjectSummary": {
+        "additionalProperties": false,
         "properties": {
           "applies_to": {
             "items": {
@@ -1194,6 +1198,633 @@
           "endpoint_id"
         ],
         "title": "AgentMonitoringTarget",
+        "type": "object"
+      },
+      "AgentProjectedObject": {
+        "additionalProperties": false,
+        "description": "One readable object under a non-default read projection.\n\nIdentity and state are always present, so a projected object publishes the\nsame id, ref, kind, revision, visibility decision, and effective\npermissions as the full contract. The effective permissions are published\nonce per distinct permission set in the response-level `capability_sets`\ntable, which `capability_set` keys into. A full read never carries that\nkey and a projected read never carries an inline capability list, so the\ntwo contracts can never be confused for one another.",
+        "properties": {
+          "applies_to": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Applies To"
+          },
+          "capability_set": {
+            "title": "Capability Set",
+            "type": "string"
+          },
+          "children_refs": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Children Refs"
+          },
+          "credential_references": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Credential References"
+          },
+          "data": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Data"
+          },
+          "decision_status": {
+            "anyOf": [
+              {
+                "enum": [
+                  "proposed",
+                  "accepted",
+                  "superseded",
+                  "deprecated",
+                  "rejected"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Decision Status"
+          },
+          "dependencies": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Dependencies"
+          },
+          "diagnostics": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/CatalogRecordDiagnostic"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Diagnostics"
+          },
+          "endpoints": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/AgentEndpoint"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Endpoints"
+          },
+          "etag": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Etag"
+          },
+          "health": {
+            "anyOf": [
+              {
+                "enum": [
+                  "unknown",
+                  "healthy",
+                  "degraded",
+                  "down",
+                  "maintenance"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Health"
+          },
+          "hostnames": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Hostnames"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "ips": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ips"
+          },
+          "kind": {
+            "enum": [
+              "host",
+              "system",
+              "network",
+              "device",
+              "service",
+              "credential_reference",
+              "runbook",
+              "decision",
+              "project"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "lifecycle": {
+            "anyOf": [
+              {
+                "enum": [
+                  "planned",
+                  "active",
+                  "retired"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Lifecycle"
+          },
+          "monitoring": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AgentServiceMonitoring"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "parent_path_refs": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Parent Path Refs"
+          },
+          "parent_ref": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Parent Ref"
+          },
+          "placement_state": {
+            "anyOf": [
+              {
+                "enum": [
+                  "root",
+                  "assigned",
+                  "unassigned",
+                  "unknown"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Placement State"
+          },
+          "primary_endpoint": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AgentEndpoint"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "project_category": {
+            "anyOf": [
+              {
+                "enum": [
+                  "implementation",
+                  "migration",
+                  "research",
+                  "experiment",
+                  "incident_review",
+                  "other"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Project Category"
+          },
+          "project_status": {
+            "anyOf": [
+              {
+                "enum": [
+                  "planned",
+                  "active",
+                  "paused",
+                  "completed",
+                  "cancelled",
+                  "archived"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Project Status"
+          },
+          "provenance": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CatalogProvenanceOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "recent_comments": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/CommentOut"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Recent Comments"
+          },
+          "recent_project_chronology": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/ProjectChronologyEntryOut"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Recent Project Chronology"
+          },
+          "record_state": {
+            "anyOf": [
+              {
+                "enum": [
+                  "valid",
+                  "corrupt"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Record State"
+          },
+          "ref": {
+            "title": "Ref",
+            "type": "string"
+          },
+          "related_assets": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Related Assets"
+          },
+          "relationships": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/AgentRelationshipOut"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Relationships"
+          },
+          "revision": {
+            "minimum": 1.0,
+            "title": "Revision",
+            "type": "integer"
+          },
+          "runbook_applies_to": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Runbook Applies To"
+          },
+          "runbook_risk": {
+            "anyOf": [
+              {
+                "enum": [
+                  "read-only",
+                  "safe-change",
+                  "disruptive",
+                  "destructive"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Runbook Risk"
+          },
+          "runbook_status": {
+            "anyOf": [
+              {
+                "enum": [
+                  "draft",
+                  "approved",
+                  "active",
+                  "deprecated",
+                  "superseded",
+                  "retired"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Runbook Status"
+          },
+          "search_snippet": {
+            "anyOf": [
+              {
+                "maxLength": 240,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Search Snippet"
+          },
+          "source_references": {
+            "anyOf": [
+              {
+                "items": {
+                  "additionalProperties": true,
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source References"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "summary": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Summary"
+          },
+          "updated_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Updated At"
+          },
+          "visibility": {
+            "const": "detail",
+            "default": "detail",
+            "title": "Visibility",
+            "type": "string"
+          }
+        },
+        "required": [
+          "capability_set",
+          "ref",
+          "id",
+          "kind",
+          "label",
+          "status",
+          "revision"
+        ],
+        "title": "AgentProjectedObject",
+        "type": "object"
+      },
+      "AgentProjectedStub": {
+        "additionalProperties": false,
+        "description": "One discover-only object under a non-default read projection.\n\nA projected stub publishes strictly the subset of what the full stub\nalready publishes, so a projection can never turn discover-only knowledge\ninto readable knowledge.",
+        "properties": {
+          "capability_set": {
+            "title": "Capability Set",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "host",
+              "system",
+              "network",
+              "device",
+              "service",
+              "credential_reference",
+              "runbook",
+              "decision",
+              "project"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "parent_path_refs": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Parent Path Refs"
+          },
+          "parent_ref": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Parent Ref"
+          },
+          "placement_state": {
+            "anyOf": [
+              {
+                "enum": [
+                  "root",
+                  "assigned",
+                  "unassigned",
+                  "unknown"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Placement State"
+          },
+          "ref": {
+            "title": "Ref",
+            "type": "string"
+          },
+          "visibility": {
+            "const": "stub",
+            "default": "stub",
+            "title": "Visibility",
+            "type": "string"
+          }
+        },
+        "required": [
+          "capability_set",
+          "ref",
+          "id",
+          "kind",
+          "label"
+        ],
+        "title": "AgentProjectedStub",
         "type": "object"
       },
       "AgentRelationshipOut": {
@@ -2273,7 +2904,8 @@
       "CatalogRole": {
         "description": "Global catalog authority, independent of the platform-admin axis.",
         "enum": [
-          "catalog_owner"
+          "catalog_owner",
+          "catalog_viewer"
         ],
         "title": "CatalogRole",
         "type": "string"
@@ -2602,7 +3234,10 @@
             "type": "array"
           },
           "source": {
-            "const": "catalog_owner",
+            "enum": [
+              "catalog_owner",
+              "catalog_viewer"
+            ],
             "title": "Source",
             "type": "string"
           }
@@ -3669,6 +4304,38 @@
         "title": "ProjectOverviewPageOut",
         "type": "object"
       },
+      "ReadProjectionOut": {
+        "additionalProperties": false,
+        "description": "The echoed, versioned description of one resolved projected read.",
+        "properties": {
+          "profile": {
+            "enum": [
+              "compact",
+              "context",
+              "full"
+            ],
+            "title": "Profile",
+            "type": "string"
+          },
+          "sections": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Sections",
+            "type": "array"
+          },
+          "version": {
+            "default": 1,
+            "title": "Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "profile"
+        ],
+        "title": "ReadProjectionOut",
+        "type": "object"
+      },
       "ReadinessOut": {
         "properties": {
           "build_revision": {
@@ -3914,6 +4581,487 @@
         "title": "V1AttachedDeviceCreateIn",
         "type": "object"
       },
+      "V1AttentionItemOut": {
+        "additionalProperties": false,
+        "description": "One deduplicated attention item; every value is a closed vocabulary.",
+        "properties": {
+          "category": {
+            "enum": [
+              "record_integrity",
+              "monitoring",
+              "lifecycle",
+              "endpoint",
+              "placement",
+              "relationship_integrity",
+              "provenance",
+              "runbook",
+              "knowledge",
+              "source_coverage"
+            ],
+            "title": "Category",
+            "type": "string"
+          },
+          "description": {
+            "maxLength": 512,
+            "title": "Description",
+            "type": "string"
+          },
+          "detail_code": {
+            "anyOf": [
+              {
+                "enum": [
+                  "accepted",
+                  "active",
+                  "ambiguous_endpoints",
+                  "ambiguous_health_url",
+                  "ambiguous_mapping",
+                  "approved",
+                  "archived",
+                  "cancelled",
+                  "completed",
+                  "connect_failed",
+                  "dangling_typed_reference",
+                  "degraded",
+                  "deprecated",
+                  "dns_failed",
+                  "down",
+                  "draft",
+                  "duplicate_mapping",
+                  "duplicate_relationship",
+                  "healthy",
+                  "http_client_error",
+                  "http_server_error",
+                  "incomplete_endpoint",
+                  "intentionally_unmapped",
+                  "invalid_endpoints",
+                  "invalid_health_url",
+                  "invalid_monitoring_config",
+                  "invalid_object_json",
+                  "invalid_relationship_direction",
+                  "invalid_relationship_endpoint",
+                  "invalid_relationship_metadata",
+                  "invalid_target",
+                  "invalid_typed_reference",
+                  "maintenance",
+                  "mapped_current",
+                  "mapped_stale",
+                  "missing_source",
+                  "multiple_placement_parents",
+                  "multiple_primary_relationships",
+                  "no_http_endpoint",
+                  "obsolete_data_dependencies",
+                  "orphaned_catalog_reference",
+                  "paused",
+                  "planned",
+                  "policy_denied",
+                  "probe_failed",
+                  "proposed",
+                  "redirect_not_supported",
+                  "rejected",
+                  "relationship_cycle",
+                  "response_too_large",
+                  "retired",
+                  "secret_relationship_metadata",
+                  "self_reference",
+                  "source_changed_since_import",
+                  "superseded",
+                  "timeout",
+                  "tls_failed",
+                  "typed_reference_kind_mismatch",
+                  "unknown",
+                  "unmapped_operational",
+                  "unsupported_relation_type"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Detail Code"
+          },
+          "observed_at": {
+            "anyOf": [
+              {
+                "maxLength": 64,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Observed At"
+          },
+          "reason_code": {
+            "enum": [
+              "record_corrupt",
+              "monitoring_observed_down",
+              "monitoring_check_error",
+              "monitoring_config_invalid",
+              "monitoring_observation_stale",
+              "monitoring_never_observed",
+              "lifecycle_health_down",
+              "lifecycle_health_degraded",
+              "lifecycle_health_unknown",
+              "lifecycle_maintenance",
+              "endpoint_target_unresolved",
+              "placement_missing",
+              "placement_relationship_invalid",
+              "relationship_target_unresolved",
+              "relationship_primary_ambiguous",
+              "knowledge_relationship_invalid",
+              "relationship_domain_invalid",
+              "provenance_stale",
+              "provenance_unverified",
+              "runbook_review_overdue",
+              "runbook_unverified",
+              "runbook_deprecated_unresolved",
+              "critical_service_runbook_missing",
+              "knowledge_review_overdue",
+              "knowledge_review_unscheduled",
+              "coverage_import_drift",
+              "coverage_mapping_ambiguous",
+              "coverage_not_collected"
+            ],
+            "title": "Reason Code",
+            "type": "string"
+          },
+          "severity": {
+            "enum": [
+              "critical",
+              "warning",
+              "info"
+            ],
+            "title": "Severity",
+            "type": "string"
+          },
+          "signal_state": {
+            "enum": [
+              "current",
+              "stale",
+              "unknown"
+            ],
+            "title": "Signal State",
+            "type": "string"
+          },
+          "target": {
+            "$ref": "#/components/schemas/V1AttentionTargetOut"
+          }
+        },
+        "required": [
+          "reason_code",
+          "category",
+          "severity",
+          "signal_state",
+          "target",
+          "description"
+        ],
+        "title": "V1AttentionItemOut",
+        "type": "object"
+      },
+      "V1AttentionPageOut": {
+        "additionalProperties": false,
+        "properties": {
+          "direction": {
+            "enum": [
+              "asc",
+              "desc"
+            ],
+            "title": "Direction",
+            "type": "string"
+          },
+          "generated_at": {
+            "maxLength": 64,
+            "title": "Generated At",
+            "type": "string"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/V1AttentionItemOut"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Cursor"
+          },
+          "sort": {
+            "const": "priority",
+            "default": "priority",
+            "title": "Sort",
+            "type": "string"
+          },
+          "summary": {
+            "$ref": "#/components/schemas/V1AttentionSummaryOut"
+          },
+          "total": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Total"
+          }
+        },
+        "required": [
+          "summary",
+          "items",
+          "generated_at",
+          "direction"
+        ],
+        "title": "V1AttentionPageOut",
+        "type": "object"
+      },
+      "V1AttentionSignalOut": {
+        "additionalProperties": false,
+        "properties": {
+          "evaluated": {
+            "minimum": 0.0,
+            "title": "Evaluated",
+            "type": "integer"
+          },
+          "items": {
+            "minimum": 0.0,
+            "title": "Items",
+            "type": "integer"
+          },
+          "state": {
+            "enum": [
+              "current",
+              "stale",
+              "unknown",
+              "not_applicable"
+            ],
+            "title": "State",
+            "type": "string"
+          }
+        },
+        "required": [
+          "state",
+          "evaluated",
+          "items"
+        ],
+        "title": "V1AttentionSignalOut",
+        "type": "object"
+      },
+      "V1AttentionSummaryOut": {
+        "additionalProperties": false,
+        "properties": {
+          "by_category": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "propertyNames": {
+              "enum": [
+                "record_integrity",
+                "monitoring",
+                "lifecycle",
+                "endpoint",
+                "placement",
+                "relationship_integrity",
+                "provenance",
+                "runbook",
+                "knowledge",
+                "source_coverage"
+              ]
+            },
+            "title": "By Category",
+            "type": "object"
+          },
+          "by_reason": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "propertyNames": {
+              "enum": [
+                "record_corrupt",
+                "monitoring_observed_down",
+                "monitoring_check_error",
+                "monitoring_config_invalid",
+                "monitoring_observation_stale",
+                "monitoring_never_observed",
+                "lifecycle_health_down",
+                "lifecycle_health_degraded",
+                "lifecycle_health_unknown",
+                "lifecycle_maintenance",
+                "endpoint_target_unresolved",
+                "placement_missing",
+                "placement_relationship_invalid",
+                "relationship_target_unresolved",
+                "relationship_primary_ambiguous",
+                "knowledge_relationship_invalid",
+                "relationship_domain_invalid",
+                "provenance_stale",
+                "provenance_unverified",
+                "runbook_review_overdue",
+                "runbook_unverified",
+                "runbook_deprecated_unresolved",
+                "critical_service_runbook_missing",
+                "knowledge_review_overdue",
+                "knowledge_review_unscheduled",
+                "coverage_import_drift",
+                "coverage_mapping_ambiguous",
+                "coverage_not_collected"
+              ]
+            },
+            "title": "By Reason",
+            "type": "object"
+          },
+          "by_severity": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "propertyNames": {
+              "enum": [
+                "critical",
+                "warning",
+                "info"
+              ]
+            },
+            "title": "By Severity",
+            "type": "object"
+          },
+          "coverage_snapshot_state": {
+            "enum": [
+              "collected",
+              "not_collected"
+            ],
+            "title": "Coverage Snapshot State",
+            "type": "string"
+          },
+          "signals": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/V1AttentionSignalOut"
+            },
+            "propertyNames": {
+              "enum": [
+                "record_integrity",
+                "monitoring",
+                "lifecycle",
+                "endpoint",
+                "placement",
+                "relationship_integrity",
+                "provenance",
+                "runbook",
+                "knowledge",
+                "source_coverage"
+              ]
+            },
+            "title": "Signals",
+            "type": "object"
+          },
+          "total": {
+            "minimum": 0.0,
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "total",
+          "by_severity",
+          "by_category",
+          "by_reason",
+          "signals",
+          "coverage_snapshot_state"
+        ],
+        "title": "V1AttentionSummaryOut",
+        "type": "object"
+      },
+      "V1AttentionTargetOut": {
+        "additionalProperties": false,
+        "description": "The authorized navigation reference of one attention item.",
+        "properties": {
+          "detail_path": {
+            "anyOf": [
+              {
+                "maxLength": 512,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Detail Path"
+          },
+          "kind": {
+            "anyOf": [
+              {
+                "enum": [
+                  "host",
+                  "system",
+                  "network",
+                  "device",
+                  "service",
+                  "credential_reference",
+                  "runbook",
+                  "decision",
+                  "project"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Kind"
+          },
+          "label": {
+            "anyOf": [
+              {
+                "maxLength": 255,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Label"
+          },
+          "object_id": {
+            "anyOf": [
+              {
+                "maxLength": 128,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Object Id"
+          },
+          "ref": {
+            "maxLength": 256,
+            "minLength": 1,
+            "title": "Ref",
+            "type": "string"
+          },
+          "scope": {
+            "enum": [
+              "object",
+              "catalog"
+            ],
+            "title": "Scope",
+            "type": "string"
+          }
+        },
+        "required": [
+          "scope",
+          "ref"
+        ],
+        "title": "V1AttentionTargetOut",
+        "type": "object"
+      },
       "V1AuditEventOut": {
         "properties": {
           "action": {
@@ -4006,6 +5154,7 @@
         "type": "object"
       },
       "V1ContextPageOut": {
+        "additionalProperties": false,
         "properties": {
           "direction": {
             "enum": [
@@ -4935,7 +6084,44 @@
         "type": "object"
       },
       "V1ObjectContextBatchIn": {
+        "description": "One known-id batch request and its optional read projection.\n\nThe projection fields travel in the body so this endpoint keeps taking no\nquery parameter at all. They are the same closed profile and closed field\nmask every other agent read uses.",
         "properties": {
+          "fields": {
+            "anyOf": [
+              {
+                "items": {
+                  "enum": [
+                    "knowledge",
+                    "orientation",
+                    "network",
+                    "integrity",
+                    "monitoring",
+                    "detail",
+                    "activity"
+                  ],
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Closed server-defined field mask. It can only narrow the chosen profile; identity and state are always returned, so identities, revisions, visibility decisions, and effective permissions never depend on it.",
+            "title": "Fields"
+          },
+          "include_recent_comments": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Explicitly include or exclude the bounded newest-first comment preview. Omit it to keep the profile default; list_comments remains the complete authorized comment history either way.",
+            "title": "Include Recent Comments"
+          },
           "object_ids": {
             "items": {
               "maxLength": 128,
@@ -4946,6 +6132,23 @@
             "minItems": 1,
             "title": "Object Ids",
             "type": "array"
+          },
+          "projection": {
+            "anyOf": [
+              {
+                "enum": [
+                  "compact",
+                  "context",
+                  "full"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Closed server-defined read profile. compact keeps identity, state, and the type-aware short fields; context adds network, integrity, monitoring, and the detail document; full is the unchanged complete contract.",
+            "title": "Projection"
           }
         },
         "required": [
@@ -4955,6 +6158,7 @@
         "type": "object"
       },
       "V1ObjectContextBatchOut": {
+        "additionalProperties": false,
         "properties": {
           "count": {
             "title": "Count",
@@ -4986,6 +6190,7 @@
         "type": "object"
       },
       "V1ObjectPageOut": {
+        "additionalProperties": false,
         "properties": {
           "direction": {
             "enum": [
@@ -5051,6 +6256,197 @@
         "title": "V1ObjectPageOut",
         "type": "object"
       },
+      "V1ObjectUpdatePreviewDiffEntryOut": {
+        "additionalProperties": false,
+        "description": "One canonical change the proposed update would make.",
+        "properties": {
+          "after": {
+            "$ref": "#/components/schemas/V1ObjectUpdatePreviewValueOut"
+          },
+          "before": {
+            "$ref": "#/components/schemas/V1ObjectUpdatePreviewValueOut"
+          },
+          "operation": {
+            "enum": [
+              "added",
+              "removed",
+              "changed"
+            ],
+            "title": "Operation",
+            "type": "string"
+          },
+          "path": {
+            "description": "Canonical RFC 6901 JSON Pointer into the normalized object, or a fixed SHA-256 pointer when the exact pointer exceeds the bound.",
+            "maxLength": 512,
+            "pattern": "^/(?:[^~/]|~[01])*(?:/(?:[^~/]|~[01])*)*$",
+            "title": "Path",
+            "type": "string"
+          },
+          "path_state": {
+            "enum": [
+              "exact",
+              "hashed"
+            ],
+            "title": "Path State",
+            "type": "string"
+          }
+        },
+        "required": [
+          "path",
+          "path_state",
+          "operation",
+          "before",
+          "after"
+        ],
+        "title": "V1ObjectUpdatePreviewDiffEntryOut",
+        "type": "object"
+      },
+      "V1ObjectUpdatePreviewOut": {
+        "additionalProperties": false,
+        "description": "The read-only result of one ETag-bound full-object update preview.\n\nThe response deliberately carries no object document: only the redacted\nstructured diff, the canonical no-op answer, the base and expected result\nrevisions, and one stable digest over exactly these safe published fields.",
+        "properties": {
+          "base_etag": {
+            "pattern": "^\"rev-[1-9][0-9]*\"$",
+            "title": "Base Etag",
+            "type": "string"
+          },
+          "base_revision": {
+            "minimum": 1.0,
+            "title": "Base Revision",
+            "type": "integer"
+          },
+          "changed": {
+            "title": "Changed",
+            "type": "boolean"
+          },
+          "diff": {
+            "description": "Canonically ordered, bounded, redacted structured diff of the normalized proposal against the current record.",
+            "items": {
+              "$ref": "#/components/schemas/V1ObjectUpdatePreviewDiffEntryOut"
+            },
+            "maxItems": 200,
+            "title": "Diff",
+            "type": "array"
+          },
+          "diff_digest": {
+            "description": "Domain-separated SHA-256 digest of the complete safe semantic diff, including bounded-output omissions and unabridged non-secret values.",
+            "pattern": "^sha256:[0-9a-f]{64}$",
+            "title": "Diff Digest",
+            "type": "string"
+          },
+          "diff_truncated": {
+            "title": "Diff Truncated",
+            "type": "boolean"
+          },
+          "expected_result_etag": {
+            "pattern": "^\"rev-[1-9][0-9]*\"$",
+            "title": "Expected Result Etag",
+            "type": "string"
+          },
+          "expected_result_revision": {
+            "minimum": 1.0,
+            "title": "Expected Result Revision",
+            "type": "integer"
+          },
+          "object_id": {
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[a-z0-9][a-z0-9_-]*[a-z0-9]$|^[a-z0-9]$",
+            "title": "Object Id",
+            "type": "string"
+          },
+          "object_kind": {
+            "enum": [
+              "host",
+              "system",
+              "network",
+              "device",
+              "service",
+              "credential_reference",
+              "runbook",
+              "decision",
+              "project"
+            ],
+            "title": "Object Kind",
+            "type": "string"
+          },
+          "preview_contract_version": {
+            "const": "1",
+            "title": "Preview Contract Version",
+            "type": "string"
+          },
+          "preview_digest": {
+            "pattern": "^sha256:[0-9a-f]{64}$",
+            "title": "Preview Digest",
+            "type": "string"
+          }
+        },
+        "required": [
+          "preview_contract_version",
+          "object_id",
+          "object_kind",
+          "changed",
+          "base_revision",
+          "base_etag",
+          "expected_result_revision",
+          "expected_result_etag",
+          "diff",
+          "diff_digest",
+          "diff_truncated",
+          "preview_digest"
+        ],
+        "title": "V1ObjectUpdatePreviewOut",
+        "type": "object"
+      },
+      "V1ObjectUpdatePreviewValueOut": {
+        "additionalProperties": false,
+        "description": "One closed, bounded side of a published preview diff entry.\n\n`state` distinguishes an absent path, a rendered value, a value the shared\nsecret redaction removed, and a rendered value cut at the published bound.\n`text` carries the exact string for a string value and the canonical JSON\nrendering for every other type; it is always `null` for `absent` and\n`redacted`, so no secret-shaped or concealed value can be reconstructed.",
+        "properties": {
+          "state": {
+            "enum": [
+              "absent",
+              "value",
+              "redacted",
+              "truncated"
+            ],
+            "title": "State",
+            "type": "string"
+          },
+          "text": {
+            "anyOf": [
+              {
+                "maxLength": 120,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Text"
+          },
+          "type": {
+            "enum": [
+              "absent",
+              "null",
+              "boolean",
+              "integer",
+              "number",
+              "string",
+              "array",
+              "object"
+            ],
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "state",
+          "type",
+          "text"
+        ],
+        "title": "V1ObjectUpdatePreviewValueOut",
+        "type": "object"
+      },
       "V1PrincipalSearchOut": {
         "properties": {
           "items": {
@@ -5102,6 +6498,150 @@
           "active"
         ],
         "title": "V1PrincipalSummaryOut",
+        "type": "object"
+      },
+      "V1ProjectedObjectContextBatchOut": {
+        "additionalProperties": false,
+        "description": "One known-id batch under a non-default read projection.\n\nConcealed placeholders are byte-identical to the full contract under every\nprofile and field mask, so a projection cannot separate a concealed id from\na missing one.",
+        "properties": {
+          "capability_sets": {
+            "additionalProperties": {
+              "items": {
+                "$ref": "#/components/schemas/Permission"
+              },
+              "type": "array"
+            },
+            "title": "Capability Sets",
+            "type": "object"
+          },
+          "count": {
+            "title": "Count",
+            "type": "integer"
+          },
+          "objects": {
+            "items": {
+              "discriminator": {
+                "mapping": {
+                  "concealed": "#/components/schemas/AgentCatalogConcealed",
+                  "detail": "#/components/schemas/AgentProjectedObject",
+                  "stub": "#/components/schemas/AgentProjectedStub"
+                },
+                "propertyName": "visibility"
+              },
+              "oneOf": [
+                {
+                  "$ref": "#/components/schemas/AgentProjectedObject"
+                },
+                {
+                  "$ref": "#/components/schemas/AgentProjectedStub"
+                },
+                {
+                  "$ref": "#/components/schemas/AgentCatalogConcealed"
+                }
+              ]
+            },
+            "title": "Objects",
+            "type": "array"
+          },
+          "projection": {
+            "$ref": "#/components/schemas/ReadProjectionOut"
+          }
+        },
+        "required": [
+          "projection",
+          "objects",
+          "count"
+        ],
+        "title": "V1ProjectedObjectContextBatchOut",
+        "type": "object"
+      },
+      "V1ProjectedPageOut": {
+        "additionalProperties": false,
+        "description": "One page of objects or contexts under a non-default read projection.\n\nOrdering, paging, cursors, and the returned result set are exactly those of\nthe full page: only the serialized sections differ. `capability_sets` is\nthe response-level table each item's `capability_set` key resolves in; two\nitems share a key only when their effective permissions are identical.",
+        "properties": {
+          "capability_sets": {
+            "additionalProperties": {
+              "items": {
+                "$ref": "#/components/schemas/Permission"
+              },
+              "type": "array"
+            },
+            "title": "Capability Sets",
+            "type": "object"
+          },
+          "direction": {
+            "enum": [
+              "asc",
+              "desc"
+            ],
+            "title": "Direction",
+            "type": "string"
+          },
+          "items": {
+            "items": {
+              "discriminator": {
+                "mapping": {
+                  "detail": "#/components/schemas/AgentProjectedObject",
+                  "stub": "#/components/schemas/AgentProjectedStub"
+                },
+                "propertyName": "visibility"
+              },
+              "oneOf": [
+                {
+                  "$ref": "#/components/schemas/AgentProjectedObject"
+                },
+                {
+                  "$ref": "#/components/schemas/AgentProjectedStub"
+                }
+              ]
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Cursor"
+          },
+          "projection": {
+            "$ref": "#/components/schemas/ReadProjectionOut"
+          },
+          "sort": {
+            "enum": [
+              "id",
+              "label",
+              "kind",
+              "relevance",
+              "updated_at"
+            ],
+            "title": "Sort",
+            "type": "string"
+          },
+          "total": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Total"
+          }
+        },
+        "required": [
+          "projection",
+          "items",
+          "sort",
+          "direction"
+        ],
+        "title": "V1ProjectedPageOut",
         "type": "object"
       },
       "V1RelationshipCommandIn": {
@@ -10044,6 +11584,335 @@
         ]
       }
     },
+    "/api/v1/attention": {
+      "get": {
+        "description": "Combine existing canonical signals; this request runs no probe or source read.",
+        "operationId": "get_v1_attention_api_v1_attention_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "category",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "record_integrity",
+                    "monitoring",
+                    "lifecycle",
+                    "endpoint",
+                    "placement",
+                    "relationship_integrity",
+                    "provenance",
+                    "runbook",
+                    "knowledge",
+                    "source_coverage"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Category"
+            }
+          },
+          {
+            "in": "query",
+            "name": "severity",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "critical",
+                    "warning",
+                    "info"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Severity"
+            }
+          },
+          {
+            "in": "query",
+            "name": "reason_code",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "record_corrupt",
+                    "monitoring_observed_down",
+                    "monitoring_check_error",
+                    "monitoring_config_invalid",
+                    "monitoring_observation_stale",
+                    "monitoring_never_observed",
+                    "lifecycle_health_down",
+                    "lifecycle_health_degraded",
+                    "lifecycle_health_unknown",
+                    "lifecycle_maintenance",
+                    "endpoint_target_unresolved",
+                    "placement_missing",
+                    "placement_relationship_invalid",
+                    "relationship_target_unresolved",
+                    "relationship_primary_ambiguous",
+                    "knowledge_relationship_invalid",
+                    "relationship_domain_invalid",
+                    "provenance_stale",
+                    "provenance_unverified",
+                    "runbook_review_overdue",
+                    "runbook_unverified",
+                    "runbook_deprecated_unresolved",
+                    "critical_service_runbook_missing",
+                    "knowledge_review_overdue",
+                    "knowledge_review_unscheduled",
+                    "coverage_import_drift",
+                    "coverage_mapping_ambiguous",
+                    "coverage_not_collected"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Reason Code"
+            }
+          },
+          {
+            "in": "query",
+            "name": "signal_state",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "current",
+                    "stale",
+                    "unknown"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Signal State"
+            }
+          },
+          {
+            "in": "query",
+            "name": "kind",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "host",
+                    "system",
+                    "network",
+                    "device",
+                    "service",
+                    "credential_reference",
+                    "runbook",
+                    "decision",
+                    "project"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Kind"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Opaque cursor returned by the previous page",
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 2048,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Opaque cursor returned by the previous page",
+              "title": "Cursor"
+            }
+          },
+          {
+            "in": "query",
+            "name": "direction",
+            "required": false,
+            "schema": {
+              "default": "asc",
+              "enum": [
+                "asc",
+                "desc"
+              ],
+              "title": "Direction",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Compute the total over the authorized filtered item set",
+            "in": "query",
+            "name": "include_total",
+            "required": false,
+            "schema": {
+              "default": false,
+              "description": "Compute the total over the authorized filtered item set",
+              "title": "Include Total",
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1AttentionPageOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Authentication required"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Permission denied"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Resource not found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "412": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Precondition failed"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Request validation failed"
+          },
+          "428": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Precondition required"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Internal server error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Service unavailable"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Read the authorized catalog-wide attention view",
+        "tags": [
+          "api-v1-readonly"
+        ]
+      }
+    },
     "/api/v1/auth/me": {
       "get": {
         "operationId": "authenticated_principal_api_v1_auth_me_get",
@@ -10697,6 +12566,77 @@
               "title": "Include Total",
               "type": "boolean"
             }
+          },
+          {
+            "description": "Closed server-defined read profile. compact keeps identity, state, and the type-aware short fields; context adds network, integrity, monitoring, and the detail document; full is the unchanged complete contract.",
+            "in": "query",
+            "name": "projection",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "compact",
+                    "context",
+                    "full"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Closed server-defined read profile. compact keeps identity, state, and the type-aware short fields; context adds network, integrity, monitoring, and the detail document; full is the unchanged complete contract.",
+              "title": "Projection"
+            }
+          },
+          {
+            "description": "Closed server-defined field mask. It can only narrow the chosen profile; identity and state are always returned, so identities, revisions, visibility decisions, and effective permissions never depend on it.",
+            "in": "query",
+            "name": "fields",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "items": {
+                    "enum": [
+                      "knowledge",
+                      "orientation",
+                      "network",
+                      "integrity",
+                      "monitoring",
+                      "detail",
+                      "activity"
+                    ],
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Closed server-defined field mask. It can only narrow the chosen profile; identity and state are always returned, so identities, revisions, visibility decisions, and effective permissions never depend on it.",
+              "title": "Fields"
+            }
+          },
+          {
+            "description": "Explicitly include or exclude the bounded newest-first comment preview. Omit it to keep the profile default; list_comments remains the complete authorized comment history either way.",
+            "in": "query",
+            "name": "include_recent_comments",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Explicitly include or exclude the bounded newest-first comment preview. Omit it to keep the profile default; list_comments remains the complete authorized comment history either way.",
+              "title": "Include Recent Comments"
+            }
           }
         ],
         "responses": {
@@ -10704,7 +12644,15 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/V1ContextPageOut"
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/V1ContextPageOut"
+                    },
+                    {
+                      "$ref": "#/components/schemas/V1ProjectedPageOut"
+                    }
+                  ],
+                  "title": "Response Get V1 Context Api V1 Context Get"
                 }
               }
             },
@@ -10966,7 +12914,15 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/V1ObjectContextBatchOut"
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/V1ObjectContextBatchOut"
+                    },
+                    {
+                      "$ref": "#/components/schemas/V1ProjectedObjectContextBatchOut"
+                    }
+                  ],
+                  "title": "Response Post V1 Object Contexts Api V1 Object Contexts Post"
                 }
               }
             },
@@ -11621,6 +13577,59 @@
               "title": "Include Total",
               "type": "boolean"
             }
+          },
+          {
+            "description": "Closed server-defined read profile. compact keeps identity, state, and the type-aware short fields; context adds network, integrity, monitoring, and the detail document; full is the unchanged complete contract.",
+            "in": "query",
+            "name": "projection",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "compact",
+                    "context",
+                    "full"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Closed server-defined read profile. compact keeps identity, state, and the type-aware short fields; context adds network, integrity, monitoring, and the detail document; full is the unchanged complete contract.",
+              "title": "Projection"
+            }
+          },
+          {
+            "description": "Closed server-defined field mask. It can only narrow the chosen profile; identity and state are always returned, so identities, revisions, visibility decisions, and effective permissions never depend on it.",
+            "in": "query",
+            "name": "fields",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "items": {
+                    "enum": [
+                      "knowledge",
+                      "orientation",
+                      "network",
+                      "integrity",
+                      "monitoring",
+                      "detail",
+                      "activity"
+                    ],
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Closed server-defined field mask. It can only narrow the chosen profile; identity and state are always returned, so identities, revisions, visibility decisions, and effective permissions never depend on it.",
+              "title": "Fields"
+            }
           }
         ],
         "responses": {
@@ -11628,7 +13637,15 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/V1ObjectPageOut"
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/V1ObjectPageOut"
+                    },
+                    {
+                      "$ref": "#/components/schemas/V1ProjectedPageOut"
+                    }
+                  ],
+                  "title": "Response List V1 Objects Api V1 Objects Get"
                 }
               }
             },
@@ -14596,6 +16613,170 @@
           }
         ],
         "summary": "Get V1 Topology",
+        "tags": [
+          "api-v1-readonly"
+        ]
+      }
+    },
+    "/api/v1/objects/{object_id}/update-preview": {
+      "post": {
+        "description": "Resolve the proposed full-object update read-only and publish its diff.\n\nThe request is exactly the request of `PUT /api/v1/objects/{object_id}`:\nthe exact object ID, the current strong `If-Match` ETag, and the complete\nproposed object. Effective `write` on that exact object is required even\nthough nothing is written, and every authorization, precondition, schema,\nnormalization, secret, reference, relationship, lifecycle, placement,\nmonitoring, component, provenance, and kind rule is the shared one. The\npreview creates no lock, reservation, or later-apply guarantee: a write\nbetween preview and apply fails the ordinary precondition.",
+        "operationId": "preview_v1_object_update_api_v1_objects__object_id__update_preview_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "object_id",
+            "required": true,
+            "schema": {
+              "title": "Object Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "If-Match",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "If-Match"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CatalogObjectIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ObjectUpdatePreviewOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Authentication required"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Permission denied"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Resource not found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "412": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Precondition failed"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Request validation failed"
+          },
+          "428": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Precondition required"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Internal server error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Service unavailable"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Preview one ETag-bound full-object update without writing",
         "tags": [
           "api-v1-readonly"
         ]
@@ -19240,6 +21421,23 @@
               "type": "string",
               "violations": [
                 "type_mismatch"
+              ]
+            },
+            {
+              "constraint": "must be a supported service criticality",
+              "enum": [
+                "critical",
+                "standard"
+              ],
+              "json_types": [
+                "string"
+              ],
+              "normalization": [],
+              "path": "criticality",
+              "requirement": "optional",
+              "type": "enum",
+              "violations": [
+                "value_not_allowed"
               ]
             },
             {

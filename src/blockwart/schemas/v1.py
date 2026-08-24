@@ -10,7 +10,21 @@ from pydantic import (
     model_validator,
 )
 
+from blockwart.domain.attention import (
+    ATTENTION_CATEGORY_VALUES,
+    ATTENTION_DETAIL_CODE_VALUES,
+    ATTENTION_REASON_VALUES,
+    ATTENTION_SEVERITY_VALUES,
+    ATTENTION_SIGNAL_STATE_VALUES,
+)
 from blockwart.domain.auth import GrantScope, Permission, Role
+from blockwart.domain.read_projection import (
+    FIELDS_DESCRIPTION,
+    PROJECTION_DESCRIPTION,
+    RECENT_COMMENTS_DESCRIPTION,
+    ProjectionProfile,
+    ProjectionSection,
+)
 from blockwart.domain.relationship_projection import (
     metadata_json_schema,
     metadata_union_json_schema,
@@ -31,10 +45,19 @@ from blockwart.domain.source_coverage import (
     MAPPING_ROLES,
     SOURCE_CLASSIFICATIONS,
 )
+from blockwart.domain.update_preview import (
+    PREVIEW_CONTRACT_VERSION,
+    PREVIEW_DIFF_MAX_ENTRIES,
+    PREVIEW_DIFF_PATH_MAX_LENGTH,
+    PREVIEW_DIFF_VALUE_MAX_LENGTH,
+)
 from blockwart.schemas.agent import (
     AgentCatalogBatchItem,
     AgentCatalogContextRead,
     AgentCatalogObjectRead,
+    AgentProjectedBatchItem,
+    AgentProjectedRead,
+    ReadProjectionOut,
 )
 from blockwart.schemas.catalog import CatalogObjectIn, CatalogObjectOut, ObjectKind
 
@@ -47,6 +70,14 @@ MappingRoleValue = Literal[MAPPING_ROLES]
 EntryPresenceValue = Literal[ENTRY_PRESENCES]
 DecisionReasonValue = Literal[DECISION_REASONS]
 CoverageScopeValue = Literal["mapped", "all"]
+# The attention vocabulary is projected from the domain registry, so the
+# published REST contract can never carry a second, drifting copy of it.
+AttentionCategoryValue = Literal[ATTENTION_CATEGORY_VALUES]
+AttentionSeverityValue = Literal[ATTENTION_SEVERITY_VALUES]
+AttentionReasonValue = Literal[ATTENTION_REASON_VALUES]
+AttentionSignalStateValue = Literal[ATTENTION_SIGNAL_STATE_VALUES]
+AttentionItemSignalStateValue = Literal["current", "stale", "unknown"]
+AttentionDetailCodeValue = Literal[ATTENTION_DETAIL_CODE_VALUES]
 
 
 class McpContractMetadataOut(BaseModel):
@@ -65,6 +96,10 @@ ATTACHED_TO_RELATION_TYPE = "attached_to"
 
 
 class V1ObjectPageOut(BaseModel):
+    # Closed so the default full page can never absorb a projected page and
+    # silently drop its projection descriptor or capability-set table.
+    model_config = ConfigDict(extra="forbid")
+
     items: list[AgentCatalogObjectRead]
     next_cursor: str | None = None
     total: int | None = None
@@ -73,7 +108,29 @@ class V1ObjectPageOut(BaseModel):
 
 
 class V1ContextPageOut(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     items: list[AgentCatalogContextRead]
+    next_cursor: str | None = None
+    total: int | None = None
+    sort: ObjectSortField
+    direction: SortDirection
+
+
+class V1ProjectedPageOut(BaseModel):
+    """One page of objects or contexts under a non-default read projection.
+
+    Ordering, paging, cursors, and the returned result set are exactly those of
+    the full page: only the serialized sections differ. `capability_sets` is
+    the response-level table each item's `capability_set` key resolves in; two
+    items share a key only when their effective permissions are identical.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    projection: ReadProjectionOut
+    capability_sets: dict[str, list[Permission]] = Field(default_factory=dict)
+    items: list[AgentProjectedRead]
     next_cursor: str | None = None
     total: int | None = None
     sort: ObjectSortField
@@ -140,6 +197,65 @@ class V1SourceCoveragePageOut(BaseModel):
     direction: SortDirection
 
 
+class V1AttentionTargetOut(BaseModel):
+    """The authorized navigation reference of one attention item."""
+
+    model_config = ConfigDict(from_attributes=True, extra="forbid")
+
+    scope: Literal["object", "catalog"]
+    ref: str = Field(min_length=1, max_length=256)
+    object_id: str | None = Field(default=None, max_length=128)
+    kind: ObjectKind | None = None
+    label: str | None = Field(default=None, max_length=255)
+    detail_path: str | None = Field(default=None, max_length=512)
+
+
+class V1AttentionItemOut(BaseModel):
+    """One deduplicated attention item; every value is a closed vocabulary."""
+
+    model_config = ConfigDict(from_attributes=True, extra="forbid")
+
+    reason_code: AttentionReasonValue
+    category: AttentionCategoryValue
+    severity: AttentionSeverityValue
+    signal_state: AttentionItemSignalStateValue
+    target: V1AttentionTargetOut
+    description: str = Field(max_length=512)
+    detail_code: AttentionDetailCodeValue | None = None
+    observed_at: str | None = Field(default=None, max_length=64)
+
+
+class V1AttentionSignalOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True, extra="forbid")
+
+    state: AttentionSignalStateValue
+    evaluated: int = Field(ge=0)
+    items: int = Field(ge=0)
+
+
+class V1AttentionSummaryOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True, extra="forbid")
+
+    total: int = Field(ge=0)
+    by_severity: dict[AttentionSeverityValue, int]
+    by_category: dict[AttentionCategoryValue, int]
+    by_reason: dict[AttentionReasonValue, int]
+    signals: dict[AttentionCategoryValue, V1AttentionSignalOut]
+    coverage_snapshot_state: Literal["collected", "not_collected"]
+
+
+class V1AttentionPageOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True, extra="forbid")
+
+    summary: V1AttentionSummaryOut
+    items: list[V1AttentionItemOut]
+    next_cursor: str | None = None
+    total: int | None = None
+    generated_at: str = Field(max_length=64)
+    sort: Literal["priority"] = "priority"
+    direction: SortDirection
+
+
 # The known-id batch surface is bounded to 20 ids. Each id follows the same
 # pattern as CatalogObjectIn so an obviously malformed id is rejected before
 # any authorization lookup; concealed and missing ids stay indistinguishable
@@ -167,6 +283,25 @@ MAX_BATCH_REQUEST_BODY_BYTES = 8192
 
 
 class V1ObjectContextBatchIn(BaseModel):
+    """One known-id batch request and its optional read projection.
+
+    The projection fields travel in the body so this endpoint keeps taking no
+    query parameter at all. They are the same closed profile and closed field
+    mask every other agent read uses.
+    """
+
+    projection: ProjectionProfile | None = Field(
+        default=None,
+        description=PROJECTION_DESCRIPTION,
+    )
+    fields: list[ProjectionSection] | None = Field(
+        default=None,
+        description=FIELDS_DESCRIPTION,
+    )
+    include_recent_comments: bool | None = Field(
+        default=None,
+        description=RECENT_COMMENTS_DESCRIPTION,
+    )
     object_ids: list[str] = Field(
         min_length=1,
         max_length=MAX_BATCH_OBJECT_IDS,
@@ -191,7 +326,25 @@ class V1ObjectContextBatchIn(BaseModel):
 
 
 class V1ObjectContextBatchOut(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     objects: list[AgentCatalogBatchItem]
+    count: int
+
+
+class V1ProjectedObjectContextBatchOut(BaseModel):
+    """One known-id batch under a non-default read projection.
+
+    Concealed placeholders are byte-identical to the full contract under every
+    profile and field mask, so a projection cannot separate a concealed id from
+    a missing one.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    projection: ReadProjectionOut
+    capability_sets: dict[str, list[Permission]] = Field(default_factory=dict)
+    objects: list[AgentProjectedBatchItem]
     count: int
 
 
@@ -231,6 +384,91 @@ class V1ObjectCommandOut(BaseModel):
     etag: str
     changed: bool
     replayed: bool = False
+
+
+class V1ObjectUpdatePreviewValueOut(BaseModel):
+    """One closed, bounded side of a published preview diff entry.
+
+    `state` distinguishes an absent path, a rendered value, a value the shared
+    secret redaction removed, and a rendered value cut at the published bound.
+    `text` carries the exact string for a string value and the canonical JSON
+    rendering for every other type; it is always `null` for `absent` and
+    `redacted`, so no secret-shaped or concealed value can be reconstructed.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    state: Literal["absent", "value", "redacted", "truncated"]
+    type: Literal[
+        "absent",
+        "null",
+        "boolean",
+        "integer",
+        "number",
+        "string",
+        "array",
+        "object",
+    ]
+    text: str | None = Field(max_length=PREVIEW_DIFF_VALUE_MAX_LENGTH)
+
+
+class V1ObjectUpdatePreviewDiffEntryOut(BaseModel):
+    """One canonical change the proposed update would make."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    path: str = Field(
+        max_length=PREVIEW_DIFF_PATH_MAX_LENGTH,
+        pattern=r"^/(?:[^~/]|~[01])*(?:/(?:[^~/]|~[01])*)*$",
+        description=(
+            "Canonical RFC 6901 JSON Pointer into the normalized object, or a "
+            "fixed SHA-256 pointer when the exact pointer exceeds the bound."
+        ),
+    )
+    path_state: Literal["exact", "hashed"]
+    operation: Literal["added", "removed", "changed"]
+    before: V1ObjectUpdatePreviewValueOut
+    after: V1ObjectUpdatePreviewValueOut
+
+
+class V1ObjectUpdatePreviewOut(BaseModel):
+    """The read-only result of one ETag-bound full-object update preview.
+
+    The response deliberately carries no object document: only the redacted
+    structured diff, the canonical no-op answer, the base and expected result
+    revisions, and one stable digest over exactly these safe published fields.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    preview_contract_version: Literal[PREVIEW_CONTRACT_VERSION]
+    object_id: str = Field(
+        min_length=1,
+        max_length=128,
+        pattern=r"^[a-z0-9][a-z0-9_-]*[a-z0-9]$|^[a-z0-9]$",
+    )
+    object_kind: ObjectKind
+    changed: bool
+    base_revision: int = Field(ge=1)
+    base_etag: str = Field(pattern=r'^"rev-[1-9][0-9]*"$')
+    expected_result_revision: int = Field(ge=1)
+    expected_result_etag: str = Field(pattern=r'^"rev-[1-9][0-9]*"$')
+    diff: list[V1ObjectUpdatePreviewDiffEntryOut] = Field(
+        max_length=PREVIEW_DIFF_MAX_ENTRIES,
+        description=(
+            "Canonically ordered, bounded, redacted structured diff of the "
+            "normalized proposal against the current record."
+        ),
+    )
+    diff_digest: str = Field(
+        pattern=r"^sha256:[0-9a-f]{64}$",
+        description=(
+            "Domain-separated SHA-256 digest of the complete safe semantic diff, "
+            "including bounded-output omissions and unabridged non-secret values."
+        )
+    )
+    diff_truncated: bool
+    preview_digest: str = Field(pattern=r"^sha256:[0-9a-f]{64}$")
 
 
 class V1DeleteCommandOut(BaseModel):

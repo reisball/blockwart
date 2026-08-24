@@ -340,8 +340,108 @@ def test_policy_snapshot_uses_constant_select_count(
 
 
 def test_catalog_role_matrix_is_exact_and_closed() -> None:
-    assert set(CatalogRole) == {CatalogRole.CATALOG_OWNER}
+    assert set(CatalogRole) == {
+        CatalogRole.CATALOG_OWNER,
+        CatalogRole.CATALOG_VIEWER,
+    }
     assert permissions_for_catalog_role(CatalogRole.CATALOG_OWNER) == set(Permission)
+    assert permissions_for_catalog_role(CatalogRole.CATALOG_VIEWER) == {
+        Permission.DISCOVER,
+        Permission.READ,
+    }
+
+
+def test_active_catalog_viewer_reads_current_and_future_disconnected_objects(
+    alembic_session_factory,
+) -> None:
+    with alembic_session_factory() as session:
+        with transaction(session):
+            _seed_fabrik(session)
+            principal = create_service_account(
+                session,
+                login="global.viewer",
+                display_name="Global Viewer",
+                catalog_role=CatalogRole.CATALOG_VIEWER,
+            )
+        initial = policy_for_principal(session, principal.id)
+        with transaction(session):
+            session.add(_object("later-disconnected-root", "host"))
+        future = policy_for_principal(session, principal.id)
+
+    expected = {Permission.DISCOVER, Permission.READ}
+    assert principal.is_catalog_viewer
+    assert not principal.is_catalog_owner
+    assert initial.permissions_for("fabrik") == expected
+    assert future.permissions_for("later-disconnected-root") == expected
+    assert future.grants_for("later-disconnected-root") == ()
+    assert future.has_global_authority(GlobalPolicySource.CATALOG_VIEWER)
+    assert not future.has_global_authority(GlobalPolicySource.CATALOG_OWNER)
+    assert all(
+        not future.can(permission, "fabrik")
+        for permission in (
+            Permission.WRITE,
+            Permission.CREATE_CHILD,
+            Permission.MANAGE_ACCESS,
+            Permission.DELETE,
+        )
+    )
+
+
+def test_inactive_catalog_viewer_receives_no_catalog_permissions(
+    alembic_session_factory,
+) -> None:
+    with alembic_session_factory() as session:
+        with transaction(session):
+            _seed_fabrik(session)
+            principal = create_service_account(
+                session,
+                login="inactive.viewer",
+                display_name="Inactive Viewer",
+                catalog_role=CatalogRole.CATALOG_VIEWER,
+            )
+        with transaction(session):
+            stored = session.get(Principal, principal.id)
+            assert stored is not None
+            stored.active = False
+        policy = policy_for_principal(session, principal.id)
+
+    assert policy.authorized_ids(Permission.DISCOVER) == set()
+    assert policy.authorized_ids(Permission.READ) == set()
+    assert policy.global_authorities == ()
+
+
+def test_catalog_viewer_and_owner_subtree_grant_are_strictly_additive(
+    alembic_session_factory,
+) -> None:
+    with alembic_session_factory() as session:
+        with transaction(session):
+            _seed_fabrik(session)
+            principal = create_service_account(
+                session,
+                login="mixed.viewer",
+                display_name="Mixed Viewer",
+                catalog_role=CatalogRole.CATALOG_VIEWER,
+            )
+            create_object_grant(
+                session,
+                principal_id=principal.id,
+                object_id="lxc-137",
+                role=Role.OWNER,
+                scope=GrantScope.SUBTREE,
+            )
+        policy = policy_for_principal(session, principal.id)
+
+    assert policy.permissions_for("fabrik") == {
+        Permission.DISCOVER,
+        Permission.READ,
+    }
+    assert policy.permissions_for("other-host") == {
+        Permission.DISCOVER,
+        Permission.READ,
+    }
+    assert policy.permissions_for("lxc-137") == set(Permission)
+    assert policy.permissions_for("blockwart") == set(Permission)
+    assert len(policy.grants_for("blockwart")) == 1
 
 
 def test_active_catalog_owner_holds_every_permission_without_any_grant(
@@ -523,6 +623,31 @@ def test_policy_fingerprint_tracks_catalog_role_changes(
 
     assert before != promoted
     assert after == before
+
+
+def test_catalog_viewer_revoke_is_immediate_and_invalidates_policy_fingerprint(
+    alembic_session_factory,
+) -> None:
+    with alembic_session_factory() as session:
+        with transaction(session):
+            _seed_fabrik(session)
+            principal = create_service_account(
+                session,
+                login="fingerprint.viewer",
+                display_name="Fingerprint Viewer",
+                catalog_role=CatalogRole.CATALOG_VIEWER,
+            )
+        viewer = policy_for_principal(session, principal.id)
+        with transaction(session):
+            stored = session.get(Principal, principal.id)
+            assert stored is not None
+            stored.catalog_role = None
+        revoked = policy_for_principal(session, principal.id)
+
+    assert viewer.authorized_ids(Permission.READ)
+    assert revoked.authorized_ids(Permission.DISCOVER) == set()
+    assert revoked.global_authorities == ()
+    assert viewer.fingerprint() != revoked.fingerprint()
 
 
 def test_catalog_owner_policy_uses_constant_select_count(

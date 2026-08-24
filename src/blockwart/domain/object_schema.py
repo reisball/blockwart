@@ -30,6 +30,7 @@ from blockwart.domain.service_components import (
     normalize_service_components,
     service_component_violations,
 )
+from blockwart.domain.service_readiness import SERVICE_CRITICALITIES
 
 FieldType = Literal[
     "array",
@@ -1135,6 +1136,12 @@ SERVICE_FIELDS = (
         forbidden_message="is obsolete; use a hosts relationship",
     ),
     _field("owner", "string"),
+    _field(
+        "criticality",
+        "enum",
+        enum_values=SERVICE_CRITICALITIES,
+        message="must be a supported service criticality",
+    ),
     _field("auth", "object"),
     *_reference_list("auth.credential_references", "credential_reference"),
     _field("components", "object", allowed_keys=COMPONENT_DOCUMENT_KEYS),

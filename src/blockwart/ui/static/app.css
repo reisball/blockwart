@@ -1074,6 +1074,23 @@ button:hover,
   gap: 11px;
 }
 
+.checkbox-field {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: fit-content;
+  color: var(--text);
+}
+
+.checkbox-field input[type="checkbox"] {
+  width: 18px;
+  height: 18px;
+  min-height: 18px;
+  margin: 0;
+  padding: 0;
+  accent-color: var(--primary);
+}
+
 .relation-form {
   margin-top: 16px;
   padding-top: 14px;
@@ -1431,3 +1448,11 @@ pre {
     scroll-behavior: auto;
   }
 }
+
+.attention-severity-critical { border-inline-start: .3rem solid #b54040; }
+.attention-severity-warning { border-inline-start: .3rem solid #9b6b13; }
+.attention-severity-info { border-inline-start: .3rem solid #7b8490; }
+.attention-state-current { border-inline-start: .3rem solid #24835b; }
+.attention-state-stale { border-inline-start: .3rem solid #9b6b13; }
+.attention-state-unknown { border-inline-start: .3rem solid #7b8490; }
+.attention-state-not_applicable { border-inline-start: .3rem solid #7b8490; }

@@ -57,7 +57,7 @@
                   <td>{{ t("admin.type." ~ item.principal_type.value) }}</td>
                   <td>{{ t("admin.status.active" if item.active else "admin.status.inactive") }}</td>
                   <td>{{ t("admin.role.admin") if item.platform_role else t("admin.role.none") }}</td>
-                  <td>{{ t("admin.catalog_role.catalog_owner") if item.catalog_role else t("admin.role.none") }}</td>
+                  <td>{{ t("admin.catalog_role." ~ item.catalog_role.value) if item.catalog_role else t("admin.role.none") }}</td>
                   <td>{{ item.last_used_at or t("asset.no_value") }}</td>
                 </tr>
               {% else %}

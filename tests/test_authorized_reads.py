@@ -12,10 +12,10 @@ from sqlalchemy.orm import Session
 
 from blockwart.api.deps import get_session
 from blockwart.db.session import transaction
-from blockwart.domain.auth import GrantScope, Role
+from blockwart.domain.auth import CatalogRole, GrantScope, Role
 from blockwart.main import create_app
 from blockwart.mcp.server import UpstreamError, call_tool
-from blockwart.models import CatalogObject
+from blockwart.models import CatalogObject, ObjectComment, Principal
 from blockwart.schemas.catalog import CatalogObjectIn
 from blockwart.services.access import create_object_grant
 from blockwart.services.audit import add_audit_event
@@ -40,6 +40,9 @@ class AuthorizedReadState:
     other_api_token: str
     placement_gap_token: str
     browser_session: str
+    viewer_principal_id: str
+    viewer_api_token: str
+    viewer_browser_session: str
 
 
 def _grant_fabrik_scenario(
@@ -179,6 +182,19 @@ def authorized_read_state(
                 ),
             ):
                 upsert_object(session, payload)
+            session.add(
+                CatalogObject(
+                    id="viewer-unsafe-import",
+                    kind="service",
+                    label="Viewer Unsafe Import",
+                    status="active",
+                    lifecycle="active",
+                    health="unknown",
+                    data_json=(
+                        '{"schema_version":1,"password":"viewer-must-not-leak"}'
+                    ),
+                )
+            )
             create_relationship(
                 session,
                 from_ref="host:fabrik",
@@ -215,6 +231,20 @@ def authorized_read_state(
                 action="update",
                 actor="test",
                 details={"changes": [{"new": PRIVATE_MARKER, "old": "old"}]},
+            )
+            comment_object = session.get(CatalogObject, "hidden-db")
+            assert comment_object is not None
+            session.add(
+                ObjectComment(
+                    id="viewer-comment",
+                    object_id=comment_object.id,
+                    object_instance_id=comment_object.instance_id,
+                    object_created_at=comment_object.created_at,
+                    origin="legacy",
+                    format="plain_text",
+                    body="Viewer-visible operational comment",
+                    created_at=datetime(2026, 8, 22, 12, 0, 0),
+                )
             )
 
             api_principal = create_service_account(
@@ -290,6 +320,29 @@ def authorized_read_state(
                 principal_id=browser_principal.id,
                 ttl_seconds=3600,
             )
+            viewer_principal = create_service_account(
+                session,
+                login="global.catalog.viewer",
+                display_name="Global Catalog Viewer",
+                catalog_role=CatalogRole.CATALOG_VIEWER,
+            )
+            viewer_token = issue_service_token(
+                session,
+                principal_id=viewer_principal.id,
+                name="viewer-api",
+            )
+            human_viewer = create_human_principal(
+                session,
+                login="global.human.viewer",
+                display_name="Global Human Viewer",
+                password="global-viewer-password-with-safe-length",
+                catalog_role=CatalogRole.CATALOG_VIEWER,
+            )
+            viewer_session = issue_browser_session(
+                session,
+                principal_id=human_viewer.id,
+                ttl_seconds=3600,
+            )
     return (
         alembic_session_factory,
         AuthorizedReadState(
@@ -298,6 +351,9 @@ def authorized_read_state(
             other_api_token=other_token.value,
             placement_gap_token=gap_token.value,
             browser_session=browser_session.value,
+            viewer_principal_id=viewer_principal.id,
+            viewer_api_token=viewer_token.value,
+            viewer_browser_session=viewer_session.value,
         ),
     )
 
@@ -339,6 +395,227 @@ def _mcp_fetcher(client: TestClient, token: str):
         return response.json()
 
     return fetch
+
+
+def test_catalog_viewer_reaches_every_read_surface_and_revoke_fails_closed(
+    authorized_client,
+    authorized_read_state,
+) -> None:
+    client, state = authorized_client
+    headers = _authorization(state.viewer_api_token)
+
+    catalog = client.get("/api/objects/hidden-db", headers=headers)
+    v1 = client.get("/api/v1/objects/hidden-db", headers=headers)
+    search = client.get(
+        "/api/v1/objects",
+        params={"q": HIDDEN_LABEL, "include_total": "true"},
+        headers=headers,
+    )
+    agent = client.get("/api/agent/objects/hidden-db", headers=headers)
+    relationships = client.get(
+        "/api/v1/objects/blockwart/relationships",
+        params={"include_total": "true"},
+        headers=headers,
+    )
+    comments = client.get(
+        "/api/v1/objects/hidden-db/comments",
+        params={"include_total": "true"},
+        headers=headers,
+    )
+    audit = client.get(
+        "/api/v1/objects/blockwart/audit-events",
+        params={"include_total": "true"},
+        headers=headers,
+    )
+    coverage = client.get(
+        "/api/v1/source-coverage",
+        params={"include_total": "true"},
+        headers=headers,
+    )
+    mcp = call_tool(
+        "blockwart.get_object_context",
+        {"object_id": "hidden-db"},
+        fetcher=_mcp_fetcher(client, state.viewer_api_token),
+    )
+    redacted_v1 = client.get("/api/v1/objects/viewer-unsafe-import", headers=headers)
+    redacted_agent = client.get(
+        "/api/agent/objects/viewer-unsafe-import", headers=headers
+    )
+    redacted_mcp = call_tool(
+        "blockwart.get_object_context",
+        {"object_id": "viewer-unsafe-import"},
+        fetcher=_mcp_fetcher(client, state.viewer_api_token),
+    )
+    client.cookies.set(AUTH_SESSION_COOKIE_NAME, state.viewer_browser_session)
+    ui = client.get("/objects/hidden-db")
+
+    assert catalog.status_code == 200
+    assert v1.status_code == 200
+    assert search.status_code == 200
+    assert search.json()["total"] == 1
+    assert search.json()["items"][0]["id"] == "hidden-db"
+    assert agent.status_code == 200
+    assert agent.json()["objects"][0]["visibility"] == "detail"
+    assert relationships.status_code == 200
+    assert relationships.json()["total"] == 2
+    assert any(
+        item["to_ref"] == "service:hidden-db"
+        for item in relationships.json()["items"]
+    )
+    assert comments.status_code == 200
+    assert comments.json()["total"] == 1
+    assert comments.json()["items"][0]["body"] == "Viewer-visible operational comment"
+    assert audit.status_code == 200
+    assert audit.json()["total"] >= 1
+    assert coverage.status_code == 200
+    assert coverage.json()["scope"] == "mapped"
+    assert json.loads(mcp["content"][0]["text"])["objects"][0]["id"] == "hidden-db"
+    for redacted_payload in (
+        redacted_v1.text,
+        redacted_agent.text,
+        redacted_mcp["content"][0]["text"],
+    ):
+        assert "viewer-must-not-leak" not in redacted_payload
+        assert "[redacted-secret-field]" in redacted_payload
+    assert ui.status_code == 200
+    assert HIDDEN_LABEL in ui.text
+
+    first_page = client.get(
+        "/api/v1/objects",
+        params={"limit": 2},
+        headers=headers,
+    )
+    cursor = first_page.json()["next_cursor"]
+    session_factory, _ = authorized_read_state
+    with session_factory() as session:
+        with transaction(session):
+            viewer = session.get(Principal, state.viewer_principal_id)
+            assert viewer is not None
+            viewer.catalog_role = None
+            viewer.revision += 1
+
+    revoked_detail = client.get("/api/v1/objects/hidden-db", headers=headers)
+    revoked_cursor = client.get(
+        "/api/v1/objects",
+        params={"limit": 2, "cursor": cursor},
+        headers=headers,
+    )
+    assert revoked_detail.status_code == 404
+    assert HIDDEN_LABEL not in revoked_detail.text
+    assert revoked_cursor.status_code == 400
+    assert revoked_cursor.json()["error"]["code"] == "invalid_request"
+
+
+def test_pure_catalog_viewer_cannot_mutate_or_administer(
+    authorized_client,
+) -> None:
+    client, state = authorized_client
+    headers = _authorization(state.viewer_api_token)
+    detail = client.get("/api/v1/objects/hidden-db", headers=headers)
+    assert detail.status_code == 200
+    etag = detail.headers["etag"]
+    payload = {
+        "id": "hidden-db",
+        "kind": "service",
+        "label": "Viewer must not update",
+        "lifecycle": "active",
+        "health": "healthy",
+        "data": {"schema_version": 1},
+    }
+    child_payload = {
+        "id": "viewer-forbidden-child",
+        "kind": "service",
+        "label": "Viewer Forbidden Child",
+        "lifecycle": "active",
+        "health": "unknown",
+        "data": {"schema_version": 1},
+    }
+    idempotency_headers = {
+        **headers,
+        "Idempotency-Key": "viewer-forbidden-action-0001",
+    }
+
+    responses = [
+        client.put(
+            "/api/v1/objects/hidden-db",
+            headers={**headers, "If-Match": etag},
+            json=payload,
+        ),
+        client.delete(
+            "/api/v1/objects/hidden-db",
+            headers={**headers, "If-Match": etag},
+        ),
+        client.post(
+            "/api/v1/objects/fabrik/children",
+            headers=idempotency_headers,
+            json=child_payload,
+        ),
+        client.post(
+            "/api/v1/roots",
+            headers={
+                **headers,
+                "Idempotency-Key": "viewer-forbidden-root-0001",
+            },
+            json={**child_payload, "id": "viewer-forbidden-root", "kind": "host"},
+        ),
+        client.post(
+            "/api/v1/objects/hidden-db/comments",
+            headers=idempotency_headers,
+            json={"body": "viewer must not comment"},
+        ),
+        client.post(
+            "/api/v1/objects/blockwart/relationships",
+            headers={**headers, "If-Match": '"rev-1"'},
+            json={
+                "from_ref": "service:blockwart",
+                "relation_type": "depends_on",
+                "to_ref": "service:hidden-db",
+            },
+        ),
+        client.get("/api/v1/objects/hidden-db/access", headers=headers),
+        client.post(
+            "/api/v1/objects/hidden-db/access/grants",
+            headers={**headers, "If-Match": etag},
+            json={
+                "principal_id": state.viewer_principal_id,
+                "role": "owner",
+                "scope": "self",
+            },
+        ),
+        client.get("/api/v1/admin/principals", headers=headers),
+        client.post(
+            "/api/v1/admin/principals",
+            headers=headers,
+            json={
+                "principal_type": "service_account",
+                "login": "viewer.forbidden.admin",
+                "display_name": "Viewer Forbidden Admin",
+            },
+        ),
+        client.post(
+            f"/api/v1/admin/principals/{state.viewer_principal_id}/tokens",
+            headers={
+                **headers,
+                "If-Match": '"rev-1"',
+                "Idempotency-Key": "viewer-forbidden-token-0001",
+            },
+            json={"name": "viewer-forbidden-token", "audience": "api"},
+        ),
+        client.post(
+            f"/api/v1/admin/principals/{state.viewer_principal_id}/password",
+            headers={**headers, "If-Match": '"rev-1"'},
+            json={
+                "new_password": "viewer-forbidden-password",
+                "current_admin_password": "viewer-has-no-admin-password",
+            },
+        ),
+    ]
+
+    statuses = [response.status_code for response in responses]
+    assert statuses == [403] * len(responses)
+    final_detail = client.get("/api/v1/objects/hidden-db", headers=headers)
+    assert final_detail.status_code == 200
+    assert final_detail.json()["label"] == HIDDEN_LABEL
 
 
 def test_api_requires_authentication_and_conceals_undiscoverable_objects(

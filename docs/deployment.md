@@ -50,8 +50,9 @@ scoped catalog access still comes only from the listed Owner anchors.
 role in the same transaction; without it, startup and readiness fail with
 `catalog_owner_missing`. For an existing database upgraded from an earlier
 release, explicitly run `blockwart-auth promote-admin --login kai` and
-`blockwart-auth bootstrap-catalog-owner --login kai`; migrations `0012` and
-`0015` never guess an admin or catalog-owner identity.
+`blockwart-auth bootstrap-catalog-owner --login kai`; migrations `0012`,
+`0015`, and `0019` never guess an admin, catalog-owner, or catalog-viewer
+identity.
 
 Then run the migration/readiness-gated launcher:
 
@@ -92,6 +93,15 @@ proxy-header processing disabled. Migration errors use the redacted
 active global catalog owner has been selected yet; see `auth-rbac.md` for the explicit
 `--catalog-owner` bootstrap choice and the `bootstrap-catalog-owner` recovery command. Nothing
 promotes an existing principal automatically.
+
+Revision `20260822_0019` only expands the catalog-role constraint for the
+explicit `catalog_viewer` value. It creates no role and no grant. Before a
+downgrade to `20260818_0018`, remove every viewer role through the protected
+catalog-role UI/REST lifecycle; downgrade fails closed otherwise. SQLite
+recreates the existing platform-admin and catalog-owner invariant triggers and
+counters during its table rebuild, while PostgreSQL retains those owner-specific
+objects unchanged. Back up and test the upgrade/downgrade against the normal
+restored candidate before changing traffic.
 
 The image healthcheck calls `/api/health/ready`. An unhealthy result therefore means the process
 may still be alive but must not receive normal traffic.
@@ -206,6 +216,15 @@ For an authentication-denial incident:
 
 Treat application code and its database revision as one release. Before updating the live image:
 
+For a containerized self-hosted installation, the packaged
+[`blockwart-release`](release-workflow.md) controller implements this proof as
+a dry-run-first, single-writer state machine. It creates the SQLite online
+backup, migrates and checks only a restored candidate copy, separates internal
+readiness from fresh container health, and automatically restores the exact
+previous image/backup pair after any post-stop failure. It never uses database
+downgrade. The manual steps below remain the underlying recovery contract and
+apply to installations that have not adopted the managed release state.
+
 Revision `0013` deliberately keeps legacy Network rows without `data.network.category` readable
 while rejecting every write to them. It does not classify or mutate those rows. Do not deploy that
 transitional revision to production until the separately reviewed Network classification dry run,
@@ -316,6 +335,13 @@ downgrade because its two SQLite rebuilds require the matching pre-migration bac
 recovery remains the matching verified pre-upgrade database plus pinned old image. Never supply a
 retired global-bypass credential to an old image.
 
+The packaged `blockwart-release` workflow additionally compares the daemon's
+actual managed-container mounts, loopback publication, environment, network
+mode, and restart policy with the release contract before mutation and after
+both cutover and rollback start. A restored service that cannot pass those and
+the readiness/health/schema/integrity gates is stopped and removed; it is never
+left restart-enabled while rollback is reported failed.
+
 Revision `0018` similarly refuses downgrade while any typed Project chronology
 entry exists. Untyped legacy rows can remain object comments across downgrade;
 typed semantic metadata requires the matching pre-upgrade backup rather than a
@@ -343,7 +369,10 @@ Optional:
 - `BLOCKWART_ENV`
 - `BLOCKWART_BUILD_REVISION` (default `unknown`; inject the deployed Git commit at image build)
 - `BLOCKWART_SECRET_REFERENCE`
-- `BLOCKWART_AUTH_SESSION_TTL_SECONDS` (default `3600`, allowed `300..86400`)
+- `BLOCKWART_AUTH_SESSION_TTL_SECONDS` (default `3600`, allowed `300..3600`;
+  absolute standard human browser-session lifetime)
+- `BLOCKWART_AUTH_REMEMBER_SESSION_TTL_SECONDS` (default `2592000`, allowed
+  `86400..7776000`; absolute opt-in persistent human browser-session lifetime)
 - `BLOCKWART_AUTH_LOGIN_CHALLENGE_TTL_SECONDS` (default `600`, allowed
   `60..3600`)
 - `BLOCKWART_AUTH_LOGIN_RATE_WINDOW_SECONDS` (default `60`, allowed `10..3600`)
@@ -399,11 +428,22 @@ document only after the written JSON and its complete structure validate. A malf
 or unreadable existing document fails diagnostically instead of silently falling back to defaults.
 The configured directory must therefore be writable by the application process.
 
-Catalog access now requires principals and object grants. `/auth` uses the
+Catalog access now requires principals and an effective policy from object
+grants or an explicit catalog role. `/auth` uses the
 `BLOCKWART_AUTH_*` settings for browser sessions; service-account bearer
 tokens authenticate and filter `/api/objects`, `/api/agent`, and `/api/v1`.
 Production bootstrap, token injection, writable authorization, and deployment
 rollout each require explicit approval. See `auth-rbac.md`.
+
+Changing either browser-session lifetime affects only sessions issued by a
+later successful `/auth/login`; it never extends an existing session. Keep the
+standard value at or below one hour and choose the remembered value within its
+validated bounds. Invalid values prevent settings initialization. Deployment
+smoke checks should verify that unchecked login sets session-only identity and
+CSRF cookies, checked login gives both cookies the same configured `Max-Age`,
+and both responses preserve `Secure`, `HttpOnly`, `SameSite=Strict`, `Path=/`,
+and `Cache-Control: no-store`. Do not add proxy cookie rewriting or sliding
+renewal.
 
 ## Agent Access
 
@@ -415,7 +455,13 @@ wrapper into OpenClaw/Gateway config is a separate approval step.
 For an approved MCP deployment, inject a service-account token through the
 protected `BLOCKWART_API_TOKEN_FILE`. `BLOCKWART_API_TOKEN` is an environment
 fallback; configuring both sources is an error. The service account must have
-the exact object grants needed by its tools. To enable comment writes, rotate
+the exact object grants needed by its tools, or explicitly receive
+`catalog_viewer` through the protected admin lifecycle when complete read-only
+catalog access is the approved requirement. Migration, startup, bootstrap,
+login, token injection, and platform-admin assignment never make that choice.
+Any private-instance role assignment is a separate rollout with named principal,
+approval, verification, and rollback; this repository change performs none.
+To enable comment writes, rotate
 the exact named runtime token with `blockwart-auth rotate-token --audience mcp`
 to a new protected output file, atomically replace the runtime secret file, and
 verify `blockwart.list_comments` plus one explicitly approved idempotent

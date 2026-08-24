@@ -1,0 +1,34 @@
+{
+  "schema_version": 1,
+  "collector_version": "1",
+  "inventory_id": "public-example",
+  "collected_at": "2026-08-20T12:00:00Z",
+  "expected_source_count": 1,
+  "expected_entry_count": 1,
+  "closed_directories": [
+    {
+      "relative_path": "knowledge",
+      "suffix": ".md"
+    }
+  ],
+  "sources": [
+    {
+      "source_id": "example-knowledge",
+      "source_uri": "knowledge://public/example.md",
+      "relative_path": "knowledge/example.md",
+      "sha256": "677477fd114017237861f643b09f074721aef0fecad04a52f572fd0d496bb032",
+      "expected_entry_count": 1,
+      "entries": [
+        {
+          "entry_id": "example-entry",
+          "classification": "research",
+          "intent": "no_catalog_object",
+          "decision_reason": "research_material",
+          "presence": "present",
+          "entry_fingerprint": "8d84453ec17875e419e4822a58f1d0b171d324b6394294017b74f1b8fb8e12b0",
+          "mappings": []
+        }
+      ]
+    }
+  ]
+}

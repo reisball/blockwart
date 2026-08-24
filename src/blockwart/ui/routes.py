@@ -14,6 +14,10 @@ from pydantic import ValidationError
 from sqlalchemy.orm import Session
 
 from blockwart.api.deps import get_session
+from blockwart.domain.attention import (
+    ATTENTION_CATEGORY_VALUES,
+    ATTENTION_SEVERITY_VALUES,
+)
 from blockwart.domain.auth import GrantScope, Permission, Role
 from blockwart.domain.comment_markdown import render_comment_source
 from blockwart.domain.decisions import (
@@ -63,6 +67,11 @@ from blockwart.schemas.catalog import (
     PUBLIC_OBJECT_KINDS,
     CatalogObjectIn,
     CatalogObjectOut,
+)
+from blockwart.services.attention import (
+    ATTENTION_ITEM_SIGNAL_STATES,
+    AttentionQueryError,
+    query_attention_page,
 )
 from blockwart.services.catalog import get_object
 from blockwart.services.commands import (
@@ -797,6 +806,87 @@ def index(
             include_inherited_services=include_inherited_services,
         ),
     )
+
+
+@router.get("/attention", response_class=HTMLResponse)
+def attention_overview(
+    request: Request,
+    session: Annotated[Session, Depends(get_session)],
+    category: str | None = None,
+    severity: str | None = None,
+    signal_state: str | None = None,
+    cursor: str | None = None,
+):
+    """Render the authorized attention view from the shared application result."""
+    access = read_access_from_request(request)
+    try:
+        page = query_attention_page(
+            session,
+            access,
+            category=category or None,
+            severity=severity or None,
+            signal_state=signal_state or None,
+            limit=100,
+            cursor=cursor,
+            direction="asc",
+            include_total=False,
+        )
+    except InvalidCursor as exc:
+        raise HTTPException(status_code=400, detail="Invalid pagination cursor") from exc
+    except AttentionQueryError as exc:
+        raise HTTPException(status_code=400, detail="Invalid attention filter") from exc
+    params = {
+        "category": category,
+        "severity": severity,
+        "signal_state": signal_state,
+        "cursor": page.next_cursor,
+    }
+    next_url = (
+        f"/attention?{urlencode({key: value for key, value in params.items() if value})}"
+        if page.next_cursor
+        else None
+    )
+    i18n = translation_context(request)
+    return templates.TemplateResponse(
+        request,
+        "attention.html",
+        context={
+            "title": i18n["t"]("attention.title"),
+            "summary": page.summary,
+            "items": page.items,
+            "categories": list(ATTENTION_CATEGORY_VALUES),
+            "severities": list(ATTENTION_SEVERITY_VALUES),
+            "signal_states": sorted(ATTENTION_ITEM_SIGNAL_STATES),
+            "selected_category": category or "",
+            "selected_severity": severity or "",
+            "selected_signal_state": signal_state or "",
+            "generated_at": page.generated_at,
+            "next_url": next_url,
+            **i18n,
+        },
+    )
+
+
+@router.get("/attention/filters/normalize")
+def normalize_attention_filter_submission(
+    category: str | None = None,
+    severity: str | None = None,
+    signal_state: str | None = None,
+) -> RedirectResponse:
+    """Redirect a native attention filter form to its canonical typed URL."""
+    parameters = [
+        (name, value)
+        for name, value in (
+            ("category", category),
+            ("severity", severity),
+            ("signal_state", signal_state),
+        )
+        if value not in (None, "")
+    ]
+    target = "/attention"
+    if parameters:
+        target = f"{target}?{urlencode(parameters)}"
+    return RedirectResponse(target, status_code=303)
 
 
 @router.get("/projects", response_class=HTMLResponse)

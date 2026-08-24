@@ -20,6 +20,11 @@ Existing free-form Runbook rows have the same read-only boundary; see
 rollback, and recovery are never inferred, and every updated Runbook must satisfy
 the canonical structured contract.
 
+The ETag-bound update preview accepts the same complete `CatalogObjectIn` as
+the full update and calls the same read-only update planner. It therefore
+normalizes and rejects at the same canonical stage and field path without
+writing the normalized result.
+
 The registry covers the existing object kinds:
 
 - `host`

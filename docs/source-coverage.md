@@ -36,10 +36,14 @@ as `missing_source`; source content itself is not retained.
 
 ## Trust and authorization boundary
 
-Only `blockwart-import-markdown` opens `TOOLS.md`. `--record-coverage` is the
-explicit snapshot persistence step and is separate from `--apply`. API and MCP
-requests read only the recorded snapshot and referenced catalog rows; they do
-not crawl OpenClaw, open source URIs, or persist a refreshed result.
+Only the explicit offline collectors open declared source files:
+`blockwart-import-markdown` opens `TOOLS.md`, and
+`blockwart-source-coverage` hashes the exact closed source set declared by a
+reviewed manifest. Their record operations are separate from catalog apply.
+API, MCP, UI, and other runtime requests read only the recorded snapshot and
+referenced catalog rows; they do not crawl a workspace, open source URIs, or
+persist a refreshed result. See [Reviewed Knowledge source
+coverage](source-coverage-manifest.md) for the generic collector contract.
 
 The ordinary `mapped` projection removes mappings without object `read`
 permission before state resolution. Entries left without a visible mapping are
@@ -55,6 +59,15 @@ snapshot counts, optional total, and every paginated detail page therefore
 describe the same authorized filtered set. Coverage cursors bind principal and
 effective policy, normalized filters, scope, direction, page size, ordering,
 and the authorized projection digest.
+
+The catalog-wide attention view reuses the same authorized resolver through one
+shared seam and consumes only the object-scoped `mapped` projection. Source-only
+facts stay behind the platform-admin `scope=all` boundary and never reach it.
+Its collection state is based on authorized mapped evidence and exposes no
+global snapshot timestamp. When no snapshot has been recorded, attention
+reports an explicit "not collected" state rather than zero coverage problems.
+`mapped_stale` is reported there as object provenance, not a second time as
+coverage. See `attention.md`.
 
 ## Lifecycle
 

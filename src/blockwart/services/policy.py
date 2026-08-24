@@ -39,6 +39,7 @@ class GlobalPolicySource(StrEnum):
     """Provenance of permissions that are not backed by an object grant."""
 
     CATALOG_OWNER = "catalog_owner"
+    CATALOG_VIEWER = "catalog_viewer"
 
 
 @dataclass(frozen=True)
@@ -281,7 +282,7 @@ def _global_authorities_for_principal(
         return ()
     return (
         GlobalAuthority(
-            source=GlobalPolicySource.CATALOG_OWNER,
+            source=GlobalPolicySource(CatalogRole(row.catalog_role).value),
             permissions=permissions_for_catalog_role(CatalogRole(row.catalog_role)),
         ),
     )

@@ -17,6 +17,11 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from blockwart.db.session import build_engine, transaction
+from blockwart.domain.attention import (
+    ATTENTION_CATEGORY_VALUES,
+    ATTENTION_REASON_VALUES,
+    ATTENTION_SEVERITY_VALUES,
+)
 from blockwart.domain.auth import CatalogRole, GrantScope, PlatformRole, Role
 from blockwart.models import CatalogObject
 from blockwart.services.access import create_object_grant
@@ -145,9 +150,11 @@ async def check_mcp(
                 "blockwart.add_comment",
                 "blockwart.get_context",
                 "blockwart.get_source_coverage",
+                "blockwart.get_attention",
                 "blockwart.create_child",
                 "blockwart.create_root",
                 "blockwart.update_object",
+                "blockwart.preview_object_update",
                 "blockwart.delete_object",
                 "blockwart.create_relationship",
                 "blockwart.delete_relationship",
@@ -179,6 +186,7 @@ async def check_mcp(
                         "blockwart.list_audit_events",
                         "blockwart.get_context",
                         "blockwart.get_source_coverage",
+                        "blockwart.get_attention",
                         "blockwart.get_object_access",
                         "blockwart.search_principals",
                         "blockwart.list_admin_principals",
@@ -186,6 +194,7 @@ async def check_mcp(
                         "blockwart.preview_grant_scope",
                         "blockwart.get_device_graph",
                         "blockwart.get_network_topology",
+                        "blockwart.preview_object_update",
                     }
                     else not tool.annotations.readOnlyHint
                 )
@@ -352,6 +361,10 @@ async def check_mcp(
                 ),
                 await session.call_tool("blockwart.get_context", {"limit": 1}),
                 await session.call_tool("blockwart.get_source_coverage", {"limit": 1}),
+                await session.call_tool(
+                    "blockwart.get_attention",
+                    {"limit": 1, "include_total": True},
+                ),
                 admin_first_page,
                 admin_second_page,
                 await session.call_tool(
@@ -360,6 +373,22 @@ async def check_mcp(
                 ),
             ]
             assert all(not result.isError for result in read_results)
+            # The installed wrapper must project the same closed attention
+            # vocabulary the application resolver owns, not a wrapper-local copy.
+            attention_payload = _tool_payload(read_results[5])
+            assert attention_payload["sort"] == "priority"
+            assert set(attention_payload["summary"]["signals"]) == set(
+                ATTENTION_CATEGORY_VALUES
+            )
+            assert set(attention_payload["summary"]["by_reason"]) == set(
+                ATTENTION_REASON_VALUES
+            )
+            assert set(attention_payload["summary"]["by_severity"]) == set(
+                ATTENTION_SEVERITY_VALUES
+            )
+            assert attention_payload["summary"]["coverage_snapshot_state"] == (
+                "not_collected"
+            )
             batch_payload = _tool_payload(read_results[2])
             assert batch_payload["count"] == 1
             assert batch_payload["objects"][0]["id"] == object_id
@@ -544,21 +573,29 @@ async def check_mcp(
                 relationship_args,
             )
             relationship_deleted_payload = _tool_payload(relationship_deleted)
-            updated = await session.call_tool(
-                "blockwart.update_object",
-                {
-                    "object_id": "package-smoke-child",
-                    "if_match": str(relationship_deleted_payload["etag"]),
-                    "object": {
-                        "id": "package-smoke-child",
-                        "kind": "service",
-                        "label": "Package Smoke Child Updated",
-                        "status": "active",
-                        "data": {"schema_version": 1},
-                    },
+            update_args = {
+                "object_id": "package-smoke-child",
+                "if_match": str(relationship_deleted_payload["etag"]),
+                "object": {
+                    "id": "package-smoke-child",
+                    "kind": "service",
+                    "label": "Package Smoke Child Updated",
+                    "status": "active",
+                    "data": {"schema_version": 1},
                 },
+            }
+            previewed = await session.call_tool(
+                "blockwart.preview_object_update",
+                update_args,
             )
+            previewed_payload = _tool_payload(previewed)
+            assert previewed_payload["changed"] is True
+            assert previewed_payload["base_etag"] == update_args["if_match"]
+            assert previewed_payload["diff"]
+            assert previewed_payload["preview_digest"].startswith("sha256:")
+            updated = await session.call_tool("blockwart.update_object", update_args)
             updated_payload = _tool_payload(updated)
+            assert updated_payload["etag"] == previewed_payload["expected_result_etag"]
             placement_deleted = await session.call_tool(
                 "blockwart.delete_relationship",
                 {
@@ -703,7 +740,7 @@ def main() -> None:
         token=api_token,
     )["objects"][0]
 
-    assert readiness["revision"] == "20260818_0018"
+    assert readiness["revision"] == "20260824_0020"
     assert "Blockwart" in index
     assert static_content_type == "text/css"
     assert not any(
@@ -730,7 +767,7 @@ def main() -> None:
     print(
         "installed_package=ok "
         f"cwd={Path.cwd()} revision={readiness['revision']} "
-        f"openapi_paths={len(openapi['paths'])} mcp_protocol={protocol} mcp_calls=36 "
+        f"openapi_paths={len(openapi['paths'])} mcp_protocol={protocol} mcp_calls=38 "
         "mcp_contract=compatible"
     )
 

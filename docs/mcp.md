@@ -76,10 +76,12 @@ It wraps the object-authorized v1 API:
 - blockwart.list_audit_events -> GET /api/v1/objects/{object_id}/audit-events
 - blockwart.add_comment -> POST /api/v1/objects/{object_id}/comments
 - blockwart.get_context -> GET /api/v1/context
+- blockwart.get_attention -> GET /api/v1/attention
 - blockwart.get_source_coverage -> GET /api/v1/source-coverage
 - blockwart.create_child -> POST /api/v1/objects/{parent_id}/children
 - blockwart.create_root -> POST /api/v1/roots
 - blockwart.update_object -> PUT /api/v1/objects/{object_id}
+- blockwart.preview_object_update -> POST /api/v1/objects/{object_id}/update-preview
 - blockwart.delete_object -> DELETE /api/v1/objects/{object_id}
 - blockwart.create_relationship -> POST /api/v1/objects/{object_id}/relationships
 - blockwart.delete_relationship -> DELETE /api/v1/objects/{object_id}/relationships
@@ -94,6 +96,40 @@ It wraps the object-authorized v1 API:
 - blockwart.create_grant -> POST /api/v1/objects/{object_id}/access/grants
 - blockwart.update_grant -> PUT /api/v1/objects/{object_id}/access/grants/{grant_id}
 - blockwart.revoke_grant -> DELETE /api/v1/objects/{object_id}/access/grants/{grant_id}
+
+All read tools consume the API's current shared policy. An explicit active
+`catalog_viewer` service principal therefore receives exactly `discover` and
+`read` across current and future catalog objects for search, context, counts,
+relationships, comments, audit, and coverage, with the same concealment and
+field redaction as REST and UI. Additive object grants can authorize existing
+write tools only at their explicit object/subtree scope; the global viewer
+source itself never authorizes a write. An MCP token, platform admin, or login
+alone never implies catalog viewing, and role revocation applies on the next
+upstream request and invalidates policy-bound cursors.
+
+## Versioned agent read projections
+
+`blockwart.search`, `blockwart.get_context`, and
+`blockwart.get_object_contexts` accept the versioned closed `projection`
+profile (`compact`, `context`, or `full`) and the closed `fields` mask.
+Projected pages publish one `capability_sets` table; each item refers to its
+exact effective permission set with `capability_set`. This saves repeated
+capability blocks without conflating different rights. Identity, revision,
+visibility, authorization, cursor, concealment, and strong ETag semantics are
+unchanged. No projection argument retains the historical complete response.
+
+The bounded comment/chronology preview is independently controlled by
+`include_recent_comments`. It is off by default for `compact` and `context`,
+so discovery and batch reads do not fetch it unnecessarily. `list_comments`
+remains the full opaque-cursor history. `get_object_context` remains a
+single-object full read.
+
+`blockwart.describe_schema` can narrow its local generated contract to one
+`kind`, one `write_intent`, and closed `sections`: `object_fields`,
+`write_intents`, `minimal_example`, `relationships`, and `errors`. See
+[Agent read projections](agent-read-projections.md) for the precise profiles,
+field-mask vocabulary, synthetic budget evidence, and recommended adoption
+ladder.
 
 ## Agent intent guide
 
@@ -112,7 +148,9 @@ Choose the smallest tool that directly answers the intent:
   published contract cannot drift from server-side validation. The optional
   `kind` argument narrows both the kind contract and the relationship types
   that accept that kind as an endpoint; the published relationship vocabulary
-  stays complete.
+  stays complete. For one small write, request exactly one `kind`, one
+  `write_intent`, and `sections: ["object_fields", "minimal_example"]`; add
+  `relationships` or `errors` only when that write needs them.
 - Use `blockwart.get_object_context` when the exact object ID is already known.
 - Use `blockwart.get_object_contexts` when several exact object IDs are already
   known and their authorized contexts must be retrieved in one bounded
@@ -124,12 +162,18 @@ Choose the smallest tool that directly answers the intent:
   caller cannot discover or IDs that do not exist. Concealed and missing IDs are
   indistinguishable; the placeholder carries only the requested ID. Use
   `get_object_context` for a single ID and `get_context` to search by attribute.
+  For a candidate batch, set `projection=compact`; use `context` only after
+  narrowing the set, and request the comment preview explicitly when needed.
 - Use `blockwart.get_context` to find assets or services by name, kind, parent,
-  endpoint, state, or provenance and return their full authorized details in the
-  same call.
-- Use `blockwart.search` when a compact candidate list is preferable to full
-  detail payloads. With a `q` term, pass `sort=relevance` to receive the
-  published rank ladder instead of the default `id` order.
+  endpoint, state, or provenance. Start with `projection=compact` for broad
+  discovery, then use `projection=context` for a bounded working set.
+- Use `blockwart.search` with `projection=compact` for candidate lists. With a
+  `q` term, pass `sort=relevance` to receive the published rank ladder instead
+  of the default `id` order.
+- Use `blockwart.get_attention` first when the intent is "what needs work?".
+  It returns one deduplicated, severity-ordered list over the signals
+  Blockwart already records, so an agent does not have to page the whole
+  catalog and re-derive them. It performs no probe and no source read.
 - Use `blockwart.get_source_coverage` to inspect the latest recorded inventory
   coverage/drift snapshot. Its default mapped scope follows object visibility;
   the full source-only scope requires platform-admin authority.
@@ -160,6 +204,15 @@ after a successful non-delete mutation supplies the next current value;
 deletion leaves no object or successor ETag to read. Discover-only stubs
 contain neither field, so they cannot be used to infer or attempt a write
 precondition.
+
+Before a reviewed full-object update, `blockwart.preview_object_update` accepts
+the exact `object_id`, `if_match`, and complete `object` arguments of
+`blockwart.update_object`. It requires effective `write` but is annotated
+read-only and directly returns REST's bounded redacted diff, canonical no-op
+answer, base and expected result revision/ETag, complete safe-diff digest, and
+versioned preview digest. It creates no lock or reservation; clients still pass
+the original ETag to the real update and receive the ordinary precondition
+failure if anything changed in between.
 
 For `service`, the same generic context and object write tools carry the
 canonical bounded `data.components` document. `blockwart.describe_schema`
@@ -207,10 +260,12 @@ means it deliberately bundles lower-level API concerns behind one agent call.
 | `list_audit_events` | Read an object's system audit timeline | `directly sufficient` | Projects the existing redacted newest-first audit page without mixing in comment content. |
 | `add_comment` | Append an operational work note | `directly sufficient` | Keeps Markdown source and idempotency explicit without exposing audit internals. |
 | `get_context` | Find objects and read details | `directly sufficient` | Search, filters, full details, and per-object write-ready ETags already share one call. |
+| `get_attention` | Find what currently needs work | `directly sufficient` | Projects the shared application attention resolver: one closed category, severity, reason-code, and signal-state vocabulary over record and relationship integrity, placement, manual lifecycle, monitoring, endpoints, provenance, critical-service Runbook readiness, knowledge review, and source coverage, deduplicated to one item per target and category. |
 | `get_source_coverage` | Inspect source inventory coverage and drift | `directly sufficient` | Projects the authorized REST snapshot with identical filters, state vocabulary, digest-bound cursor, and no workspace access. |
 | `create_child` | Create a placed child | `intent tool`, `response improved` | Resolves the parent internally and proves placement, ownership, revision, and idempotency. |
 | `create_root` | Create a disconnected catalog root | `intent tool`, `response improved` | Requires an already active catalog-owner principal; proves ownership, revision, idempotency, and the absence of a placement parent. Never mutates any catalog role. |
 | `update_object` | Update one known object | `directly sufficient` | The explicit current ETag preserves visible optimistic concurrency. |
+| `preview_object_update` | Review one proposed full-object update | `directly sufficient` | Uses the exact update arguments and shared plan, but returns only the bounded redacted diff and digest without mutating catalog or authentication state. |
 | `delete_object` | Delete one known object | `directly sufficient` | The destructive action and current ETag remain explicit. |
 | `create_relationship` | Link existing objects | `directly sufficient` | Its published schema carries the closed relationship vocabulary and the type-dependent metadata; its response contains the exact relationship, metadata, revision, and ETag. |
 | `delete_relationship` | Unlink existing objects | `directly sufficient` | The exact edge and current ETag remain explicit; the same closed vocabulary applies. |
@@ -269,6 +324,30 @@ as API v1; it does not reconstruct topology in the MCP wrapper.
 All tools require a service-account token and receive exactly that
 principal's authorized detail/stub projection.
 
+`blockwart.get_attention` accepts exact `category`, `severity`, `reason_code`,
+`signal_state`, and `kind` filters plus `limit`, `cursor`, `direction`, and
+`include_total`. It returns REST's `summary` and item page unchanged, so the
+tool cannot hold a second copy of the vocabulary. Every item is bounded: a
+closed classification, a fixed English description, an optional `detail_code`
+from an existing closed domain vocabulary, an optional evidence timestamp, and
+one authorized `kind:id` navigation reference. No message, exception text,
+endpoint, path, credential, or source excerpt is part of the contract.
+
+The call is a read. It triggers no probe, no source file access, no network
+lookup, and no catalog, audit, comment, coverage, or observation write, and it
+has no remediation mode: correcting a signal uses the ordinary authorized write
+tools. Only readable objects contribute items; discover-only stubs contribute
+none. Applicable Runbooks and canonical relationship diagnostics are resolved
+from the authorized source projection. Concealed and absent relationship
+targets both produce the same generic unresolved signal on a readable
+source/endpoint; diagnostic prose, target identity, existence state, and related
+references are not returned. Source-only coverage facts stay behind the
+platform-admin `scope=all` boundary of `blockwart.get_source_coverage`. Planned,
+retired, and finished records, and services without enabled monitoring, are
+excluded rather than reported as incidents; declared maintenance suppresses
+the observed incident; stale or missing evidence stays `stale` or `unknown`.
+See `attention.md`.
+
 `blockwart.get_source_coverage` accepts exact `source`, `classification`,
 `state`, and `target_kind` filters plus `scope`, `limit`, `cursor`, `direction`,
 and `include_total`. It directly returns REST's compact summary and detail page.
@@ -299,6 +378,11 @@ and rollback implementation as REST and the browser UI. Update and delete
 arguments carry the last full-read body `etag` unchanged as `if_match`. Child creation carries an
 `idempotency_key`; credentials remain runtime configuration and are never tool
 arguments. Delete tools publish MCP's destructive annotation.
+
+The preview tool uses the planning half of that update command and the same
+field-accurate failures, but performs no write, token-use timestamp update, or
+denial audit. Its output and digests use only the safe redacted preview
+contract; raw object documents and concealed typed identities are absent.
 
 `blockwart.add_comment` carries `object_id`, exact Markdown `body`, and
 `idempotency_key`. It intentionally has no `if_match`: appends are independent,
@@ -351,7 +435,8 @@ principal with an `mcp`-audience token and an `idempotency_key`, and it never
 assigns or removes any catalog role. Its additive result fields are
 `parent_ref` (always `null`, proving the disconnected root), the same
 `owner_assignment` Owner/self proof, and `revision` alongside `etag`,
-`changed`, and `replayed`. The catalog role itself remains read-only in MCP
+`changed`, and `replayed`. The catalog role (`catalog_owner`, `catalog_viewer`,
+or none) itself remains read-only in MCP
 through the admin principal projections.
 
 Grant read tools expose only minimized principal identity, separated direct
@@ -438,7 +523,8 @@ and validated correlation ID. Legacy or malformed upstream error bodies become
 unchanged. See `api-boundary-contract.md`.
 
 Object-write and relationship tool validation failures (`blockwart.create_root`,
-`blockwart.create_child`, `blockwart.update_object`, `blockwart.create_attached_device`,
+`blockwart.create_child`, `blockwart.update_object`, `blockwart.preview_object_update`,
+`blockwart.create_attached_device`,
 `blockwart.create_relationship`, and `blockwart.delete_relationship`) return field-accurate,
 sanitized `details` on the `invalid_arguments` error. Each detail carries exactly the canonical
 fields the schema projection publishes: `code` (stable violation type), `location` (rejected

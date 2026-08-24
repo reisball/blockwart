@@ -1,12 +1,17 @@
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, Response
+from pydantic import BeforeValidator
 from sqlalchemy.orm import Session
 
 from blockwart.api.deps import get_session
 from blockwart.api.errors import API_ERROR_RESPONSES
-from blockwart.api.security import require_api_read_access
-from blockwart.api.write_commands import api_write_context, execute_api_command
+from blockwart.api.security import require_api_read_access, require_api_read_only_access
+from blockwart.api.write_commands import (
+    api_write_context,
+    execute_api_command,
+    execute_api_read_only_command,
+)
 from blockwart.config import Settings
 from blockwart.domain.asset_state import AssetHealth, AssetLifecycle
 from blockwart.domain.auth import GrantScope
@@ -22,6 +27,15 @@ from blockwart.domain.projects import (
     ProjectStatus,
 )
 from blockwart.domain.provenance import SourceType
+from blockwart.domain.read_projection import (
+    ACTIVITY_SECTION,
+    FIELDS_DESCRIPTION,
+    PROJECTION_DESCRIPTION,
+    RECENT_COMMENTS_DESCRIPTION,
+    ProjectionProfile,
+    ProjectionSection,
+    resolve_read_projection,
+)
 from blockwart.domain.runbooks import RunbookRisk, RunbookStatus
 from blockwart.domain.search import (
     CONTEXT_LIMIT_MAX,
@@ -32,7 +46,7 @@ from blockwart.domain.search import (
     SearchQuery,
 )
 from blockwart.domain.source_coverage import SourceCoverageError
-from blockwart.schemas.agent import AgentCatalogContextRead
+from blockwart.schemas.agent import AgentCatalogContextRead, ReadProjectionOut
 from blockwart.schemas.catalog import CatalogObjectIn, ObjectKind, ObjectStatus
 from blockwart.schemas.comments import (
     CommentCommandOut,
@@ -49,6 +63,10 @@ from blockwart.schemas.projects import (
 )
 from blockwart.schemas.v1 import (
     MAX_BATCH_RESPONSE_BYTES,
+    AttentionCategoryValue,
+    AttentionItemSignalStateValue,
+    AttentionReasonValue,
+    AttentionSeverityValue,
     CoverageScopeValue,
     CoverageStateValue,
     McpContractMetadataOut,
@@ -56,6 +74,7 @@ from blockwart.schemas.v1 import (
     SortDirection,
     SourceClassificationValue,
     V1AttachedDeviceCreateIn,
+    V1AttentionPageOut,
     V1AuditPageOut,
     V1ContextPageOut,
     V1DeleteCommandOut,
@@ -70,8 +89,12 @@ from blockwart.schemas.v1 import (
     V1ObjectContextBatchIn,
     V1ObjectContextBatchOut,
     V1ObjectPageOut,
+    V1ObjectUpdatePreviewDiffEntryOut,
+    V1ObjectUpdatePreviewOut,
     V1PrincipalSearchOut,
     V1PrincipalSummaryOut,
+    V1ProjectedObjectContextBatchOut,
+    V1ProjectedPageOut,
     V1RelationshipCommandIn,
     V1RelationshipCommandOut,
     V1RelationshipPageOut,
@@ -84,6 +107,10 @@ from blockwart.services.agent import (
     query_agent_object_contexts,
     query_agent_objects_page,
 )
+from blockwart.services.attention import (
+    AttentionQueryError,
+    query_attention_page,
+)
 from blockwart.services.commands import (
     create_attached_device,
     create_catalog_root,
@@ -91,6 +118,7 @@ from blockwart.services.commands import (
     create_object_relationship,
     delete_catalog_object,
     delete_object_relationship,
+    preview_catalog_object_update,
     revision_etag,
     update_catalog_object,
 )
@@ -110,6 +138,7 @@ from blockwart.services.project_chronology import (
     query_project_overview_page,
 )
 from blockwart.services.read_access import ReadAccess
+from blockwart.services.read_projection import CapabilitySets, project_read_items
 from blockwart.services.source_coverage import (
     CoverageAuthorityDenied,
     query_source_coverage_page,
@@ -145,6 +174,7 @@ def get_mcp_contract_metadata(
     return McpContractMetadataOut.model_validate(
         local_contract_metadata(build_revision=request.app.state.settings.build_revision)
     )
+
 
 QueryText = Annotated[
     str | None,
@@ -200,6 +230,86 @@ CursorParameter = Annotated[
     Query(max_length=2048, description="Opaque cursor returned by the previous page"),
 ]
 PageLimit = Annotated[int, Query(ge=SEARCH_LIMIT_MIN, le=SEARCH_LIMIT_MAX)]
+# The closed read-projection controls. Omitting all of them keeps the exact
+# historical full contract, so no existing client sees a changed response.
+ProjectionParameter = Annotated[
+    ProjectionProfile | None,
+    Query(description=PROJECTION_DESCRIPTION),
+]
+
+
+def _decode_empty_projection_fields(value: object) -> object:
+    """Treat the explicit ``fields=`` query marker as an empty closed mask.
+
+    MCP encodes an empty JSON array as an explicitly present blank repeated
+    query parameter. It is distinct from omitting ``fields`` altogether: the
+    former requests the core-only projection, while the latter retains the
+    backwards-compatible unmasked full read.
+    """
+    return [] if value == [""] else value
+
+
+ProjectionFields = Annotated[
+    list[ProjectionSection] | None,
+    BeforeValidator(_decode_empty_projection_fields),
+    Query(description=FIELDS_DESCRIPTION),
+]
+IncludeRecentComments = Annotated[
+    bool | None,
+    Query(description=RECENT_COMMENTS_DESCRIPTION),
+]
+
+
+@router.get(
+    "/attention",
+    response_model=V1AttentionPageOut,
+    summary="Read the authorized catalog-wide attention view",
+)
+def get_v1_attention(
+    session: Annotated[Session, Depends(get_session)],
+    access: Annotated[ReadAccess, Depends(require_api_read_access)],
+    category: AttentionCategoryValue | None = None,
+    severity: AttentionSeverityValue | None = None,
+    reason_code: AttentionReasonValue | None = None,
+    signal_state: AttentionItemSignalStateValue | None = None,
+    kind: ObjectKind | None = None,
+    limit: PageLimit = 50,
+    cursor: CursorParameter = None,
+    direction: SortDirection = "asc",
+    include_total: Annotated[
+        bool,
+        Query(description="Compute the total over the authorized filtered item set"),
+    ] = False,
+) -> V1AttentionPageOut:
+    """Combine existing canonical signals; this request runs no probe or source read."""
+    try:
+        page = query_attention_page(
+            session,
+            access,
+            category=category,
+            severity=severity,
+            reason_code=reason_code,
+            signal_state=signal_state,
+            kind=kind,
+            limit=limit,
+            cursor=cursor,
+            direction=direction,
+            include_total=include_total,
+        )
+    except InvalidCursor as exc:
+        raise _invalid_cursor() from exc
+    except AttentionQueryError as exc:
+        raise HTTPException(status_code=400, detail="Invalid attention request") from exc
+    return V1AttentionPageOut.model_validate(
+        {
+            "summary": page.summary,
+            "items": page.items,
+            "next_cursor": page.next_cursor,
+            "total": page.total,
+            "generated_at": page.generated_at,
+            "direction": direction,
+        }
+    )
 
 
 @router.get(
@@ -260,7 +370,7 @@ def get_v1_source_coverage(
     )
 
 
-@router.get("/objects", response_model=V1ObjectPageOut)
+@router.get("/objects", response_model=V1ObjectPageOut | V1ProjectedPageOut)
 def list_v1_objects(
     session: Annotated[Session, Depends(get_session)],
     access: Annotated[ReadAccess, Depends(require_api_read_access)],
@@ -311,7 +421,14 @@ def list_v1_objects(
         bool,
         Query(description="Compute the total matching result count"),
     ] = False,
-) -> V1ObjectPageOut:
+    projection: ProjectionParameter = None,
+    fields: ProjectionFields = None,
+) -> V1ObjectPageOut | V1ProjectedPageOut:
+    resolved = resolve_read_projection(
+        surface="summary",
+        profile=projection,
+        fields=fields,
+    )
     try:
         page = query_agent_objects_page(
             session,
@@ -348,8 +465,23 @@ def list_v1_objects(
         )
     except InvalidCursor as exc:
         raise _invalid_cursor() from exc
-    return V1ObjectPageOut(
-        items=page.items,
+    if resolved.is_default:
+        return V1ObjectPageOut(
+            items=page.items,
+            next_cursor=page.next_cursor,
+            total=page.total,
+            sort=sort,
+            direction=direction,
+        )
+    capability_sets = CapabilitySets()
+    return V1ProjectedPageOut(
+        projection=ReadProjectionOut.model_validate(resolved.descriptor()),
+        items=project_read_items(
+            page.items,
+            projection=resolved,
+            capability_sets=capability_sets,
+        ),
+        capability_sets=capability_sets.table(),
         next_cursor=page.next_cursor,
         total=page.total,
         sort=sort,
@@ -399,7 +531,7 @@ def list_v1_projects(
     )
 
 
-@router.get("/context", response_model=V1ContextPageOut)
+@router.get("/context", response_model=V1ContextPageOut | V1ProjectedPageOut)
 def get_v1_context(
     session: Annotated[Session, Depends(get_session)],
     access: Annotated[ReadAccess, Depends(require_api_read_access)],
@@ -450,7 +582,16 @@ def get_v1_context(
         bool,
         Query(description="Compute the total matching result count"),
     ] = False,
-) -> V1ContextPageOut:
+    projection: ProjectionParameter = None,
+    fields: ProjectionFields = None,
+    include_recent_comments: IncludeRecentComments = None,
+) -> V1ContextPageOut | V1ProjectedPageOut:
+    resolved = resolve_read_projection(
+        surface="context",
+        profile=projection,
+        fields=fields,
+        include_recent_comments=include_recent_comments,
+    )
     try:
         page = query_agent_context_page(
             session,
@@ -484,11 +625,27 @@ def get_v1_context(
             sort=sort,
             direction=direction,
             include_total=include_total,
+            include_recent_comments=resolved.includes(ACTIVITY_SECTION),
         )
     except InvalidCursor as exc:
         raise _invalid_cursor() from exc
-    return V1ContextPageOut(
-        items=page.items,
+    if resolved.is_default:
+        return V1ContextPageOut(
+            items=page.items,
+            next_cursor=page.next_cursor,
+            total=page.total,
+            sort=sort,
+            direction=direction,
+        )
+    capability_sets = CapabilitySets()
+    return V1ProjectedPageOut(
+        projection=ReadProjectionOut.model_validate(resolved.descriptor()),
+        items=project_read_items(
+            page.items,
+            projection=resolved,
+            capability_sets=capability_sets,
+        ),
+        capability_sets=capability_sets.table(),
         next_cursor=page.next_cursor,
         total=page.total,
         sort=sort,
@@ -523,19 +680,45 @@ _BATCH_RESPONSES = {
 
 @router.post(
     "/object-contexts",
-    response_model=V1ObjectContextBatchOut,
+    response_model=V1ObjectContextBatchOut | V1ProjectedObjectContextBatchOut,
     responses=_BATCH_RESPONSES,
 )
 def post_v1_object_contexts(
     payload: V1ObjectContextBatchIn,
     session: Annotated[Session, Depends(get_session)],
     access: Annotated[ReadAccess, Depends(require_api_read_access)],
-) -> V1ObjectContextBatchOut:
-    batch = query_agent_object_contexts(session, access, payload.object_ids)
-    response = V1ObjectContextBatchOut(
-        objects=batch.items,
-        count=len(batch.items),
+) -> V1ObjectContextBatchOut | V1ProjectedObjectContextBatchOut:
+    resolved = resolve_read_projection(
+        surface="context",
+        profile=payload.projection,
+        fields=payload.fields,
+        include_recent_comments=payload.include_recent_comments,
     )
+    batch = query_agent_object_contexts(
+        session,
+        access,
+        payload.object_ids,
+        include_recent_comments=resolved.includes(ACTIVITY_SECTION),
+    )
+    response: V1ObjectContextBatchOut | V1ProjectedObjectContextBatchOut
+    if resolved.is_default:
+        response = V1ObjectContextBatchOut(
+            objects=batch.items,
+            count=len(batch.items),
+        )
+    else:
+        capability_sets = CapabilitySets()
+        projected = project_read_items(
+            batch.items,
+            projection=resolved,
+            capability_sets=capability_sets,
+        )
+        response = V1ProjectedObjectContextBatchOut(
+            projection=ReadProjectionOut.model_validate(resolved.descriptor()),
+            objects=projected,
+            capability_sets=capability_sets.table(),
+            count=len(projected),
+        )
     encoded = response.model_dump_json(by_alias=True, exclude_none=True)
     if len(encoded.encode("utf-8")) > MAX_BATCH_RESPONSE_BYTES:
         raise HTTPException(
@@ -608,9 +791,7 @@ def create_v1_object_comment(
         ),
     )
     response.headers["ETag"] = result.etag
-    response.headers["Location"] = (
-        f"/objects/{object_id}/comments#comment-{result.comment.id}"
-    )
+    response.headers["Location"] = f"/objects/{object_id}/comments#comment-{result.comment.id}"
     if result.replayed:
         response.status_code = 200
     return CommentCommandOut(
@@ -687,9 +868,7 @@ def create_v1_project_chronology(
         ),
     )
     response.headers["ETag"] = result.etag
-    response.headers["Location"] = (
-        f"/projects/{object_id}#chronology-{result.entry.id}"
-    )
+    response.headers["Location"] = f"/projects/{object_id}#chronology-{result.entry.id}"
     if result.replayed:
         response.status_code = 200
     return ProjectChronologyCommandOut(
@@ -843,6 +1022,7 @@ def update_v1_object(
             object_id=object_id,
             payload=payload,
             expected_revision=if_match,
+            refresh_policy=True,
         ),
     )
     response.headers["ETag"] = result.etag
@@ -850,6 +1030,64 @@ def update_v1_object(
         catalog_object=result.catalog_object,
         etag=result.etag,
         changed=result.changed,
+    )
+
+
+@router.post(
+    "/objects/{object_id}/update-preview",
+    response_model=V1ObjectUpdatePreviewOut,
+    summary="Preview one ETag-bound full-object update without writing",
+)
+def preview_v1_object_update(
+    object_id: str,
+    payload: CatalogObjectIn,
+    request: Request,
+    response: Response,
+    session: Annotated[Session, Depends(get_session)],
+    access: Annotated[ReadAccess, Depends(require_api_read_only_access)],
+    if_match: Annotated[str | None, Header(alias="If-Match")] = None,
+) -> V1ObjectUpdatePreviewOut:
+    """Resolve the proposed full-object update read-only and publish its diff.
+
+    The request is exactly the request of `PUT /api/v1/objects/{object_id}`:
+    the exact object ID, the current strong `If-Match` ETag, and the complete
+    proposed object. Effective `write` on that exact object is required even
+    though nothing is written, and every authorization, precondition, schema,
+    normalization, secret, reference, relationship, lifecycle, placement,
+    monitoring, component, provenance, and kind rule is the shared one. The
+    preview creates no lock, reservation, or later-apply guarantee: a write
+    between preview and apply fails the ordinary precondition.
+    """
+    context = api_write_context(request, access)
+    result = execute_api_read_only_command(
+        session,
+        context,
+        lambda: preview_catalog_object_update(
+            session,
+            context,
+            object_id=object_id,
+            payload=payload,
+            expected_revision=if_match,
+            refresh_policy=True,
+        ),
+    )
+    response.headers["ETag"] = result.base_etag
+    return V1ObjectUpdatePreviewOut(
+        preview_contract_version=result.contract_version,
+        object_id=result.object_id,
+        object_kind=result.object_kind,
+        changed=result.changed,
+        base_revision=result.base_revision,
+        base_etag=result.base_etag,
+        expected_result_revision=result.expected_result_revision,
+        expected_result_etag=result.expected_result_etag,
+        diff=[
+            V1ObjectUpdatePreviewDiffEntryOut.model_validate(entry.as_json())
+            for entry in result.diff
+        ],
+        diff_digest=result.diff_digest,
+        diff_truncated=result.diff_truncated,
+        preview_digest=result.preview_digest,
     )
 
 

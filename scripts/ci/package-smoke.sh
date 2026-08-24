@@ -91,4 +91,13 @@ fi
 "$TEMP_DIR/venv/bin/blockwart-knowledge-apply" --print-schema apply-result >/dev/null
 "$TEMP_DIR/venv/bin/blockwart-knowledge-apply" --print-schema backup-receipt >/dev/null
 "$TEMP_DIR/venv/bin/blockwart-knowledge-apply" --print-schema rollback-result >/dev/null
+"$TEMP_DIR/venv/bin/blockwart-source-coverage" --print-schema manifest >/dev/null
+"$TEMP_DIR/venv/bin/blockwart-source-coverage" --print-schema target-evidence >/dev/null
+"$TEMP_DIR/venv/bin/blockwart-source-coverage" --print-schema result >/dev/null
+"$TEMP_DIR/venv/bin/blockwart-release" --print-schema spec >/dev/null
+"$TEMP_DIR/venv/bin/blockwart-release" --print-schema manifest >/dev/null
+"$TEMP_DIR/venv/bin/blockwart-release" --print-schema report >/dev/null
+"$TEMP_DIR/venv/bin/blockwart-release" --print-schema pointer >/dev/null
+"$TEMP_DIR/venv/bin/blockwart-release" --print-schema status >/dev/null
+"$TEMP_DIR/venv/bin/blockwart-release" --print-schema error >/dev/null
 echo "package_smoke=passed"

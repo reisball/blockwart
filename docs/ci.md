@@ -80,14 +80,22 @@ docker build \
 
 The package smoke builds a wheel, installs it into a clean virtual environment, changes to a
 directory outside the repository, starts `blockwart-start`, loads packaged templates and static
-assets, runs the relationship-integrity diagnostic, and exercises all 29
-tools through 36 read/write, Project-workspace, coverage, comment, audit, and grant-management calls to the installed
-`blockwart-mcp` console command. It also runs the read-only service-interface
+assets, runs the relationship-integrity diagnostic, and exercises all 31
+tools through 38 read/write, preview, Project-workspace, coverage, attention, comment,
+audit, and grant-management calls to the installed `blockwart-mcp` console
+command. It also runs the read-only service-interface
 normalization, placement-state, network-classification, and canonical-Project plans from outside
 the source tree, plus the canonical-Runbook classification plan, the write-free synthetic
 Knowledge plan, and the installed reviewed-apply machine schemas. Productive Knowledge apply is
 covered only with synthetic SQLite catalogs in pytest; package smoke never mutates its seeded
 catalog through this workflow.
+The installed-package proof also resolves `blockwart-source-coverage` and validates that its
+manifest, target-evidence, and result schemas can be printed outside the source tree; it does not
+perform a private collection or coverage record.
+It also resolves the installed `blockwart-release` entry point and validates
+that the release specification, manifest, report, pointer, status, and error
+JSON Schemas can be printed outside the source tree. CI never invokes its apply
+mode or touches a host service.
 
 The container smoke proves that an empty catalog fails the Owner invariant, then starts an
 explicitly bootstrapped candidate and a database at the historical Alembic baseline. Ready

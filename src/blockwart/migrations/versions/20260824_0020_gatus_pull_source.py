@@ -1,16 +1,16 @@
 """allow gatus as monitoring provider in CHECK constraints
 
-Revision ID: 20260819_0019
-Revises: 20260818_0018
+Revision ID: 20260824_0020
+Revises: 20260822_0019
 
 The CHECK constraints on ``service_observations.provider`` and
 ``service_check_leases.provider`` are rebuilt to accept ``'gatus'``
 beside ``'builtin_http'``.  This is a constraint widening — no data is
 migrated, no column changes type, and no existing row is altered.
 
-The gatus provider is push-based and never creates lease rows, so only
-the observation table will ever store ``provider='gatus'`` in practice.
-The lease constraint is widened for symmetry and forward safety.
+The gatus provider is a **pull** adapter: the scheduler reads the current
+status data of a registered Gatus source, so it creates lease rows exactly
+like the built-in probe.  Both provider constraints are therefore widened.
 
 SQLite does not support ``ALTER TABLE … DROP CONSTRAINT``; we use
 ``batch_alter_table(recreate="always")`` on that dialect.
@@ -22,8 +22,8 @@ from collections.abc import Sequence
 
 from alembic import op
 
-revision: str = "20260819_0019"
-down_revision: str | Sequence[str] | None = "20260818_0018"
+revision: str = "20260824_0020"
+down_revision: str | Sequence[str] | None = "20260822_0019"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 

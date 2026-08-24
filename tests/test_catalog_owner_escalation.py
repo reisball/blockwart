@@ -538,6 +538,20 @@ def test_non_owner_credential_administration_contract_is_unchanged(
     """Platform-admin service accounts keep the API exemption for ordinary targets."""
     with alembic_session_factory() as session:
         ids = _escalation_fixture(session)
+        with transaction(session):
+            viewer_service = create_service_account(
+                session,
+                login="viewer.svc",
+                display_name="Viewer Service",
+                catalog_role=CatalogRole.CATALOG_VIEWER,
+            )
+            viewer_human = create_human_principal(
+                session,
+                login="viewer.human",
+                display_name="Viewer Human",
+                password=TARGET_PASSWORD,
+                catalog_role=CatalogRole.CATALOG_VIEWER,
+            )
         service_access = _access(session, ids["admin_service_id"])
         human_access = _access(session, ids["admin_human_id"])
 
@@ -574,6 +588,33 @@ def test_non_owner_credential_administration_contract_is_unchanged(
         assert rotated.changed is True
 
         with transaction(session):
+            viewer_issued = issue_managed_service_token(
+                session,
+                service_access,
+                principal_id=viewer_service.id,
+                expected_revision='"rev-1"',
+                name="viewer-runtime",
+                expires_at=None,
+                actor_password=None,
+                channel="api",
+                idempotency_key="escalation-viewer-issue-0001",
+                idempotency_ttl_seconds=TTL_SECONDS,
+            )
+        assert viewer_issued.changed is True
+
+        with transaction(session):
+            viewer_reset = reset_managed_human_password(
+                session,
+                human_access,
+                principal_id=viewer_human.id,
+                expected_revision='"rev-1"',
+                new_password="rotated-viewer-password",
+                actor_password=PASSWORD,
+                channel="ui",
+            )
+        assert viewer_reset.changed is True
+
+        with transaction(session):
             reset = reset_managed_human_password(
                 session,
                 human_access,
@@ -591,8 +632,13 @@ def test_non_owner_credential_administration_contract_is_unchanged(
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.parametrize(
+    "catalog_role",
+    [CatalogRole.CATALOG_OWNER, CatalogRole.CATALOG_VIEWER],
+)
 def test_catalog_role_cannot_be_assigned_to_an_inactive_target(
     alembic_session_factory,
+    catalog_role: CatalogRole,
 ) -> None:
     with alembic_session_factory() as session:
         ids = _escalation_fixture(session)
@@ -611,7 +657,7 @@ def test_catalog_role_cannot_be_assigned_to_an_inactive_target(
                     access,
                     principal_id=ids["plain_service_id"],
                     expected_revision='"rev-1"',
-                    catalog_role=CatalogRole.CATALOG_OWNER,
+                    catalog_role=catalog_role,
                     actor_password=PASSWORD,
                     channel="ui",
                 )
@@ -623,7 +669,7 @@ def test_catalog_role_cannot_be_assigned_to_an_inactive_target(
         assert (
             session.scalars(
                 select(SecurityEvent).where(
-                    SecurityEvent.event_type == "catalog_owner_role_changed"
+                    SecurityEvent.event_type == "catalog_role_changed"
                 )
             ).all()
             == []
@@ -631,18 +677,23 @@ def test_catalog_role_cannot_be_assigned_to_an_inactive_target(
 
 
 @pytest.mark.parametrize("actor", ["admin_human_id", "admin_service_id"])
-def test_preexisting_inactive_catalog_owner_cannot_be_activated_generically(
+@pytest.mark.parametrize(
+    "catalog_role",
+    [CatalogRole.CATALOG_OWNER, CatalogRole.CATALOG_VIEWER],
+)
+def test_preexisting_inactive_catalog_role_cannot_be_activated_generically(
     alembic_session_factory,
     actor: str,
+    catalog_role: CatalogRole,
 ) -> None:
-    """A legacy or raw-written parked owner row fails closed on reactivation."""
+    """A legacy or raw-written parked catalog role fails closed on reactivation."""
     with alembic_session_factory() as session:
         ids = _escalation_fixture(session)
         with transaction(session):
             session.execute(
                 update(Principal)
                 .where(Principal.id == ids["plain_service_id"])
-                .values(active=False, catalog_role=CatalogRole.CATALOG_OWNER.value)
+                .values(active=False, catalog_role=catalog_role.value)
             )
         access = _access(session, ids[actor])
 
