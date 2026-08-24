@@ -59,6 +59,14 @@ class AgentServiceMonitoring(BaseModel):
     It carries no vendor-specific payload, so adding a provider cannot change
     this contract. ``state`` is the value a client may act on; ``observed_state``
     is the last stored result even when it has gone stale.
+
+    ``last_checked_at`` is the instant the observation is evidence **for**, and
+    ``last_received_at`` the instant this deployment acquired it. They are equal
+    for a provider that observes what it acquires, and differ for a pull
+    provider that reads evidence a source produced earlier. Freshness always
+    follows ``last_checked_at``, so re-reading an old snapshot cannot present
+    it as current. A pull provider publishes no ``target``: its source URL is
+    deployment state, not catalog content.
     """
 
     enabled: bool
@@ -74,6 +82,7 @@ class AgentServiceMonitoring(BaseModel):
     latency_ms: int | None = None
     error_code: MonitoringErrorCode | None = None
     last_checked_at: str | None = None
+    last_received_at: str | None = None
     last_success_at: str | None = None
     next_due_at: str | None = None
     effective_health: AssetHealth | None = None

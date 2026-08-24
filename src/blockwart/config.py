@@ -228,6 +228,24 @@ class Settings(BaseSettings):
         le=60,
         description="How often each web process looks for due database leases.",
     )
+    monitoring_gatus_sources: str = Field(
+        default="",
+        max_length=4096,
+        description=(
+            "Comma-separated name=status-url bindings for Gatus pull sources. "
+            "Catalog data may only name one of these identities; it can never "
+            "choose a URL. Empty denies every Gatus check."
+        ),
+    )
+    monitoring_gatus_credential_files: str = Field(
+        default="",
+        max_length=4096,
+        description=(
+            "Comma-separated name=file bindings. The file holds one API token "
+            "for exactly that Gatus source and is read at check time; the "
+            "value is never stored, projected, or logged. Never a token value."
+        ),
+    )
 
     @model_validator(mode="after")
     def validate_monitoring_time_bounds(self) -> "Settings":
@@ -247,6 +265,30 @@ class Settings(BaseSettings):
             )
         except MonitoringPolicyError as exc:
             raise ValueError("monitoring target policy is invalid") from exc
+        return self
+
+    @model_validator(mode="after")
+    def validate_monitoring_pull_sources(self) -> "Settings":
+        """Fail closed at startup on an unusable Gatus source binding.
+
+        A deployment that cannot say exactly which host each source identity
+        resolves to must not start and then guess.
+        """
+
+        from blockwart.domain.monitoring_sources import (
+            MonitoringSourceError,
+            parse_monitoring_pull_sources,
+        )
+
+        try:
+            parse_monitoring_pull_sources(
+                sources=self.monitoring_gatus_sources,
+                credential_files=self.monitoring_gatus_credential_files,
+            )
+        except MonitoringSourceError as exc:
+            # The registry error names the identity and the broken rule only,
+            # never a URL, host, path, or credential.
+            raise ValueError(f"monitoring gatus sources are invalid: {exc}") from exc
         return self
 
 

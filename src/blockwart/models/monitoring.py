@@ -21,7 +21,9 @@ _STATES = "'unknown','healthy','down','check_error'"
 _ERROR_CODES = (
     "'connect_failed','dns_failed','http_client_error','http_server_error',"
     "'invalid_target','policy_denied','probe_failed','redirect_not_supported',"
-    "'response_too_large','timeout','tls_failed'"
+    "'response_too_large','timeout','tls_failed',"
+    "'invalid_observation_time','mapping_ambiguous','mapping_missing',"
+    "'source_unconfigured','source_unreadable'"
 )
 
 
@@ -40,6 +42,12 @@ class ServiceObservation(Base):
       observations;
     - ``provider`` keeps two acquisition sources independent, so a later
       receiver can write beside the built-in probe rather than overwrite it.
+
+    The row stores the evidence instant and the acquisition instant separately.
+    Evidence columns only ever move forward in evidence time, so re-reading an
+    unchanged upstream snapshot cannot refresh a stale result or move
+    ``last_success_at``, while ``last_received_at`` and ``next_due_at`` still
+    advance so cadence stays bounded.
     """
 
     __tablename__ = "service_observations"
@@ -80,6 +88,11 @@ class ServiceObservation(Base):
     latency_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
     error_code: Mapped[str | None] = mapped_column(String(32), nullable=True)
     last_checked_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    # The instant this deployment acquired the evidence, which is the instant
+    # acquisition cadence follows. It equals ``last_checked_at`` for every
+    # adapter that observes what it acquires, and is nullable so rows written
+    # before the pull contract existed stay byte-for-byte unchanged.
+    last_received_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     last_success_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     next_due_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     updated_at: Mapped[datetime] = mapped_column(

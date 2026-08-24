@@ -33,13 +33,20 @@ Current local keys:
 - `BLOCKWART_MONITORING_TOTAL_TIMEOUT_MS` (default `5000`, allowed
   `200..30000`)
 - `BLOCKWART_MONITORING_MAX_RESPONSE_BYTES` (default `65536`, allowed
-  `1024..1048576`; response bodies are not read or stored)
+  `1024..1048576`; the built-in probe reads no body, while pull adapters may
+  parse at most this many bytes and never store them)
 - `BLOCKWART_MONITORING_MAX_CHECKS_PER_RUN` (default `20`, allowed `1..1000`)
 - `BLOCKWART_MONITORING_MAX_CONCURRENT_CHECKS` (default `4`, allowed `1..32`)
 - `BLOCKWART_MONITORING_LEASE_SECONDS` (default `60`, allowed `10..3600` and
   strictly longer than the total probe timeout)
 - `BLOCKWART_MONITORING_JITTER_SECONDS` (default `30`, allowed `0..3600`)
 - `BLOCKWART_MONITORING_POLL_INTERVAL_SECONDS` (default `5`, allowed `1..60`)
+- `BLOCKWART_MONITORING_GATUS_SOURCES` (default empty; comma-separated,
+  bounded `name=https://status.example.invalid/path` runtime bindings; catalog
+  data may name a source but cannot supply its URL)
+- `BLOCKWART_MONITORING_GATUS_CREDENTIAL_FILES` (default empty;
+  comma-separated `name=/absolute/protected/token-file` bindings; each file is
+  scoped to one declared source and its value is read only at acquisition time)
 
 `BLOCKWART_SECRET_REFERENCE` is a reference label only. It must never contain a raw secret value.
 
@@ -53,7 +60,10 @@ fail settings validation and stop startup rather than falling back.
 
 Monitoring configuration is deny-by-default at both levels: the process poller
 must be enabled and the concrete target must fall within the explicit network
-and port allowlists. A service's optional interval overrides only the server
+and port allowlists. Gatus additionally requires an exact runtime source
+binding; a missing, duplicate, malformed, or unmatched binding fails closed.
+Credential values are not settings values and must never be placed in `.env`.
+A service's optional interval overrides only the server
 default; it never changes timeout, concurrency, or target policy. See
 [Service monitoring](service-monitoring.md).
 

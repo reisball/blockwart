@@ -189,6 +189,7 @@ def test_present_malformed_monitoring_configuration_has_one_fail_closed_view(
         "latency_ms": None,
         "error_code": None,
         "last_checked_at": None,
+        "last_received_at": None,
         "last_success_at": None,
         "next_due_at": None,
         "effective_health": (

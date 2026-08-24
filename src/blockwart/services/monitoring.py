@@ -4,9 +4,8 @@ This module owns everything a monitoring provider must not re-implement:
 
 - one bounded read of the authorized observation index per request;
 - the single monitoring projection every surface renders;
-- the ingestion seam ``record_service_observation`` that a later receiver
-  (for example the Gatus webhook tracked in #177) calls without touching the
-  catalog, its revision, or its audit timeline;
+- the ingestion seam ``record_service_observation`` that every adapter calls
+  without touching the catalog, its revision, or its audit timeline;
 - the database-backed lease that makes polling safe with multiple web
   processes.
 
@@ -23,8 +22,9 @@ import logging
 import secrets
 from collections.abc import Mapping, Sequence
 from concurrent.futures import ThreadPoolExecutor
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
+from types import MappingProxyType
 from typing import Any
 
 from sqlalchemy import case, delete, select, update
@@ -39,8 +39,8 @@ from blockwart.domain.monitoring import (
     MonitoringObservation,
     MonitoringRecord,
     monitoring_view,
+    read_gatus_mapping,
     read_monitoring_config,
-    resolve_gatus_source_target,
     resolve_monitoring_target,
     scheduled_next_due,
 )
@@ -49,11 +49,17 @@ from blockwart.domain.monitoring_policy import (
     TargetPolicy,
     parse_target_policy,
 )
+from blockwart.domain.monitoring_sources import (
+    MonitoringPullSource,
+    MonitoringSourceError,
+    parse_monitoring_pull_sources,
+)
 from blockwart.domain.timestamps import format_rfc3339_utc
 from blockwart.models import CatalogObject, ServiceCheckLease, ServiceObservation
 from blockwart.services.monitoring_registry import (
     ProbeLimits,
     ProviderCheckRequest,
+    PullSourceRequest,
     get_provider,
     has_provider,
     polling_providers,
@@ -83,6 +89,16 @@ class MonitoringSettings:
     lease_seconds: int = 60
     jitter_seconds: int = 30
     poll_interval_seconds: int = 5
+    # The status sources this deployment binds, keyed by the identity a service
+    # may name. Empty denies every pull check, which is the fail-closed
+    # default: catalog data can name a source but never create one.
+    gatus_sources: Mapping[str, MonitoringPullSource] = field(
+        default_factory=lambda: MappingProxyType({})
+    )
+
+    @property
+    def known_gatus_sources(self) -> frozenset[str]:
+        return frozenset(self.gatus_sources)
 
     @property
     def limits(self) -> ProbeLimits:
@@ -129,6 +145,10 @@ def monitoring_settings(settings: Settings) -> MonitoringSettings:
         lease_seconds=settings.monitoring_lease_seconds,
         jitter_seconds=settings.monitoring_jitter_seconds,
         poll_interval_seconds=settings.monitoring_poll_interval_seconds,
+        gatus_sources=parse_monitoring_pull_sources(
+            sources=settings.monitoring_gatus_sources,
+            credential_files=settings.monitoring_gatus_credential_files,
+        ),
     )
 
 
@@ -252,6 +272,7 @@ def monitoring_projection(
         now=now,
         default_interval_seconds=resolved.default_interval_seconds,
         jitter_seconds=resolved.jitter_seconds,
+        known_gatus_sources=resolved.known_gatus_sources,
     )
 
 
@@ -293,8 +314,9 @@ def record_service_observation(
     if not config.valid or config.interval_seconds is None:
         return None
     checked_at = _aware(observation.checked_at)
+    received_at = _aware(observation.acquired_at)
     next_due_at = _next_due(
-        checked_at,
+        received_at,
         object_id=object_id,
         object_instance_id=object_instance_id,
         provider=observation.provider,
@@ -313,6 +335,7 @@ def record_service_observation(
         "latency_ms": observation.latency_ms,
         "error_code": observation.error_code,
         "last_checked_at": _naive(checked_at),
+        "last_received_at": _naive(received_at),
         "last_success_at": (
             _naive(checked_at) if observation.state == "healthy" else None
         ),
@@ -323,25 +346,56 @@ def record_service_observation(
     dialect = session.get_bind().dialect.name
     insert = sqlite_insert(table) if dialect == "sqlite" else pg_insert(table)
     excluded = insert.excluded
+    # Evidence and acquisition advance independently.
+    #
+    # Evidence columns move only when this observation is evidence for a later
+    # instant than the stored one, so a delayed, out-of-order, or byte-identical
+    # replayed snapshot cannot refresh a result, change a state, or move last
+    # success. Acquisition columns move whenever this deployment acquired more
+    # recently, so re-reading an old upstream snapshot still reschedules the
+    # next check instead of leaving the service permanently due.
+    newer_evidence = table.c.last_checked_at.is_(None) | (
+        excluded.last_checked_at > table.c.last_checked_at
+    )
+    newer_acquisition = table.c.last_received_at.is_(None) | (
+        excluded.last_received_at > table.c.last_received_at
+    )
     statement = insert.values(**values).on_conflict_do_update(
         index_elements=["object_id", "object_instance_id", "provider"],
         set_={
-            "state": excluded.state,
-            "http_status": excluded.http_status,
-            "latency_ms": excluded.latency_ms,
-            "error_code": excluded.error_code,
-            "last_checked_at": excluded.last_checked_at,
+            "state": case((newer_evidence, excluded.state), else_=table.c.state),
+            "http_status": case(
+                (newer_evidence, excluded.http_status), else_=table.c.http_status
+            ),
+            "latency_ms": case(
+                (newer_evidence, excluded.latency_ms), else_=table.c.latency_ms
+            ),
+            "error_code": case(
+                (newer_evidence, excluded.error_code), else_=table.c.error_code
+            ),
+            "last_checked_at": case(
+                (newer_evidence, excluded.last_checked_at),
+                else_=table.c.last_checked_at,
+            ),
             "last_success_at": case(
-                (excluded.state == "healthy", excluded.last_checked_at),
+                (
+                    newer_evidence & (excluded.state == "healthy"),
+                    excluded.last_checked_at,
+                ),
                 else_=table.c.last_success_at,
             ),
-            "next_due_at": excluded.next_due_at,
-            "updated_at": excluded.updated_at,
+            "last_received_at": case(
+                (newer_acquisition, excluded.last_received_at),
+                else_=table.c.last_received_at,
+            ),
+            "next_due_at": case(
+                (newer_acquisition, excluded.next_due_at), else_=table.c.next_due_at
+            ),
+            "updated_at": case(
+                (newer_evidence | newer_acquisition, excluded.updated_at),
+                else_=table.c.updated_at,
+            ),
         },
-        where=(
-            table.c.last_checked_at.is_(None)
-            | (excluded.last_checked_at > table.c.last_checked_at)
-        ),
     )
     session.execute(statement)
     row = session.scalars(
@@ -427,10 +481,11 @@ def synchronize_check_schedule(
         if row.provider != selected_provider:
             continue
         observation = observations.get((*key, selected_provider))
-        if observation is None or observation.last_checked_at is None:
+        acquired_at = _acquired_at(observation)
+        if acquired_at is None:
             continue
         desired_due = _next_due(
-            _aware(observation.last_checked_at),
+            acquired_at,
             object_id=row.object_id,
             object_instance_id=row.object_instance_id,
             provider=selected_provider,
@@ -449,16 +504,17 @@ def synchronize_check_schedule(
         if (object_id, instance_id) in existing:
             continue
         observation = observations.get((object_id, instance_id, provider))
+        acquired_at = _acquired_at(observation)
         due_at = (
             _next_due(
-                _aware(observation.last_checked_at),
+                acquired_at,
                 object_id=object_id,
                 object_instance_id=instance_id,
                 provider=provider,
                 interval_seconds=interval_seconds,
                 jitter_seconds=resolved.jitter_seconds,
             )
-            if observation is not None and observation.last_checked_at is not None
+            if acquired_at is not None
             else _initial_due(
                 moment,
                 object_id=object_id,
@@ -640,9 +696,10 @@ def run_due_service_checks(
                 ServiceObservation.provider == claim.provider,
             )
         )
-        if current_observation is not None and current_observation.last_checked_at is not None:
+        current_acquired_at = _acquired_at(current_observation)
+        if current_acquired_at is not None:
             current_due = _next_due(
-                _aware(current_observation.last_checked_at),
+                current_acquired_at,
                 object_id=claim.object_id,
                 object_instance_id=claim.object_instance_id,
                 provider=claim.provider,
@@ -660,13 +717,13 @@ def run_due_service_checks(
                     now=moment,
                 )
                 continue
-        if claim.provider == "gatus":
-            resolution = resolve_gatus_source_target(data, object_id=claim.object_id)
-            gatus_mapping = _gatus_mapping_from_data(data)
-        else:
-            resolution = resolve_monitoring_target(data, object_id=claim.object_id)
-            gatus_mapping = None
-        if resolution.target is None:
+        request, unresolved_code = _check_request(
+            data,
+            object_id=claim.object_id,
+            provider=claim.provider,
+            settings=settings,
+        )
+        if request is None:
             record = record_service_observation(
                 session,
                 object_id=claim.object_id,
@@ -675,7 +732,7 @@ def run_due_service_checks(
                     provider=claim.provider,
                     state="check_error",
                     checked_at=moment,
-                    error_code="invalid_target",
+                    error_code=unresolved_code,
                 ),
                 now=moment,
                 settings=settings,
@@ -690,19 +747,7 @@ def run_due_service_checks(
                 )
                 completed += 1
             continue
-        pending_requests.append(
-            (
-                claim,
-                ProviderCheckRequest(
-                    object_id=claim.object_id,
-                    target=resolution.target,
-                    diagnostic=resolution.diagnostic,
-                    limits=settings.limits,
-                    gatus_mapping=gatus_mapping,
-                ),
-                config.interval_seconds,
-            )
-        )
+        pending_requests.append((claim, request, config.interval_seconds))
 
     # Renew immediately before acquisition. If catalog/config processing ever
     # consumed the original lease, skip the expired claim rather than racing a
@@ -728,12 +773,15 @@ def run_due_service_checks(
         requests, observations, strict=True
     ):
         if observation is not None:
+            # Row bookkeeping and lease scheduling both follow the acquisition
+            # instant, never the (possibly much older) upstream observation
+            # instant an old snapshot carries.
             record = record_service_observation(
                 session,
                 object_id=claim.object_id,
                 object_instance_id=claim.object_instance_id,
                 observation=observation,
-                now=observation.checked_at,
+                now=observation.acquired_at,
                 settings=settings,
             )
             if record is not None and record.next_due_at is not None:
@@ -742,7 +790,7 @@ def run_due_service_checks(
                     lease_id=claim.lease_id,
                     owner=lease_owner,
                     next_due_at=record.next_due_at,
-                    now=observation.checked_at,
+                    now=observation.acquired_at,
                 )
                 completed += 1
                 continue
@@ -881,35 +929,86 @@ def _record(row: ServiceObservation) -> MonitoringRecord:
         last_success_at=_aware_or_none(row.last_success_at),
         next_due_at=_aware_or_none(row.next_due_at),
         object_instance_id=row.object_instance_id,
+        last_received_at=_aware_or_none(row.last_received_at),
     )
 
 
-def _gatus_mapping_from_data(data: dict[str, Any]) -> dict[str, str] | None:
-    """Extract the stable Gatus endpoint identity from a service's data.
+def _check_request(
+    data: dict[str, Any],
+    *,
+    object_id: str,
+    provider: str,
+    settings: MonitoringSettings,
+) -> tuple[ProviderCheckRequest | None, str]:
+    """Build one acquisition request, or explain why none can be built.
 
-    Reads ``data.monitoring.gatus`` and returns only the bounded mapping keys
-    (``endpoint``, ``group``, ``source``). Unknown or non-string values are
-    dropped; an absent or malformed document yields ``None``.
+    Provider awareness stops here. A probing provider resolves the monitored
+    service's own target; a pull provider resolves the deployment binding for
+    the source identity the service names. Neither reaches past this function,
+    and an adapter never sees catalog data.
 
     Args:
         data: The service's catalog data document.
+        object_id: The service id.
+        provider: The claimed provider identity.
+        settings: The resolved deployment envelope.
 
     Returns:
-        A mapping with the string keys Gatus needs, or ``None`` when there is
-        no usable Gatus identity.
+        ``(request, "")`` when acquisition may proceed, otherwise
+        ``(None, error_code)`` with the stable code to record. Every
+        unresolved case fails closed with no outbound request.
     """
-    document = data.get("monitoring") if isinstance(data, dict) else None
-    gatus = document.get("gatus") if isinstance(document, dict) else None
-    if not isinstance(gatus, dict):
+
+    if provider == "gatus":
+        resolution = read_gatus_mapping(data, object_id=object_id)
+        if resolution.mapping is None:
+            return None, "invalid_target"
+        source = settings.gatus_sources.get(resolution.mapping.source)
+        if source is None:
+            # The service names a source this deployment does not bind. There
+            # is no default and no fallback: guessing a host would be exactly
+            # the confused-deputy problem the binding exists to prevent.
+            return None, "source_unconfigured"
+        return (
+            ProviderCheckRequest(
+                object_id=object_id,
+                target=None,
+                diagnostic=None,
+                limits=settings.limits,
+                pull_source=PullSourceRequest(
+                    source=source,
+                    group=resolution.mapping.group,
+                    endpoint=resolution.mapping.endpoint,
+                ),
+            ),
+            "",
+        )
+    resolution = resolve_monitoring_target(data, object_id=object_id)
+    if resolution.target is None:
+        return None, "invalid_target"
+    return (
+        ProviderCheckRequest(
+            object_id=object_id,
+            target=resolution.target,
+            diagnostic=resolution.diagnostic,
+            limits=settings.limits,
+        ),
+        "",
+    )
+
+
+def _acquired_at(row: ServiceObservation | None) -> datetime | None:
+    """The instant a stored observation was acquired, for cadence decisions.
+
+    Rows written before the pull contract existed carry only one instant, so
+    the evidence instant is the correct fallback: those adapters observed
+    exactly what they acquired.
+    """
+
+    if row is None:
         return None
-    mapping: dict[str, str] = {}
-    for key in ("endpoint", "group", "source"):
-        value = gatus.get(key)
-        if isinstance(value, str) and value:
-            mapping[key] = value
-    if "endpoint" not in mapping:
-        return None
-    return mapping
+    acquired = row.last_received_at or row.last_checked_at
+    return _aware(acquired) if acquired is not None else None
 
 
 def _object_data(catalog_object: CatalogObject) -> dict[str, Any]:
@@ -1092,11 +1191,13 @@ def monitoring_plan_entry_payload(entry: MonitoringPlanEntry) -> dict[str, Any]:
 def current_monitoring_settings() -> MonitoringSettings:
     """Resolve the deployment envelope from the process environment.
 
-    An unusable allowlist must never fail a catalog read, so a broken policy
-    degrades to the deny-everything default instead of raising here.
+    An unusable allowlist or source binding must never fail a catalog read, so
+    a broken one degrades to the deny-everything default instead of raising
+    here. Startup already rejects both, so this path only covers an environment
+    mutated after the process began.
     """
 
     try:
         return monitoring_settings(get_settings())
-    except MonitoringPolicyError:
+    except (MonitoringPolicyError, MonitoringSourceError):
         return MonitoringSettings()

@@ -1,29 +1,13 @@
-# Gatus Pull Adapter (provider="gatus")
+# Gatus pull adapter (`provider="gatus"`)
 
-The Gatus pull adapter is the **preferred source** of the #177 feature: it
-reads the **current Gatus status data** from the Gatus status API instead of
-waiting for push webhooks. The optional push webhook (see
-[`gatus-webhook.md`](gatus-webhook.md)) is a low-latency signal on top of this
-polling source.
+The Gatus adapter reads current endpoint evidence from a deployment-bound
+Gatus status API. It uses the same provider-neutral observation, freshness,
+maintenance, REST, Agent, MCP, UI, attention, revision, and audit contracts as
+the built-in HTTP provider.
 
-## How It Works
+## Service identity
 
-A service configured with `provider="gatus"` is driven by the built-in
-database-backed scheduler, exactly like `provider="builtin_http"`. On each due
-check the adapter:
-
-1. resolves the Gatus status API URL (`data.monitoring.gatus.source_url`);
-2. validates the resolved address against the deny-by-default outbound policy
-   (the same SSRF controls as the built-in probe);
-3. sends a bounded, authenticated `GET` to the Gatus status API;
-4. finds the endpoint whose `name`/`group` match the service's Gatus mapping;
-5. reads the **latest** result's `success` flag and stores a canonical
-   observation (`healthy` or `down`).
-
-## Configuration
-
-Each service that should pull from Gatus declares its monitoring document with
-a `gatus` sub-document:
+Catalog data contains only a closed, bounded identity:
 
 ```json
 {
@@ -32,49 +16,75 @@ a `gatus` sub-document:
     "provider": "gatus",
     "interval_seconds": 300,
     "gatus": {
-      "source_url": "https://gatus.example.com/api/v1/endpoints/statuses",
-      "endpoint": "api-gateway",
-      "group": "core"
+      "source": "prod",
+      "group": "core",
+      "endpoint": "api-gateway"
     }
   }
 }
 ```
 
-- `source_url` (**required**) is the Gatus **status API** URL. It must be an
-  `http(s)` URL that the outbound allowlist permits. A missing or malformed
-  URL yields the `missing_gatus_source` / `invalid_gatus_source_url`
-  diagnostic and no probe.
-- `endpoint` (**required**) and `group` (optional) identify which Gatus
-  endpoint this service maps to. They must match the `name` and `group` in the
-  Gatus statuses payload.
+`source` is a stable lowercase deployment identity, not a URL. `group` is
+required and may be empty to select an ungrouped Gatus endpoint. `endpoint` is
+the exact Gatus endpoint name. Extra, partial, URL-shaped, credential-shaped,
+or over-bound fields are rejected. The service UI edits and round-trips all
+three fields, including while another provider is selected.
 
-The API token is **not** stored in catalog data. It is read from the process
-environment variable `BLOCKWART_GATUS_TOKEN` and sent as a `Bearer` header.
-Without a token the adapter still attempts an unauthenticated request; Gatus
-endpoints behind the protected API routes will reject it (the adapter reports
-`check_error`).
+## Runtime source registration
 
-## Result Semantics
+An operator binds each source identity to one immutable, validated status URL:
 
-| Gatus latest result `success` | Blockwart observation state |
-|-------------------------------|-----------------------------|
-| `true`                        | `healthy`                   |
-| `false`                       | `down`                      |
-| endpoint not found / malformed payload | `check_error` (`invalid_target`) |
-| Gatus API non-2xx             | `check_error` (`http_client_error` / `http_server_error`) |
-| network / DNS / timeout       | `down` (redacted code)      |
+```dotenv
+BLOCKWART_MONITORING_GATUS_SOURCES=prod=https://gatus.example.invalid/api/v1/endpoints/statuses
+BLOCKWART_MONITORING_GATUS_CREDENTIAL_FILES=prod=/protected/runtime/gatus-prod-token
+```
 
-## Security
+The registry accepts at most eight exact `name=value` bindings. Source names
+must be unique; credential-file names must match a declared source; paths must
+be absolute; and every URL must pass the bounded HTTP(S) admission rule.
+Malformed, duplicate, or cross-source declarations stop startup. A catalog
+service cannot provide or override a URL, and there is no default or fallback
+source.
 
-- The target is resolved and pinned by the domain before any connection; this
-  adapter never scans a URL, port, or path and never follows a redirect.
-- Every resolved address is validated against the deny-by-default allowlist.
-- Connect and total time, response size, and header count are bounded; the
-  JSON body is read once up to a fixed cap and discarded after parsing.
-- The API token never appears in catalog data, logs, or the OpenAPI contract.
+The credential-file setting contains a path, never a credential. Its bounded
+value is read at acquisition time, attached only to that source's request, and
+never stored, projected, logged, placed in an exception, or included in
+OpenAPI. A declared but missing, unreadable, empty, oversized, or invalid
+credential file fails closed without sending an anonymous request. Omit the
+credential-file binding only for a deliberately unauthenticated source.
 
-## Relationship to the #135 Observation Model
+## Selection and time semantics
 
-The pull adapter writes through the same `record_service_observation()` seam as
-the built-in probe and the push webhook, so it inherits freshness, maintenance
-precedence, and the shared read model without duplicating them.
+On each ordinary due check the adapter reads the bound status API and selects
+exactly one entry by `group` plus endpoint `name`. Zero matches are missing;
+multiple matches are ambiguous. Inside that entry it chooses the latest valid
+result by its aware RFC 3339 `timestamp`, independent of list order. Results
+that disagree at the same latest timestamp are ambiguous.
+
+A matched `success=true` maps to `healthy`; `success=false` maps to `down`.
+Only canonical bounded HTTP status and latency values are retained. Upstream
+payload fields never enter a public projection.
+
+The result timestamp is `last_checked_at`: the instant the evidence is about.
+`last_received_at` is the separate server acquisition instant. Re-reading an
+unchanged or older snapshot advances acquisition cadence but cannot replace
+evidence, refresh freshness, change state/latency/status, or move last success.
+This keeps old evidence stale without creating a tight polling loop. Invalid,
+naive, or materially future-skewed timestamps are rejected.
+
+## Failure and network semantics
+
+DNS, connect, TLS, timeout, HTTP, framing, size, parse, and mapping failures are
+source-acquisition `check_error` results. They project effective `unknown` and
+never claim that the monitored service is down. Only a valid matched Gatus
+result can produce `healthy` or `down`.
+
+The deployment allowlist is still deny-by-default. Every DNS answer is policy
+checked, one permitted address is pinned for the socket, and the original host
+remains the HTTP Host and TLS SNI/certificate identity. The client follows no
+redirect, uses no proxy, closes every connection, and bounds DNS, connect,
+total time, response headers, body bytes, endpoint results, and credential
+bytes. Errors are stable redacted codes.
+
+See [Service monitoring](service-monitoring.md) for the shared observation and
+scheduling contract.

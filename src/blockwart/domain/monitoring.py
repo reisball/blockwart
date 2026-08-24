@@ -9,11 +9,10 @@ re-invent:
 - **Target resolution** is a pure function of the service's canonical endpoint
   contract.  It never performs discovery, scanning, or a network call, and it
   reports a stable configuration diagnostic instead of guessing.
-- **Observation** is the canonical, vendor-neutral result of one check.  The
-  built-in HTTP(S) probe is only the first provider; a later receiver such as
-  Gatus writes the same observation shape through the same ingestion seam and
-  therefore inherits catalog, UI, REST, Agent, MCP, freshness, and maintenance
-  semantics without duplicating them.
+- **Observation** is the canonical, vendor-neutral result of one check.  Both
+  the built-in HTTP(S) probe and the Gatus pull adapter write the same shape
+  through the same ingestion seam and therefore share catalog, UI, REST,
+  Agent, MCP, freshness, and maintenance semantics.
 
 Nothing in this module performs I/O.  Acquisition lives behind the narrow
 adapter boundary in ``blockwart.services.monitoring_registry``.
@@ -21,6 +20,7 @@ adapter boundary in ``blockwart.services.monitoring_registry``.
 
 from __future__ import annotations
 
+import re
 from collections.abc import Mapping
 from copy import deepcopy
 from dataclasses import dataclass
@@ -47,24 +47,31 @@ MonitoringDiagnostic = Literal[
     "invalid_endpoints",
     "invalid_health_url",
     "invalid_monitoring_config",
+    "missing_gatus_source",
     "no_http_endpoint",
+    "unknown_gatus_source",
 ]
 MonitoringErrorCode = Literal[
     "connect_failed",
     "dns_failed",
     "http_client_error",
     "http_server_error",
+    "invalid_observation_time",
     "invalid_target",
+    "mapping_ambiguous",
+    "mapping_missing",
     "policy_denied",
     "probe_failed",
     "redirect_not_supported",
     "response_too_large",
+    "source_unconfigured",
+    "source_unreadable",
     "timeout",
     "tls_failed",
 ]
 
 # The provider identity is explicit and closed.  A later provider (for example
-# the Gatus receiver tracked in #177) adds exactly one value here plus one
+# another adapter adds exactly one value here plus one
 # adapter registration; no read model, freshness rule, or maintenance rule
 # changes with it.
 MONITORING_PROVIDER_VALUES: tuple[str, ...] = ("builtin_http", "gatus")
@@ -85,7 +92,36 @@ MONITORING_FRESHNESS_VALUES: tuple[str, ...] = ("pending", "fresh", "stale")
 DEFAULT_MONITORING_INTERVAL_SECONDS = 300
 MIN_MONITORING_INTERVAL_SECONDS = 60
 MAX_MONITORING_INTERVAL_SECONDS = 86400
+
+# A pull adapter trusts an upstream observation instant, so it must bound how
+# far ahead of this server that instant may be. Anything beyond this window is
+# a broken or hostile clock rather than evidence, and is rejected outright.
+MAX_UPSTREAM_FUTURE_SKEW_SECONDS = 120
 MONITORING_DOCUMENT_KEYS = frozenset({"enabled", "provider", "interval_seconds", "gatus"})
+
+# The Gatus sub-document is closed and complete: all three identity fields are
+# required together, so a partial document can never silently match a different
+# Gatus entry. ``group`` may be the empty string for Gatus's ungrouped
+# endpoints, which keeps "ungrouped" an explicit choice rather than an omission.
+GATUS_DOCUMENT_KEYS = frozenset({"source", "group", "endpoint"})
+MAX_GATUS_SOURCE_NAME_LENGTH = 32
+MAX_GATUS_GROUP_LENGTH = 128
+MAX_GATUS_ENDPOINT_LENGTH = 128
+_GATUS_SOURCE_NAME = re.compile(r"^[a-z0-9][a-z0-9._-]*$")
+
+
+def valid_gatus_source_name(value: str) -> bool:
+    """Whether ``value`` is a well-formed Gatus source identity.
+
+    The identity is deliberately narrow — lowercase, bounded, and free of any
+    URL syntax — so a source name can never smuggle a host, a port, or a path
+    into the runtime binding.
+    """
+
+    return (
+        1 <= len(value) <= MAX_GATUS_SOURCE_NAME_LENGTH
+        and _GATUS_SOURCE_NAME.match(value) is not None
+    )
 
 # Stable, redacted configuration diagnostics.  They describe the catalog record
 # a reader can already see; they never contain a resolver, socket, TLS, or
@@ -98,8 +134,11 @@ MONITORING_DIAGNOSTIC_VALUES: tuple[str, ...] = (
     "invalid_health_url",
     "invalid_monitoring_config",
     "no_http_endpoint",
+    # Gatus pull configuration. They describe the catalog record and the
+    # deployment binding a reader may already see; they never name the bound
+    # status URL, its host, or any credential.
     "missing_gatus_source",
-    "invalid_gatus_source_url",
+    "unknown_gatus_source",
 )
 MONITORING_DIAGNOSTICS = frozenset(MONITORING_DIAGNOSTIC_VALUES)
 
@@ -116,6 +155,15 @@ MONITORING_ERROR_CODE_VALUES: tuple[str, ...] = (
     "response_too_large",
     "timeout",
     "tls_failed",
+    # Pull-source acquisition. A pull adapter reads a third-party status
+    # source, so it can fail in ways the built-in probe cannot. None of these
+    # is a claim that the monitored service is down: they all say that this
+    # deployment could not obtain usable evidence about it.
+    "invalid_observation_time",
+    "mapping_ambiguous",
+    "mapping_missing",
+    "source_unconfigured",
+    "source_unreadable",
 )
 MONITORING_ERROR_CODES = frozenset(MONITORING_ERROR_CODE_VALUES)
 
@@ -163,8 +211,43 @@ class MonitoringTarget:
 
 
 @dataclass(frozen=True, slots=True)
+class ParsedHttpUrl:
+    """One bounded, admission-checked HTTP(S) URL split into its socket parts."""
+
+    url: str
+    scheme: str
+    host: str
+    port: int
+    path: str
+
+
+@dataclass(frozen=True, slots=True)
 class MonitoringTargetResolution:
     target: MonitoringTarget | None
+    diagnostic: MonitoringDiagnostic | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class GatusMapping:
+    """The stable Gatus identity one service declares in catalog data.
+
+    It is deliberately an *identity*, never a location: ``source`` names a
+    deployment-bound status source, and ``group``/``endpoint`` name one entry
+    inside it. No URL, host, port, or credential is expressible here, so
+    catalog data can never choose which host receives a credential.
+
+    ``group`` may be the empty string, which selects Gatus's ungrouped
+    endpoints explicitly rather than by omission.
+    """
+
+    source: str
+    group: str
+    endpoint: str
+
+
+@dataclass(frozen=True, slots=True)
+class GatusMappingResolution:
+    mapping: GatusMapping | None
     diagnostic: MonitoringDiagnostic | None = None
 
 
@@ -175,6 +258,20 @@ class MonitoringObservation:
     Every provider produces exactly this shape.  ``provider`` is the explicit
     identity of the adapter that acquired it, so two providers can observe the
     same service without overwriting each other.
+
+    Two instants are distinguished on purpose:
+
+    - ``checked_at`` is the instant this observation is **evidence for**. A
+      probing adapter checks the service itself, so it is the probe instant.
+      A pull adapter reads evidence a third-party source produced earlier, so
+      it is that upstream observation instant — never the poll instant. This
+      is the value freshness is computed from, so re-reading an old upstream
+      snapshot can never present it as a current claim.
+    - ``received_at`` is the instant **this deployment acquired** the evidence.
+      It only ever drives acquisition cadence, so an old upstream snapshot
+      cannot make a service permanently due and produce a tight polling loop.
+      It defaults to ``checked_at``, which is exactly right for an adapter that
+      observes and acquires in the same step.
     """
 
     provider: str
@@ -183,6 +280,13 @@ class MonitoringObservation:
     http_status: int | None = None
     latency_ms: int | None = None
     error_code: MonitoringErrorCode | None = None
+    received_at: datetime | None = None
+
+    @property
+    def acquired_at(self) -> datetime:
+        """The acquisition instant, defaulting to the observation instant."""
+
+        return self.received_at if self.received_at is not None else self.checked_at
 
     def __post_init__(self) -> None:
         if self.provider not in MONITORING_PROVIDERS:
@@ -203,7 +307,13 @@ class MonitoringObservation:
 
 @dataclass(frozen=True, slots=True)
 class MonitoringRecord:
-    """The persisted observation state of one service/provider pair."""
+    """The persisted observation state of one service/provider pair.
+
+    ``last_checked_at`` is the stored evidence instant and ``last_received_at``
+    the stored acquisition instant; they are equal for every adapter that
+    observes what it acquires. ``last_received_at`` is nullable because rows
+    written before the pull contract existed only ever carried one instant.
+    """
 
     provider: str
     state: MonitoringState
@@ -214,6 +324,13 @@ class MonitoringRecord:
     last_success_at: datetime | None
     next_due_at: datetime | None
     object_instance_id: str | None = None
+    last_received_at: datetime | None = None
+
+    @property
+    def acquired_at(self) -> datetime | None:
+        """The acquisition instant, falling back to the evidence instant."""
+
+        return self.last_received_at or self.last_checked_at
 
 
 def read_monitoring_config(
@@ -275,6 +392,12 @@ def normalize_service_monitoring(data: Mapping[str, Any]) -> dict[str, Any]:
     provider = document.get("provider")
     if isinstance(provider, str):
         document["provider"] = provider.strip()
+    gatus = document.get("gatus")
+    if isinstance(gatus, dict):
+        for key in ("source", "group", "endpoint"):
+            value = gatus.get(key)
+            if isinstance(value, str):
+                gatus[key] = value.strip()
     return normalized
 
 
@@ -293,6 +416,23 @@ def service_monitoring_violations(
                 "is required when data.monitoring is present",
             ),
         )
+    gatus = document.get("gatus")
+    if document.get("provider") == "gatus" and not isinstance(gatus, Mapping):
+        return (
+            (
+                "data.monitoring.gatus",
+                "is required when data.monitoring.provider is gatus",
+            ),
+        )
+    if isinstance(gatus, Mapping):
+        for key in sorted(GATUS_DOCUMENT_KEYS):
+            if key not in gatus:
+                return (
+                    (
+                        f"data.monitoring.gatus.{key}",
+                        "is required when data.monitoring.gatus is present",
+                    ),
+                )
     return ()
 
 
@@ -387,41 +527,52 @@ def resolve_monitoring_target(
 
 
 
-def resolve_gatus_source_target(
+def read_gatus_mapping(
     data: Mapping[str, Any],
     *,
     object_id: str = "<service>",
-) -> MonitoringTargetResolution:
-    """Resolve the Gatus status-source URL into exactly one bounded target.
+) -> GatusMappingResolution:
+    """Read the Gatus identity one service declares, or a stable diagnostic.
 
-    This is the Gatus pull counterpart to ``resolve_monitoring_target``. The
-    target is the **Gatus API** URL that serves endpoint status, not the
-    monitored service itself. It comes from ``data.monitoring.gatus.source_url``
-    and is validated with the same SSRF controls as ``health_url`` (http/https,
-    plain host, no userinfo or fragment).
-
-    A missing or malformed source URL yields a stable diagnostic; resolution
-    never performs DNS, opens a socket, or probes the API.
+    This is the Gatus counterpart to ``resolve_monitoring_target`` and it is
+    deliberately *not* a target resolution: catalog data names a source, a
+    group, and an endpoint, and the deployment — not the catalog — decides
+    which status URL and which credential that source identity binds to.
 
     Args:
         data: The service's catalog data document.
-        object_id: The service id, used only for diagnostics.
+        object_id: The service id, accepted for signature symmetry with
+            ``resolve_monitoring_target``; it never appears in a diagnostic.
 
     Returns:
-        A resolution with the Gatus API target, or a stable diagnostic when the
-        source URL is missing or unusable.
+        The complete bounded identity, or ``missing_gatus_source`` when the
+        document is absent, malformed, or incomplete. Any incomplete identity
+        fails closed rather than matching a Gatus entry by omission.
     """
+
+    del object_id
     document = data.get("monitoring") if isinstance(data, Mapping) else None
     gatus = document.get("gatus") if isinstance(document, Mapping) else None
     if not isinstance(gatus, Mapping):
-        return MonitoringTargetResolution(None, "missing_gatus_source")
-    source_url = gatus.get("source_url")
-    if not isinstance(source_url, str) or not source_url.strip():
-        return MonitoringTargetResolution(None, "missing_gatus_source")
-    target = _parse_health_url(source_url, source="gatus")
-    if target is None:
-        return MonitoringTargetResolution(None, "invalid_gatus_source_url")
-    return MonitoringTargetResolution(target)
+        return GatusMappingResolution(None, "missing_gatus_source")
+    if set(gatus) != GATUS_DOCUMENT_KEYS:
+        return GatusMappingResolution(None, "missing_gatus_source")
+    source = gatus.get("source")
+    group = gatus.get("group")
+    endpoint = gatus.get("endpoint")
+    if not isinstance(source, str) or not isinstance(group, str):
+        return GatusMappingResolution(None, "missing_gatus_source")
+    if not isinstance(endpoint, str):
+        return GatusMappingResolution(None, "missing_gatus_source")
+    source = source.strip()
+    endpoint = endpoint.strip()
+    if not valid_gatus_source_name(source) or not endpoint:
+        return GatusMappingResolution(None, "missing_gatus_source")
+    if len(endpoint) > MAX_GATUS_ENDPOINT_LENGTH or len(group) > MAX_GATUS_GROUP_LENGTH:
+        return GatusMappingResolution(None, "missing_gatus_source")
+    return GatusMappingResolution(
+        GatusMapping(source=source, group=group.strip(), endpoint=endpoint)
+    )
 
 
 def freshness_for(
@@ -429,12 +580,21 @@ def freshness_for(
     *,
     interval_seconds: int,
     now: datetime,
+    expires_at: datetime | None = None,
 ) -> MonitoringFreshness:
-    """Classify how current a stored observation is."""
+    """Classify how current a stored observation is.
+
+    Freshness is a statement about the **evidence**, never about how recently
+    this deployment ran a check. ``expires_at`` names the instant the evidence
+    stops being current; callers that separate acquisition cadence from
+    evidence age pass it explicitly. Without it the stored due time — which
+    equals the evidence expiry for every adapter that observes what it
+    acquires — is used.
+    """
 
     if record is None or record.last_checked_at is None:
         return "pending"
-    due = record.next_due_at
+    due = expires_at or record.next_due_at
     if due is None:
         due = record.last_checked_at + timedelta(seconds=interval_seconds)
     if _aware(now) > _aware(due):
@@ -528,12 +688,18 @@ def monitoring_view(
     now: datetime,
     default_interval_seconds: int = DEFAULT_MONITORING_INTERVAL_SECONDS,
     jitter_seconds: int = 0,
+    known_gatus_sources: frozenset[str] = frozenset(),
 ) -> dict[str, Any]:
     """Build the one authorized monitoring projection every surface shares.
 
     The result contains only provider-neutral fields.  A vendor-specific
     payload never reaches this projection, so adding a provider cannot change
     the published read contract.
+
+    ``known_gatus_sources`` names the status sources this deployment binds. It
+    is used only to report the ``unknown_gatus_source`` configuration
+    diagnostic; the bound URL, its host, and its credential are deployment
+    state and never enter the projection.
     """
 
     config = read_monitoring_config(
@@ -555,6 +721,7 @@ def monitoring_view(
             "latency_ms": None,
             "error_code": None,
             "last_checked_at": None,
+            "last_received_at": None,
             "last_success_at": None,
             "next_due_at": None,
             "effective_health": effective_health(
@@ -565,10 +732,24 @@ def monitoring_view(
         }
     assert config.provider is not None
     assert config.interval_seconds is not None
-    resolution = resolve_monitoring_target(data, object_id=object_id)
+    if config.provider == "gatus":
+        # A pull provider observes through a deployment-bound status source.
+        # Publishing that source's URL would expose a private instance
+        # endpoint to every reader of the service, so the projection carries
+        # the configuration diagnostic and no target at all.
+        target = None
+        diagnostic = _gatus_diagnostic(data, known_gatus_sources)
+    else:
+        resolution = resolve_monitoring_target(data, object_id=object_id)
+        target = resolution.target.as_dict() if resolution.target else None
+        diagnostic = resolution.diagnostic
     matching = record if record is not None and record.provider == config.provider else None
+    evidence_expires_at: datetime | None = None
     if matching is not None and matching.last_checked_at is not None:
-        effective_due = scheduled_next_due(
+        # Evidence expiry follows the instant the observation is evidence for,
+        # so an old upstream snapshot goes stale on schedule no matter how
+        # often this deployment re-reads it.
+        evidence_expires_at = scheduled_next_due(
             matching.last_checked_at,
             object_id=object_id,
             object_instance_id=matching.object_instance_id,
@@ -576,6 +757,11 @@ def monitoring_view(
             interval_seconds=config.interval_seconds,
             jitter_seconds=jitter_seconds,
         )
+        # The published due time is the acquisition schedule, which follows the
+        # instant this deployment last acquired evidence. The two coincide for
+        # every adapter that observes what it acquires.
+        acquired_at = matching.acquired_at
+        assert acquired_at is not None
         matching = MonitoringRecord(
             provider=matching.provider,
             state=matching.state,
@@ -584,13 +770,22 @@ def monitoring_view(
             error_code=matching.error_code,
             last_checked_at=matching.last_checked_at,
             last_success_at=matching.last_success_at,
-            next_due_at=effective_due,
+            next_due_at=scheduled_next_due(
+                acquired_at,
+                object_id=object_id,
+                object_instance_id=matching.object_instance_id,
+                provider=config.provider,
+                interval_seconds=config.interval_seconds,
+                jitter_seconds=jitter_seconds,
+            ),
             object_instance_id=matching.object_instance_id,
+            last_received_at=matching.last_received_at,
         )
     freshness = freshness_for(
         matching,
         interval_seconds=config.interval_seconds,
         now=now,
+        expires_at=evidence_expires_at,
     )
     state = effective_state(matching, freshness)
     return {
@@ -598,8 +793,8 @@ def monitoring_view(
         "provider": config.provider,
         "interval_seconds": config.interval_seconds,
         "interval_overridden": config.interval_overridden,
-        "target": resolution.target.as_dict() if resolution.target else None,
-        "diagnostic": resolution.diagnostic,
+        "target": target,
+        "diagnostic": diagnostic,
         "state": state,
         "observed_state": matching.state if matching is not None else "unknown",
         "freshness": freshness,
@@ -608,6 +803,9 @@ def monitoring_view(
         "error_code": matching.error_code if matching is not None else None,
         "last_checked_at": format_rfc3339_utc(
             matching.last_checked_at if matching is not None else None
+        ),
+        "last_received_at": format_rfc3339_utc(
+            matching.acquired_at if matching is not None else None
         ),
         "last_success_at": format_rfc3339_utc(
             matching.last_success_at if matching is not None else None
@@ -621,6 +819,18 @@ def monitoring_view(
             state=state,
         ),
     }
+
+
+def _gatus_diagnostic(
+    data: Mapping[str, Any],
+    known_gatus_sources: frozenset[str],
+) -> MonitoringDiagnostic | None:
+    resolution = read_gatus_mapping(data)
+    if resolution.mapping is None:
+        return resolution.diagnostic
+    if resolution.mapping.source not in known_gatus_sources:
+        return "unknown_gatus_source"
+    return None
 
 
 def service_monitoring_contract_projection() -> dict[str, Any]:
@@ -647,6 +857,14 @@ def service_monitoring_contract_projection() -> dict[str, Any]:
             "requires_single_complete_http_endpoint": True,
             "discovery_or_scanning": False,
         },
+        "observation_time": {
+            "observed_at_field": "last_checked_at",
+            "received_at_field": "last_received_at",
+            "freshness_follows": "last_checked_at",
+            "acquisition_cadence_follows": "last_received_at",
+            "upstream_observation_time_preserved": True,
+            "max_future_skew_seconds": MAX_UPSTREAM_FUTURE_SKEW_SECONDS,
+        },
         "probe": {
             "methods": ["GET"],
             "schemes": sorted(_HTTP_SCHEMES),
@@ -654,6 +872,16 @@ def service_monitoring_contract_projection() -> dict[str, Any]:
             "redirects_followed": False,
             "response_body_stored": False,
             "allowlist": "deny_by_default",
+        },
+        "pull_sources": {
+            "gatus": {
+                "identity_path": "data.monitoring.gatus",
+                "identity_fields": sorted(GATUS_DOCUMENT_KEYS),
+                "source_url_in_catalog_data": False,
+                "credential_in_catalog_data": False,
+                "credential_binding": "deployment_source_scoped_file",
+                "source_url_published": False,
+            }
         },
         "result_semantics": {
             "2xx": "healthy",
@@ -694,6 +922,8 @@ def _valid_monitoring_document(document: Mapping[str, Any]) -> bool:
     provider = document.get("provider", DEFAULT_MONITORING_PROVIDER)
     if not isinstance(provider, str) or provider not in MONITORING_PROVIDERS:
         return False
+    if "gatus" in document and not _valid_gatus_document(document["gatus"]):
+        return False
     if "interval_seconds" not in document:
         return True
     interval = document.get("interval_seconds")
@@ -703,6 +933,31 @@ def _valid_monitoring_document(document: Mapping[str, Any]) -> bool:
         and MIN_MONITORING_INTERVAL_SECONDS
         <= interval
         <= MAX_MONITORING_INTERVAL_SECONDS
+    )
+
+
+def _valid_gatus_document(value: Any) -> bool:
+    """Whether a stored Gatus sub-document is complete and in bounds.
+
+    A hand-edited or legacy row with a malformed sub-document is an explicit
+    invalid configuration rather than a partially usable one, so it can never
+    become probe work.
+    """
+
+    if not isinstance(value, Mapping) or set(value) != GATUS_DOCUMENT_KEYS:
+        return False
+    source = value.get("source")
+    group = value.get("group")
+    endpoint = value.get("endpoint")
+    if not isinstance(source, str) or not isinstance(group, str):
+        return False
+    if not isinstance(endpoint, str):
+        return False
+    return (
+        valid_gatus_source_name(source.strip())
+        and bool(endpoint.strip())
+        and len(endpoint) <= MAX_GATUS_ENDPOINT_LENGTH
+        and len(group) <= MAX_GATUS_GROUP_LENGTH
     )
 
 
@@ -729,11 +984,20 @@ def _endpoint_origin(endpoint: Mapping[str, Any]) -> tuple[str, str, int] | None
     return scheme, canonical_host, port
 
 
-def _parse_health_url(
-    value: str,
-    *,
-    source: MonitoringTargetSource = "endpoint_health_url",
-) -> MonitoringTarget | None:
+def parse_bounded_http_url(value: str) -> ParsedHttpUrl | None:
+    """Parse one bounded HTTP(S) URL, or return ``None`` when it is unusable.
+
+    This is the single URL admission rule Blockwart applies before any outbound
+    monitoring connection. It rejects a non-HTTP scheme, userinfo, a fragment,
+    a control character, an over-long value, an embedded port in the host, and
+    any host that is not a canonical DNS name or IP literal. It never performs
+    DNS, opens a socket, or contacts the URL.
+
+    Both the endpoint ``health_url`` contract and the deployment-bound Gatus
+    status sources use it, so a catalog-declared URL and an operator-declared
+    URL are admitted under exactly the same rule.
+    """
+
     if len(value) > 512 or any(ord(character) < 32 or ord(character) == 127 for character in value):
         return None
     try:
@@ -764,13 +1028,26 @@ def _parse_health_url(
         return None
     encoded_query = quote(parsed.query, safe="%:@!$&'()*+,;=/?-._~")
     query = f"?{encoded_query}" if encoded_query else ""
-    return MonitoringTarget(
+    return ParsedHttpUrl(
         url=f"{scheme}://{_authority(host, port, scheme)}{path}{query}",
         scheme=scheme,
         host=host,
         port=port,
         path=f"{path}{query}",
-        source=source,
+    )
+
+
+def _parse_health_url(value: str) -> MonitoringTarget | None:
+    parsed = parse_bounded_http_url(value)
+    if parsed is None:
+        return None
+    return MonitoringTarget(
+        url=parsed.url,
+        scheme=parsed.scheme,
+        host=parsed.host,
+        port=parsed.port,
+        path=parsed.path,
+        source="endpoint_health_url",
         endpoint_id="",
     )
 

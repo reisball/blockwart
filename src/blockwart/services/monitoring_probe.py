@@ -397,8 +397,24 @@ def _request_status_and_body(
         )
         if declared is not None and declared.isdigit() and int(declared) > max_response_bytes:
             raise _ProbeFailure("check_error", "response_too_large")
+        encoding = next(
+            (value for name, value in headers if name.casefold() == "content-encoding"),
+            None,
+        )
+        if encoding is not None and encoding.strip().casefold() not in {"", "identity"}:
+            # No Accept-Encoding is offered, so a compressed body is a server
+            # this client cannot read. Fail closed instead of handing an
+            # undecodable payload to a parser.
+            raise _ProbeFailure("check_error", "probe_failed")
+        chunked = any(
+            name.casefold() == "transfer-encoding"
+            and "chunked" in value.casefold()
+            for name, value in headers
+        )
         try:
             body = _read_bounded_body(sock, max_response_bytes, deadline)
+            if chunked:
+                body = _decode_chunked_body(body)
         except _ProbeFailure:
             raise
         except TimeoutError as exc:
@@ -416,22 +432,18 @@ def _read_bounded_body(
     max_bytes: int,
     deadline: float,
 ) -> bytes:
-    """Read a response body up to ``max_bytes`` (plus a sentinel byte).
+    """Read the raw response body up to ``max_bytes``.
 
-    The connection is ``Connection: close``, so reading until EOF is correct
-    for both ``Content-Length`` and chunked responses; a transfer chunked body
-    is parsed as JSON downstream, and a framing mismatch fails closed there.
+    The request sends ``Connection: close``, so reading until EOF returns the
+    complete body for both ``Content-Length`` and chunked framing. The total
+    deadline and the byte ceiling bound the work; nothing is logged or kept
+    beyond the returned bytes.
     """
     chunks: list[bytes] = []
     total = 0
     while True:
         sock.settimeout(_remaining(deadline))
-        try:
-            chunk = sock.recv(4096)
-        except TimeoutError:
-            raise
-        except OSError:
-            raise
+        chunk = sock.recv(4096)
         if not chunk:
             break
         total += len(chunk)
@@ -439,6 +451,37 @@ def _read_bounded_body(
             raise _ProbeFailure("check_error", "response_too_large")
         chunks.append(chunk)
     return b"".join(chunks)
+
+
+def _decode_chunked_body(raw: bytes) -> bytes:
+    """Strip ``Transfer-Encoding: chunked`` framing from an already-bounded body.
+
+    Decoding after the bounded read keeps the socket loop trivial and cannot
+    grow the payload: the decoded body is always smaller than ``raw``, which
+    the caller already capped. Any framing the sender did not terminate
+    correctly fails closed rather than yielding a truncated document.
+    """
+    decoded = bytearray()
+    position = 0
+    while True:
+        terminator = raw.find(b"\r\n", position)
+        if terminator < 0:
+            raise _ProbeFailure("check_error", "probe_failed")
+        # A chunk extension after ';' is legal and carries no body bytes.
+        size_text = raw[position:terminator].split(b";", 1)[0].strip()
+        try:
+            size = int(size_text, 16)
+        except ValueError as exc:
+            raise _ProbeFailure("check_error", "probe_failed") from exc
+        if size < 0:
+            raise _ProbeFailure("check_error", "probe_failed")
+        position = terminator + 2
+        if size == 0:
+            return bytes(decoded)
+        if position + size > len(raw):
+            raise _ProbeFailure("check_error", "probe_failed")
+        decoded.extend(raw[position : position + size])
+        position += size + 2
 
 
 def _classify(status: int) -> tuple[str, str | None]:

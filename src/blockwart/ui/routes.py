@@ -1329,6 +1329,7 @@ def _detail_template_context(
             and isinstance(monitoring["interval_seconds"], int)
             else ""
         ),
+        **_gatus_form_values(monitoring_document),
     }
     service_component_names = {
         str(component.get("id")): str(component.get("name") or component.get("id"))
@@ -3232,6 +3233,10 @@ def update_service_monitoring_from_ui(
     monitoring_provider: Annotated[str, Form(max_length=32)] = "builtin_http",
     monitoring_interval_overridden: Annotated[bool, Form()] = False,
     monitoring_interval_seconds: Annotated[str, Form(max_length=5)] = "",
+    monitoring_gatus_submitted: Annotated[bool, Form()] = False,
+    monitoring_gatus_source: Annotated[str, Form(max_length=64)] = "",
+    monitoring_gatus_group: Annotated[str, Form(max_length=256)] = "",
+    monitoring_gatus_endpoint: Annotated[str, Form(max_length=256)] = "",
     if_match: Annotated[str, Form()] = "",
 ):
     """Write monitoring through the ordinary service CAS/audit boundary."""
@@ -3264,6 +3269,15 @@ def update_service_monitoring_from_ui(
         if monitoring_interval_overridden:
             document["interval_seconds"] = int(monitoring_interval_seconds)
         data = _editable_data_copy(existing_object.data)
+        gatus = _submitted_gatus_document(
+            data.get("monitoring"),
+            submitted=monitoring_gatus_submitted,
+            source=monitoring_gatus_source,
+            group=monitoring_gatus_group,
+            endpoint=monitoring_gatus_endpoint,
+        )
+        if gatus is not None:
+            document["gatus"] = gatus
         data["monitoring"] = document
         _reject_secret_shaped_form_data(data)
         payload = CatalogObjectIn(
@@ -5070,6 +5084,65 @@ def _access_methods(
 
 def _editable_data_copy(data: Mapping[str, Any]) -> dict[str, Any]:
     return json.loads(json.dumps(data))
+
+
+def _submitted_gatus_document(
+    stored: Any,
+    *,
+    submitted: bool,
+    source: str,
+    group: str,
+    endpoint: str,
+) -> Any | None:
+    """Decide the Gatus identity one monitoring save should store.
+
+    The whole monitoring document is rewritten on every save, so a form that
+    did not carry the Gatus fields would silently destroy the identity. The
+    hidden ``monitoring_gatus_submitted`` marker makes the difference explicit:
+
+    - the marker is absent — this save did not offer the Gatus section at all,
+      so the stored identity is carried through byte-for-byte;
+    - the marker is present with a source or an endpoint — the submitted
+      identity replaces the stored one;
+    - the marker is present and every field is blank — the operator cleared the
+      identity on purpose, so it is removed.
+
+    A partially filled submission is passed through unchanged, so schema
+    validation rejects it with an exact field path instead of this form
+    guessing a completion.
+    """
+
+    if not submitted:
+        existing = stored.get("gatus") if isinstance(stored, Mapping) else None
+        return existing if existing is not None else None
+    values = {
+        "source": source.strip(),
+        "group": group.strip(),
+        "endpoint": endpoint.strip(),
+    }
+    if not values["source"] and not values["endpoint"] and not values["group"]:
+        return None
+    return values
+
+
+def _gatus_form_values(document: Any) -> dict[str, str]:
+    """Read the stored Gatus identity back into editable form values.
+
+    Reading the stored document directly — rather than the projection — is what
+    makes the form round-trip: an identity that names a source this deployment
+    does not bind is still shown and still submittable, so a reader cannot
+    destroy it by saving an unrelated monitoring change.
+    """
+
+    gatus = document.get("gatus") if isinstance(document, Mapping) else None
+    values = {"gatus_source": "", "gatus_group": "", "gatus_endpoint": ""}
+    if not isinstance(gatus, Mapping):
+        return values
+    for key in ("source", "group", "endpoint"):
+        value = gatus.get(key)
+        if isinstance(value, str):
+            values[f"gatus_{key}"] = value
+    return values
 
 
 def _endpoint_edit_rows(endpoints: list[Mapping[str, Any]]) -> list[dict[str, Any]]:
