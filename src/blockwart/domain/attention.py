@@ -45,6 +45,7 @@ from blockwart.domain.source_coverage import COVERAGE_STATES
 AttentionCategory = Literal[
     "record_integrity",
     "monitoring",
+    "release",
     "lifecycle",
     "endpoint",
     "placement",
@@ -86,6 +87,7 @@ AttentionReason = Literal[
     "monitoring_config_invalid",
     "monitoring_observation_stale",
     "monitoring_never_observed",
+    "release_update_available",
     "lifecycle_health_down",
     "lifecycle_health_degraded",
     "lifecycle_health_unknown",
@@ -189,6 +191,13 @@ ATTENTION_REASON_SPECS: tuple[AttentionReasonSpec, ...] = (
         "info",
         "unknown",
         "Monitoring is enabled but no observation has been recorded yet.",
+    ),
+    _spec(
+        "release_update_available",
+        "release",
+        "warning",
+        "current",
+        "A newer stable GitHub full release is proven against the documented running version.",
     ),
     _spec(
         "lifecycle_health_down",
@@ -478,6 +487,7 @@ class AttentionObjectInput:
     provenance_stale_after: str | None
     data: Mapping[str, Any]
     monitoring: Mapping[str, Any] | None = None
+    release_monitoring: Mapping[str, Any] | None = None
     has_suitable_runbook: bool = False
 
 
@@ -545,10 +555,7 @@ def build_attention_derivation(
         )
         bucket = collected[spec.category]
         existing = bucket.get(target.ref)
-        if (
-            existing is not None
-            and _REASON_RANK[existing.reason_code] <= _REASON_RANK[reason_code]
-        ):
+        if existing is not None and _REASON_RANK[existing.reason_code] <= _REASON_RANK[reason_code]:
             return
         bucket[target.ref] = _validated_item(
             AttentionItem(
@@ -576,8 +583,7 @@ def build_attention_derivation(
             if (
                 _is_live(candidate)
                 and candidate.monitoring is not None
-                and candidate.monitoring.get("diagnostic")
-                == "invalid_monitoring_config"
+                and candidate.monitoring.get("diagnostic") == "invalid_monitoring_config"
             ):
                 _derive_monitoring(candidate, evaluated, emit)
             continue
@@ -587,6 +593,7 @@ def build_attention_derivation(
         _derive_placement(candidate, evaluated, emit)
         _derive_lifecycle(candidate, evaluated, emit)
         _derive_monitoring(candidate, evaluated, emit)
+        _derive_release(candidate, evaluated, emit)
         _derive_provenance(candidate, evaluated, emit, now=now)
         _derive_runbook(candidate, evaluated, emit, now=now)
         _derive_knowledge(candidate, evaluated, emit, now=now)
@@ -616,11 +623,7 @@ def build_attention_derivation(
 
     items = tuple(
         sorted(
-            (
-                item
-                for bucket in collected.values()
-                for item in bucket.values()
-            ),
+            (item for bucket in collected.values() for item in bucket.values()),
             key=lambda item: item.key,
         )
     )
@@ -645,9 +648,7 @@ def summarize_attention(
     by_severity = dict.fromkeys(ATTENTION_SEVERITY_VALUES, 0)
     by_category = dict.fromkeys(ATTENTION_CATEGORY_VALUES, 0)
     by_reason = dict.fromkeys(ATTENTION_REASON_VALUES, 0)
-    states: dict[str, set[str]] = {
-        category: set() for category in ATTENTION_CATEGORY_VALUES
-    }
+    states: dict[str, set[str]] = {category: set() for category in ATTENTION_CATEGORY_VALUES}
     for item in items:
         by_severity[item.severity] += 1
         by_category[item.category] += 1
@@ -672,9 +673,7 @@ def summarize_attention(
         by_category=by_category,
         by_reason=by_reason,
         signals=signals,
-        coverage_snapshot_state=(
-            "collected" if derivation.coverage_collected else "not_collected"
-        ),
+        coverage_snapshot_state=("collected" if derivation.coverage_collected else "not_collected"),
     )
 
 
@@ -830,6 +829,20 @@ def _derive_monitoring(candidate, evaluated, emit) -> None:
         )
 
 
+def _derive_release(candidate, evaluated, emit) -> None:
+    release = candidate.release_monitoring
+    if candidate.kind != "service" or release is None or not release.get("enabled"):
+        return
+    evaluated["release"] += 1
+    if release.get("status") == "update_available":
+        observed_at = release.get("last_success_at")
+        emit(
+            candidate,
+            "release_update_available",
+            observed_at=observed_at if isinstance(observed_at, str) else None,
+        )
+
+
 def _derive_provenance(candidate, evaluated, emit, *, now: datetime) -> None:
     evaluated["provenance"] += 1
     if _is_past(candidate.provenance_stale_after, now):
@@ -869,9 +882,10 @@ def _derive_runbook(candidate, evaluated, emit, *, now: datetime) -> None:
             observed_at=review_after,
         )
         return
-    if status in _CURRENT_RUNBOOK_STATUSES and _text(
-        candidate.data.get("last_verified_at")
-    ) is None:
+    if (
+        status in _CURRENT_RUNBOOK_STATUSES
+        and _text(candidate.data.get("last_verified_at")) is None
+    ):
         emit(candidate, "runbook_unverified", detail_code=detail_code)
         return
     if (
@@ -908,11 +922,7 @@ def _derive_knowledge(candidate, evaluated, emit, *, now: datetime) -> None:
 def _derive_relationship_diagnostics(diagnostics, *, labels, emit) -> None:
     for diagnostic in diagnostics:
         candidate = labels.get(diagnostic.object_id)
-        if (
-            candidate is None
-            or candidate.record_state != "valid"
-            or not _is_live(candidate)
-        ):
+        if candidate is None or candidate.record_state != "valid" or not _is_live(candidate):
             continue
         if diagnostic.code == "dangling_typed_reference":
             reason_code = "relationship_target_unresolved"

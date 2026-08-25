@@ -14,7 +14,7 @@ from blockwart.api.write_commands import (
 )
 from blockwart.config import Settings
 from blockwart.domain.asset_state import AssetHealth, AssetLifecycle
-from blockwart.domain.auth import GrantScope
+from blockwart.domain.auth import GrantScope, Permission
 from blockwart.domain.decisions import (
     APPLIES_TO_MAX_LENGTH,
     APPLIES_TO_PATTERN,
@@ -36,6 +36,7 @@ from blockwart.domain.read_projection import (
     ProjectionSection,
     resolve_read_projection,
 )
+from blockwart.domain.release_monitoring import ReleaseStatus
 from blockwart.domain.runbooks import RunbookRisk, RunbookStatus
 from blockwart.domain.search import (
     CONTEXT_LIMIT_MAX,
@@ -98,6 +99,8 @@ from blockwart.schemas.v1 import (
     V1RelationshipCommandIn,
     V1RelationshipCommandOut,
     V1RelationshipPageOut,
+    V1ReleaseCheckOut,
+    V1ReleaseOverviewPageOut,
     V1SourceCoveragePageOut,
     V1TopologyOut,
 )
@@ -112,6 +115,7 @@ from blockwart.services.attention import (
     query_attention_page,
 )
 from blockwart.services.commands import (
+    authorize_object_command,
     create_attached_device,
     create_catalog_root,
     create_child_object,
@@ -139,6 +143,11 @@ from blockwart.services.project_chronology import (
 )
 from blockwart.services.read_access import ReadAccess
 from blockwart.services.read_projection import CapabilitySets, project_read_items
+from blockwart.services.release_monitoring import (
+    check_service_release,
+    query_release_overview,
+    release_monitoring_settings,
+)
 from blockwart.services.source_coverage import (
     CoverageAuthorityDenied,
     query_source_coverage_page,
@@ -303,6 +312,43 @@ def get_v1_attention(
     return V1AttentionPageOut.model_validate(
         {
             "summary": page.summary,
+            "items": page.items,
+            "next_cursor": page.next_cursor,
+            "total": page.total,
+            "generated_at": page.generated_at,
+            "direction": direction,
+        }
+    )
+
+
+@router.get(
+    "/release-updates",
+    response_model=V1ReleaseOverviewPageOut,
+    summary="Read authorized service release-monitoring results",
+)
+def get_v1_release_updates(
+    session: Annotated[Session, Depends(get_session)],
+    access: Annotated[ReadAccess, Depends(require_api_read_access)],
+    status: ReleaseStatus | None = None,
+    limit: PageLimit = 50,
+    cursor: CursorParameter = None,
+    direction: SortDirection = "asc",
+    include_total: bool = False,
+) -> V1ReleaseOverviewPageOut:
+    try:
+        page = query_release_overview(
+            session,
+            access,
+            status=status,
+            limit=limit,
+            cursor=cursor,
+            direction=direction,
+            include_total=include_total,
+        )
+    except InvalidCursor as exc:
+        raise _invalid_cursor() from exc
+    return V1ReleaseOverviewPageOut.model_validate(
+        {
             "items": page.items,
             "next_cursor": page.next_cursor,
             "total": page.total,
@@ -832,6 +878,42 @@ def list_v1_project_chronology(
         items=page.items,
         next_cursor=page.next_cursor,
         total=page.total,
+    )
+
+
+@router.post(
+    "/objects/{object_id}/release-check",
+    response_model=V1ReleaseCheckOut,
+    summary="Run one authorized, leased public GitHub release check",
+)
+def create_v1_release_check(
+    object_id: str,
+    request: Request,
+    session: Annotated[Session, Depends(get_session)],
+    access: Annotated[ReadAccess, Depends(require_api_read_access)],
+) -> V1ReleaseCheckOut:
+    context = api_write_context(request, access)
+    execute_api_command(
+        session,
+        context,
+        lambda: authorize_object_command(
+            session,
+            context,
+            object_id=object_id,
+            permission=Permission.WRITE,
+        ),
+    )
+    result = check_service_release(
+        session,
+        object_id=object_id,
+        settings=release_monitoring_settings(request.app.state.settings),
+        manual=True,
+    )
+    return V1ReleaseCheckOut(
+        object_id=object_id,
+        outcome=result.outcome,  # type: ignore[arg-type]
+        skipped_reason=result.skipped_reason,
+        release_monitoring=result.projection,
     )
 
 

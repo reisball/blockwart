@@ -34,7 +34,7 @@ every projected response. It is currently `1`.
 | Profile | Serializes | Use it for |
 |---|---|---|
 | `compact` | identity, state, the type-aware knowledge fields, and the orientation line | wide discovery, candidate lists, cheap known-id batches |
-| `context` | `compact` plus network, integrity, monitoring, and the detail document | working on a bounded set of objects |
+| `context` | `compact` plus network, integrity, health/release monitoring, and the detail document | working on a bounded set of objects |
 | `full` | the complete historical contract, including the comment preview | unchanged existing behavior |
 
 `full` is the default. Sending no projection argument, or sending
@@ -50,6 +50,11 @@ so a mask can never widen a read or reach past an authorization decision.
 
 The selectable sections are `knowledge`, `orientation`, `network`, `integrity`,
 `monitoring`, `detail`, and `activity`.
+
+For readable Services, the `monitoring` section contains both independent
+projections: availability monitoring and public release monitoring. Selecting
+the section does not run either probe. Release observations remain
+target-bound and never affect `health` or `effective_health`.
 
 A mask can only narrow: the resolved read is the intersection of the profile,
 the surface, and the mask, plus the always-present core. Asking for `detail`

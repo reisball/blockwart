@@ -22,7 +22,7 @@ from blockwart.domain.relationships import (
 from blockwart.domain.runbooks import authorized_runbook_data
 from blockwart.domain.service_components import service_components_view
 from blockwart.domain.ui_schema import get_ui_schema
-from blockwart.models import Relationship
+from blockwart.models import CatalogObject, Relationship
 from blockwart.schemas.catalog import (
     PUBLIC_OBJECT_KINDS,
     CatalogAssetNode,
@@ -44,6 +44,11 @@ from blockwart.services.monitoring import (
     monitoring_projection,
 )
 from blockwart.services.read_access import ReadAccess
+from blockwart.services.release_monitoring import (
+    current_release_monitoring_settings,
+    load_release_observation_index,
+    release_monitoring_projection,
+)
 
 PUBLIC_KIND_PRIORITY = {
     kind: index
@@ -295,6 +300,7 @@ class CatalogDetailReadModel:
     audit_events: list[AuditEventReadModel]
     recent_comments: list[CommentOut]
     monitoring: dict[str, Any] | None
+    release_monitoring: dict[str, Any] | None
 
 
 def project_catalog_objects(
@@ -342,11 +348,7 @@ def get_catalog_object(
 ) -> CatalogObjectReadOut | None:
     """Return one canonical catalog read model used by the JSON API."""
     catalog_object = next(
-        (
-            candidate
-            for candidate in list_objects(session)
-            if candidate.id == object_id
-        ),
+        (candidate for candidate in list_objects(session) if candidate.id == object_id),
         None,
     )
     if catalog_object is None:
@@ -368,22 +370,14 @@ def query_catalog_browse(
     all_objects = sort_for_browse(list_catalog_objects(session, access))
     public_objects = visible_objects(all_objects)
     normalized_query = query.strip() if query else ""
-    matching_ids = (
-        _matching_object_ids(all_objects, normalized_query)
-        if normalized_query
-        else None
-    )
+    matching_ids = _matching_object_ids(all_objects, normalized_query) if normalized_query else None
     objects = [
         catalog_object
         for catalog_object in public_objects
         if (kind is None or catalog_object.kind == kind)
         and (matching_ids is None or catalog_object.id in matching_ids)
     ]
-    systems = [
-        catalog_object
-        for catalog_object in all_objects
-        if catalog_object.kind == "system"
-    ]
+    systems = [catalog_object for catalog_object in all_objects if catalog_object.kind == "system"]
     relationships = _list_relationships(session, access)
     object_map = {
         f"{catalog_object.kind}:{catalog_object.id}": catalog_object
@@ -401,10 +395,7 @@ def query_catalog_browse(
         and is_asset_kind(catalog_object.kind)
     )
     included_refs = (
-        {
-            f"{catalog_object.kind}:{catalog_object.id}"
-            for catalog_object in objects
-        }
+        {f"{catalog_object.kind}:{catalog_object.id}" for catalog_object in objects}
         if normalized_query or kind is not None
         else None
     )
@@ -414,8 +405,7 @@ def query_catalog_browse(
         systems=systems,
         relation_targets=public_objects,
         display_names={
-            catalog_object.id: primary_name_value(catalog_object)
-            for catalog_object in all_objects
+            catalog_object.id: primary_name_value(catalog_object) for catalog_object in all_objects
         },
         object_counts=object_counts,
         health_counts=health_counts,
@@ -455,8 +445,7 @@ def build_monitoring_index(
     readable_service_ids = [
         catalog_object.id
         for catalog_object in objects
-        if catalog_object.visibility == ObjectVisibility.DETAIL
-        and catalog_object.kind == "service"
+        if catalog_object.visibility == ObjectVisibility.DETAIL and catalog_object.kind == "service"
     ]
     observations = load_observation_index(
         session,
@@ -465,10 +454,7 @@ def build_monitoring_index(
     reference = now or datetime.now(UTC)
     index: dict[str, dict[str, Any]] = {}
     for catalog_object in objects:
-        if (
-            catalog_object.visibility != ObjectVisibility.DETAIL
-            or catalog_object.kind != "service"
-        ):
+        if catalog_object.visibility != ObjectVisibility.DETAIL or catalog_object.kind != "service":
             continue
         view = monitoring_projection(
             kind=catalog_object.kind,
@@ -482,6 +468,47 @@ def build_monitoring_index(
         if view is not None:
             index[catalog_object.id] = view
     return index
+
+
+def build_release_monitoring_index(
+    session: Session,
+    objects: list[CatalogObjectReadOut],
+    *,
+    now: datetime | None = None,
+    data_by_id: Mapping[str, Mapping[str, Any]] | None = None,
+) -> dict[str, dict[str, Any]]:
+    """Project release evidence only after full-detail authorization."""
+
+    readable = [
+        item
+        for item in objects
+        if item.visibility == ObjectVisibility.DETAIL and item.kind == "service"
+    ]
+    ids = [item.id for item in readable]
+    rows = {
+        row.id: row
+        for row in session.scalars(select(CatalogObject).where(CatalogObject.id.in_(ids))).all()
+    }
+    observations = load_release_observation_index(session, object_ids=ids)
+    settings = current_release_monitoring_settings()
+    reference = now or datetime.now(UTC)
+    projected: dict[str, dict[str, Any]] = {}
+    for item in readable:
+        row = rows.get(item.id)
+        if row is None:
+            continue
+        view = release_monitoring_projection(
+            kind=item.kind,
+            object_id=item.id,
+            object_instance_id=row.instance_id,
+            data=dict((data_by_id or {}).get(item.id, item.data)),
+            observations=observations,
+            now=reference,
+            settings=settings,
+        )
+        if view is not None:
+            projected[item.id] = view
+    return projected
 
 
 def _effective_health_value(
@@ -502,26 +529,18 @@ def query_catalog_detail(
     """Build the object detail model without FastAPI or template dependencies."""
     all_objects = sort_for_browse(list_catalog_objects(session, access))
     catalog_object = next(
-        (
-            candidate
-            for candidate in all_objects
-            if candidate.id == object_id
-        ),
+        (candidate for candidate in all_objects if candidate.id == object_id),
         None,
     )
     if catalog_object is None:
         return None
-    object_map = {
-        f"{candidate.kind}:{candidate.id}": candidate
-        for candidate in all_objects
-    }
+    object_map = {f"{candidate.kind}:{candidate.id}": candidate for candidate in all_objects}
     all_relationships = _list_relationships(session, access)
     object_ref = f"{catalog_object.kind}:{catalog_object.id}"
     relationships = [
         relationship
         for relationship in all_relationships
-        if relationship["from_ref"] == object_ref
-        or relationship["to_ref"] == object_ref
+        if relationship["from_ref"] == object_ref or relationship["to_ref"] == object_ref
     ]
     relationship_groups = group_relationships(
         catalog_object,
@@ -572,6 +591,7 @@ def query_catalog_detail(
         ],
         recent_comments=comment_page.items if comment_page is not None else [],
         monitoring=build_monitoring_index(session, [catalog_object]).get(object_id),
+        release_monitoring=build_release_monitoring_index(session, [catalog_object]).get(object_id),
     )
 
 
@@ -583,19 +603,12 @@ def query_catalog_topology(
     """Return one canonical topology resource without UI dependencies."""
     all_objects = sort_for_browse(list_catalog_objects(session, access))
     catalog_object = next(
-        (
-            candidate
-            for candidate in all_objects
-            if candidate.id == object_id
-        ),
+        (candidate for candidate in all_objects if candidate.id == object_id),
         None,
     )
     if catalog_object is None:
         return None
-    object_map = {
-        f"{candidate.kind}:{candidate.id}": candidate
-        for candidate in all_objects
-    }
+    object_map = {f"{candidate.kind}:{candidate.id}": candidate for candidate in all_objects}
     relationships = _list_relationships(session, access)
     object_ref = f"{catalog_object.kind}:{catalog_object.id}"
     return (
@@ -623,18 +636,13 @@ def query_device_graph(
     """
     all_objects = sort_for_browse(list_catalog_objects(session, access))
     catalog_object = next(
-        (
-            candidate
-            for candidate in all_objects
-            if candidate.id == object_id
-        ),
+        (candidate for candidate in all_objects if candidate.id == object_id),
         None,
     )
     if catalog_object is None:
         return None
     object_map: dict[str, CatalogObjectReadOut] = {
-        f"{candidate.kind}:{candidate.id}": candidate
-        for candidate in all_objects
+        f"{candidate.kind}:{candidate.id}": candidate for candidate in all_objects
     }
     relationships = _list_relationships(session, access)
     current_ref = f"{catalog_object.kind}:{catalog_object.id}"
@@ -658,14 +666,8 @@ def query_device_graph(
     pending_refs = [current_ref]
     for pending_ref in pending_refs:
         for edge in incident_edges.get(pending_ref, []):
-            edge_set[
-                (edge["from_ref"], edge["relation_type"], edge["to_ref"])
-            ] = edge
-            neighbor_ref = (
-                edge["to_ref"]
-                if edge["from_ref"] == pending_ref
-                else edge["from_ref"]
-            )
+            edge_set[(edge["from_ref"], edge["relation_type"], edge["to_ref"])] = edge
+            neighbor_ref = edge["to_ref"] if edge["from_ref"] == pending_ref else edge["from_ref"]
             if neighbor_ref not in connected_refs:
                 connected_refs.add(neighbor_ref)
                 pending_refs.append(neighbor_ref)
@@ -700,10 +702,7 @@ def query_device_graph(
             downstream_refs.append(child_ref)
             pending_downstream.append(child_ref)
 
-    nodes = [
-        _device_graph_node(ref, object_map.get(ref))
-        for ref in sorted(connected_refs)
-    ]
+    nodes = [_device_graph_node(ref, object_map.get(ref)) for ref in sorted(connected_refs)]
     return {
         "object_ref": current_ref,
         "nodes": nodes,
@@ -732,10 +731,7 @@ def query_network_topology(
         (candidate for candidate in all_objects if candidate.id == object_id),
         None,
     )
-    if (
-        catalog_object is None
-        or catalog_object.visibility != ObjectVisibility.DETAIL
-    ):
+    if catalog_object is None or catalog_object.visibility != ObjectVisibility.DETAIL:
         return None
     return _build_network_topology(
         catalog_object,
@@ -758,17 +754,12 @@ def _build_network_topology(
         raise ValueError("network topology limits must be positive")
 
     object_map: dict[str, CatalogObjectReadOut] = {
-        f"{candidate.kind}:{candidate.id}": candidate
-        for candidate in all_objects
+        f"{candidate.kind}:{candidate.id}": candidate for candidate in all_objects
     }
     placement_graph = PlacementGraph(object_map.values(), relationships)
     current_ref = f"{catalog_object.kind}:{catalog_object.id}"
     placement_path = placement_graph.parent_path_refs(current_ref)
-    attached_edges = [
-        edge
-        for edge in relationships
-        if edge["relation_type"] == "attached_to"
-    ]
+    attached_edges = [edge for edge in relationships if edge["relation_type"] == "attached_to"]
     attached_by_source: dict[str, list[RelationshipReadModel]] = {}
     for edge in attached_edges:
         attached_by_source.setdefault(edge["from_ref"], []).append(edge)
@@ -857,10 +848,7 @@ def _build_network_topology(
             if len(paths) >= max_paths:
                 truncated = True
                 break
-            if (
-                edge["to_ref"] not in included_refs
-                and len(included_refs) >= max_nodes
-            ):
+            if edge["to_ref"] not in included_refs and len(included_refs) >= max_nodes:
                 truncated = True
                 break
             key = (edge["from_ref"], edge["relation_type"], edge["to_ref"])
@@ -884,13 +872,8 @@ def _build_network_topology(
     else:
         overall_status = "complete"
 
-    projected_placement_path = [
-        ref for ref in placement_path if ref in included_refs
-    ]
-    if (
-        resolution_source_ref is not None
-        and resolution_source_ref not in included_refs
-    ):
+    projected_placement_path = [ref for ref in placement_path if ref in included_refs]
+    if resolution_source_ref is not None and resolution_source_ref not in included_refs:
         resolution = None
         resolution_source = None
         resolution_source_ref = None
@@ -898,15 +881,13 @@ def _build_network_topology(
     return {
         "object_ref": current_ref,
         "nodes": [
-            _network_topology_node(ref, object_map.get(ref))
-            for ref in sorted(included_refs)
+            _network_topology_node(ref, object_map.get(ref)) for ref in sorted(included_refs)
         ],
         "edges": sorted(
             (
                 edge
                 for edge in edge_set.values()
-                if edge["from_ref"] in included_refs
-                and edge["to_ref"] in included_refs
+                if edge["from_ref"] in included_refs and edge["to_ref"] in included_refs
             ),
             key=_network_edge_sort_key,
         ),
@@ -1025,21 +1006,15 @@ def build_topology_read_model(
                 {
                     "hosts": _relationship_nodes(host_refs, object_map),
                     "systems": _relationship_nodes(system_refs, object_map),
-                    "services": [
-                        _relationship_node(current_ref, catalog_object)
-                    ],
+                    "services": [_relationship_node(current_ref, catalog_object)],
                 }
             ]
         }
 
     if catalog_object.kind == "host":
         child_refs = placement_graph.children_refs(current_ref)
-        system_refs = [
-            ref for ref in child_refs if ref.startswith("system:")
-        ]
-        direct_service_refs = [
-            ref for ref in child_refs if ref.startswith("service:")
-        ]
+        system_refs = [ref for ref in child_refs if ref.startswith("system:")]
+        direct_service_refs = [ref for ref in child_refs if ref.startswith("service:")]
         service_refs = _unique_refs(
             [
                 *direct_service_refs,
@@ -1054,9 +1029,7 @@ def build_topology_read_model(
         return {
             "chains": [
                 {
-                    "hosts": [
-                        _relationship_node(current_ref, catalog_object)
-                    ],
+                    "hosts": [_relationship_node(current_ref, catalog_object)],
                     "systems": _relationship_nodes(system_refs, object_map),
                     "services": _relationship_nodes(service_refs, object_map),
                 }
@@ -1065,22 +1038,16 @@ def build_topology_read_model(
 
     if catalog_object.kind == "system":
         host_refs = [
-            ref
-            for ref in placement_graph.parent_path_refs(current_ref)
-            if ref.startswith("host:")
+            ref for ref in placement_graph.parent_path_refs(current_ref) if ref.startswith("host:")
         ]
         service_refs = [
-            ref
-            for ref in placement_graph.children_refs(current_ref)
-            if ref.startswith("service:")
+            ref for ref in placement_graph.children_refs(current_ref) if ref.startswith("service:")
         ]
         return {
             "chains": [
                 {
                     "hosts": _relationship_nodes(host_refs, object_map),
-                    "systems": [
-                        _relationship_node(current_ref, catalog_object)
-                    ],
+                    "systems": [_relationship_node(current_ref, catalog_object)],
                     "services": _relationship_nodes(service_refs, object_map),
                 }
             ]
@@ -1101,8 +1068,7 @@ def build_explorer_read_model(
 ) -> ExplorerReadModel:
     """Build the shared catalog/topology hierarchy from canonical placement."""
     object_map = {
-        f"{catalog_object.kind}:{catalog_object.id}": catalog_object
-        for catalog_object in objects
+        f"{catalog_object.kind}:{catalog_object.id}": catalog_object for catalog_object in objects
     }
     graph = PlacementGraph(object_map.values(), relationships)
     assets = {
@@ -1125,9 +1091,7 @@ def build_explorer_read_model(
                 system_is_included = is_included(child_ref)
                 placed_system_refs.add(child_ref)
                 service_refs = [
-                    ref
-                    for ref in graph.children_refs(child_ref)
-                    if ref.startswith("service:")
+                    ref for ref in graph.children_refs(child_ref) if ref.startswith("service:")
                 ]
                 placed_service_refs.update(service_refs)
                 visible_services = [
@@ -1166,19 +1130,13 @@ def build_explorer_read_model(
             continue
         system_is_included = is_included(system_ref)
         service_refs = [
-            ref
-            for ref in graph.children_refs(system_ref)
-            if ref.startswith("service:")
+            ref for ref in graph.children_refs(system_ref) if ref.startswith("service:")
         ]
         placed_service_refs.update(service_refs)
         visible_services = [
             assets[ref]
             for ref in service_refs
-            if (
-                included_refs is None
-                or system_is_included
-                or ref in included_refs
-            )
+            if (included_refs is None or system_is_included or ref in included_refs)
         ]
         if system_is_included or visible_services:
             standalone_systems.append(
@@ -1239,31 +1197,20 @@ def build_explorer_read_model(
     visible_refs = set(included_refs or assets)
     for cluster in clusters:
         visible_refs.add(cluster["host"]["ref"])
-        visible_refs.update(
-            service["ref"]
-            for service in cluster["direct_services"]
-        )
+        visible_refs.update(service["ref"] for service in cluster["direct_services"])
         for branch in cluster["systems"]:
             visible_refs.add(branch["system"]["ref"])
-            visible_refs.update(
-                service["ref"] for service in branch["services"]
-            )
+            visible_refs.update(service["ref"] for service in branch["services"])
     for branch in standalone_systems:
         visible_refs.add(branch["system"]["ref"])
-        visible_refs.update(
-            service["ref"] for service in branch["services"]
-        )
+        visible_refs.update(service["ref"] for service in branch["services"])
     visible_refs.update(service["ref"] for service in standalone_services)
     visible_refs.update(network["ref"] for network in networks)
     visible_refs.update(device["ref"] for device in devices)
     visible_refs.update(decision["ref"] for decision in decisions)
     visible_refs.update(project["ref"] for project in projects)
     visible_refs.update(runbook["ref"] for runbook in runbooks)
-    visible_refs.update(
-        row["asset"]["ref"]
-        for chain in device_chains
-        for row in chain["rows"]
-    )
+    visible_refs.update(row["asset"]["ref"] for chain in device_chains for row in chain["rows"])
     visible_refs.update(
         row["asset"]["ref"]
         for group in network_path_groups
@@ -1282,11 +1229,7 @@ def build_explorer_read_model(
         "runbooks": runbooks,
         "device_chains": device_chains,
         "network_path_groups": network_path_groups,
-        "assets": {
-            ref: asset
-            for ref, asset in assets.items()
-            if ref in visible_refs
-        },
+        "assets": {ref: asset for ref, asset in assets.items() if ref in visible_refs},
     }
 
 
@@ -1327,8 +1270,7 @@ def _explorer_network_path_groups(
             max_nodes=512,
         )
         if network_category and not any(
-            node.get("category") == network_category
-            for node in topology["nodes"]
+            node.get("category") == network_category for node in topology["nodes"]
         ):
             continue
         paths: list[ExplorerNetworkPathReadModel] = []
@@ -1437,9 +1379,7 @@ def _explorer_device_chains(
             depth: int,
             edge: RelationshipReadModel | None = None,
             *,
-            _children_by_parent: dict[
-                str, list[RelationshipReadModel]
-            ] = children_by_parent,
+            _children_by_parent: dict[str, list[RelationshipReadModel]] = children_by_parent,
             _rows: list[ExplorerDeviceChainRowReadModel] = rows,
             _visited: set[str] = visited,
         ) -> None:
@@ -1484,32 +1424,16 @@ def group_relationships(
     current_ref = f"{catalog_object.kind}:{catalog_object.id}"
     grouped: dict[str, list[RelatedRelationshipReadModel]] = {}
     for relationship in relationships:
-        direction = (
-            "outbound"
-            if relationship["from_ref"] == current_ref
-            else "inbound"
-        )
-        other_ref = (
-            relationship["to_ref"]
-            if direction == "outbound"
-            else relationship["from_ref"]
-        )
+        direction = "outbound" if relationship["from_ref"] == current_ref else "inbound"
+        other_ref = relationship["to_ref"] if direction == "outbound" else relationship["from_ref"]
         other_object = object_map.get(other_ref)
         grouped.setdefault(direction, []).append(
             {
                 **relationship,
                 "other_ref": other_ref,
                 "other_id": object_id_from_ref(other_ref),
-                "other_kind": (
-                    other_object.kind
-                    if other_object
-                    else other_ref.split(":", 1)[0]
-                ),
-                "other_label": (
-                    primary_name_value(other_object)
-                    if other_object
-                    else other_ref
-                ),
+                "other_kind": (other_object.kind if other_object else other_ref.split(":", 1)[0]),
+                "other_label": (primary_name_value(other_object) if other_object else other_ref),
                 "other_status": _object_status(other_object),
                 "other_data": _object_data(other_object),
             }
@@ -1550,11 +1474,7 @@ def visible_objects(
     objects: list[CatalogObjectReadOut],
 ) -> list[CatalogObjectReadOut]:
     return sort_for_browse(
-        [
-            catalog_object
-            for catalog_object in objects
-            if catalog_object.kind in UI_VISIBLE_KINDS
-        ]
+        [catalog_object for catalog_object in objects if catalog_object.kind in UI_VISIBLE_KINDS]
     )
 
 
@@ -1608,9 +1528,7 @@ def _list_relationships(
         from_id = object_id_from_ref(row.from_ref)
         to_id = object_id_from_ref(row.to_ref)
         required_permission = (
-            Permission.DISCOVER
-            if row.relation_type == "hosts"
-            else Permission.READ
+            Permission.DISCOVER if row.relation_type == "hosts" else Permission.READ
         )
         if not (
             access.policy.can(required_permission, from_id)
@@ -1639,8 +1557,7 @@ def _index_relationship_cards(
         object_relationships = [
             relationship
             for relationship in relationships
-            if relationship["from_ref"] == object_ref
-            or relationship["to_ref"] == object_ref
+            if relationship["from_ref"] == object_ref or relationship["to_ref"] == object_ref
         ]
         grouped = group_relationships(
             catalog_object,
@@ -1677,10 +1594,7 @@ def _relationship_nodes(
     refs: list[str],
     object_map: dict[str, CatalogObjectReadOut],
 ) -> list[TopologyNodeReadModel]:
-    return [
-        _relationship_node(ref, object_map.get(ref))
-        for ref in refs
-    ]
+    return [_relationship_node(ref, object_map.get(ref)) for ref in refs]
 
 
 def _relationship_display_sort_key(
@@ -1688,9 +1602,7 @@ def _relationship_display_sort_key(
 ) -> tuple[int, str, str]:
     left_kind = card["left"]["kind"]
     right_kind = card["right"]["kind"]
-    is_system_service = (
-        left_kind == "system" and right_kind == "service"
-    )
+    is_system_service = left_kind == "system" and right_kind == "service"
     return (
         0 if is_system_service else 1,
         card["left"]["label"],
@@ -1731,9 +1643,7 @@ def _relationship_display_cards(
                     right_ref,
                     object_map.get(right_ref),
                 ),
-                "current_side": (
-                    "left" if left_ref == current_ref else "right"
-                ),
+                "current_side": ("left" if left_ref == current_ref else "right"),
             }
         )
     return sorted(cards, key=_relationship_display_sort_key)
@@ -1746,25 +1656,13 @@ def _system_service_refs(
     to_object: CatalogObjectReadOut | None,
 ) -> tuple[str, str]:
     if from_object is not None and to_object is not None:
-        if (
-            from_object.kind == "system"
-            and to_object.kind == "service"
-        ):
+        if from_object.kind == "system" and to_object.kind == "service":
             return from_ref, to_ref
-        if (
-            from_object.kind == "service"
-            and to_object.kind == "system"
-        ):
+        if from_object.kind == "service" and to_object.kind == "system":
             return to_ref, from_ref
-    if (
-        from_ref.startswith("system:")
-        and to_ref.startswith("service:")
-    ):
+    if from_ref.startswith("system:") and to_ref.startswith("service:"):
         return from_ref, to_ref
-    if (
-        from_ref.startswith("service:")
-        and to_ref.startswith("system:")
-    ):
+    if from_ref.startswith("service:") and to_ref.startswith("system:"):
         return to_ref, from_ref
     return from_ref, to_ref
 
@@ -1774,39 +1672,18 @@ def _device_graph_node(
     catalog_object: CatalogObjectReadOut | None,
 ) -> DeviceGraphNodeReadModel:
     """Build a device-graph node honoring read-access redaction."""
-    kind = (
-        catalog_object.kind
-        if catalog_object
-        else ref.split(":", 1)[0]
-    )
+    kind = catalog_object.kind if catalog_object else ref.split(":", 1)[0]
     node: DeviceGraphNodeReadModel = {
         "ref": ref,
-        "id": (
-            catalog_object.id
-            if catalog_object
-            else object_id_from_ref(ref)
-        ),
+        "id": (catalog_object.id if catalog_object else object_id_from_ref(ref)),
         "kind": kind,
-        "label": (
-            primary_name_value(catalog_object)
-            if catalog_object
-            else ref
-        ),
+        "label": (primary_name_value(catalog_object) if catalog_object else ref),
         "visibility": (
-            catalog_object.visibility
-            if catalog_object is not None
-            else ObjectVisibility.STUB
+            catalog_object.visibility if catalog_object is not None else ObjectVisibility.STUB
         ),
-        "capabilities": (
-            catalog_object.capabilities
-            if catalog_object is not None
-            else []
-        ),
+        "capabilities": (catalog_object.capabilities if catalog_object is not None else []),
     }
-    if (
-        catalog_object is not None
-        and catalog_object.visibility == ObjectVisibility.DETAIL
-    ):
+    if catalog_object is not None and catalog_object.visibility == ObjectVisibility.DETAIL:
         data = catalog_object.data
         node.update(
             {
@@ -1835,18 +1712,11 @@ def _network_topology_node(
         "kind": kind,
         "label": primary_name_value(catalog_object) if catalog_object else ref,
         "visibility": (
-            catalog_object.visibility
-            if catalog_object is not None
-            else ObjectVisibility.STUB
+            catalog_object.visibility if catalog_object is not None else ObjectVisibility.STUB
         ),
-        "capabilities": (
-            catalog_object.capabilities if catalog_object is not None else []
-        ),
+        "capabilities": (catalog_object.capabilities if catalog_object is not None else []),
     }
-    if (
-        catalog_object is not None
-        and catalog_object.visibility == ObjectVisibility.DETAIL
-    ):
+    if catalog_object is not None and catalog_object.visibility == ObjectVisibility.DETAIL:
         node.update({"status": catalog_object.status, "data": catalog_object.data})
         network = catalog_object.data.get("network")
         if catalog_object.kind == "network" and isinstance(network, Mapping):
@@ -1861,39 +1731,18 @@ def _relationship_node(
     ref: str,
     catalog_object: CatalogObjectReadOut | None,
 ) -> TopologyNodeReadModel:
-    kind = (
-        catalog_object.kind
-        if catalog_object
-        else ref.split(":", 1)[0]
-    )
+    kind = catalog_object.kind if catalog_object else ref.split(":", 1)[0]
     node: TopologyNodeReadModel = {
         "ref": ref,
-        "id": (
-            catalog_object.id
-            if catalog_object
-            else object_id_from_ref(ref)
-        ),
+        "id": (catalog_object.id if catalog_object else object_id_from_ref(ref)),
         "kind": kind,
-        "label": (
-            primary_name_value(catalog_object)
-            if catalog_object
-            else ref
-        ),
+        "label": (primary_name_value(catalog_object) if catalog_object else ref),
         "visibility": (
-            catalog_object.visibility
-            if catalog_object is not None
-            else ObjectVisibility.STUB
+            catalog_object.visibility if catalog_object is not None else ObjectVisibility.STUB
         ),
-        "capabilities": (
-            catalog_object.capabilities
-            if catalog_object is not None
-            else []
-        ),
+        "capabilities": (catalog_object.capabilities if catalog_object is not None else []),
     }
-    if (
-        catalog_object is not None
-        and catalog_object.visibility == ObjectVisibility.DETAIL
-    ):
+    if catalog_object is not None and catalog_object.visibility == ObjectVisibility.DETAIL:
         node.update(
             {
                 "status": catalog_object.status,
@@ -1914,9 +1763,7 @@ def _relationship_node_ports(
     ):
         return []
     ports: list[RelationshipPortReadModel] = []
-    for endpoint in _list_of_mappings(
-        catalog_object.data.get("endpoints")
-    ):
+    for endpoint in _list_of_mappings(catalog_object.data.get("endpoints")):
         port = endpoint.get("port")
         if port is None:
             continue
@@ -1955,11 +1802,7 @@ def _explorer_asset(
             "capabilities": catalog_object.capabilities,
         }
     network = catalog_object.data.get("network")
-    addresses = (
-        _list_of_mappings(network.get("addresses"))
-        if isinstance(network, Mapping)
-        else []
-    )
+    addresses = _list_of_mappings(network.get("addresses")) if isinstance(network, Mapping) else []
     endpoints = _list_of_mappings(catalog_object.data.get("endpoints"))
     first_address = str(addresses[0].get("ip") or "") if addresses else ""
     first_endpoint = endpoints[0] if endpoints else {}
@@ -1968,11 +1811,7 @@ def _explorer_asset(
     endpoint = endpoint_type
     if endpoint_port is not None:
         endpoint = f"{endpoint_type} :{endpoint_port}".strip()
-    platform = str(
-        catalog_object.data.get("platform")
-        or catalog_object.data.get("type")
-        or ""
-    )
+    platform = str(catalog_object.data.get("platform") or catalog_object.data.get("type") or "")
     raw_labels = catalog_object.data.get("labels")
     labels = (
         [str(label) for label in raw_labels if isinstance(label, str)]
@@ -1992,16 +1831,12 @@ def _explorer_asset(
         "address": first_address,
         "platform": platform,
         "endpoint": endpoint,
-        "updated_at": catalog_object.last_changed
-        or catalog_object.updated_at
-        or "",
+        "updated_at": catalog_object.last_changed or catalog_object.updated_at or "",
         "visibility": ObjectVisibility.DETAIL,
         "capabilities": catalog_object.capabilities,
     }
     category_source = (
-        network
-        if catalog_object.kind == "network"
-        else catalog_object.data.get("device")
+        network if catalog_object.kind == "network" else catalog_object.data.get("device")
     )
     if isinstance(category_source, Mapping):
         category = category_source.get("category")
@@ -2051,13 +1886,10 @@ def _project_catalog_object(
         visible_parent_path.append(_project_parent_node(node, access))
     visible_parent_path.reverse()
     placement_state = catalog_object.placement_state
-    if (
-        placement_state == "assigned"
-        and (
-            not visible_parent_path
-            or not catalog_object.parent_path
-            or visible_parent_path[-1].id != catalog_object.parent_path[-1].id
-        )
+    if placement_state == "assigned" and (
+        not visible_parent_path
+        or not catalog_object.parent_path
+        or visible_parent_path[-1].id != catalog_object.parent_path[-1].id
     ):
         placement_state = "unknown"
     if visibility == ObjectVisibility.DETAIL:
@@ -2115,19 +1947,13 @@ def _project_parent_node(
 
 
 def _object_status(catalog_object: CatalogObjectReadOut | None) -> str:
-    if (
-        catalog_object is not None
-        and catalog_object.visibility == ObjectVisibility.DETAIL
-    ):
+    if catalog_object is not None and catalog_object.visibility == ObjectVisibility.DETAIL:
         return catalog_object.status
     return ""
 
 
 def _object_data(catalog_object: CatalogObjectReadOut | None) -> dict[str, Any]:
-    if (
-        catalog_object is not None
-        and catalog_object.visibility == ObjectVisibility.DETAIL
-    ):
+    if catalog_object is not None and catalog_object.visibility == ObjectVisibility.DETAIL:
         return catalog_object.data
     return {}
 

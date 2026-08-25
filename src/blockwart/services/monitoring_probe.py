@@ -480,11 +480,34 @@ def _decode_chunked_body(raw: bytes) -> bytes:
             raise _ProbeFailure("check_error", "probe_failed")
         position = terminator + 2
         if size == 0:
-            return bytes(decoded)
-        if position + size > len(raw):
+            trailer_count = 0
+            while True:
+                trailer_end = raw.find(b"\r\n", position)
+                if trailer_end < 0:
+                    raise _ProbeFailure("check_error", "probe_failed")
+                trailer = raw[position:trailer_end]
+                position = trailer_end + 2
+                if not trailer:
+                    if position != len(raw):
+                        raise _ProbeFailure("check_error", "probe_failed")
+                    return bytes(decoded)
+                trailer_count += 1
+                if trailer_count > _MAX_HEADERS:
+                    raise _ProbeFailure("check_error", "response_too_large")
+                name, separator, _value = trailer.partition(b":")
+                if (
+                    not separator
+                    or not name
+                    or any(character <= 32 or character >= 127 for character in name)
+                ):
+                    raise _ProbeFailure("check_error", "probe_failed")
+        chunk_end = position + size
+        if chunk_end + 2 > len(raw):
             raise _ProbeFailure("check_error", "probe_failed")
-        decoded.extend(raw[position : position + size])
-        position += size + 2
+        decoded.extend(raw[position:chunk_end])
+        if raw[chunk_end : chunk_end + 2] != b"\r\n":
+            raise _ProbeFailure("check_error", "probe_failed")
+        position = chunk_end + 2
 
 
 def _classify(status: int) -> tuple[str, str | None]:

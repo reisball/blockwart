@@ -11,6 +11,10 @@ from blockwart.models.auth import (
 )
 from blockwart.models.catalog import AuditEvent, CatalogObject, ObjectComment, Relationship
 from blockwart.models.monitoring import ServiceCheckLease, ServiceObservation
+from blockwart.models.release_monitoring import (
+    ServiceReleaseCheckLease,
+    ServiceReleaseObservation,
+)
 from blockwart.models.source_coverage import (
     SourceEntry,
     SourceEntryMapping,
@@ -31,6 +35,8 @@ __all__ = [
     "SecurityEvent",
     "ServiceCheckLease",
     "ServiceObservation",
+    "ServiceReleaseCheckLease",
+    "ServiceReleaseObservation",
     "ServiceTokenFailureBucket",
     "ServiceToken",
     "SourceEntry",

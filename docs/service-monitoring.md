@@ -4,6 +4,11 @@ Blockwart supports opt-in per-service health observations. Monitoring is a
 catalog read-model input, not a replacement for manual lifecycle management or
 an infrastructure discovery system.
 
+This health contract is separate from [public GitHub release
+monitoring](release-monitoring.md). A release update is not availability, a
+GitHub error is not a service outage, and the two features use different
+configuration, observation, lease, status, and runtime-switch contracts.
+
 ## Configuration and compatibility
 
 A service may store this closed document below `data`:

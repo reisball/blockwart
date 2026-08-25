@@ -47,6 +47,26 @@ Current local keys:
 - `BLOCKWART_MONITORING_GATUS_CREDENTIAL_FILES` (default empty;
   comma-separated `name=/absolute/protected/token-file` bindings; each file is
   scoped to one declared source and its value is read only at acquisition time)
+- `BLOCKWART_RELEASE_MONITORING_ENABLED` (default `false`; master switch for
+  scheduled and authorized manual public GitHub requests)
+- `BLOCKWART_RELEASE_MONITORING_POLLER_ENABLED` (default `false`; requires the
+  master switch and starts periodic due checks)
+- `BLOCKWART_RELEASE_MONITORING_DEFAULT_INTERVAL_SECONDS` (default `86400`,
+  allowed `3600..604800`)
+- `BLOCKWART_RELEASE_MONITORING_CONNECT_TIMEOUT_MS` (default `2000`, allowed
+  `100..15000`)
+- `BLOCKWART_RELEASE_MONITORING_TOTAL_TIMEOUT_MS` (default `5000`, allowed
+  `200..30000`)
+- `BLOCKWART_RELEASE_MONITORING_MAX_RESPONSE_BYTES` (default `65536`, allowed
+  `1024..262144`)
+- `BLOCKWART_RELEASE_MONITORING_MAX_CHECKS_PER_RUN` (default `10`, allowed
+  `1..100`)
+- `BLOCKWART_RELEASE_MONITORING_LEASE_SECONDS` (default `60`, allowed
+  `10..3600` and longer than the total request deadline)
+- `BLOCKWART_RELEASE_MONITORING_JITTER_SECONDS` (default `3600`, allowed
+  `0..21600`)
+- `BLOCKWART_RELEASE_MONITORING_POLL_INTERVAL_SECONDS` (default `30`, allowed
+  `5..300`)
 
 `BLOCKWART_SECRET_REFERENCE` is a reference label only. It must never contain a raw secret value.
 
@@ -66,6 +86,10 @@ Credential values are not settings values and must never be placed in `.env`.
 A service's optional interval overrides only the server
 default; it never changes timeout, concurrency, or target policy. See
 [Service monitoring](service-monitoring.md).
+
+Release monitoring has separate disabled-by-default runtime switches and a
+fixed public GitHub target; it does not reuse the health target allowlist or
+health observations. See [Public GitHub release monitoring](release-monitoring.md).
 
 Service-token audience is credential metadata, not environment configuration.
 `blockwart-auth issue-token --audience api|mcp` and the equivalent protected

@@ -165,6 +165,7 @@ def _project_object(
         projected["provenance"] = summary.provenance
     if projection.includes("monitoring"):
         _copy_present(projected, summary, "monitoring")
+        _copy_present(projected, summary, "release_monitoring")
 
     if isinstance(summary, AgentCatalogObjectContext):
         _project_context_sections(projected, summary, projection=projection)
