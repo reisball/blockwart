@@ -11,6 +11,7 @@ so no test opens a socket.
 from __future__ import annotations
 
 import json
+import os
 from datetime import UTC, datetime, timedelta
 from ipaddress import ip_address
 
@@ -406,6 +407,32 @@ def test_an_oversized_credential_file_is_refused(monkeypatch, tmp_path) -> None:
     assert observation.error_code == "source_unconfigured"
 
 
+@pytest.mark.parametrize("kind", ["fifo", "directory", "symlink"])
+def test_special_credential_paths_are_rejected_without_a_request(
+    monkeypatch, tmp_path, kind: str
+) -> None:
+    credential_path = tmp_path / kind
+    if kind == "fifo":
+        os.mkfifo(credential_path)
+    elif kind == "directory":
+        credential_path.mkdir()
+    else:
+        target = tmp_path / "regular-target"
+        target.write_text(CANARY_TOKEN, encoding="utf-8")
+        credential_path.symlink_to(target)
+    captured = _mock_network(monkeypatch, body=_statuses())
+
+    observation = monitoring_gatus.probe_gatus_endpoint(
+        _request(credential_file=str(credential_path))
+    )
+
+    assert (observation.state, observation.error_code) == (
+        "check_error",
+        "source_unconfigured",
+    )
+    assert captured == []
+
+
 def test_a_credential_never_reaches_the_observation_or_the_logs(
     monkeypatch, tmp_path, caplog
 ) -> None:
@@ -503,6 +530,89 @@ def test_the_upstream_observation_time_is_preserved_and_receive_time_is_separate
     assert observation.received_at is not None
     assert observation.received_at >= before
     assert observation.received_at != observation.checked_at
+
+
+def test_receive_time_is_stamped_only_after_acquisition_completes(monkeypatch) -> None:
+    completed = False
+
+    monkeypatch.setattr(
+        monitoring_probe,
+        "_resolve",
+        lambda _host, _port, *, timeout: [ip_address("203.0.113.9")],
+    )
+
+    def request(**_kwargs):
+        nonlocal completed
+        completed = True
+        return 200, _statuses()
+
+    def completion_time() -> datetime:
+        assert completed, "receive time was sampled before acquisition completed"
+        return NOW
+
+    monkeypatch.setattr(monitoring_probe, "_request_status_and_body", request)
+    monkeypatch.setattr(monitoring_gatus, "_utcnow", completion_time)
+
+    observation = monitoring_gatus.probe_gatus_endpoint(_request())
+
+    assert observation.checked_at == OBSERVED
+    assert observation.received_at == NOW
+
+
+def test_one_deadline_bounds_cumulative_credential_dns_and_http_time(monkeypatch, tmp_path) -> None:
+    class Clock:
+        current = 100.0
+
+        def __call__(self) -> float:
+            return self.current
+
+        def advance(self, seconds: float) -> None:
+            self.current += seconds
+
+    clock = Clock()
+    budgets: list[tuple[str, float]] = []
+    token_file = tmp_path / "token"
+    token_file.write_text(CANARY_TOKEN, encoding="utf-8")
+
+    def credential(_path, *, timeout):
+        budgets.append(("credential", timeout))
+        clock.advance(2)
+        return CANARY_TOKEN
+
+    def resolve(_host, _port, *, timeout):
+        budgets.append(("dns", timeout))
+        clock.advance(1)
+        return [ip_address("203.0.113.9")]
+
+    def request(**kwargs):
+        budgets.append(("http", kwargs["total_timeout"]))
+        assert kwargs["deadline"] == pytest.approx(105)
+        clock.advance(2.01)
+        return 200, _statuses()
+
+    monkeypatch.setattr(monitoring_gatus, "monotonic", clock)
+    monkeypatch.setattr(monitoring_probe, "monotonic", clock)
+    monkeypatch.setattr(monitoring_gatus, "_read_credential", credential)
+    monkeypatch.setattr(monitoring_probe, "_resolve", resolve)
+    monkeypatch.setattr(monitoring_probe, "_request_status_and_body", request)
+
+    observation = monitoring_gatus.probe_gatus_endpoint(
+        _request(
+            credential_file=str(token_file),
+            limits=ProbeLimits(
+                policy=parse_target_policy(allowed_networks="203.0.113.0/24", allowed_ports="443"),
+                connect_timeout_ms=5000,
+                total_timeout_ms=5000,
+            ),
+        )
+    )
+
+    assert [phase for phase, _ in budgets] == ["credential", "dns", "http"]
+    assert [budget for _, budget in budgets] == pytest.approx([5, 3, 2])
+    assert (observation.state, observation.error_code) == (
+        "check_error",
+        "timeout",
+    )
 
 
 def test_the_latest_result_wins_by_timestamp_not_list_position(monkeypatch) -> None:

@@ -32,7 +32,11 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.orm import Session, sessionmaker
 
-from blockwart.config import Settings, get_settings
+from blockwart.config import (
+    MONITORING_LEASE_SAFETY_MARGIN_MS,
+    Settings,
+    get_settings,
+)
 from blockwart.db.session import build_engine
 from blockwart.domain.monitoring import (
     DEFAULT_MONITORING_INTERVAL_SECONDS,
@@ -95,6 +99,16 @@ class MonitoringSettings:
     gatus_sources: Mapping[str, MonitoringPullSource] = field(
         default_factory=lambda: MappingProxyType({})
     )
+
+    def __post_init__(self) -> None:
+        """Keep every runtime lease safely beyond its acquisition deadline."""
+
+        if self.connect_timeout_ms > self.total_timeout_ms:
+            raise ValueError("monitoring connect timeout must not exceed total timeout")
+        if self.lease_seconds * 1000 < self.total_timeout_ms + MONITORING_LEASE_SAFETY_MARGIN_MS:
+            raise ValueError(
+                "monitoring lease must cover the total probe timeout and acquisition safety margin"
+            )
 
     @property
     def known_gatus_sources(self) -> frozenset[str]:

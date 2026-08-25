@@ -174,6 +174,8 @@ class _ProbeFailure(Exception):
 def _resolve(host: str, port: int, *, timeout: float) -> list[IPAddress]:
     """Resolve one hostname to every address it currently answers with."""
 
+    if timeout <= 0:
+        raise TimeoutError("resolver deadline exceeded")
     try:
         return [ip_address(host)]
     except ValueError:
@@ -186,7 +188,7 @@ def _resolve(host: str, port: int, *, timeout: float) -> list[IPAddress]:
     except Full as exc:
         raise TimeoutError("resolver capacity unavailable") from exc
     try:
-        succeeded, payload = result.get(timeout=max(0.01, timeout))
+        succeeded, payload = result.get(timeout=timeout)
     except Empty as exc:
         task.cancelled.set()
         raise TimeoutError("resolver deadline exceeded") from exc
@@ -334,6 +336,7 @@ def _request_status_and_body(
     total_timeout: float,
     max_response_bytes: int,
     authorization: str | None = None,
+    deadline: float | None = None,
 ) -> tuple[int, bytes]:
     """Like ``_request_status`` but also reads a bounded response body.
 
@@ -342,13 +345,13 @@ def _request_status_and_body(
     from ``_request_status`` applies identically; the body is read only up to
     ``max_response_bytes`` and never logged or persisted.
     """
-    deadline = monotonic() + total_timeout
+    request_deadline = monotonic() + total_timeout if deadline is None else deadline
     sock: socket.socket | None = None
     try:
         try:
             sock = socket.create_connection(
                 (str(pinned), port),
-                timeout=min(connect_timeout, _remaining(deadline)),
+                timeout=min(connect_timeout, _remaining(request_deadline)),
             )
         except TimeoutError as exc:
             raise _ProbeFailure("down", "timeout") from exc
@@ -360,7 +363,7 @@ def _request_status_and_body(
             context.check_hostname = True
             context.verify_mode = ssl.CERT_REQUIRED
             try:
-                sock.settimeout(_remaining(deadline))
+                sock.settimeout(_remaining(request_deadline))
                 sock = context.wrap_socket(sock, server_hostname=hostname)
             except ssl.SSLError as exc:
                 raise _ProbeFailure("down", "tls_failed") from exc
@@ -379,8 +382,8 @@ def _request_status_and_body(
             "Connection: close\r\n\r\n"
         ).encode("ascii")
         try:
-            _send_all(sock, request, deadline)
-            header_block = _read_response_headers(sock, deadline)
+            _send_all(sock, request, request_deadline)
+            header_block = _read_response_headers(sock, request_deadline)
         except TimeoutError as exc:
             raise _ProbeFailure("down", "timeout") from exc
         except ssl.SSLError as exc:
@@ -412,7 +415,7 @@ def _request_status_and_body(
             for name, value in headers
         )
         try:
-            body = _read_bounded_body(sock, max_response_bytes, deadline)
+            body = _read_bounded_body(sock, max_response_bytes, request_deadline)
             if chunked:
                 body = _decode_chunked_body(body)
         except _ProbeFailure:

@@ -1,6 +1,8 @@
 from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+MONITORING_LEASE_SAFETY_MARGIN_MS = 1000
+
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="BLOCKWART_", env_file=".env", extra="ignore")
@@ -251,8 +253,13 @@ class Settings(BaseSettings):
     def validate_monitoring_time_bounds(self) -> "Settings":
         if self.monitoring_connect_timeout_ms > self.monitoring_total_timeout_ms:
             raise ValueError("monitoring connect timeout must not exceed total timeout")
-        if self.monitoring_lease_seconds * 1000 <= self.monitoring_total_timeout_ms:
-            raise ValueError("monitoring lease must exceed the total probe timeout")
+        if (
+            self.monitoring_lease_seconds * 1000
+            < self.monitoring_total_timeout_ms + MONITORING_LEASE_SAFETY_MARGIN_MS
+        ):
+            raise ValueError(
+                "monitoring lease must cover the total probe timeout and acquisition safety margin"
+            )
         from blockwart.domain.monitoring_policy import (
             MonitoringPolicyError,
             parse_target_policy,

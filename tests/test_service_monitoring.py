@@ -13,7 +13,7 @@ import blockwart.services.agent as agent_service
 import blockwart.services.monitoring as monitoring_service
 import blockwart.services.monitoring_probe as monitoring_probe
 from blockwart.api.deps import get_session
-from blockwart.config import Settings
+from blockwart.config import MONITORING_LEASE_SAFETY_MARGIN_MS, Settings
 from blockwart.domain.auth import Permission, PrincipalContext, PrincipalType
 from blockwart.domain.monitoring import (
     MonitoringObservation,
@@ -1379,9 +1379,18 @@ def test_monitoring_settings_keep_probe_and_lease_bounds_consistent() -> None:
         )
     with pytest.raises(ValidationError):
         Settings(
-            monitoring_total_timeout_ms=10000,
+            monitoring_total_timeout_ms=9001,
             monitoring_lease_seconds=10,
         )
+    accepted = Settings(
+        monitoring_total_timeout_ms=9000,
+        monitoring_lease_seconds=10,
+    )
+    assert accepted.monitoring_lease_seconds * 1000 >= (
+        accepted.monitoring_total_timeout_ms + MONITORING_LEASE_SAFETY_MARGIN_MS
+    )
+    with pytest.raises(ValueError):
+        MonitoringSettings(total_timeout_ms=9001, lease_seconds=10)
     with pytest.raises(ValidationError):
         Settings(monitoring_allowed_target_networks="not-a-network")
 

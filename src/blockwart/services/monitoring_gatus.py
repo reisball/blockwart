@@ -34,16 +34,23 @@ Security model (mirrors ``monitoring_probe``):
   any connection, and DNS is resolved once with every answer policy-checked;
 - one validated address is pinned for the socket while the original hostname
   supplies the ``Host`` header and the TLS SNI and certificate identity;
-- connect and total time, response size, header count, result count, and
-  credential size are bounded; the body is discarded after parsing;
+- one end-to-end deadline covers credential access, DNS, connect, TLS, response
+  headers, and body; response size, header count, result count, and credential
+  size are bounded, and the body is discarded after parsing;
 - every outcome collapses to one stable, redacted error code.
 """
 
 from __future__ import annotations
 
 import json
+import os
 import re
+import stat
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
+from queue import Empty, Full, Queue
+from threading import Event, Lock, Thread
+from time import monotonic
 from typing import TYPE_CHECKING, Any
 
 from blockwart.domain.monitoring import (
@@ -74,6 +81,10 @@ _RFC3339_TIMESTAMP = re.compile(
     r"^\d{4}-\d{2}-\d{2}[Tt]\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:[Zz]|[+-]\d{2}:\d{2})$"
 )
 
+_CREDENTIAL_WORKERS = 2
+_CREDENTIAL_STARTED = False
+_CREDENTIAL_START_LOCK = Lock()
+
 
 def probe_gatus_endpoint(request: ProviderCheckRequest) -> MonitoringObservation:
     """Read one bounded Gatus status snapshot and normalize it.
@@ -95,31 +106,42 @@ def probe_gatus_endpoint(request: ProviderCheckRequest) -> MonitoringObservation
     # probe_http_target inside _register_builtin_providers.
     from blockwart.services.monitoring_probe import (
         _ProbeFailure,
+        _remaining,
         _request_status_and_body,
         _resolve,
     )
 
-    received_at = datetime.now(UTC)
+    deadline = monotonic() + request.limits.total_timeout_ms / 1000
+
+    def failure(error_code: str) -> MonitoringObservation:
+        return _error(_utcnow(), error_code)
+
     binding = request.pull_source
     if binding is None or not binding.endpoint:
         # The scheduler resolves the binding, so an absent one means the
         # service names no usable source identity for this deployment.
-        return _error(received_at, "source_unconfigured")
+        return failure("source_unconfigured")
     source = binding.source
 
     limits = request.limits
     if not limits.policy.enabled:
-        return _error(received_at, "policy_denied")
+        return failure("policy_denied")
     if limits.policy.check_scheme(source.scheme) is not None:
-        return _error(received_at, "policy_denied")
+        return failure("policy_denied")
     if limits.policy.check_port(source.port) is not None:
-        return _error(received_at, "policy_denied")
+        return failure("policy_denied")
 
-    credential = _read_credential(binding.credential_file)
+    try:
+        credential = _read_credential(
+            binding.credential_file,
+            timeout=_remaining(deadline),
+        )
+    except TimeoutError:
+        return failure("timeout")
     if credential is _CREDENTIAL_UNREADABLE:
         # A source that declares a credential must present it. Sending an
         # anonymous request instead would silently downgrade the contract.
-        return _error(received_at, "source_unconfigured")
+        return failure("source_unconfigured")
 
     try:
         addresses = _resolve(
@@ -127,49 +149,54 @@ def probe_gatus_endpoint(request: ProviderCheckRequest) -> MonitoringObservation
             source.port,
             timeout=min(
                 limits.connect_timeout_ms / 1000,
-                limits.total_timeout_ms / 1000,
+                _remaining(deadline),
             ),
         )
     except TimeoutError:
-        return _error(received_at, "timeout")
+        return failure("timeout")
     except OSError:
-        return _error(received_at, "dns_failed")
+        return failure("dns_failed")
 
     if limits.policy.check_target(
         scheme=source.scheme, port=source.port, addresses=addresses
     ) is not None:
-        return _error(received_at, "policy_denied")
+        return failure("policy_denied")
 
     pinned = pin_address(addresses)
     if pinned is None:
-        return _error(received_at, "policy_denied")
+        return failure("policy_denied")
 
     try:
+        remaining = _remaining(deadline)
         status, body = _request_status_and_body(
             scheme=source.scheme,
             hostname=source.host,
             pinned=pinned,
             port=source.port,
             path=source.path,
-            connect_timeout=limits.connect_timeout_ms / 1000,
-            total_timeout=limits.total_timeout_ms / 1000,
+            connect_timeout=min(limits.connect_timeout_ms / 1000, remaining),
+            total_timeout=remaining,
             max_response_bytes=limits.max_response_bytes,
             authorization=f"Bearer {credential}" if credential else None,
+            deadline=deadline,
         )
-    except _ProbeFailure as failure:
+        _remaining(deadline)
+    except _ProbeFailure as probe_failure:
         # A transport failure reaching Gatus says nothing about the monitored
         # service, so the probe's "down" verdict is deliberately not reused.
-        return _error(received_at, failure.error_code)
+        return _error(_utcnow(), probe_failure.error_code)
+    except TimeoutError:
+        return failure("timeout")
 
     if status < 200 or status >= 300:
         code = "http_server_error" if status >= 500 else "http_client_error"
-        return _error(received_at, code)
+        return failure(code)
 
     return _observation_from_body(
         body,
         group=binding.group,
         endpoint=binding.endpoint,
-        received_at=received_at,
+        deadline=deadline,
     )
 
 
@@ -178,7 +205,7 @@ def _observation_from_body(
     *,
     group: str,
     endpoint: str,
-    received_at: datetime,
+    deadline: float | None = None,
 ) -> MonitoringObservation:
     """Map one Gatus statuses payload to a canonical observation.
 
@@ -190,9 +217,9 @@ def _observation_from_body(
     try:
         parsed = json.loads(body)
     except (ValueError, TypeError):
-        return _error(received_at, "source_unreadable")
+        return _error(_utcnow(), "source_unreadable")
     if not isinstance(parsed, list):
-        return _error(received_at, "source_unreadable")
+        return _error(_utcnow(), "source_unreadable")
 
     matches = [
         entry
@@ -202,20 +229,20 @@ def _observation_from_body(
         and _entry_group(entry) == group
     ]
     if not matches:
-        return _error(received_at, "mapping_missing")
+        return _error(_utcnow(), "mapping_missing")
     if len(matches) > 1:
         # Two entries answering to one identity make the mapping ambiguous.
         # Picking either would publish a guess as evidence.
-        return _error(received_at, "mapping_ambiguous")
+        return _error(_utcnow(), "mapping_ambiguous")
 
     results = matches[0].get("results")
     if not isinstance(results, list) or not results:
-        return _error(received_at, "source_unreadable")
+        return _error(_utcnow(), "source_unreadable")
     if len(results) > MAX_ENDPOINT_RESULTS:
-        return _error(received_at, "source_unreadable")
+        return _error(_utcnow(), "source_unreadable")
 
     latest: datetime | None = None
-    candidates: list[dict[str, Any]] = []
+    valid_results: list[tuple[datetime, dict[str, Any]]] = []
     invalid_timestamp = False
     for result in results:
         if not isinstance(result, dict) or not isinstance(result.get("success"), bool):
@@ -224,6 +251,18 @@ def _observation_from_body(
         if observed_at is None:
             invalid_timestamp = True
             continue
+        valid_results.append((observed_at, result))
+
+    if deadline is not None:
+        from blockwart.services.monitoring_probe import _remaining
+
+        try:
+            _remaining(deadline)
+        except TimeoutError:
+            return _error(_utcnow(), "timeout")
+    received_at = _utcnow()
+    candidates: list[dict[str, Any]] = []
+    for observed_at, result in valid_results:
         if observed_at > received_at + timedelta(seconds=MAX_UPSTREAM_FUTURE_SKEW_SECONDS):
             # A materially future observation is a broken or hostile clock. It
             # is never accepted, because storing it would make the evidence
@@ -327,7 +366,21 @@ class _CredentialUnreadable:
 _CREDENTIAL_UNREADABLE = _CredentialUnreadable()
 
 
-def _read_credential(path: str | None) -> str | None | _CredentialUnreadable:
+@dataclass(slots=True)
+class _CredentialTask:
+    path: str
+    result: Queue[object]
+    cancelled: Event
+
+
+_CREDENTIAL_QUEUE = Queue(maxsize=16)
+
+
+def _read_credential(
+    path: str | None,
+    *,
+    timeout: float,
+) -> str | None | _CredentialUnreadable:
     """Read one bounded credential from its source-scoped file.
 
     Returns ``None`` when the source declares no credential, the token when it
@@ -338,11 +391,97 @@ def _read_credential(path: str | None) -> str | None | _CredentialUnreadable:
 
     if not path:
         return None
+    if timeout <= 0:
+        raise TimeoutError("credential deadline exceeded")
+    _ensure_credential_workers()
+    result: Queue[object] = Queue(maxsize=1)
+    task = _CredentialTask(path=path, result=result, cancelled=Event())
     try:
-        with open(path, "rb") as handle:
-            raw = handle.read(MAX_CREDENTIAL_BYTES + 1)
+        _CREDENTIAL_QUEUE.put_nowait(task)
+    except Full as exc:
+        raise TimeoutError("credential capacity unavailable") from exc
+    try:
+        credential = result.get(timeout=timeout)
+    except Empty as exc:
+        task.cancelled.set()
+        raise TimeoutError("credential deadline exceeded") from exc
+    if isinstance(credential, str) or credential is _CREDENTIAL_UNREADABLE:
+        return credential
+    return _CREDENTIAL_UNREADABLE
+
+
+def _ensure_credential_workers() -> None:
+    global _CREDENTIAL_STARTED
+
+    if _CREDENTIAL_STARTED:
+        return
+    with _CREDENTIAL_START_LOCK:
+        if _CREDENTIAL_STARTED:
+            return
+        for index in range(_CREDENTIAL_WORKERS):
+            Thread(
+                target=_credential_worker,
+                name=f"blockwart-gatus-credential-{index + 1}",
+                daemon=True,
+            ).start()
+        _CREDENTIAL_STARTED = True
+
+
+def _credential_worker() -> None:
+    while True:
+        task = _CREDENTIAL_QUEUE.get()
+        try:
+            if task.cancelled.is_set():
+                continue
+            credential = _read_regular_credential(task.path)
+            if not task.cancelled.is_set():
+                try:
+                    task.result.put_nowait(credential)
+                except Full:
+                    pass
+        finally:
+            _CREDENTIAL_QUEUE.task_done()
+
+
+def _read_regular_credential(path: str) -> str | _CredentialUnreadable:
+    """Read a bounded token only from a non-followed regular file."""
+
+    try:
+        admitted = os.lstat(path)
     except OSError:
         return _CREDENTIAL_UNREADABLE
+    if not stat.S_ISREG(admitted.st_mode):
+        # Inspect the directory entry before opening it. In particular, a FIFO
+        # is rejected without relying on open/read behavior to remain prompt.
+        return _CREDENTIAL_UNREADABLE
+    flags = os.O_RDONLY | os.O_NONBLOCK
+    flags |= getattr(os, "O_CLOEXEC", 0)
+    flags |= getattr(os, "O_NOFOLLOW", 0)
+    try:
+        descriptor = os.open(path, flags)
+    except OSError:
+        return _CREDENTIAL_UNREADABLE
+    try:
+        metadata = os.fstat(descriptor)
+        if (
+            not stat.S_ISREG(metadata.st_mode)
+            or (metadata.st_dev, metadata.st_ino) != (admitted.st_dev, admitted.st_ino)
+            or metadata.st_size > MAX_CREDENTIAL_BYTES
+        ):
+            return _CREDENTIAL_UNREADABLE
+        chunks: list[bytes] = []
+        remaining = MAX_CREDENTIAL_BYTES + 1
+        while remaining:
+            chunk = os.read(descriptor, remaining)
+            if not chunk:
+                break
+            chunks.append(chunk)
+            remaining -= len(chunk)
+        raw = b"".join(chunks)
+    except OSError:
+        return _CREDENTIAL_UNREADABLE
+    finally:
+        os.close(descriptor)
     if len(raw) > MAX_CREDENTIAL_BYTES:
         return _CREDENTIAL_UNREADABLE
     try:
@@ -359,9 +498,9 @@ def _read_credential(path: str | None) -> str | None | _CredentialUnreadable:
 def _error(received_at: datetime, error_code: str) -> MonitoringObservation:
     """Build the one shape every acquisition failure collapses to.
 
-    The instant is the poll instant: a failed acquisition is evidence about
-    this deployment's check, not about the monitored service, so it carries no
-    upstream latency or status.
+    The instant is when the failed acquisition outcome was determined. It is
+    evidence about this deployment's check, not about the monitored service,
+    so it carries no upstream latency or status.
     """
 
     return MonitoringObservation(
@@ -371,3 +510,9 @@ def _error(received_at: datetime, error_code: str) -> MonitoringObservation:
         received_at=received_at,
         error_code=error_code,
     )
+
+
+def _utcnow() -> datetime:
+    """Return acquisition completion time through one deterministic test seam."""
+
+    return datetime.now(UTC)
