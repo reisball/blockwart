@@ -11,12 +11,17 @@ from urllib.parse import parse_qsl, urlsplit
 
 from blockwart.domain.interfaces import CANONICAL_EXPOSURES, CANONICAL_TRANSPORTS
 from blockwart.domain.monitoring import (
+    GATUS_DOCUMENT_KEYS,
+    MAX_GATUS_ENDPOINT_LENGTH,
+    MAX_GATUS_GROUP_LENGTH,
+    MAX_GATUS_SOURCE_NAME_LENGTH,
     MAX_MONITORING_INTERVAL_SECONDS,
     MIN_MONITORING_INTERVAL_SECONDS,
     MONITORING_DOCUMENT_KEYS,
     MONITORING_PROVIDERS,
     normalize_service_monitoring,
     service_monitoring_violations,
+    valid_gatus_source_name,
 )
 from blockwart.domain.references import TypedReference
 from blockwart.domain.security import FORBIDDEN_SECRET_KEYS
@@ -1218,6 +1223,33 @@ SERVICE_MONITORING_FIELDS = (
             f"to {MAX_MONITORING_INTERVAL_SECONDS}"
         ),
     ),
+    # The Gatus sub-document is a closed *identity*: it names a
+    # deployment-bound source and one entry inside it. There is deliberately no
+    # field for a URL, a host, a port, or a credential, so catalog data can
+    # never choose where a check connects or what it presents there.
+    _field("monitoring.gatus", "object", allowed_keys=GATUS_DOCUMENT_KEYS),
+    _field(
+        "monitoring.gatus.source",
+        "string",
+        strip_whitespace=True,
+        min_length=1,
+        max_length=MAX_GATUS_SOURCE_NAME_LENGTH,
+    ),
+    # Gatus's ungrouped endpoints have the empty group, so the empty string is
+    # an explicit selection rather than an omission.
+    _field(
+        "monitoring.gatus.group",
+        "string",
+        strip_whitespace=True,
+        max_length=MAX_GATUS_GROUP_LENGTH,
+    ),
+    _field(
+        "monitoring.gatus.endpoint",
+        "string",
+        strip_whitespace=True,
+        min_length=1,
+        max_length=MAX_GATUS_ENDPOINT_LENGTH,
+    ),
 )
 
 SERVICE_COMPONENTS_FORBIDDEN_FIELDS = (
@@ -2351,6 +2383,36 @@ def _validate_service_monitoring(data: Mapping[str, Any]) -> None:
     )
 
 
+def _reject_invalid_gatus_identity(data: Mapping[str, Any]) -> None:
+    """Reject a Gatus source identity this deployment could never bind.
+
+    The identity is matched against the runtime source registry by exact
+    string. Admitting a value that no registry entry can ever use would store
+    a service that silently never gets checked.
+    """
+
+    document = data.get("monitoring")
+    gatus = document.get("gatus") if isinstance(document, Mapping) else None
+    if not isinstance(gatus, Mapping):
+        return
+    source = gatus.get("source")
+    if isinstance(source, str) and not valid_gatus_source_name(source.strip()):
+        raise ObjectSchemaError(
+            "data.monitoring.gatus.source",
+            "must be a lowercase source identity of letters, digits, '.', '-', or '_'",
+            violation=VIOLATION_VALUE_NOT_ALLOWED,
+            rule=public_rule_name(_reject_invalid_gatus_identity),
+        )
+    endpoint = gatus.get("endpoint")
+    if isinstance(endpoint, str) and not endpoint.strip():
+        raise ObjectSchemaError(
+            "data.monitoring.gatus.endpoint",
+            "must name one Gatus endpoint",
+            violation=VIOLATION_VALUE_NOT_ALLOWED,
+            rule=public_rule_name(_reject_invalid_gatus_identity),
+        )
+
+
 def _validate_service_components(data: Mapping[str, Any]) -> None:
     """Enforce local identity and graph integrity after field-shape checks."""
 
@@ -2439,7 +2501,15 @@ SCHEMA_RULE_CONTRACTS: Mapping[str, str] = MappingProxyType(
             "explicit enabled flag once present; an absent document is exactly "
             "enabled=false. provider selects the observation provider and "
             "interval_seconds overrides the server-wide default within its "
-            "published bounds."
+            "published bounds. The gatus provider additionally requires the "
+            "closed data.monitoring.gatus identity with all of source, group, "
+            "and endpoint."
+        ),
+        "_reject_invalid_gatus_identity": (
+            "data.monitoring.gatus names a deployment-bound status source and "
+            "one endpoint inside it. The source identity is a bounded "
+            "lowercase name and the endpoint must not be empty; no URL, host, "
+            "port, or credential is expressible here."
         ),
         "_validate_service_components": (
             "data.components is a closed service-only document with required items "
@@ -2471,6 +2541,7 @@ SCHEMA_RULE_VIOLATIONS: Mapping[str, str] = MappingProxyType(
         "_reject_installed_software_extra_fields": VIOLATION_FIELD_NOT_ALLOWED,
         "_validate_service_components": VIOLATION_VALUE_NOT_ALLOWED,
         "_validate_service_monitoring": VIOLATION_REQUIRED_FIELD_MISSING,
+        "_reject_invalid_gatus_identity": VIOLATION_VALUE_NOT_ALLOWED,
     }
 )
 
@@ -2566,7 +2637,11 @@ BUILTIN_SCHEMAS: Mapping[str, TypeSchema] = MappingProxyType(
             *SERVICE_MONITORING_FIELDS,
             *REFERENCE_FIELDS,
             *INSTALLED_SOFTWARE_FORBIDDEN_FIELDS,
-            rules=(_validate_service_components, _validate_service_monitoring),
+            rules=(
+                _validate_service_components,
+                _validate_service_monitoring,
+                _reject_invalid_gatus_identity,
+            ),
         ),
         "credential_reference": _schema(
             "credential_reference",

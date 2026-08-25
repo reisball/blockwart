@@ -62,13 +62,19 @@ keyed by service object ID, immutable object-instance ID, and provider. A
 deleted and recreated object ID cannot inherit an earlier instance's result;
 out-of-order observations cannot replace a newer one.
 
-`record_service_observation` is the internal ingestion seam for later adapters.
+`record_service_observation` is the internal ingestion seam for all adapters.
 Its caller supplies both the catalog ID and the concrete immutable object-
 instance ID; a delayed delivery for a deleted instance is rejected rather than
-attached to a replacement row. A future push receiver such as Gatus converts
-its authorized input into the same domain observation and calls that seam. It
-must not add vendor payloads to the catalog or public read models. This release
-implements no Gatus HTTP/API receiver; that remains issue #177.
+attached to a replacement row. The built-in HTTP probe and the Gatus pull
+adapter both call that seam and never add vendor payloads to catalog or public
+read models.
+
+The Gatus adapter keeps upstream observation time (`last_checked_at`) separate
+from server receive time (`last_received_at`). Evidence, freshness, state, and
+last success move only for a newer upstream observation; acquisition cadence
+follows receive time. An unchanged, delayed, or replayed snapshot therefore
+cannot refresh old evidence and cannot make an old snapshot cause a tight poll
+loop. See [Gatus pull adapter](gatus-pull.md).
 
 States are normalized as follows:
 
@@ -114,12 +120,13 @@ a broad allow such as `0.0.0.0/0`. An operator must explicitly name the
 special-purpose range or a narrower subnet. Use the smallest required CIDR and
 port set.
 
-The adapter attaches no authorization, credential, cookie, or caller header;
-uses no environment proxy; sends `Connection: close`; enforces bounded connect
-and total deadlines plus response-header/count limits; reads no response body;
-and stores no header, body, resolver text, socket text, TLS text, exception
-text, or upstream error string. Public and operator results use only controlled
-codes.
+The built-in adapter attaches no authorization, credential, cookie, or caller
+header and reads no response body. The Gatus boundary may attach only the
+credential file bound to its exact runtime source identity and reads only a
+bounded status body. Both use no environment proxy, send `Connection: close`,
+enforce bounded connect and total deadlines plus response-header limits, and
+store no header, body, resolver text, socket text, TLS text, exception text, or
+upstream error string. Public and operator results use only controlled codes.
 
 ## Scheduling and operations
 
@@ -168,6 +175,8 @@ Expired leases recover automatically; deleting lease or observation rows is not
 a normal recovery step.
 
 Revision `0017` adds only `service_observations` and
-`service_check_leases`. Its downgrade removes only those two tables. Before a
+`service_check_leases`. Revision `20260824_0020` widens their provider/error
+constraints for Gatus and adds nullable `last_received_at`; it refuses to
+downgrade while Gatus rows or pull-source errors remain. Before a
 live rollback, stop Blockwart and restore the verified pre-upgrade database with
 the matching previous image according to the deployment recovery contract.

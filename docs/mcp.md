@@ -227,8 +227,8 @@ provider, interval bounds, target semantics, observation vocabulary, and
 maintenance precedence. Readable service summaries/contexts return the same
 provider-neutral monitoring projection and effective health as REST v1.
 Discover-only stubs receive no configuration, target, observation, freshness,
-timestamp, or count. Acquisition, force-check, allowlist mutation, and the
-future Gatus receiver are not MCP operations. See
+timestamp, or count. Acquisition, force-check, allowlist mutation, and Gatus
+runtime-source registration are not MCP operations. See
 [Service monitoring](service-monitoring.md).
 A malformed present monitoring document uses the same redacted
 `invalid_monitoring_config` projection as REST and never falls back to a

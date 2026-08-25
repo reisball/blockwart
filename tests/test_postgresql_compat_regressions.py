@@ -64,7 +64,8 @@ PG_TEST_URL = os.environ.get(
 CATALOG_OWNER_REVISION = "20260806_0015"
 SOURCE_COVERAGE_REVISION = "20260811_0016"
 PROJECT_CHRONOLOGY_REVISION = "20260818_0018"
-HEAD_REVISION = "20260822_0019"
+CATALOG_VIEWER_REVISION = "20260822_0019"
+HEAD_REVISION = "20260824_0020"
 
 
 def _pg_url(database: str) -> str:
@@ -389,6 +390,149 @@ def test_postgresql_catalog_viewer_migration_upgrade_and_safe_downgrade(
                 )
     finally:
         engine.dispose()
+
+
+@PG_SKIP
+def test_postgresql_gatus_pull_migration_upgrade_and_safe_downgrade(
+    pg_database_name: str,
+) -> None:
+    """Exercise the Gatus constraint/receive-time round trip on PostgreSQL."""
+
+    database_url = _pg_url(pg_database_name)
+    config = build_alembic_config(database_url)
+    _upgrade_to(database_url, CATALOG_VIEWER_REVISION)
+    engine = build_engine(database_url)
+    try:
+        with engine.begin() as connection:
+            connection.execute(
+                text(
+                    "INSERT INTO catalog_objects "
+                    "(id, kind, label, status, lifecycle, health, data_json) VALUES "
+                    "('pg-gatus-service', 'service', 'PG Gatus Service', 'active', "
+                    "'active', 'healthy', :data_json)"
+                ),
+                {"data_json": '{"schema_version":1}'},
+            )
+            connection.execute(
+                text(
+                    "INSERT INTO service_observations "
+                    "(object_id, object_instance_id, provider, state, last_checked_at) "
+                    "VALUES ('pg-gatus-service', 'inst-1', 'builtin_http', "
+                    "'healthy', TIMESTAMP '2026-08-24 11:00:00')"
+                )
+            )
+        before = _table_rows_for_columns(
+            engine,
+            {
+                "catalog_objects": ["id", "data_json", "revision"],
+                "service_observations": [
+                    "object_id",
+                    "object_instance_id",
+                    "provider",
+                    "state",
+                    "last_checked_at",
+                ],
+            },
+        )
+    finally:
+        engine.dispose()
+
+    _upgrade_to(database_url, HEAD_REVISION)
+    engine = build_engine(database_url)
+    try:
+        assert _table_rows_for_columns(
+            engine,
+            {
+                "catalog_objects": ["id", "data_json", "revision"],
+                "service_observations": [
+                    "object_id",
+                    "object_instance_id",
+                    "provider",
+                    "state",
+                    "last_checked_at",
+                ],
+            },
+        ) == before
+        assert "last_received_at" in {
+            column["name"] for column in inspect(engine).get_columns("service_observations")
+        }
+        with engine.begin() as connection:
+            connection.execute(
+                text(
+                    "INSERT INTO service_observations "
+                    "(object_id, object_instance_id, provider, state, error_code, "
+                    "last_checked_at, last_received_at) VALUES "
+                    "('pg-gatus-service', 'inst-2', 'gatus', 'check_error', "
+                    "'source_unconfigured', TIMESTAMP '2026-08-24 11:30:00', "
+                    "TIMESTAMP '2026-08-24 11:59:00')"
+                )
+            )
+            connection.execute(
+                text(
+                    "INSERT INTO service_check_leases "
+                    "(object_id, object_instance_id, provider, due_at) VALUES "
+                    "('pg-gatus-service', 'inst-2', 'gatus', "
+                    "TIMESTAMP '2026-08-24 12:00:00')"
+                )
+            )
+    finally:
+        engine.dispose()
+
+    with pytest.raises(RuntimeError, match="gatus check leases exist"):
+        command.downgrade(config, CATALOG_VIEWER_REVISION)
+
+    engine = build_engine(database_url)
+    try:
+        with engine.begin() as connection:
+            connection.execute(
+                text("DELETE FROM service_check_leases WHERE provider = 'gatus'")
+            )
+    finally:
+        engine.dispose()
+    with pytest.raises(RuntimeError, match="gatus observations exist"):
+        command.downgrade(config, CATALOG_VIEWER_REVISION)
+
+    engine = build_engine(database_url)
+    try:
+        with engine.begin() as connection:
+            connection.execute(
+                text("DELETE FROM service_observations WHERE provider = 'gatus'")
+            )
+    finally:
+        engine.dispose()
+    command.downgrade(config, CATALOG_VIEWER_REVISION)
+
+    engine = build_engine(database_url)
+    try:
+        assert "last_received_at" not in {
+            column["name"] for column in inspect(engine).get_columns("service_observations")
+        }
+        assert _table_rows_for_columns(
+            engine,
+            {
+                "catalog_objects": ["id", "data_json", "revision"],
+                "service_observations": [
+                    "object_id",
+                    "object_instance_id",
+                    "provider",
+                    "state",
+                    "last_checked_at",
+                ],
+            },
+        ) == before
+        with pytest.raises(IntegrityError):
+            with engine.begin() as connection:
+                connection.execute(
+                    text(
+                        "INSERT INTO service_observations "
+                        "(object_id, object_instance_id, provider, state) VALUES "
+                        "('pg-gatus-service', 'inst-3', 'gatus', 'healthy')"
+                    )
+                )
+    finally:
+        engine.dispose()
+
+    _upgrade_to(database_url, HEAD_REVISION)
 
 
 @PG_SKIP

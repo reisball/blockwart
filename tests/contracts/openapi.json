@@ -1929,7 +1929,7 @@
         "type": "object"
       },
       "AgentServiceMonitoring": {
-        "description": "The provider-neutral monitoring projection shared by every surface.\n\nIt carries no vendor-specific payload, so adding a provider cannot change\nthis contract. ``state`` is the value a client may act on; ``observed_state``\nis the last stored result even when it has gone stale.",
+        "description": "The provider-neutral monitoring projection shared by every surface.\n\nIt carries no vendor-specific payload, so adding a provider cannot change\nthis contract. ``state`` is the value a client may act on; ``observed_state``\nis the last stored result even when it has gone stale.\n\n``last_checked_at`` is the instant the observation is evidence **for**, and\n``last_received_at`` the instant this deployment acquired it. They are equal\nfor a provider that observes what it acquires, and differ for a pull\nprovider that reads evidence a source produced earlier. Freshness always\nfollows ``last_checked_at``, so re-reading an old snapshot cannot present\nit as current. A pull provider publishes no ``target``: its source URL is\ndeployment state, not catalog content.",
         "properties": {
           "diagnostic": {
             "anyOf": [
@@ -1941,7 +1941,9 @@
                   "invalid_endpoints",
                   "invalid_health_url",
                   "invalid_monitoring_config",
-                  "no_http_endpoint"
+                  "missing_gatus_source",
+                  "no_http_endpoint",
+                  "unknown_gatus_source"
                 ],
                 "type": "string"
               },
@@ -1981,11 +1983,16 @@
                   "dns_failed",
                   "http_client_error",
                   "http_server_error",
+                  "invalid_observation_time",
                   "invalid_target",
+                  "mapping_ambiguous",
+                  "mapping_missing",
                   "policy_denied",
                   "probe_failed",
                   "redirect_not_supported",
                   "response_too_large",
+                  "source_unconfigured",
+                  "source_unreadable",
                   "timeout",
                   "tls_failed"
                 ],
@@ -2043,6 +2050,17 @@
             ],
             "title": "Last Checked At"
           },
+          "last_received_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Received At"
+          },
           "last_success_at": {
             "anyOf": [
               {
@@ -2089,7 +2107,10 @@
           "provider": {
             "anyOf": [
               {
-                "const": "builtin_http",
+                "enum": [
+                  "builtin_http",
+                  "gatus"
+                ],
                 "type": "string"
               },
               {
@@ -4634,6 +4655,7 @@
                   "invalid_health_url",
                   "invalid_monitoring_config",
                   "invalid_object_json",
+                  "invalid_observation_time",
                   "invalid_relationship_direction",
                   "invalid_relationship_endpoint",
                   "invalid_relationship_metadata",
@@ -4642,6 +4664,9 @@
                   "maintenance",
                   "mapped_current",
                   "mapped_stale",
+                  "mapping_ambiguous",
+                  "mapping_missing",
+                  "missing_gatus_source",
                   "missing_source",
                   "multiple_placement_parents",
                   "multiple_primary_relationships",
@@ -4661,11 +4686,14 @@
                   "secret_relationship_metadata",
                   "self_reference",
                   "source_changed_since_import",
+                  "source_unconfigured",
+                  "source_unreadable",
                   "superseded",
                   "timeout",
                   "tls_failed",
                   "typed_reference_kind_mismatch",
                   "unknown",
+                  "unknown_gatus_source",
                   "unmapped_operational",
                   "unsupported_relation_type"
                 ],
@@ -21711,6 +21739,7 @@
               "additional_properties": false,
               "allowed_keys": [
                 "enabled",
+                "gatus",
                 "interval_seconds",
                 "provider"
               ],
@@ -21741,7 +21770,8 @@
             {
               "constraint": "must be a supported monitoring provider",
               "enum": [
-                "builtin_http"
+                "builtin_http",
+                "gatus"
               ],
               "json_types": [
                 "string"
@@ -21768,6 +21798,77 @@
               "violations": [
                 "type_mismatch",
                 "value_out_of_range"
+              ]
+            },
+            {
+              "additional_properties": false,
+              "allowed_keys": [
+                "endpoint",
+                "group",
+                "source"
+              ],
+              "json_types": [
+                "object"
+              ],
+              "normalization": [],
+              "path": "monitoring.gatus",
+              "requirement": "optional",
+              "type": "object",
+              "violations": [
+                "field_not_allowed",
+                "type_mismatch"
+              ]
+            },
+            {
+              "json_types": [
+                "string"
+              ],
+              "max_length": 32,
+              "min_length": 1,
+              "normalization": [
+                "strip_whitespace"
+              ],
+              "path": "monitoring.gatus.source",
+              "requirement": "optional",
+              "type": "string",
+              "violations": [
+                "type_mismatch",
+                "value_too_long",
+                "value_too_short"
+              ]
+            },
+            {
+              "json_types": [
+                "string"
+              ],
+              "max_length": 128,
+              "normalization": [
+                "strip_whitespace"
+              ],
+              "path": "monitoring.gatus.group",
+              "requirement": "optional",
+              "type": "string",
+              "violations": [
+                "type_mismatch",
+                "value_too_long"
+              ]
+            },
+            {
+              "json_types": [
+                "string"
+              ],
+              "max_length": 128,
+              "min_length": 1,
+              "normalization": [
+                "strip_whitespace"
+              ],
+              "path": "monitoring.gatus.endpoint",
+              "requirement": "optional",
+              "type": "string",
+              "violations": [
+                "type_mismatch",
+                "value_too_long",
+                "value_too_short"
               ]
             },
             {
@@ -22001,9 +22102,14 @@
               "violation": "value_not_allowed"
             },
             {
-              "description": "data.monitoring is a closed service-only document. It requires an explicit enabled flag once present; an absent document is exactly enabled=false. provider selects the observation provider and interval_seconds overrides the server-wide default within its published bounds.",
+              "description": "data.monitoring is a closed service-only document. It requires an explicit enabled flag once present; an absent document is exactly enabled=false. provider selects the observation provider and interval_seconds overrides the server-wide default within its published bounds. The gatus provider additionally requires the closed data.monitoring.gatus identity with all of source, group, and endpoint.",
               "rule": "validate_service_monitoring",
               "violation": "required_field_missing"
+            },
+            {
+              "description": "data.monitoring.gatus names a deployment-bound status source and one endpoint inside it. The source identity is a bounded lowercase name and the endpoint must not be empty; no URL, host, port, or credential is expressible here.",
+              "rule": "reject_invalid_gatus_identity",
+              "violation": "value_not_allowed"
             }
           ],
           "secret_policy": "global_enforced",
@@ -22110,7 +22216,9 @@
             "invalid_endpoints",
             "invalid_health_url",
             "invalid_monitoring_config",
-            "no_http_endpoint"
+            "no_http_endpoint",
+            "missing_gatus_source",
+            "unknown_gatus_source"
           ],
           "error_codes": [
             "connect_failed",
@@ -22123,7 +22231,12 @@
             "redirect_not_supported",
             "response_too_large",
             "timeout",
-            "tls_failed"
+            "tls_failed",
+            "invalid_observation_time",
+            "mapping_ambiguous",
+            "mapping_missing",
+            "source_unconfigured",
+            "source_unreadable"
           ],
           "freshness": [
             "pending",
@@ -22144,6 +22257,14 @@
             "server_default_configurable": true
           },
           "maintenance_precedence": true,
+          "observation_time": {
+            "acquisition_cadence_follows": "last_received_at",
+            "freshness_follows": "last_checked_at",
+            "max_future_skew_seconds": 120,
+            "observed_at_field": "last_checked_at",
+            "received_at_field": "last_received_at",
+            "upstream_observation_time_preserved": true
+          },
           "probe": {
             "allowlist": "deny_by_default",
             "authenticated": false,
@@ -22158,8 +22279,23 @@
             ]
           },
           "providers": [
-            "builtin_http"
+            "builtin_http",
+            "gatus"
           ],
+          "pull_sources": {
+            "gatus": {
+              "credential_binding": "deployment_source_scoped_file",
+              "credential_in_catalog_data": false,
+              "identity_fields": [
+                "endpoint",
+                "group",
+                "source"
+              ],
+              "identity_path": "data.monitoring.gatus",
+              "source_url_in_catalog_data": false,
+              "source_url_published": false
+            }
+          },
           "result_semantics": {
             "2xx": "healthy",
             "3xx": "check_error",

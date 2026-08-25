@@ -44,7 +44,8 @@ SOURCE_COVERAGE_REVISION = "20260811_0016"
 SERVICE_MONITORING_REVISION = "20260818_0017"
 PROJECT_CHRONOLOGY_REVISION = "20260818_0018"
 CATALOG_VIEWER_REVISION = "20260822_0019"
-HEAD_REVISION = CATALOG_VIEWER_REVISION
+GATUS_SOURCE_REVISION = "20260824_0020"
+HEAD_REVISION = GATUS_SOURCE_REVISION
 PROJECT_ALEMBIC_CONFIG = Path(__file__).resolve().parents[1] / "alembic.ini"
 LEGACY_SNAPSHOT = Path(__file__).resolve().parent / "fixtures" / "legacy_snapshot.sql"
 
@@ -2571,6 +2572,142 @@ def test_catalog_viewer_migration_preserves_data_and_has_safe_round_trip(
         assert connection.execute("PRAGMA foreign_key_check").fetchall() == []
     finally:
         connection.close()
+
+
+def test_gatus_pull_source_migration_is_additive_and_fails_closed_on_rollback(
+    tmp_path: Path,
+) -> None:
+    database_path = tmp_path / "gatus-pull-source.sqlite3"
+    database_url = _database_url(database_path)
+    config = build_alembic_config(database_url)
+    command.upgrade(config, CATALOG_VIEWER_REVISION)
+    connection = sqlite3.connect(database_path)
+    try:
+        connection.execute(
+            "INSERT INTO catalog_objects "
+            "(id, kind, label, status, lifecycle, health, data_json, "
+            "provenance_json, revision) VALUES "
+            "('preserved-service', 'service', 'Preserved Service', 'active', "
+            "'active', 'healthy', '{\"schema_version\":1}', "
+            "'{\"source_type\":\"manual\",\"manual_override\":false}', 5)"
+        )
+        connection.execute(
+            "INSERT INTO service_observations "
+            "(object_id, object_instance_id, provider, state, last_checked_at) "
+            "VALUES ('preserved-service', 'inst-1', 'builtin_http', 'healthy', "
+            "'2026-08-24 11:00:00')"
+        )
+        connection.commit()
+        before_objects = connection.execute(
+            "SELECT * FROM catalog_objects ORDER BY id"
+        ).fetchall()
+        before_observations = connection.execute(
+            "SELECT object_id, object_instance_id, provider, state, last_checked_at "
+            "FROM service_observations ORDER BY id"
+        ).fetchall()
+        # Before the upgrade the widened vocabulary is refused by the database.
+        with pytest.raises(sqlite3.IntegrityError, match="CHECK constraint failed"):
+            connection.execute(
+                "INSERT INTO service_observations "
+                "(object_id, object_instance_id, provider, state) VALUES "
+                "('preserved-service', 'inst-1', 'gatus', 'healthy')"
+            )
+        connection.rollback()
+    finally:
+        connection.close()
+
+    command.upgrade(config, GATUS_SOURCE_REVISION)
+    connection = sqlite3.connect(database_path)
+    try:
+        assert connection.execute(
+            "SELECT * FROM catalog_objects ORDER BY id"
+        ).fetchall() == before_objects
+        assert connection.execute(
+            "SELECT object_id, object_instance_id, provider, state, last_checked_at "
+            "FROM service_observations ORDER BY id"
+        ).fetchall() == before_observations
+        # The new acquisition instant is additive and starts empty.
+        assert connection.execute(
+            "SELECT last_received_at FROM service_observations"
+        ).fetchall() == [(None,)]
+        connection.execute(
+            "INSERT INTO service_observations "
+            "(object_id, object_instance_id, provider, state, error_code, "
+            "last_checked_at, last_received_at) VALUES "
+            "('preserved-service', 'inst-1', 'gatus', 'check_error', "
+            "'source_unconfigured', '2026-08-24 11:30:00', '2026-08-24 11:59:00')"
+        )
+        connection.execute(
+            "INSERT INTO service_check_leases "
+            "(object_id, object_instance_id, provider, due_at) VALUES "
+            "('preserved-service', 'inst-1', 'gatus', '2026-08-24 12:00:00')"
+        )
+        connection.commit()
+        # An unknown provider or code is still refused after the widening.
+        for statement in (
+            "INSERT INTO service_observations "
+            "(object_id, object_instance_id, provider, state) VALUES "
+            "('preserved-service', 'inst-2', 'made-up', 'healthy')",
+            "INSERT INTO service_observations "
+            "(object_id, object_instance_id, provider, state, error_code) VALUES "
+            "('preserved-service', 'inst-2', 'gatus', 'check_error', 'made-up')",
+        ):
+            with pytest.raises(sqlite3.IntegrityError, match="CHECK constraint failed"):
+                connection.execute(statement)
+            connection.rollback()
+    finally:
+        connection.close()
+
+    # The downgrade refuses to discard monitoring history rather than deleting it.
+    with pytest.raises(RuntimeError, match="gatus check leases exist"):
+        command.downgrade(config, CATALOG_VIEWER_REVISION)
+    assert _revision(database_url) == GATUS_SOURCE_REVISION
+
+    connection = sqlite3.connect(database_path)
+    try:
+        connection.execute("DELETE FROM service_check_leases WHERE provider = 'gatus'")
+        connection.commit()
+    finally:
+        connection.close()
+    with pytest.raises(RuntimeError, match="gatus observations exist"):
+        command.downgrade(config, CATALOG_VIEWER_REVISION)
+    assert _revision(database_url) == GATUS_SOURCE_REVISION
+
+    connection = sqlite3.connect(database_path)
+    try:
+        connection.execute("DELETE FROM service_observations WHERE provider = 'gatus'")
+        connection.commit()
+    finally:
+        connection.close()
+
+    command.downgrade(config, CATALOG_VIEWER_REVISION)
+    connection = sqlite3.connect(database_path)
+    try:
+        assert connection.execute(
+            "SELECT * FROM catalog_objects ORDER BY id"
+        ).fetchall() == before_objects
+        assert connection.execute(
+            "SELECT object_id, object_instance_id, provider, state, last_checked_at "
+            "FROM service_observations ORDER BY id"
+        ).fetchall() == before_observations
+        columns = {
+            str(row[1])
+            for row in connection.execute("PRAGMA table_info(service_observations)")
+        }
+        assert "last_received_at" not in columns
+        with pytest.raises(sqlite3.IntegrityError, match="CHECK constraint failed"):
+            connection.execute(
+                "INSERT INTO service_observations "
+                "(object_id, object_instance_id, provider, state) VALUES "
+                "('preserved-service', 'inst-3', 'gatus', 'healthy')"
+            )
+        connection.rollback()
+        assert connection.execute("PRAGMA foreign_key_check").fetchall() == []
+    finally:
+        connection.close()
+
+    command.upgrade(config, GATUS_SOURCE_REVISION)
+    assert _revision(database_url) == GATUS_SOURCE_REVISION
 
 
 def test_source_coverage_migration_preserves_populated_catalog_and_provenance(

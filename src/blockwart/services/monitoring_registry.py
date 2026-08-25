@@ -21,6 +21,7 @@ from blockwart.domain.monitoring import (
     MonitoringTarget,
 )
 from blockwart.domain.monitoring_policy import TargetPolicy
+from blockwart.domain.monitoring_sources import MonitoringPullSource
 
 
 @dataclass(frozen=True, slots=True)
@@ -34,18 +35,48 @@ class ProbeLimits:
 
 
 @dataclass(frozen=True, slots=True)
+class PullSourceRequest:
+    """One acquisition request against a deployment-bound status source.
+
+    A pull adapter never reaches the monitored service. It reads one immutable
+    status URL that the deployment bound to the ``source`` identity the service
+    names, and presents only that source's own credential. The binding arrives
+    already resolved and already admission-checked, so the adapter cannot pick
+    a host, cannot fall back to another source, and cannot forward one source's
+    credential to another.
+
+    ``credential_file`` is a path, never a secret. The adapter reads it at
+    check time so a rotated credential takes effect without a restart and no
+    credential value ever lives in a settings object, a request, or a log line.
+    """
+
+    source: MonitoringPullSource
+    group: str
+    endpoint: str
+
+    @property
+    def credential_file(self) -> str | None:
+        return self.source.credential_file
+
+
+@dataclass(frozen=True, slots=True)
 class ProviderCheckRequest:
     """One acquisition request for exactly one service.
 
     ``target`` is already resolved and ``diagnostic`` already explains why it
     could not be. An adapter never inspects catalog data, resolves a second
     target, or falls back to another endpoint.
+
+    ``pull_source`` is set instead of ``target`` for a pull provider, whose
+    evidence comes from a bound status source rather than from the monitored
+    service. Exactly one of the two is ever populated.
     """
 
     object_id: str
     target: MonitoringTarget | None
     diagnostic: str | None
     limits: ProbeLimits
+    pull_source: PullSourceRequest | None = None
 
 
 MonitoringAcquire = Callable[[ProviderCheckRequest], MonitoringObservation]
@@ -100,6 +131,7 @@ def registered_providers() -> tuple[str, ...]:
 def _register_builtin_providers() -> None:
     # Imported lazily so the registry module stays importable from the pure
     # domain tests without pulling in socket and TLS machinery.
+    from blockwart.services.monitoring_gatus import probe_gatus_endpoint
     from blockwart.services.monitoring_probe import probe_http_target
 
     register_provider(
@@ -109,6 +141,17 @@ def _register_builtin_providers() -> None:
             acquire=probe_http_target,
             description=(
                 "Bounded unauthenticated HTTP(S) GET against one allowlisted target."
+            ),
+        )
+    )
+    register_provider(
+        MonitoringProviderSpec(
+            provider="gatus",
+            polling=True,
+            acquire=probe_gatus_endpoint,
+            description=(
+                "Gatus pull adapter: reads current status data from a "
+                "deployment-bound Gatus source (#177)."
             ),
         )
     )

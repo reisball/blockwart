@@ -915,6 +915,20 @@
                   <input type="number" name="monitoring_interval_seconds" value="{{ monitoring_form.interval_seconds }}" min="60" max="86400" step="1" inputmode="numeric" />
                   <span class="meta">{{ t("monitoring.interval_help") }}</span>
                 </label>
+                <h3>{{ t("monitoring.gatus_title") }}</h3>
+                <p class="meta">{{ t("monitoring.gatus_help") }}</p>
+                {# Marks this save as carrying the Gatus section, so a blank submission clears the identity on purpose instead of by omission. #}
+                <input type="hidden" name="monitoring_gatus_submitted" value="true" />
+                <label>{{ t("monitoring.gatus_source") }}
+                  <input type="text" name="monitoring_gatus_source" value="{{ monitoring_form.gatus_source }}" maxlength="32" autocomplete="off" />
+                </label>
+                <label>{{ t("monitoring.gatus_group") }}
+                  <input type="text" name="monitoring_gatus_group" value="{{ monitoring_form.gatus_group }}" maxlength="128" autocomplete="off" />
+                  <span class="meta">{{ t("monitoring.gatus_group_help") }}</span>
+                </label>
+                <label>{{ t("monitoring.gatus_endpoint") }}
+                  <input type="text" name="monitoring_gatus_endpoint" value="{{ monitoring_form.gatus_endpoint }}" maxlength="128" autocomplete="off" />
+                </label>
                 <div class="button-row"><button type="submit">{{ t("detail.save") }}</button><a class="button button-muted" href="{{ detail_href }}">{{ t("detail.cancel") }}</a></div>
               </form>
             {% else %}
@@ -930,11 +944,15 @@
                 <div><dt>{{ t("monitoring.http_status") }}</dt><dd>{{ monitoring.http_status or t("asset.no_value") }}</dd></div>
                 <div><dt>{{ t("monitoring.latency") }}</dt><dd>{% if monitoring.latency_ms is not none %}{{ monitoring.latency_ms }} ms{% else %}{{ t("asset.no_value") }}{% endif %}</dd></div>
                 <div><dt>{{ t("monitoring.last_checked_at") }}</dt><dd>{{ monitoring.last_checked_at or t("asset.no_value") }}</dd></div>
+                <div><dt>{{ t("monitoring.last_received_at") }}</dt><dd>{{ monitoring.last_received_at or t("asset.no_value") }}</dd></div>
                 <div><dt>{{ t("monitoring.last_success_at") }}</dt><dd>{{ monitoring.last_success_at or t("asset.no_value") }}</dd></div>
                 <div><dt>{{ t("monitoring.next_due_at") }}</dt><dd>{{ monitoring.next_due_at or t("asset.no_value") }}</dd></div>
               </dl>
               <h3>{{ t("monitoring.target") }}</h3>
               {% if monitoring.target %}<p><code>{{ monitoring.target.url }}</code></p><p class="meta">{{ t("monitoring.target_source." ~ monitoring.target.source) }} · {{ monitoring.target.endpoint_id }}</p>{% else %}<p class="meta">{{ t("monitoring.target_missing") }}</p>{% endif %}
+              <h3>{{ t("monitoring.gatus_title") }}</h3>
+              {# The bound status URL and its credential are deployment state, so only the identity is shown. #}
+              {% if monitoring_form.gatus_source or monitoring_form.gatus_endpoint %}<p class="meta"><code>{{ monitoring_form.gatus_source }}</code> · <code>{{ monitoring_form.gatus_group }}</code> · <code>{{ monitoring_form.gatus_endpoint }}</code></p>{% else %}<p class="meta">{{ t("monitoring.gatus_none") }}</p>{% endif %}
               {% if monitoring.error_code %}<p class="meta">{{ t("monitoring.error") }}: <code>{{ t("monitoring.error." ~ monitoring.error_code) }}</code></p>{% endif %}
               {% if object.health == "maintenance" %}<p class="notice">{{ t("monitoring.maintenance_wins") }}</p>{% endif %}
             {% endif %}

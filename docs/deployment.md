@@ -403,6 +403,11 @@ Optional:
 - `BLOCKWART_MONITORING_LEASE_SECONDS` (default `60`, allowed `10..3600`)
 - `BLOCKWART_MONITORING_JITTER_SECONDS` (default `30`, allowed `0..3600`)
 - `BLOCKWART_MONITORING_POLL_INTERVAL_SECONDS` (default `5`, allowed `1..60`)
+- `BLOCKWART_MONITORING_GATUS_SOURCES` (default empty; comma-separated bounded
+  `name=status-url` bindings fixed by the deployment)
+- `BLOCKWART_MONITORING_GATUS_CREDENTIAL_FILES` (default empty;
+  comma-separated `name=/absolute/token-file` bindings, one protected file per
+  declared source; never put a token value in this setting)
 - `BLOCKWART_SQLITE_BUSY_TIMEOUT_MS` (default `5000`, allowed `100..60000`)
 - `BLOCKWART_SQLITE_WAL_ENABLED` (default `true`)
 
@@ -418,6 +423,10 @@ the connect timeout cannot exceed the total timeout. Invalid combinations fail
 configuration validation. Do not enable polling until the exact target plan,
 smallest necessary CIDRs/ports, backup, and recovery procedure have been
 reviewed. A broad public CIDR still does not allow special-purpose networks.
+Gatus catalog documents name only a source identity plus group and endpoint;
+they cannot select the status URL or credential. Startup rejects duplicate,
+malformed, or cross-source credential bindings, and acquisition fails closed
+when a declared credential file is missing or unreadable.
 
 `BLOCKWART_SECRET_REFERENCE` is a reference label only. It must not contain a raw token, password,
 private key, cookie, or `.env` body.

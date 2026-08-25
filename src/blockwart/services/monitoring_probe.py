@@ -32,10 +32,13 @@ from ipaddress import ip_address
 from queue import Empty, Full, Queue
 from threading import Event, Lock, Thread
 from time import monotonic
+from typing import TYPE_CHECKING
 
 from blockwart.domain.monitoring import MonitoringObservation
 from blockwart.domain.monitoring_policy import IPAddress, pin_address
-from blockwart.services.monitoring_registry import ProviderCheckRequest
+
+if TYPE_CHECKING:
+    from blockwart.services.monitoring_registry import ProviderCheckRequest
 
 _PROVIDER = "builtin_http"
 _USER_AGENT = "Blockwart-Healthcheck/1"
@@ -171,6 +174,8 @@ class _ProbeFailure(Exception):
 def _resolve(host: str, port: int, *, timeout: float) -> list[IPAddress]:
     """Resolve one hostname to every address it currently answers with."""
 
+    if timeout <= 0:
+        raise TimeoutError("resolver deadline exceeded")
     try:
         return [ip_address(host)]
     except ValueError:
@@ -183,7 +188,7 @@ def _resolve(host: str, port: int, *, timeout: float) -> list[IPAddress]:
     except Full as exc:
         raise TimeoutError("resolver capacity unavailable") from exc
     try:
-        succeeded, payload = result.get(timeout=max(0.01, timeout))
+        succeeded, payload = result.get(timeout=timeout)
     except Empty as exc:
         task.cancelled.set()
         raise TimeoutError("resolver deadline exceeded") from exc
@@ -318,6 +323,168 @@ def _request_status(
     finally:
         if sock is not None:
             sock.close()
+
+
+def _request_status_and_body(
+    *,
+    scheme: str,
+    hostname: str,
+    pinned: IPAddress,
+    port: int,
+    path: str,
+    connect_timeout: float,
+    total_timeout: float,
+    max_response_bytes: int,
+    authorization: str | None = None,
+    deadline: float | None = None,
+) -> tuple[int, bytes]:
+    """Like ``_request_status`` but also reads a bounded response body.
+
+    Used by adapters that need the response payload (for example the Gatus
+    pull adapter, which parses the statuses JSON). Every SSRF and size control
+    from ``_request_status`` applies identically; the body is read only up to
+    ``max_response_bytes`` and never logged or persisted.
+    """
+    request_deadline = monotonic() + total_timeout if deadline is None else deadline
+    sock: socket.socket | None = None
+    try:
+        try:
+            sock = socket.create_connection(
+                (str(pinned), port),
+                timeout=min(connect_timeout, _remaining(request_deadline)),
+            )
+        except TimeoutError as exc:
+            raise _ProbeFailure("down", "timeout") from exc
+        except OSError as exc:
+            raise _ProbeFailure("down", "connect_failed") from exc
+
+        if scheme == "https":
+            context = ssl.create_default_context()
+            context.check_hostname = True
+            context.verify_mode = ssl.CERT_REQUIRED
+            try:
+                sock.settimeout(_remaining(request_deadline))
+                sock = context.wrap_socket(sock, server_hostname=hostname)
+            except ssl.SSLError as exc:
+                raise _ProbeFailure("down", "tls_failed") from exc
+            except TimeoutError as exc:
+                raise _ProbeFailure("down", "timeout") from exc
+            except OSError as exc:
+                raise _ProbeFailure("down", "connect_failed") from exc
+
+        auth_line = f"Authorization: {authorization}\r\n" if authorization else ""
+        request = (
+            f"GET {path or '/'} HTTP/1.1\r\n"
+            f"Host: {_host_header(hostname, port, scheme)}\r\n"
+            f"User-Agent: {_USER_AGENT}\r\n"
+            f"{auth_line}"
+            "Accept: application/json\r\n"
+            "Connection: close\r\n\r\n"
+        ).encode("ascii")
+        try:
+            _send_all(sock, request, request_deadline)
+            header_block = _read_response_headers(sock, request_deadline)
+        except TimeoutError as exc:
+            raise _ProbeFailure("down", "timeout") from exc
+        except ssl.SSLError as exc:
+            raise _ProbeFailure("down", "tls_failed") from exc
+        except OSError as exc:
+            raise _ProbeFailure("down", "connect_failed") from exc
+
+        status, headers = _parse_response_headers(header_block)
+        if len(headers) > _MAX_HEADERS:
+            raise _ProbeFailure("check_error", "response_too_large")
+        declared = next(
+            (value for name, value in headers if name.casefold() == "content-length"),
+            None,
+        )
+        if declared is not None and declared.isdigit() and int(declared) > max_response_bytes:
+            raise _ProbeFailure("check_error", "response_too_large")
+        encoding = next(
+            (value for name, value in headers if name.casefold() == "content-encoding"),
+            None,
+        )
+        if encoding is not None and encoding.strip().casefold() not in {"", "identity"}:
+            # No Accept-Encoding is offered, so a compressed body is a server
+            # this client cannot read. Fail closed instead of handing an
+            # undecodable payload to a parser.
+            raise _ProbeFailure("check_error", "probe_failed")
+        chunked = any(
+            name.casefold() == "transfer-encoding"
+            and "chunked" in value.casefold()
+            for name, value in headers
+        )
+        try:
+            body = _read_bounded_body(sock, max_response_bytes, request_deadline)
+            if chunked:
+                body = _decode_chunked_body(body)
+        except _ProbeFailure:
+            raise
+        except TimeoutError as exc:
+            raise _ProbeFailure("down", "timeout") from exc
+        except OSError as exc:
+            raise _ProbeFailure("down", "connect_failed") from exc
+        return status, body
+    finally:
+        if sock is not None:
+            sock.close()
+
+
+def _read_bounded_body(
+    sock: socket.socket,
+    max_bytes: int,
+    deadline: float,
+) -> bytes:
+    """Read the raw response body up to ``max_bytes``.
+
+    The request sends ``Connection: close``, so reading until EOF returns the
+    complete body for both ``Content-Length`` and chunked framing. The total
+    deadline and the byte ceiling bound the work; nothing is logged or kept
+    beyond the returned bytes.
+    """
+    chunks: list[bytes] = []
+    total = 0
+    while True:
+        sock.settimeout(_remaining(deadline))
+        chunk = sock.recv(4096)
+        if not chunk:
+            break
+        total += len(chunk)
+        if total > max_bytes:
+            raise _ProbeFailure("check_error", "response_too_large")
+        chunks.append(chunk)
+    return b"".join(chunks)
+
+
+def _decode_chunked_body(raw: bytes) -> bytes:
+    """Strip ``Transfer-Encoding: chunked`` framing from an already-bounded body.
+
+    Decoding after the bounded read keeps the socket loop trivial and cannot
+    grow the payload: the decoded body is always smaller than ``raw``, which
+    the caller already capped. Any framing the sender did not terminate
+    correctly fails closed rather than yielding a truncated document.
+    """
+    decoded = bytearray()
+    position = 0
+    while True:
+        terminator = raw.find(b"\r\n", position)
+        if terminator < 0:
+            raise _ProbeFailure("check_error", "probe_failed")
+        # A chunk extension after ';' is legal and carries no body bytes.
+        size_text = raw[position:terminator].split(b";", 1)[0].strip()
+        try:
+            size = int(size_text, 16)
+        except ValueError as exc:
+            raise _ProbeFailure("check_error", "probe_failed") from exc
+        if size < 0:
+            raise _ProbeFailure("check_error", "probe_failed")
+        position = terminator + 2
+        if size == 0:
+            return bytes(decoded)
+        if position + size > len(raw):
+            raise _ProbeFailure("check_error", "probe_failed")
+        decoded.extend(raw[position : position + size])
+        position += size + 2
 
 
 def _classify(status: int) -> tuple[str, str | None]:
