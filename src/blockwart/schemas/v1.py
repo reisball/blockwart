@@ -57,6 +57,7 @@ from blockwart.schemas.agent import (
     AgentCatalogObjectRead,
     AgentProjectedBatchItem,
     AgentProjectedRead,
+    AgentServiceReleaseMonitoring,
     ReadProjectionOut,
 )
 from blockwart.schemas.catalog import CatalogObjectIn, CatalogObjectOut, ObjectKind
@@ -105,6 +106,28 @@ class V1ObjectPageOut(BaseModel):
     total: int | None = None
     sort: ObjectSortField
     direction: SortDirection
+
+
+class V1ReleaseOverviewItemOut(BaseModel):
+    object_id: str
+    ref: str
+    label: str
+    release_monitoring: AgentServiceReleaseMonitoring
+
+
+class V1ReleaseOverviewPageOut(BaseModel):
+    items: list[V1ReleaseOverviewItemOut]
+    next_cursor: str | None = None
+    total: int | None = None
+    generated_at: str
+    direction: SortDirection
+
+
+class V1ReleaseCheckOut(BaseModel):
+    object_id: str
+    outcome: Literal["observed", "not_modified", "error", "skipped"]
+    skipped_reason: str | None = None
+    release_monitoring: AgentServiceReleaseMonitoring | None = None
 
 
 class V1ContextPageOut(BaseModel):

@@ -15,6 +15,7 @@ from blockwart.config import Settings, get_settings
 from blockwart.domain.schema_projection import object_schema_projection
 from blockwart.services.login_protection import LoginProtector
 from blockwart.services.monitoring import run_monitoring_poller
+from blockwart.services.release_monitoring import run_release_monitoring_poller
 from blockwart.ui.admin import router as admin_ui_router
 from blockwart.ui.auth import router as auth_router
 from blockwart.ui.i18n import persist_locale_cookie, validate_locale_catalogs
@@ -73,15 +74,17 @@ def _monitoring_lifespan(
     @asynccontextmanager
     async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
         stop_event = asyncio.Event()
-        task: asyncio.Task[None] | None = None
+        tasks: list[asyncio.Task[None]] = []
         if settings.monitoring_poller_enabled:
-            task = asyncio.create_task(run_monitoring_poller(settings, stop_event))
+            tasks.append(asyncio.create_task(run_monitoring_poller(settings, stop_event)))
+        if settings.release_monitoring_poller_enabled:
+            tasks.append(asyncio.create_task(run_release_monitoring_poller(settings, stop_event)))
         try:
             yield
         finally:
-            if task is not None:
+            if tasks:
                 stop_event.set()
-                await task
+                await asyncio.gather(*tasks)
 
     return lifespan
 
@@ -92,9 +95,7 @@ async def principal_scoped_cache_control(request: Request, call_next):
         response.headers["Cache-Control"] = "private, no-store"
         response.headers["Pragma"] = "no-cache"
         vary = {
-            value.strip()
-            for value in response.headers.get("Vary", "").split(",")
-            if value.strip()
+            value.strip() for value in response.headers.get("Vary", "").split(",") if value.strip()
         }
         vary.update({"Authorization", "Cookie"})
         response.headers["Vary"] = ", ".join(sorted(vary))

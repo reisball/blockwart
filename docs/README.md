@@ -44,6 +44,9 @@ deleted by this classification.
 - [Service monitoring](service-monitoring.md) and the [Gatus pull
   adapter](gatus-pull.md), including provider-neutral observations,
   deterministic targets, leased polling, SSRF policy, and recovery
+- [Public GitHub release monitoring](release-monitoring.md), including the
+  service-only opt-in, conservative comparison, fixed provider boundary,
+  leased scheduling, authorized views, rate limits, and recovery
 - [Canonical Decision objects](decisions.md), including lifecycle, links, and
   dry-run-first legacy classification
 - [Canonical Project knowledge](projects.md), including category-specific results,

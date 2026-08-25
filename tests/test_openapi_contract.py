@@ -44,11 +44,13 @@ EXPECTED_OPERATIONS = {
     "/api/v1/objects/{object_id}/audit-events": {"get"},
     "/api/v1/objects/{object_id}/device-graph": {"get"},
     "/api/v1/objects/{object_id}/network-topology": {"get"},
+    "/api/v1/objects/{object_id}/release-check": {"post"},
     "/api/v1/objects/{object_id}/relationships": {"get", "post", "delete"},
     "/api/v1/objects/{object_id}/topology": {"get"},
     "/api/v1/objects/{parent_id}/attached-devices": {"post"},
     "/api/v1/object-contexts": {"post"},
     "/api/v1/roots": {"post"},
+    "/api/v1/release-updates": {"get"},
     "/api/v1/source-coverage": {"get"},
 }
 

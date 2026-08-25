@@ -20,6 +20,13 @@ from blockwart.domain.read_projection import (
     READ_PROJECTION_VERSION,
     ProjectionProfile,
 )
+from blockwart.domain.release_monitoring import (
+    ReleaseDiagnostic,
+    ReleaseErrorCode,
+    ReleaseFreshness,
+    ReleaseProvider,
+    ReleaseStatus,
+)
 from blockwart.domain.runbooks import RunbookRisk, RunbookStatus
 from blockwart.domain.search import SEARCH_SNIPPET_MAX_LENGTH
 from blockwart.schemas.catalog import CatalogRecordDiagnostic, ObjectKind
@@ -88,6 +95,39 @@ class AgentServiceMonitoring(BaseModel):
     effective_health: AssetHealth | None = None
 
 
+class AgentGithubReleaseTarget(BaseModel):
+    owner: str
+    repo: str
+    slug: str
+    repository_url: str
+    api_url: str
+
+
+class AgentServiceReleaseMonitoring(BaseModel):
+    """Bounded release evidence, separate from availability monitoring."""
+
+    enabled: bool
+    provider: ReleaseProvider | None
+    interval_seconds: int | None
+    interval_overridden: bool
+    target: AgentGithubReleaseTarget | None = None
+    diagnostic: ReleaseDiagnostic | None = None
+    status: ReleaseStatus
+    observed_status: Literal["unknown", "current", "update_available"]
+    freshness: ReleaseFreshness
+    running_version: str | None = None
+    latest_version: str | None = None
+    latest_tag: str | None = None
+    release_url: str | None = None
+    released_at: str | None = None
+    http_status: int | None = None
+    error_code: ReleaseErrorCode | None = None
+    consecutive_failures: int = Field(ge=0)
+    last_checked_at: str | None = None
+    last_success_at: str | None = None
+    next_due_at: str | None = None
+
+
 class AgentAssetNode(BaseModel):
     visibility: Literal["detail"] = "detail"
     capabilities: list[Permission] = Field(default_factory=list)
@@ -152,6 +192,7 @@ class AgentCatalogObjectSummary(BaseModel):
     # Present only for readable service objects. A discover-only stub never
     # carries it, so monitoring cannot become an existence or state hint.
     monitoring: AgentServiceMonitoring | None = None
+    release_monitoring: AgentServiceReleaseMonitoring | None = None
 
 
 class AgentRelationshipOut(BaseModel):
@@ -296,6 +337,9 @@ class AgentProjectedObject(_ProjectedRead):
     )
     # monitoring
     monitoring: AgentServiceMonitoring | None = Field(
+        default=None, exclude_if=_omit_empty_projected_value
+    )
+    release_monitoring: AgentServiceReleaseMonitoring | None = Field(
         default=None, exclude_if=_omit_empty_projected_value
     )
     # detail

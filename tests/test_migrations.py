@@ -45,7 +45,8 @@ SERVICE_MONITORING_REVISION = "20260818_0017"
 PROJECT_CHRONOLOGY_REVISION = "20260818_0018"
 CATALOG_VIEWER_REVISION = "20260822_0019"
 GATUS_SOURCE_REVISION = "20260824_0020"
-HEAD_REVISION = GATUS_SOURCE_REVISION
+RELEASE_MONITORING_REVISION = "20260825_0021"
+HEAD_REVISION = RELEASE_MONITORING_REVISION
 PROJECT_ALEMBIC_CONFIG = Path(__file__).resolve().parents[1] / "alembic.ini"
 LEGACY_SNAPSHOT = Path(__file__).resolve().parent / "fixtures" / "legacy_snapshot.sql"
 
@@ -262,6 +263,8 @@ def test_real_alembic_upgrade_creates_fresh_database_and_has_no_drift(
             "security_events",
             "service_check_leases",
             "service_observations",
+            "service_release_check_leases",
+            "service_release_observations",
             "service_tokens",
             "service_token_failure_buckets",
             "source_entries",
@@ -285,6 +288,8 @@ def test_real_alembic_upgrade_creates_fresh_database_and_has_no_drift(
         "security_events",
         "service_check_leases",
         "service_observations",
+        "service_release_check_leases",
+        "service_release_observations",
         "service_tokens",
         "service_token_failure_buckets",
         "source_entries",
@@ -1967,6 +1972,8 @@ def downgrade() -> None:
             "security_events",
             "service_check_leases",
             "service_observations",
+            "service_release_check_leases",
+            "service_release_observations",
             "service_tokens",
             "service_token_failure_buckets",
             "source_entries",
@@ -2863,6 +2870,63 @@ def test_service_monitoring_migration_is_additive_opt_in_and_reversible(
         }
         assert "service_observations" not in tables
         assert "service_check_leases" not in tables
+    finally:
+        connection.close()
+
+
+def test_release_monitoring_migration_is_additive_opt_in_and_reversible(
+    tmp_path: Path,
+) -> None:
+    database_path = tmp_path / "release-monitoring.sqlite3"
+    database_url = _database_url(database_path)
+    config = build_alembic_config(database_url)
+    command.upgrade(config, GATUS_SOURCE_REVISION)
+    connection = sqlite3.connect(database_path)
+    try:
+        connection.execute(
+            "INSERT INTO catalog_objects "
+            "(id, kind, label, status, lifecycle, health, data_json, "
+            "provenance_json, revision) VALUES "
+            "('legacy-release', 'service', 'Legacy release', 'active', "
+            "'active', 'healthy', '{\"schema_version\":1}', "
+            "'{\"source_type\":\"manual\",\"manual_override\":false}', 7)"
+        )
+        connection.commit()
+        before = connection.execute(
+            "SELECT * FROM catalog_objects WHERE id = 'legacy-release'"
+        ).fetchone()
+    finally:
+        connection.close()
+
+    command.upgrade(config, RELEASE_MONITORING_REVISION)
+    connection = sqlite3.connect(database_path)
+    try:
+        assert connection.execute(
+            "SELECT * FROM catalog_objects WHERE id = 'legacy-release'"
+        ).fetchone() == before
+        assert connection.execute(
+            "SELECT COUNT(*) FROM service_release_observations"
+        ).fetchone() == (0,)
+        assert connection.execute(
+            "SELECT COUNT(*) FROM service_release_check_leases"
+        ).fetchone() == (0,)
+    finally:
+        connection.close()
+
+    command.downgrade(config, GATUS_SOURCE_REVISION)
+    connection = sqlite3.connect(database_path)
+    try:
+        assert connection.execute(
+            "SELECT * FROM catalog_objects WHERE id = 'legacy-release'"
+        ).fetchone() == before
+        tables = {
+            str(row[0])
+            for row in connection.execute(
+                "SELECT name FROM sqlite_master WHERE type = 'table'"
+            )
+        }
+        assert "service_release_observations" not in tables
+        assert "service_release_check_leases" not in tables
     finally:
         connection.close()
 

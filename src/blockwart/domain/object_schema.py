@@ -24,6 +24,19 @@ from blockwart.domain.monitoring import (
     valid_gatus_source_name,
 )
 from blockwart.domain.references import TypedReference
+from blockwart.domain.release_monitoring import (
+    GITHUB_DOCUMENT_KEYS,
+    MAX_GITHUB_OWNER_LENGTH,
+    MAX_GITHUB_REPO_LENGTH,
+    MAX_RELEASE_INTERVAL_SECONDS,
+    MIN_RELEASE_INTERVAL_SECONDS,
+    RELEASE_DOCUMENT_KEYS,
+    RELEASE_PROVIDERS,
+    normalize_service_release_monitoring,
+    service_release_monitoring_violations,
+    valid_github_owner,
+    valid_github_repo,
+)
 from blockwart.domain.security import FORBIDDEN_SECRET_KEYS
 from blockwart.domain.service_components import (
     COMPONENT_DEPENDENCY_KEYS,
@@ -107,12 +120,8 @@ SCHEMA_VIOLATION_CONTRACTS: Mapping[str, str] = MappingProxyType(
         VIOLATION_VALUE_NOT_CONSTANT: (
             "The value at this path must equal the single constant this field pins."
         ),
-        VIOLATION_VALUE_TOO_SHORT: (
-            "The value at this path is shorter than this field allows."
-        ),
-        VIOLATION_VALUE_TOO_LONG: (
-            "The value at this path is longer than this field allows."
-        ),
+        VIOLATION_VALUE_TOO_SHORT: ("The value at this path is shorter than this field allows."),
+        VIOLATION_VALUE_TOO_LONG: ("The value at this path is longer than this field allows."),
         VIOLATION_VALUE_OUT_OF_RANGE: (
             "The value at this path is outside the range this field allows."
         ),
@@ -126,8 +135,7 @@ SCHEMA_VIOLATION_CONTRACTS: Mapping[str, str] = MappingProxyType(
             "A key or value at this path is globally forbidden as secret-shaped."
         ),
         VIOLATION_RULE_VIOLATION: (
-            "A published schema rule for this object kind rejects this combination "
-            "of fields."
+            "A published schema rule for this object kind rejects this combination of fields."
         ),
         GENERIC_SCHEMA_VIOLATION: (
             "The value at this path is rejected by the canonical object schema."
@@ -141,9 +149,7 @@ CREDENTIAL_PROVIDERS = frozenset(
 CREDENTIAL_ACCESS_TYPES = frozenset(
     {"ssh", "web", "api", "database", "smb", "sudo", "token", "other"}
 )
-RUNBOOK_RISK_LEVELS = frozenset(
-    {"read-only", "safe-change", "disruptive", "destructive"}
-)
+RUNBOOK_RISK_LEVELS = frozenset({"read-only", "safe-change", "disruptive", "destructive"})
 RUNBOOK_STATUS_VALUES = (
     "draft",
     "approved",
@@ -155,9 +161,7 @@ RUNBOOK_STATUS_VALUES = (
 RUNBOOK_STATUSES = frozenset(RUNBOOK_STATUS_VALUES)
 RUNBOOK_CHANGE_FALLBACK_VALUES = ("rollback", "recovery", "no_rollback")
 RUNBOOK_CHANGE_FALLBACKS = frozenset(RUNBOOK_CHANGE_FALLBACK_VALUES)
-DEVICE_CATEGORIES = frozenset(
-    {"antenna", "sensor", "adapter", "controller", "ups", "other"}
-)
+DEVICE_CATEGORIES = frozenset({"antenna", "sensor", "adapter", "controller", "ups", "other"})
 NETWORK_CATEGORIES = frozenset(
     {
         "segment",
@@ -255,9 +259,7 @@ class ObjectSchemaError(ValueError):
         self.path = path
         self.message = message
         self.violation = (
-            violation
-            if violation in SCHEMA_VIOLATION_CONTRACTS
-            else GENERIC_SCHEMA_VIOLATION
+            violation if violation in SCHEMA_VIOLATION_CONTRACTS else GENERIC_SCHEMA_VIOLATION
         )
         self.rule = rule if rule in PUBLIC_SCHEMA_RULE_CONTRACTS else None
         super().__init__(f"{path} {message}")
@@ -338,15 +340,9 @@ class FieldSpec:
             and self.min_items > self.max_items
         ):
             raise ValueError(f"minimum items exceeds maximum items: {self.path}")
-        if (
-            self.minimum is not None or self.maximum is not None
-        ) and self.field_type != "integer":
+        if (self.minimum is not None or self.maximum is not None) and self.field_type != "integer":
             raise ValueError(f"only integer fields may declare value bounds: {self.path}")
-        if (
-            self.minimum is not None
-            and self.maximum is not None
-            and self.minimum > self.maximum
-        ):
+        if self.minimum is not None and self.maximum is not None and self.minimum > self.maximum:
             raise ValueError(f"minimum value exceeds maximum value: {self.path}")
         if self.allowed_keys and self.field_type != "object":
             raise ValueError(f"only object fields may declare allowed keys: {self.path}")
@@ -361,9 +357,7 @@ class FieldSpec:
         ):
             raise ValueError(f"forbidden field {self.path} cannot define validation options")
         if self.required_in_item and "[]" not in self.path:
-            raise ValueError(
-                f"item-required field must be nested below an array: {self.path}"
-            )
+            raise ValueError(f"item-required field must be nested below an array: {self.path}")
 
 
 @dataclass(frozen=True)
@@ -394,6 +388,7 @@ def normalize_object_data(kind: str, data: Mapping[str, Any]) -> dict[str, Any]:
     if kind == "service":
         normalized = normalize_service_components(normalized)
         normalized = normalize_service_monitoring(normalized)
+        normalized = normalize_service_release_monitoring(normalized)
     return normalized
 
 
@@ -421,9 +416,7 @@ def validate_object_data(
     fields = schema.fields
     if allow_legacy_network_without_category and kind == "network":
         fields = tuple(
-            replace(field, required=False)
-            if field.path == "network.category"
-            else field
+            replace(field, required=False) if field.path == "network.category" else field
             for field in fields
         )
     if _reads_as_legacy_knowledge_row(
@@ -438,11 +431,7 @@ def validate_object_data(
     ):
         validate_fields(
             data,
-            tuple(
-                field
-                for field in fields
-                if field.path in LEGACY_KNOWLEDGE_READ_FIELD_PATHS
-            ),
+            tuple(field for field in fields if field.path in LEGACY_KNOWLEDGE_READ_FIELD_PATHS),
         )
         return
     if kind == "runbook" and "runbook_status" not in data:
@@ -453,8 +442,7 @@ def validate_object_data(
             tuple(
                 field
                 for field in fields
-                if field.field_type == "reference"
-                or field.forbidden_message is not None
+                if field.field_type == "reference" or field.forbidden_message is not None
             ),
         )
         # Preserve the historical loose-shape diagnostic before the canonical
@@ -608,10 +596,7 @@ def _resolve_values(
                     "must be a list",
                     violation=VIOLATION_TYPE_MISMATCH,
                 )
-            next_values.extend(
-                (f"{value_path}[{index}]", item)
-                for index, item in enumerate(value)
-            )
+            next_values.extend((f"{value_path}[{index}]", item) for index, item in enumerate(value))
         resolved = next_values
     return resolved
 
@@ -1252,6 +1237,50 @@ SERVICE_MONITORING_FIELDS = (
     ),
 )
 
+SERVICE_RELEASE_MONITORING_FIELDS = (
+    _field(
+        "release_monitoring",
+        "object",
+        allowed_keys=RELEASE_DOCUMENT_KEYS,
+    ),
+    _field("release_monitoring.enabled", "boolean"),
+    _field(
+        "release_monitoring.provider",
+        "enum",
+        enum_values=RELEASE_PROVIDERS,
+        message="must be the supported public release provider",
+    ),
+    _field(
+        "release_monitoring.interval_seconds",
+        "integer",
+        minimum=MIN_RELEASE_INTERVAL_SECONDS,
+        maximum=MAX_RELEASE_INTERVAL_SECONDS,
+        message=(
+            f"must be an integer from {MIN_RELEASE_INTERVAL_SECONDS} "
+            f"to {MAX_RELEASE_INTERVAL_SECONDS}"
+        ),
+    ),
+    _field(
+        "release_monitoring.github",
+        "object",
+        allowed_keys=GITHUB_DOCUMENT_KEYS,
+    ),
+    _field(
+        "release_monitoring.github.owner",
+        "string",
+        strip_whitespace=True,
+        min_length=1,
+        max_length=MAX_GITHUB_OWNER_LENGTH,
+    ),
+    _field(
+        "release_monitoring.github.repo",
+        "string",
+        strip_whitespace=True,
+        min_length=1,
+        max_length=MAX_GITHUB_REPO_LENGTH,
+    ),
+)
+
 SERVICE_COMPONENTS_FORBIDDEN_FIELDS = (
     _field(
         "components",
@@ -1263,6 +1292,14 @@ SERVICE_COMPONENTS_FORBIDDEN_FIELDS = (
 SERVICE_MONITORING_FORBIDDEN_FIELDS = (
     _field(
         "monitoring",
+        "object",
+        forbidden_message="is supported only for service objects",
+    ),
+)
+
+SERVICE_RELEASE_MONITORING_FORBIDDEN_FIELDS = (
+    _field(
+        "release_monitoring",
         "object",
         forbidden_message="is supported only for service objects",
     ),
@@ -1320,9 +1357,7 @@ CREDENTIAL_REFERENCE_FIELDS = (
     ),
 )
 
-RUNBOOK_PROCEDURE_KEYS = frozenset(
-    {"id", "title", "description", "command", "expected_effect"}
-)
+RUNBOOK_PROCEDURE_KEYS = frozenset({"id", "title", "description", "command", "expected_effect"})
 LEGACY_RUNBOOK_SUBMISSION_FIELDS = (
     _field("steps", "array"),
     _field("steps[]", "string_or_object"),
@@ -1753,28 +1788,21 @@ PROJECT_CATEGORY_FIELD_GROUPS: Mapping[str, tuple[FieldSpec, ...]] = MappingProx
 
 
 def _top_level_paths(fields: tuple[FieldSpec, ...]) -> frozenset[str]:
-    return frozenset(
-        field.path.split(".")[0].removesuffix("[]") for field in fields
-    )
+    return frozenset(field.path.split(".")[0].removesuffix("[]") for field in fields)
 
 
 PROJECT_CATEGORY_FIELD_NAMES: Mapping[str, frozenset[str]] = MappingProxyType(
     {
-        category: _top_level_paths(fields)
-        | _top_level_paths(PROJECT_SHARED_CATEGORY_FIELDS)
+        category: _top_level_paths(fields) | _top_level_paths(PROJECT_SHARED_CATEGORY_FIELDS)
         for category, fields in PROJECT_CATEGORY_FIELD_GROUPS.items()
     }
 )
 # `implementation` and `other` carry the common contract only. They still admit
 # `lessons_learned`, which is common retrospective content rather than a
 # category-specific result shape.
-PROJECT_COMMON_ONLY_CATEGORY_FIELD_NAMES = _top_level_paths(
-    PROJECT_SHARED_CATEGORY_FIELDS
-)
+PROJECT_COMMON_ONLY_CATEGORY_FIELD_NAMES = _top_level_paths(PROJECT_SHARED_CATEGORY_FIELDS)
 ALL_PROJECT_CATEGORY_FIELD_NAMES = frozenset(
-    name
-    for fields in PROJECT_CATEGORY_FIELD_GROUPS.values()
-    for name in _top_level_paths(fields)
+    name for fields in PROJECT_CATEGORY_FIELD_GROUPS.values() for name in _top_level_paths(fields)
 )
 
 PROJECT_FIELDS = (
@@ -1831,9 +1859,7 @@ def _require_runbook_conditional_fields(data: Mapping[str, Any]) -> None:
                 )
 
     approval_required = data.get("approval_required")
-    if approval_required is True and not _nonblank_text(
-        data.get("approval_requirement")
-    ):
+    if approval_required is True and not _nonblank_text(data.get("approval_requirement")):
         raise ObjectSchemaError(
             "data.approval_requirement",
             "is required when approval is required",
@@ -1920,10 +1946,10 @@ def _reject_runbook_contradictions(data: Mapping[str, Any]) -> None:
             violation=VIOLATION_FIELD_NOT_ALLOWED,
             rule=rule,
         )
-    if (
-        data.get("change_fallback") == "no_rollback"
-        and data.get("risk_level") in {"disruptive", "destructive"}
-    ):
+    if data.get("change_fallback") == "no_rollback" and data.get("risk_level") in {
+        "disruptive",
+        "destructive",
+    }:
         raise ObjectSchemaError(
             "data.change_fallback",
             "no_rollback is not allowed for disruptive or destructive runbooks",
@@ -1944,10 +1970,7 @@ def _validate_runbook_entries(data: Mapping[str, Any]) -> None:
         for index, entry in enumerate(entries):
             if not isinstance(entry, Mapping):
                 continue
-            if not (
-                _nonblank_text(entry.get("title"))
-                or _nonblank_text(entry.get("description"))
-            ):
+            if not (_nonblank_text(entry.get("title")) or _nonblank_text(entry.get("description"))):
                 raise ObjectSchemaError(
                     f"data.{path}[{index}].description",
                     "or title must be nonblank",
@@ -2073,9 +2096,7 @@ def _require_project_conditional_fields(data: Mapping[str, Any]) -> None:
         for index, finding in enumerate(findings):
             if not isinstance(finding, Mapping):
                 continue
-            if finding.get("evidence_grade") == "source_backed" and not finding.get(
-                "source_ids"
-            ):
+            if finding.get("evidence_grade") == "source_backed" and not finding.get("source_ids"):
                 raise ObjectSchemaError(
                     f"data.findings[{index}].source_ids",
                     "is required for source_backed findings",
@@ -2120,12 +2141,8 @@ def _reject_project_contradictory_fields(data: Mapping[str, Any]) -> None:
 
     managed_by = data.get("managed_by")
     if isinstance(managed_by, Mapping):
-        forbidden_key = (
-            "label" if managed_by.get("kind") == "principal" else "principal_id"
-        )
-        if managed_by.get("kind") in PROJECT_MANAGED_BY_KINDS and forbidden_key in (
-            managed_by
-        ):
+        forbidden_key = "label" if managed_by.get("kind") == "principal" else "principal_id"
+        if managed_by.get("kind") in PROJECT_MANAGED_BY_KINDS and forbidden_key in (managed_by):
             raise ObjectSchemaError(
                 f"data.managed_by.{forbidden_key}",
                 f"is not allowed for {managed_by['kind']} ownership",
@@ -2383,6 +2400,44 @@ def _validate_service_monitoring(data: Mapping[str, Any]) -> None:
     )
 
 
+def _validate_service_release_monitoring(data: Mapping[str, Any]) -> None:
+    """Require one complete, canonical public GitHub identity when enabled."""
+
+    violations = service_release_monitoring_violations(data)
+    if not violations:
+        return
+    path, message = violations[0]
+    raise ObjectSchemaError(
+        path,
+        message,
+        violation=VIOLATION_REQUIRED_FIELD_MISSING,
+        rule=public_rule_name(_validate_service_release_monitoring),
+    )
+
+
+def _reject_invalid_public_github_identity(data: Mapping[str, Any]) -> None:
+    document = data.get("release_monitoring")
+    github = document.get("github") if isinstance(document, Mapping) else None
+    if not isinstance(github, Mapping):
+        return
+    owner = github.get("owner")
+    repo = github.get("repo")
+    if isinstance(owner, str) and not valid_github_owner(owner.strip()):
+        raise ObjectSchemaError(
+            "data.release_monitoring.github.owner",
+            "must be a canonical public GitHub owner name",
+            violation=VIOLATION_VALUE_NOT_ALLOWED,
+            rule=public_rule_name(_reject_invalid_public_github_identity),
+        )
+    if isinstance(repo, str) and not valid_github_repo(repo.strip()):
+        raise ObjectSchemaError(
+            "data.release_monitoring.github.repo",
+            "must be a canonical public GitHub repository name",
+            violation=VIOLATION_VALUE_NOT_ALLOWED,
+            rule=public_rule_name(_reject_invalid_public_github_identity),
+        )
+
+
 def _reject_invalid_gatus_identity(data: Mapping[str, Any]) -> None:
     """Reject a Gatus source identity this deployment could never bind.
 
@@ -2452,9 +2507,7 @@ SCHEMA_RULE_CONTRACTS: Mapping[str, str] = MappingProxyType(
             "ids are unique within their ordered collection; each procedure entry "
             "has a nonblank title or description; inert command text cannot be blank."
         ),
-        "_validate_runbook_timestamp_order": (
-            "review_after must not precede last_verified_at."
-        ),
+        "_validate_runbook_timestamp_order": ("review_after must not precede last_verified_at."),
         "_validate_decision_lifecycle": (
             "Accepted decisions require nonblank context, decision, rationale, and "
             "decided_at; superseded decisions require superseded_by."
@@ -2505,6 +2558,16 @@ SCHEMA_RULE_CONTRACTS: Mapping[str, str] = MappingProxyType(
             "closed data.monitoring.gatus identity with all of source, group, "
             "and endpoint."
         ),
+        "_validate_service_release_monitoring": (
+            "data.release_monitoring is a closed service-only document. It "
+            "requires an explicit enabled flag and, when enabled, one canonical "
+            "public GitHub owner/repository identity. No host, URL, token, channel, "
+            "or alternative installed-software source is expressible."
+        ),
+        "_reject_invalid_public_github_identity": (
+            "The GitHub identity accepts only canonical bounded owner and repository "
+            "segments; it cannot contain a host, scheme, port, path, or query."
+        ),
         "_reject_invalid_gatus_identity": (
             "data.monitoring.gatus names a deployment-bound status source and "
             "one endpoint inside it. The source identity is a bounded "
@@ -2541,6 +2604,8 @@ SCHEMA_RULE_VIOLATIONS: Mapping[str, str] = MappingProxyType(
         "_reject_installed_software_extra_fields": VIOLATION_FIELD_NOT_ALLOWED,
         "_validate_service_components": VIOLATION_VALUE_NOT_ALLOWED,
         "_validate_service_monitoring": VIOLATION_REQUIRED_FIELD_MISSING,
+        "_validate_service_release_monitoring": VIOLATION_REQUIRED_FIELD_MISSING,
+        "_reject_invalid_public_github_identity": VIOLATION_VALUE_NOT_ALLOWED,
         "_reject_invalid_gatus_identity": VIOLATION_VALUE_NOT_ALLOWED,
     }
 )
@@ -2557,16 +2622,10 @@ def public_rule_name(rule: SchemaRule | str) -> str:
 
 
 PUBLIC_SCHEMA_RULE_CONTRACTS: Mapping[str, str] = MappingProxyType(
-    {
-        public_rule_name(name): description
-        for name, description in SCHEMA_RULE_CONTRACTS.items()
-    }
+    {public_rule_name(name): description for name, description in SCHEMA_RULE_CONTRACTS.items()}
 )
 PUBLIC_SCHEMA_RULE_VIOLATIONS: Mapping[str, str] = MappingProxyType(
-    {
-        public_rule_name(name): violation
-        for name, violation in SCHEMA_RULE_VIOLATIONS.items()
-    }
+    {public_rule_name(name): violation for name, violation in SCHEMA_RULE_VIOLATIONS.items()}
 )
 
 
@@ -2591,6 +2650,7 @@ BUILTIN_SCHEMAS: Mapping[str, TypeSchema] = MappingProxyType(
             *INSTALLED_SOFTWARE_FIELDS,
             *SERVICE_COMPONENTS_FORBIDDEN_FIELDS,
             *SERVICE_MONITORING_FORBIDDEN_FIELDS,
+            *SERVICE_RELEASE_MONITORING_FORBIDDEN_FIELDS,
             *REFERENCE_FIELDS,
             rules=(
                 _require_installed_software_fields,
@@ -2605,6 +2665,7 @@ BUILTIN_SCHEMAS: Mapping[str, TypeSchema] = MappingProxyType(
             *INSTALLED_SOFTWARE_FIELDS,
             *SERVICE_COMPONENTS_FORBIDDEN_FIELDS,
             *SERVICE_MONITORING_FORBIDDEN_FIELDS,
+            *SERVICE_RELEASE_MONITORING_FORBIDDEN_FIELDS,
             *REFERENCE_FIELDS,
             rules=(
                 _require_installed_software_fields,
@@ -2620,6 +2681,7 @@ BUILTIN_SCHEMAS: Mapping[str, TypeSchema] = MappingProxyType(
             *NETWORK_OBJECT_FIELDS,
             *SERVICE_COMPONENTS_FORBIDDEN_FIELDS,
             *SERVICE_MONITORING_FORBIDDEN_FIELDS,
+            *SERVICE_RELEASE_MONITORING_FORBIDDEN_FIELDS,
         ),
         "device": _schema(
             "device",
@@ -2629,17 +2691,21 @@ BUILTIN_SCHEMAS: Mapping[str, TypeSchema] = MappingProxyType(
             *REFERENCE_FIELDS,
             *SERVICE_COMPONENTS_FORBIDDEN_FIELDS,
             *SERVICE_MONITORING_FORBIDDEN_FIELDS,
+            *SERVICE_RELEASE_MONITORING_FORBIDDEN_FIELDS,
         ),
         "service": _schema(
             "service",
             *INTERFACE_FIELDS,
             *SERVICE_FIELDS,
             *SERVICE_MONITORING_FIELDS,
+            *SERVICE_RELEASE_MONITORING_FIELDS,
             *REFERENCE_FIELDS,
             *INSTALLED_SOFTWARE_FORBIDDEN_FIELDS,
             rules=(
                 _validate_service_components,
                 _validate_service_monitoring,
+                _validate_service_release_monitoring,
+                _reject_invalid_public_github_identity,
                 _reject_invalid_gatus_identity,
             ),
         ),
@@ -2649,6 +2715,7 @@ BUILTIN_SCHEMAS: Mapping[str, TypeSchema] = MappingProxyType(
             *INSTALLED_SOFTWARE_FORBIDDEN_FIELDS,
             *SERVICE_COMPONENTS_FORBIDDEN_FIELDS,
             *SERVICE_MONITORING_FORBIDDEN_FIELDS,
+            *SERVICE_RELEASE_MONITORING_FORBIDDEN_FIELDS,
             rules=(_reject_credential_value_keys,),
         ),
         "runbook": _schema(
@@ -2657,6 +2724,7 @@ BUILTIN_SCHEMAS: Mapping[str, TypeSchema] = MappingProxyType(
             *INSTALLED_SOFTWARE_FORBIDDEN_FIELDS,
             *SERVICE_COMPONENTS_FORBIDDEN_FIELDS,
             *SERVICE_MONITORING_FORBIDDEN_FIELDS,
+            *SERVICE_RELEASE_MONITORING_FORBIDDEN_FIELDS,
             rules=(
                 _reject_credential_value_keys,
                 _require_runbook_conditional_fields,
@@ -2671,6 +2739,7 @@ BUILTIN_SCHEMAS: Mapping[str, TypeSchema] = MappingProxyType(
             *DECISION_FIELDS,
             *SERVICE_COMPONENTS_FORBIDDEN_FIELDS,
             *SERVICE_MONITORING_FORBIDDEN_FIELDS,
+            *SERVICE_RELEASE_MONITORING_FORBIDDEN_FIELDS,
             rules=(_validate_decision_lifecycle,),
         ),
         "project": _schema(
@@ -2679,6 +2748,7 @@ BUILTIN_SCHEMAS: Mapping[str, TypeSchema] = MappingProxyType(
             *PROJECT_FIELDS,
             *SERVICE_COMPONENTS_FORBIDDEN_FIELDS,
             *SERVICE_MONITORING_FORBIDDEN_FIELDS,
+            *SERVICE_RELEASE_MONITORING_FORBIDDEN_FIELDS,
             rules=(
                 _require_project_conditional_fields,
                 _reject_project_contradictory_fields,

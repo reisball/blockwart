@@ -45,6 +45,9 @@ from blockwart.domain.object_schema import (
     public_rule_name,
 )
 from blockwart.domain.projects import project_contract_projection
+from blockwart.domain.release_monitoring import (
+    service_release_monitoring_contract_projection,
+)
 from blockwart.domain.runbooks import runbook_contract_projection
 from blockwart.domain.security import FORBIDDEN_ACL_DATA_KEYS, FORBIDDEN_SECRET_KEYS
 from blockwart.domain.service_components import service_component_contract_projection
@@ -53,7 +56,7 @@ from blockwart.domain.service_components import service_component_contract_proje
 # configuration document, the provider-neutral observation vocabulary, and
 # integer value bounds. Version 6 additively published bounded service-local
 # components and their directed dependency graph.
-SCHEMA_PROJECTION_VERSION = 7
+SCHEMA_PROJECTION_VERSION = 8
 SCHEMA_DATA_VERSION = 1
 OBJECT_STATUS_VALUES: tuple[str, ...] = get_args(LegacyObjectStatus)
 DEFAULT_OBJECT_STATUS = "active"
@@ -224,6 +227,7 @@ def kind_schema_projection(kind: str) -> dict[str, Any]:
     if kind == "service":
         projection["service_components"] = service_component_contract_projection()
         projection["service_monitoring"] = service_monitoring_contract_projection()
+        projection["service_release_monitoring"] = service_release_monitoring_contract_projection()
     return projection
 
 
@@ -329,11 +333,7 @@ def _state_projection(asset: bool, values: tuple[str, ...]) -> dict[str, Any]:
         "requirement": OPTIONAL if asset else FORBIDDEN,
         "nullable": True,
         "default": None,
-        "reason": (
-            None
-            if asset
-            else "lifecycle and health are only valid for asset kinds"
-        ),
+        "reason": (None if asset else "lifecycle and health are only valid for asset kinds"),
     }
 
 

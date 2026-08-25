@@ -30,6 +30,8 @@ automatically.
   explicit verification, distinct rollback/recovery, and cycle-safe typed links;
 - opt services into provider-neutral health observations through bounded,
   allowlisted HTTP(S) checks without changing catalog revision history;
+- opt services into public GitHub stable-release observations without changing
+  running versions, health observations, catalog revision history, or deployments;
 - show placement, device, dependency, and network topology in the human UI;
 - search and read authorized context through REST and MCP;
 - create, update, relate, and delete catalog objects through authorized UI,

@@ -51,7 +51,11 @@ from blockwart.models import CatalogObject, Relationship
 from blockwart.schemas.catalog import ObjectKind
 from blockwart.services.catalog import catalog_objects_from_snapshot
 from blockwart.services.pagination import SortDirection, paginate_items
-from blockwart.services.queries import build_monitoring_index, project_catalog_objects
+from blockwart.services.queries import (
+    build_monitoring_index,
+    build_release_monitoring_index,
+    project_catalog_objects,
+)
 from blockwart.services.read_access import ReadAccess
 from blockwart.services.record_integrity import read_catalog_record_data
 from blockwart.services.source_coverage import resolve_authorized_coverage
@@ -131,9 +135,7 @@ def query_attention_page(
         else tuple(item for item in signals.objects if item.kind == kind)
     )
     scoped_ids = {item.object_id for item in scoped_objects}
-    scoped_coverage = tuple(
-        row for row in signals.coverage if row.object_id in scoped_ids
-    )
+    scoped_coverage = tuple(row for row in signals.coverage if row.object_id in scoped_ids)
     derivation = build_attention_derivation(
         objects=scoped_objects,
         coverage=scoped_coverage,
@@ -273,13 +275,18 @@ def _load_signals(
         now=now,
         data_by_id=raw_data_by_id,
     )
+    release_monitoring_index = build_release_monitoring_index(
+        session,
+        projected,
+        now=now,
+        data_by_id=raw_data_by_id,
+    )
     # The canonical placement state is read from the stored row, never from the
     # authorized projection: a concealed parent downgrades the projected state
     # to `unknown`, and reporting that would let concealment change an
     # observable response property.
     placement_by_id = {
-        catalog_object.id: catalog_object.placement_state
-        for catalog_object in canonical
+        catalog_object.id: catalog_object.placement_state for catalog_object in canonical
     }
     suitable_services = _suitable_runbook_service_ids(
         canonical,
@@ -292,6 +299,7 @@ def _load_signals(
             catalog_object,
             placement_state=placement_by_id.get(catalog_object.id),
             monitoring=monitoring_index.get(catalog_object.id),
+            release_monitoring=release_monitoring_index.get(catalog_object.id),
             has_suitable_runbook=catalog_object.id in suitable_services,
         )
         for catalog_object in projected
@@ -325,6 +333,7 @@ def _object_input(
     *,
     placement_state: str | None,
     monitoring: dict[str, Any] | None,
+    release_monitoring: dict[str, Any] | None,
     has_suitable_runbook: bool,
 ) -> AttentionObjectInput:
     provenance = catalog_object.provenance
@@ -342,6 +351,7 @@ def _object_input(
         provenance_stale_after=provenance.stale_after,
         data=catalog_object.data,
         monitoring=monitoring,
+        release_monitoring=release_monitoring,
         has_suitable_runbook=has_suitable_runbook,
     )
 
@@ -416,10 +426,7 @@ def _project_diagnostic_value(value: Any, resolvable_ids: set[str]) -> Any:
     if isinstance(value, list):
         return [_project_diagnostic_value(item, resolvable_ids) for item in value]
     if isinstance(value, dict):
-        return {
-            key: _project_diagnostic_value(item, resolvable_ids)
-            for key, item in value.items()
-        }
+        return {key: _project_diagnostic_value(item, resolvable_ids) for key, item in value.items()}
     return value
 
 
@@ -432,9 +439,7 @@ def _relationship_diagnostic_inputs(
 ) -> tuple[AttentionRelationshipDiagnosticInput, ...]:
     """Project canonical diagnostics onto authorized, target-bound facts only."""
     valid_ids = {
-        item.id
-        for item in canonical
-        if item.id in readable_ids and item.record_state == "valid"
+        item.id for item in canonical if item.id in readable_ids and item.record_state == "valid"
     }
     projected_objects: list[dict[str, str]] = []
     for row in catalog_rows:

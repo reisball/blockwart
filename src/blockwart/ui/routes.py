@@ -42,6 +42,10 @@ from blockwart.domain.relationships import (
     UPLINK_MODES,
     RelationshipIntegrityError,
 )
+from blockwart.domain.release_monitoring import (
+    RELEASE_PROVIDER_VALUES,
+    RELEASE_STATUS_VALUES,
+)
 from blockwart.domain.schema_projection import minimal_object_data
 from blockwart.domain.security import find_secret_violations, redact_secret_values
 from blockwart.domain.service_components import (
@@ -113,6 +117,11 @@ from blockwart.services.queries import (
     query_network_topology,
 )
 from blockwart.services.read_access import ReadAccess
+from blockwart.services.release_monitoring import (
+    check_service_release,
+    query_release_overview,
+    release_monitoring_settings,
+)
 from blockwart.ui.i18n import translation_context
 from blockwart.ui.paths import TEMPLATE_DIR
 from blockwart.ui.project_forms import (
@@ -188,7 +197,7 @@ RUNBOOK_FORM_KEYS = tuple(runbook_form_values({}))
 OBJECT_STATUSES_UI = OBJECT_STATUSES
 RELATION_TYPES = RELATIONSHIP_TYPES
 PLATFORM_TYPES = ("LXC", "VM", "WSL")
-SAFE_DATA_JSON_FALLBACK = "{\n  \"schema_version\": 1\n}"
+SAFE_DATA_JSON_FALLBACK = '{\n  "schema_version": 1\n}'
 HARDWARE_OBJECT_KINDS = {"host", "system"}
 DEVICE_OBJECT_KIND = "device"
 ATTACHMENT_RELATION_TYPE = "attached_to"
@@ -307,16 +316,10 @@ def _localized_audit_lines(
     }.get(action)
     if template_key is None:
         return [str(event.get("summary") or action)]
-    values = {
-        key: value
-        for key, value in details.items()
-        if isinstance(value, str | int | float)
-    }
+    values = {key: value for key, value in details.items() if isinstance(value, str | int | float)}
     if action in {"grant_create", "grant_update", "grant_revoke"}:
         values["target_principal_id"] = str(
-            details.get("target_principal_id")
-            or details.get("principal_id")
-            or ""
+            details.get("target_principal_id") or details.get("principal_id") or ""
         )
     return [translator(template_key, **values)]
 
@@ -369,9 +372,7 @@ def _index_template_context(
     )
     is_catalog_owner = read_access_from_request(request).principal.is_catalog_owner
     selected_form_kind = (
-        form_kind
-        if form_kind in OBJECT_KINDS
-        else str(form.get("kind") or OBJECT_KINDS[0])
+        form_kind if form_kind in OBJECT_KINDS else str(form.get("kind") or OBJECT_KINDS[0])
     )
     if selected_form_kind not in OBJECT_KINDS:
         selected_form_kind = OBJECT_KINDS[0]
@@ -389,10 +390,7 @@ def _index_template_context(
             }
         ),
         next(
-            (
-                f"{catalog_object.kind}:{catalog_object.id}"
-                for catalog_object in read_model.objects
-            ),
+            (f"{catalog_object.kind}:{catalog_object.id}" for catalog_object in read_model.objects),
             next(iter(explorer["assets"]), ""),
         ),
     )
@@ -415,9 +413,7 @@ def _index_template_context(
         localized_schemas,
         translator,
     )
-    creatable_kinds = [
-        str(option["kind"]) for option in create_kind_options if option["enabled"]
-    ]
+    creatable_kinds = [str(option["kind"]) for option in create_kind_options if option["enabled"]]
     if show_create_form and selected_form_kind not in creatable_kinds:
         # Never open the child create form on a type this principal cannot
         # place. Canonical placement wins over attachment so the ordinary case
@@ -499,11 +495,7 @@ def _index_template_context(
                 for schema in localized_schemas.values()
                 for field in schema["create_field_definitions"]
             },
-            **_fields_by_key(
-                localized_schemas[selected_form_kind][
-                    "create_field_definitions"
-                ]
-            ),
+            **_fields_by_key(localized_schemas[selected_form_kind]["create_field_definitions"]),
         },
         "display_names": read_model.display_names,
         "object_counts": read_model.object_counts,
@@ -525,15 +517,11 @@ def _index_template_context(
         "explorer": explorer,
         "selected_asset_ref": selected_asset_ref,
         "detail_mode": detail_mode,
-        "detail_query_string": detail_query_string
-        or urlencode(default_detail_params),
+        "detail_query_string": detail_query_string or urlencode(default_detail_params),
         "unassigned_count": (
             len(explorer["standalone_systems"])
             + len(explorer["standalone_services"])
-            + sum(
-                len(branch["services"])
-                for branch in explorer["standalone_systems"]
-            )
+            + sum(len(branch["services"]) for branch in explorer["standalone_systems"])
         ),
         "can_write": can_write_enabled,
         "can_create": bool(create_parent_options),
@@ -607,11 +595,7 @@ def _selected_create_parent(
     if submitted is not None and selected_kind in submitted["child_kinds"]:
         return submitted
     return next(
-        (
-            option
-            for option in create_parent_options
-            if selected_kind in option["child_kinds"]
-        ),
+        (option for option in create_parent_options if selected_kind in option["child_kinds"]),
         None,
     )
 
@@ -624,9 +608,7 @@ def _create_kind_options(
     """Describe the asset types of the create form, including why one is off."""
 
     available_kinds = {
-        child_kind
-        for option in create_parent_options
-        for child_kind in option["child_kinds"]
+        child_kind for option in create_parent_options for child_kind in option["child_kinds"]
     }
     options: list[dict[str, Any]] = []
     for kind in CREATE_KIND_ORDER:
@@ -687,9 +669,7 @@ def _localized_ui_schema_payload(
                 ):
                     field.pop(internal_key, None)
         primary_field = next(
-            field
-            for field in schema["schema_fields"]
-            if field["key"] == "primary_name"
+            field for field in schema["schema_fields"] if field["key"] == "primary_name"
         )
         schema["primary_name_label"] = primary_field["label"]
         for panel in schema["panels"]:
@@ -714,9 +694,7 @@ def _localize_create_guide(schema: dict[str, Any], translator: Any) -> None:
         translator(str(guide["parent_note_key"])) if guide["parent_note_key"] else ""
     )
     guide["relation_label"] = translator(f"create.relation.{guide['relation_type']}")
-    field_labels = {
-        str(field["key"]): str(field["label"]) for field in schema["schema_fields"]
-    }
+    field_labels = {str(field["key"]): str(field["label"]) for field in schema["schema_fields"]}
     deferred = [field_labels[key] for key in guide["deferred_fields"]]
     guide["deferred_labels"] = deferred
     guide["deferred_summary"] = translator("create.detail.later", count=len(deferred))
@@ -753,9 +731,7 @@ def index(
     selected_topology_mode = (
         topology_mode if topology_mode in {"placement", "network"} else "placement"
     )
-    selected_network_category = (
-        network_category if network_category in NETWORK_CATEGORIES else ""
-    )
+    selected_network_category = network_category if network_category in NETWORK_CATEGORIES else ""
     include_inherited_services = services in {"1", "true"}
     read_model = query_catalog_browse(
         session,
@@ -769,16 +745,13 @@ def index(
         network_category=selected_network_category or None,
     )
     create_enabled = any(
-        Permission.CREATE_CHILD in target.capabilities
-        for target in read_model.relation_targets
+        Permission.CREATE_CHILD in target.capabilities for target in read_model.relation_targets
     )
     form = _empty_form()
     if normalized_kind:
         form["kind"] = normalized_kind
     if normalized_kind == "decision":
-        form["decision_status"] = str(
-            minimal_object_data("decision")["decision_status"]
-        )
+        form["decision_status"] = str(minimal_object_data("decision")["decision_status"])
     if normalized_kind == PROJECT_KIND:
         minimal_project = minimal_object_data(PROJECT_KIND)
         form["category"] = str(minimal_project["category"])
@@ -860,6 +833,48 @@ def attention_overview(
             "selected_category": category or "",
             "selected_severity": severity or "",
             "selected_signal_state": signal_state or "",
+            "generated_at": page.generated_at,
+            "next_url": next_url,
+            **i18n,
+        },
+    )
+
+
+@router.get("/release-updates", response_class=HTMLResponse)
+def release_updates_overview(
+    request: Request,
+    session: Annotated[Session, Depends(get_session)],
+    status: str | None = None,
+    cursor: str | None = None,
+):
+    access = read_access_from_request(request)
+    try:
+        page = query_release_overview(
+            session,
+            access,
+            status=status or None,
+            limit=100,
+            cursor=cursor,
+            direction="asc",
+            include_total=False,
+        )
+    except (InvalidCursor, ValueError) as exc:
+        raise HTTPException(status_code=400, detail="Invalid release filter") from exc
+    parameters = {"status": status or "", "cursor": page.next_cursor or ""}
+    next_url = (
+        f"/release-updates?{urlencode({key: value for key, value in parameters.items() if value})}"
+        if page.next_cursor
+        else None
+    )
+    i18n = translation_context(request)
+    return templates.TemplateResponse(
+        request,
+        "release_updates.html",
+        context={
+            "title": i18n["t"]("release_updates.title"),
+            "items": page.items,
+            "statuses": RELEASE_STATUS_VALUES,
+            "selected_status": status or "",
             "generated_at": page.generated_at,
             "next_url": next_url,
             **i18n,
@@ -995,13 +1010,17 @@ def _project_workspace_response(
             cursor=None,
             include_total=False,
         )
-        chronology = [] if chronology_page is None else [
-            {
-                **entry.model_dump(),
-                "rendered_html": render_comment_source(entry.body, entry.format),
-            }
-            for entry in chronology_page.items
-        ]
+        chronology = (
+            []
+            if chronology_page is None
+            else [
+                {
+                    **entry.model_dump(),
+                    "rendered_html": render_comment_source(entry.body, entry.format),
+                }
+                for entry in chronology_page.items
+            ]
+        )
         detail = _project_detail_data(project.data, read_model.object_map)
         form_values = project_form_values(project.data)
         source_rows = canonical_project_rows(project.data, "sources") or blank_project_rows(
@@ -1307,21 +1326,18 @@ def _detail_template_context(
     installed_software = _installed_software_summary(object_data)
     service_components = service_components_view(object_data)
     monitoring = read_model.monitoring
+    release_monitoring = read_model.release_monitoring
     monitoring_document = object_data.get("monitoring")
     monitoring_form = {
         "enabled": bool(
-            isinstance(monitoring_document, Mapping)
-            and monitoring_document.get("enabled") is True
+            isinstance(monitoring_document, Mapping) and monitoring_document.get("enabled") is True
         ),
         "provider": (
             str(monitoring["provider"])
-            if monitoring is not None
-            and monitoring["provider"] in MONITORING_PROVIDER_VALUES
+            if monitoring is not None and monitoring["provider"] in MONITORING_PROVIDER_VALUES
             else MONITORING_PROVIDER_VALUES[0]
         ),
-        "interval_overridden": bool(
-            monitoring is not None and monitoring["interval_overridden"]
-        ),
+        "interval_overridden": bool(monitoring is not None and monitoring["interval_overridden"]),
         "interval_seconds": (
             str(monitoring["interval_seconds"])
             if monitoring is not None
@@ -1330,6 +1346,30 @@ def _detail_template_context(
             else ""
         ),
         **_gatus_form_values(monitoring_document),
+    }
+    release_document = object_data.get("release_monitoring")
+    release_github = (
+        release_document.get("github") if isinstance(release_document, Mapping) else None
+    )
+    release_monitoring_form = {
+        "enabled": bool(
+            isinstance(release_document, Mapping) and release_document.get("enabled") is True
+        ),
+        "provider": RELEASE_PROVIDER_VALUES[0],
+        "interval_overridden": bool(
+            release_monitoring is not None and release_monitoring["interval_overridden"]
+        ),
+        "interval_seconds": (
+            str(release_monitoring["interval_seconds"])
+            if release_monitoring is not None and release_monitoring["interval_overridden"]
+            else ""
+        ),
+        "owner": (
+            str(release_github.get("owner") or "") if isinstance(release_github, Mapping) else ""
+        ),
+        "repo": (
+            str(release_github.get("repo") or "") if isinstance(release_github, Mapping) else ""
+        ),
     }
     service_component_names = {
         str(component.get("id")): str(component.get("name") or component.get("id"))
@@ -1345,10 +1385,7 @@ def _detail_template_context(
     submitted_runbook_forms = submitted_rows.get("runbook_form") or []
     if submitted_runbook_forms:
         runbook_form_state.update(
-            {
-                str(key): str(value or "")
-                for key, value in submitted_runbook_forms[0].items()
-            }
+            {str(key): str(value or "") for key, value in submitted_runbook_forms[0].items()}
         )
     runbook_table_rows = {
         table: _mapping_rows_override(
@@ -1362,10 +1399,7 @@ def _detail_template_context(
     submitted_project_forms = submitted_rows.get("project_form") or []
     if submitted_project_forms:
         project_form_state.update(
-            {
-                str(key): str(value or "")
-                for key, value in submitted_project_forms[0].items()
-            }
+            {str(key): str(value or "") for key, value in submitted_project_forms[0].items()}
         )
     project_table_rows = {
         table: _mapping_rows_override(
@@ -1379,14 +1413,12 @@ def _detail_template_context(
     submitted_decision_forms = submitted_rows.get("decision_form") or []
     if submitted_decision_forms:
         decision_form.update(
-            {
-                str(key): str(value or "")
-                for key, value in submitted_decision_forms[0].items()
-            }
+            {str(key): str(value or "") for key, value in submitted_decision_forms[0].items()}
         )
     decision_docs_rows = _mapping_rows_override(
         submitted_rows.get("decision_docs"),
-        _canonical_decision_docs(object_data) or [
+        _canonical_decision_docs(object_data)
+        or [
             {
                 "source_type": "original",
                 "title": "",
@@ -1428,8 +1460,8 @@ def _detail_template_context(
     access_method_rows = [
         row
         for row in _mapping_rows_override(
-        submitted_rows.get("access_methods"),
-        _access_method_rows(catalog_object, access_methods),
+            submitted_rows.get("access_methods"),
+            _access_method_rows(catalog_object, access_methods),
         )
         if str(row.get("source_ref")) == own_ref
     ]
@@ -1467,14 +1499,16 @@ def _detail_template_context(
         "container": _container_summary(object_data),
         "service_information": service_information,
         "service_information_fields": service_information_fields,
-        "supports_service_information": (
-            catalog_object.kind in SERVICE_INFORMATION_OBJECT_KINDS
-        ),
+        "supports_service_information": (catalog_object.kind in SERVICE_INFORMATION_OBJECT_KINDS),
         "supports_service_components": catalog_object.kind == "service",
         "supports_monitoring": catalog_object.kind == "service",
         "monitoring": monitoring,
         "monitoring_form": monitoring_form,
         "monitoring_providers": MONITORING_PROVIDER_VALUES,
+        "supports_release_monitoring": catalog_object.kind == "service",
+        "release_monitoring": release_monitoring,
+        "release_monitoring_form": release_monitoring_form,
+        "release_monitoring_providers": RELEASE_PROVIDER_VALUES,
         "service_components": service_components,
         "service_component_names": service_component_names,
         "service_component_roles": SERVICE_COMPONENT_ROLE_VALUES,
@@ -1503,9 +1537,7 @@ def _detail_template_context(
         "decision_docs_rows": decision_docs_rows,
         "decision_statuses": DECISION_STATUS_VALUES,
         "decision_source_types": DECISION_SOURCE_TYPE_VALUES,
-        "supports_installed_software": (
-            catalog_object.kind in INSTALLED_SOFTWARE_KINDS
-        ),
+        "supports_installed_software": (catalog_object.kind in INSTALLED_SOFTWARE_KINDS),
         "installed_software": installed_software,
         "installed_software_rows": installed_software_rows,
         "ports": ports,
@@ -1528,9 +1560,7 @@ def _detail_template_context(
         "network_link_modes": NETWORK_LINK_MODES,
         "network_topology": _network_topology_display(network_topology),
         "network_uplink_targets": [
-            target
-            for target in read_model.relationship_targets
-            if _is_network_device(target)
+            target for target in read_model.relationship_targets if _is_network_device(target)
         ],
         "can_edit_network_links": _is_network_device(catalog_object),
         "relationship_form": dict(relationship_form or {}),
@@ -1542,9 +1572,7 @@ def _detail_template_context(
         "can_edit_network_ports": can_edit_network_ports,
         "can_edit_network_endpoints": can_edit_network_endpoints,
         "can_edit_network": bool(
-            can_edit_network_addresses
-            or can_edit_network_ports
-            or can_edit_network_endpoints
+            can_edit_network_addresses or can_edit_network_ports or can_edit_network_endpoints
         ),
         "network_has_editable_rows": bool(
             (can_edit_network_addresses and network["addresses"])
@@ -1613,15 +1641,11 @@ def _detail_navigation_context(
     kind = kind_value if kind_value in OBJECT_KINDS else ""
     topology_mode_value = request.query_params.get("topology_mode", "")
     topology_mode = (
-        topology_mode_value
-        if topology_mode_value in {"placement", "network"}
-        else "placement"
+        topology_mode_value if topology_mode_value in {"placement", "network"} else "placement"
     )
     network_category_value = request.query_params.get("network_category", "")
     network_category = (
-        network_category_value
-        if network_category_value in NETWORK_CATEGORIES
-        else ""
+        network_category_value if network_category_value in NETWORK_CATEGORIES else ""
     )
     include_inherited_services = request.query_params.get("services", "") in {
         "1",
@@ -1629,11 +1653,7 @@ def _detail_navigation_context(
     }
     query = request.query_params.get("q", "")[:200]
     state_value = request.query_params.get("return_state", "")
-    return_state = (
-        state_value
-        if re.fullmatch(r"[A-Za-z0-9_-]{12,64}", state_value)
-        else ""
-    )
+    return_state = state_value if re.fullmatch(r"[A-Za-z0-9_-]{12,64}", state_value) else ""
     detail_params = [
         ("view", view),
         ("q", query),
@@ -1670,6 +1690,7 @@ def _detail_navigation_context(
         "service-information",
         "components",
         "monitoring",
+        "release-monitoring",
         "installed-software",
         "device",
         "runbook",
@@ -1691,8 +1712,7 @@ def _detail_navigation_context(
         "detail_query_string": detail_query_string,
         "detail_href": detail_href,
         "detail_edit_hrefs": {
-            section: f"{detail_href}&edit={section}"
-            for section in edit_sections
+            section: f"{detail_href}&edit={section}" for section in edit_sections
         },
         "detail_post_urls": {
             "overview": detail_href,
@@ -1702,9 +1722,11 @@ def _detail_navigation_context(
             ),
             "components": f"/objects/{object_id}/components?{detail_query_string}",
             "monitoring": f"/objects/{object_id}/monitoring?{detail_query_string}",
-            "component_remove": (
-                f"/objects/{object_id}/components/remove?{detail_query_string}"
+            "release_monitoring": (
+                f"/objects/{object_id}/release-monitoring?{detail_query_string}"
             ),
+            "release_check": (f"/objects/{object_id}/release-check?{detail_query_string}"),
+            "component_remove": (f"/objects/{object_id}/components/remove?{detail_query_string}"),
             "component_dependencies": (
                 f"/objects/{object_id}/component-dependencies?{detail_query_string}"
             ),
@@ -1712,12 +1734,8 @@ def _detail_navigation_context(
                 f"/objects/{object_id}/component-dependencies/remove?{detail_query_string}"
             ),
             "access": f"/objects/{object_id}/access?{detail_query_string}",
-            "grants": (
-                f"/objects/{object_id}/permissions/grants?{detail_query_string}"
-            ),
-            "relationships": (
-                f"/objects/{object_id}/relationships?{detail_query_string}"
-            ),
+            "grants": (f"/objects/{object_id}/permissions/grants?{detail_query_string}"),
+            "relationships": (f"/objects/{object_id}/relationships?{detail_query_string}"),
             "comments": f"/objects/{object_id}/comments?{detail_query_string}",
         },
         "comments_all_url": f"/objects/{object_id}/comments?{detail_query_string}",
@@ -1768,30 +1786,18 @@ def _render_object_detail(
         query=str(navigation["q"]),
         kind=str(navigation["kind"]) or None,
     )
-    object_ref = (
-        f"{detail_read_model.catalog_object.kind}:"
-        f"{detail_read_model.catalog_object.id}"
-    )
+    object_ref = f"{detail_read_model.catalog_object.kind}:{detail_read_model.catalog_object.id}"
     if detail_read_model.catalog_object.visibility == "stub":
         can_write_enabled = False
         can_manage_access_enabled = False
         edit_section = ""
     else:
-        can_write_enabled = (
-            Permission.WRITE
-            in detail_read_model.catalog_object.capabilities
-        )
+        can_write_enabled = Permission.WRITE in detail_read_model.catalog_object.capabilities
         can_manage_access_enabled = (
-            Permission.MANAGE_ACCESS
-            in detail_read_model.catalog_object.capabilities
+            Permission.MANAGE_ACCESS in detail_read_model.catalog_object.capabilities
         )
-        if (
-            edit_section == "permissions"
-            and not can_manage_access_enabled
-        ) or (
-            edit_section != "permissions"
-            and edit_section
-            and not can_write_enabled
+        if (edit_section == "permissions" and not can_manage_access_enabled) or (
+            edit_section != "permissions" and edit_section and not can_write_enabled
         ):
             edit_section = ""
     principal_query = request.query_params.get("principal_q", "")[:100].strip()
@@ -1838,9 +1844,7 @@ def _render_object_detail(
         detail_query_string=str(navigation["detail_query_string"]),
         topology_mode=str(navigation["topology_mode"]),
         network_category=str(navigation["network_category"]),
-        include_inherited_services=bool(
-            navigation["include_inherited_services"]
-        ),
+        include_inherited_services=bool(navigation["include_inherited_services"]),
     )
     context.update(
         _detail_template_context(
@@ -1872,9 +1876,7 @@ def _render_object_detail(
         status_code=status_code,
     )
     if detail_read_model.catalog_object.visibility == "detail":
-        response.headers["ETag"] = revision_etag(
-            detail_read_model.catalog_object.revision
-        )
+        response.headers["ETag"] = revision_etag(detail_read_model.catalog_object.revision)
     return response
 
 
@@ -1904,11 +1906,7 @@ def object_detail(
         read_model.catalog_object.visibility == "detail"
         and Permission.MANAGE_ACCESS in read_model.catalog_object.capabilities
     )
-    edit_allowed = (
-        manage_access_enabled
-        if edit == "permissions"
-        else write_enabled
-    )
+    edit_allowed = manage_access_enabled if edit == "permissions" else write_enabled
     return _render_object_detail(
         request,
         session,
@@ -2381,8 +2379,7 @@ def save_root(
         "decision_docs": decision_docs or _empty_form()["decision_docs"],
         **safe_runbook_form_values(runbook_form),
         "runbook_rows": {
-            table: safe_runbook_form_rows(runbook_form, table)
-            or blank_runbook_rows(table)
+            table: safe_runbook_form_rows(runbook_form, table) or blank_runbook_rows(table)
             for table in RUNBOOK_TABLES
         },
     }
@@ -2443,8 +2440,7 @@ def save_root(
         if kind == RUNBOOK_KIND:
             form.update(safe_runbook_form_values(runbook_form))
             form["runbook_rows"] = {
-                table: safe_runbook_form_rows(runbook_form, table)
-                or blank_runbook_rows(table)
+                table: safe_runbook_form_rows(runbook_form, table) or blank_runbook_rows(table)
                 for table in RUNBOOK_TABLES
             }
         read_model = query_catalog_browse(
@@ -2584,8 +2580,7 @@ def save_relationship(
                 exc.status_code
                 if isinstance(exc, HTTPException)
                 and (
-                    relation_type == ATTACHMENT_RELATION_TYPE
-                    or exc.status_code in {403, 404, 412}
+                    relation_type == ATTACHMENT_RELATION_TYPE or exc.status_code in {403, 404, 412}
                 )
                 else 422
             ),
@@ -2682,9 +2677,7 @@ def update_comment(
                 object_id=object_id,
                 body=comment,
                 idempotency_key=idempotency_key,
-                idempotency_ttl_seconds=(
-                    request.app.state.settings.idempotency_ttl_seconds
-                ),
+                idempotency_ttl_seconds=(request.app.state.settings.idempotency_ttl_seconds),
             ),
         )
     except HTTPException as exc:
@@ -2733,9 +2726,7 @@ def object_comments_page(
     if catalog_object is None:
         raise HTTPException(status_code=404, detail="Catalog object not found")
     base_query = [
-        (key, value)
-        for key, value in request.query_params.multi_items()
-        if key != "cursor"
+        (key, value) for key, value in request.query_params.multi_items() if key != "cursor"
     ]
     next_url = None
     if page.next_cursor is not None:
@@ -2890,8 +2881,7 @@ def update_object(
         doc_published_at,
     )
     submitted_decision = any(value is not None for value in decision_values.values()) or any(
-        value is not None
-        for value in (doc_source_type, doc_title, doc_url, doc_published_at)
+        value is not None for value in (doc_source_type, doc_title, doc_url, doc_published_at)
     )
     try:
         existing_object = get_object(session, object_id)
@@ -2945,9 +2935,7 @@ def update_object(
                     hardware_cpu_name if "hardware_cpu_name" in allowed_hardware_fields else None
                 ),
                 cpu_cores=(
-                    hardware_cpu_cores
-                    if "hardware_cpu_cores" in allowed_hardware_fields
-                    else None
+                    hardware_cpu_cores if "hardware_cpu_cores" in allowed_hardware_fields else None
                 ),
                 memory=hardware_memory if "hardware_memory" in allowed_hardware_fields else None,
                 gpu=hardware_gpu if "hardware_gpu" in allowed_hardware_fields else None,
@@ -2963,9 +2951,7 @@ def update_object(
                 data,
                 category=device_category if "device_category" in allowed_device_fields else None,
                 manufacturer=(
-                    device_manufacturer
-                    if "device_manufacturer" in allowed_device_fields
-                    else None
+                    device_manufacturer if "device_manufacturer" in allowed_device_fields else None
                 ),
                 model=device_model if "device_model" in allowed_device_fields else None,
             )
@@ -3069,7 +3055,9 @@ def update_object(
                 if submitted_device
                 else "service-information"
                 if submitted_service_information
-                else "hardware" if submitted_hardware else "overview"
+                else "hardware"
+                if submitted_hardware
+                else "overview"
             ),
             can_write_enabled=True,
             data_json_override=SAFE_DATA_JSON_FALLBACK,
@@ -3090,15 +3078,12 @@ def update_object(
                 else {
                     "runbook_form": [safe_runbook_form_values(runbook_form)],
                     **{
-                        f"runbook_{table}": safe_runbook_form_rows(
-                            runbook_form, table
-                        )
+                        f"runbook_{table}": safe_runbook_form_rows(runbook_form, table)
                         for table in RUNBOOK_TABLES
                     },
                 }
                 if submitted_runbook
-                else
-                {
+                else {
                     "device_fields": [
                         {
                             "category": device_category or "",
@@ -3310,14 +3295,140 @@ def update_service_monitoring_from_ui(
             request,
             session,
             object_id,
-            error=(
-                str(exc.detail)
-                if isinstance(exc, HTTPException)
-                else _safe_error_message(exc)
-            ),
+            error=(str(exc.detail) if isinstance(exc, HTTPException) else _safe_error_message(exc)),
             edit_section="monitoring",
             status_code=exc.status_code if isinstance(exc, HTTPException) else 422,
         )
+    return RedirectResponse(
+        url=_detail_redirect_url(request, object_id),
+        status_code=303,
+    )
+
+
+@router.post(
+    "/objects/{object_id}/release-monitoring",
+    response_class=HTMLResponse,
+    dependencies=[Depends(require_browser_write_csrf)],
+)
+def update_service_release_monitoring_from_ui(
+    request: Request,
+    object_id: str,
+    session: Annotated[Session, Depends(get_session)],
+    release_monitoring_enabled: Annotated[bool, Form()] = False,
+    release_monitoring_provider: Annotated[str, Form(max_length=32)] = "github_releases",
+    release_monitoring_interval_overridden: Annotated[bool, Form()] = False,
+    release_monitoring_interval_seconds: Annotated[str, Form(max_length=6)] = "",
+    release_monitoring_owner: Annotated[str, Form(max_length=39)] = "",
+    release_monitoring_repo: Annotated[str, Form(max_length=100)] = "",
+    if_match: Annotated[str, Form()] = "",
+):
+    """Write the opt-in document through ordinary ETag/CAS and object audit."""
+
+    access = read_access_from_request(request)
+    context = ui_write_context(request, access)
+    execute_ui_command(
+        session,
+        context,
+        lambda: authorize_object_command(
+            session,
+            context,
+            object_id=object_id,
+            permission=Permission.WRITE,
+        ),
+    )
+    existing = get_object(session, object_id)
+    if existing is None:
+        raise HTTPException(status_code=404, detail="Catalog object not found")
+    if existing.kind != "service":
+        raise HTTPException(
+            status_code=422,
+            detail="Release monitoring is supported only for service objects",
+        )
+    try:
+        document: dict[str, object] = {
+            "enabled": release_monitoring_enabled,
+            "provider": release_monitoring_provider,
+        }
+        if release_monitoring_owner or release_monitoring_repo:
+            document["github"] = {
+                "owner": release_monitoring_owner,
+                "repo": release_monitoring_repo,
+            }
+        if release_monitoring_interval_overridden:
+            document["interval_seconds"] = int(release_monitoring_interval_seconds)
+        data = _editable_data_copy(existing.data)
+        data["release_monitoring"] = document
+        _reject_secret_shaped_form_data(data)
+        payload = CatalogObjectIn(
+            id=existing.id,
+            kind=existing.kind,
+            label=existing.label,
+            status=existing.status,
+            lifecycle=existing.lifecycle,
+            health=existing.health,
+            summary=existing.summary,
+            data=data,
+        )
+        execute_ui_command(
+            session,
+            context,
+            lambda: update_catalog_object(
+                session,
+                context,
+                object_id=object_id,
+                payload=payload,
+                expected_revision=_ui_expected_revision(
+                    request,
+                    if_match,
+                    existing.revision,
+                ),
+            ),
+        )
+    except (HTTPException, ValidationError, ValueError) as exc:
+        return _detail_form_error_response(
+            request,
+            session,
+            object_id,
+            error=(str(exc.detail) if isinstance(exc, HTTPException) else _safe_error_message(exc)),
+            edit_section="release-monitoring",
+            status_code=exc.status_code if isinstance(exc, HTTPException) else 422,
+        )
+    return RedirectResponse(
+        url=_detail_redirect_url(request, object_id),
+        status_code=303,
+    )
+
+
+@router.post(
+    "/objects/{object_id}/release-check",
+    response_class=HTMLResponse,
+    dependencies=[Depends(require_browser_write_csrf)],
+)
+def check_service_release_from_ui(
+    request: Request,
+    object_id: str,
+    session: Annotated[Session, Depends(get_session)],
+):
+    """Authorize the network action, then use the shared leased check path."""
+
+    access = read_access_from_request(request)
+    context = ui_write_context(request, access)
+    execute_ui_command(
+        session,
+        context,
+        lambda: authorize_object_command(
+            session,
+            context,
+            object_id=object_id,
+            permission=Permission.WRITE,
+        ),
+    )
+    check_service_release(
+        session,
+        object_id=object_id,
+        settings=release_monitoring_settings(request.app.state.settings),
+        manual=True,
+    )
     return RedirectResponse(
         url=_detail_redirect_url(request, object_id),
         status_code=303,
@@ -3497,11 +3608,7 @@ def _execute_service_component_ui_update(
             request,
             session,
             object_id,
-            error=(
-                str(exc.detail)
-                if isinstance(exc, HTTPException)
-                else _safe_error_message(exc)
-            ),
+            error=(str(exc.detail) if isinstance(exc, HTTPException) else _safe_error_message(exc)),
             edit_section="components",
             status_code=exc.status_code if isinstance(exc, HTTPException) else 422,
         )
@@ -3542,11 +3649,7 @@ async def update_network(
     translator = translation_context(request)["t"]
     try:
         data = _editable_data_copy(existing_object.data)
-        network = dict(
-            data.get("network")
-            if isinstance(data.get("network"), Mapping)
-            else {}
-        )
+        network = dict(data.get("network") if isinstance(data.get("network"), Mapping) else {})
         if existing_object.kind in NETWORK_ADDRESS_EDIT_KINDS:
             addresses = _validated_address_rows(
                 network.get("addresses"),
@@ -3645,9 +3748,7 @@ async def update_access(
     if_match = str(form.get("if_match") or "")
     submitted_rows = _access_form_rows(form, read_model)
     translator = translation_context(request)["t"]
-    allowed_sources = {
-        f"{read_model.catalog_object.kind}:{read_model.catalog_object.id}"
-    }
+    allowed_sources = {f"{read_model.catalog_object.kind}:{read_model.catalog_object.id}"}
     changed_objects: dict[str, CatalogObjectOut] = {}
     changed_data: dict[str, dict[str, Any]] = {}
     seen_rows: set[tuple[str, int]] = set()
@@ -3660,17 +3761,11 @@ async def update_access(
             if not method_type and not endpoint and not auth_mode:
                 continue
             if ref not in allowed_sources or ":" not in ref:
-                raise ValueError(
-                    translator("validation.access_source_invalid", row=row_number)
-                )
+                raise ValueError(translator("validation.access_source_invalid", row=row_number))
             if not method_type:
-                raise ValueError(
-                    translator("validation.access_type_required", row=row_number)
-                )
+                raise ValueError(translator("validation.access_type_required", row=row_number))
             if not endpoint:
-                raise ValueError(
-                    translator("validation.access_endpoint_required", row=row_number)
-                )
+                raise ValueError(translator("validation.access_endpoint_required", row=row_number))
             try:
                 index = int(str(row["index"]))
             except ValueError as exc:
@@ -3678,16 +3773,12 @@ async def update_access(
                     translator("validation.access_row_invalid", row=row_number)
                 ) from exc
             if index < 0 or (ref, index) in seen_rows:
-                raise ValueError(
-                    translator("validation.access_row_invalid", row=row_number)
-                )
+                raise ValueError(translator("validation.access_row_invalid", row=row_number))
             seen_rows.add((ref, index))
             kind, target_id = ref.split(":", 1)
             target = changed_objects.get(ref) or get_object(session, target_id)
             if target is None or target.kind != kind:
-                raise ValueError(
-                    translator("validation.access_source_invalid", row=row_number)
-                )
+                raise ValueError(translator("validation.access_source_invalid", row=row_number))
             changed_objects[ref] = target
             data = changed_data.setdefault(ref, _editable_data_copy(target.data))
             methods = data.get("access_methods")
@@ -3695,9 +3786,7 @@ async def update_access(
                 methods = []
                 data["access_methods"] = methods
             if index > len(methods):
-                raise ValueError(
-                    translator("validation.access_row_invalid", row=row_number)
-                )
+                raise ValueError(translator("validation.access_row_invalid", row=row_number))
             if index == len(methods):
                 methods.append({})
             if not isinstance(methods[index], dict):
@@ -3939,15 +4028,11 @@ def _validated_address_rows(
         if not ip_value and not interface and not scope:
             continue
         if not ip_value:
-            raise ValueError(
-                translator("validation.network_ip_required", row=row_number)
-            )
+            raise ValueError(translator("validation.network_ip_required", row=row_number))
         try:
             ip_address(ip_value)
         except ValueError as exc:
-            raise ValueError(
-                translator("validation.network_ip_invalid", row=row_number)
-            ) from exc
+            raise ValueError(translator("validation.network_ip_invalid", row=row_number)) from exc
         payload = dict(original)
         payload["ip"] = ip_value
         payload.pop("network", None)
@@ -3975,12 +4060,7 @@ def _validated_port_rows(
         protocol = str(row.get("protocol") or "").strip()
         purpose = str(row.get("purpose") or "").strip()
         exposure = str(row.get("exposure") or "").strip()
-        if (
-            not port_text
-            and protocol in {"", "tcp"}
-            and not purpose
-            and not exposure
-        ):
+        if not port_text and protocol in {"", "tcp"} and not purpose and not exposure:
             continue
         port = _validated_port(port_text, translator, row_number)
         payload = {
@@ -4014,9 +4094,7 @@ def _validated_endpoint_rows(
         if not endpoint_type and not url and not port_text:
             continue
         if not endpoint_type:
-            raise ValueError(
-                translator("validation.endpoint_type_required", row=row_number)
-            )
+            raise ValueError(translator("validation.endpoint_type_required", row=row_number))
         if not _normalize_endpoint_type(endpoint_type):
             raise ValueError(
                 translator(
@@ -4026,9 +4104,7 @@ def _validated_endpoint_rows(
                 )
             )
         if not url:
-            raise ValueError(
-                translator("validation.endpoint_url_required", row=row_number)
-            )
+            raise ValueError(translator("validation.endpoint_url_required", row=row_number))
         port = (
             _validated_port(
                 port_text,
@@ -4039,9 +4115,7 @@ def _validated_endpoint_rows(
             if port_text
             else ""
         )
-        validated.append(
-            _endpoint_payload(original, endpoint_type, url, port)
-        )
+        validated.append(_endpoint_payload(original, endpoint_type, url, port))
     return validated
 
 
@@ -4101,9 +4175,7 @@ def _empty_form() -> dict[str, Any]:
     form.update(dict.fromkeys(RUNBOOK_FORM_KEYS, ""))
     form["runbook_status"] = "draft"
     form["approval_required"] = "false"
-    form["runbook_rows"] = {
-        table: blank_runbook_rows(table) for table in RUNBOOK_TABLES
-    }
+    form["runbook_rows"] = {table: blank_runbook_rows(table) for table in RUNBOOK_TABLES}
     return form
 
 
@@ -4168,10 +4240,7 @@ def _decision_submitted_docs(
 def _safe_decision_form_values(
     values: Mapping[str, str | None],
 ) -> dict[str, str]:
-    return {
-        key: str(redact_secret_values(value or ""))
-        for key, value in values.items()
-    }
+    return {key: str(redact_secret_values(value or "")) for key, value in values.items()}
 
 
 def _safe_decision_form_docs(
@@ -4185,9 +4254,7 @@ def _safe_decision_form_docs(
                 "source_type": str(redact_secret_values(row.get("source_type") or "")),
                 "title": str(redact_secret_values(row.get("title") or "")),
                 "url": url if is_safe_external_http_url(url) else "",
-                "published_at": str(
-                    redact_secret_values(row.get("published_at") or "")
-                ),
+                "published_at": str(redact_secret_values(row.get("published_at") or "")),
             }
         )
     return safe_rows
@@ -4400,9 +4467,7 @@ def _concealed_runbook_references(
     return concealed
 
 
-def _runbook_detail_data(
-    data: Mapping[str, Any], object_map: Mapping[str, Any]
-) -> dict[str, Any]:
+def _runbook_detail_data(data: Mapping[str, Any], object_map: Mapping[str, Any]) -> dict[str, Any]:
     values = runbook_form_values(data)
     result: dict[str, Any] = {
         **values,
@@ -4601,9 +4666,7 @@ def _network_summary(data: Mapping[str, Any]) -> dict[str, list[Mapping[str, Any
         return {"hostnames": [], "addresses": [], "mac_addresses": []}
     hostnames = network.get("hostnames")
     hostname_values = (
-        [str(hostname) for hostname in hostnames]
-        if isinstance(hostnames, list)
-        else []
+        [str(hostname) for hostname in hostnames] if isinstance(hostnames, list) else []
     )
     return {
         "hostnames": hostname_values,
@@ -4722,11 +4785,7 @@ def _installed_software_summary(data: Mapping[str, Any]) -> list[dict[str, str]]
         summarized.append(
             {
                 "name": entry.get("name") if isinstance(entry.get("name"), str) else "",
-                "version": (
-                    entry.get("version")
-                    if isinstance(entry.get("version"), str)
-                    else ""
-                ),
+                "version": (entry.get("version") if isinstance(entry.get("version"), str) else ""),
                 "url": url_text,
                 "safe_url": url_text if is_absolute_http_url(url_text) else "",
             }
@@ -4837,10 +4896,7 @@ def _is_network_device(catalog_object: Any) -> bool:
     if not isinstance(data, Mapping):
         return False
     network = data.get("network")
-    return (
-        isinstance(network, Mapping)
-        and network.get("category") in NETWORK_DEVICE_CATEGORIES
-    )
+    return isinstance(network, Mapping) and network.get("category") in NETWORK_DEVICE_CATEGORIES
 
 
 def _device_schema_fields(
@@ -4871,11 +4927,7 @@ def _apply_device_fields(
     manufacturer: str | None,
     model: str | None,
 ) -> None:
-    device = dict(
-        data.get("device")
-        if isinstance(data.get("device"), Mapping)
-        else {}
-    )
+    device = dict(data.get("device") if isinstance(data.get("device"), Mapping) else {})
     for key, value in {
         "category": category,
         "manufacturer": manufacturer,
@@ -5005,9 +5057,7 @@ def _network_topology_display(
     edge_by_pair = {
         frozenset((str(edge.get("from_ref")), str(edge.get("to_ref")))): edge
         for edge in topology.get("edges", [])
-        if isinstance(edge, Mapping)
-        and edge.get("from_ref")
-        and edge.get("to_ref")
+        if isinstance(edge, Mapping) and edge.get("from_ref") and edge.get("to_ref")
     }
     paths: list[dict[str, Any]] = []
     for path in topology.get("paths", []):

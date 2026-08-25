@@ -959,6 +959,64 @@
           </section>
         {% endif %}
 
+        {% if supports_release_monitoring %}
+          <section class="panel" aria-labelledby="release-monitoring-title">
+            <div class="panel-head">
+              <div>
+                <h2 class="section-title" id="release-monitoring-title">{{ t("release_monitoring.title") }}</h2>
+                <p class="meta">{{ t("release_monitoring.help") }}</p>
+              </div>
+              {% if can_write %}
+                {% if edit_section == "release-monitoring" %}
+                  <a class="button button-small button-muted" href="{{ detail_href }}">{{ t("detail.cancel") }}</a>
+                {% else %}
+                  <a class="button button-small button-muted" href="{{ detail_edit_hrefs['release-monitoring'] }}">{{ t("detail.edit") }}</a>
+                {% endif %}
+              {% endif %}
+            </div>
+            {% if edit_section == "release-monitoring" %}
+              {% if error %}<div class="error" role="alert">{{ error }}</div>{% endif %}
+              <form class="form-grid" method="post" action="{{ detail_post_urls.release_monitoring }}">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+                <input type="hidden" name="if_match" value="{{ object_etag }}" />
+                <label class="checkbox-label"><input type="checkbox" name="release_monitoring_enabled" value="true"{% if release_monitoring_form.enabled %} checked{% endif %} /> {{ t("release_monitoring.enabled") }}</label>
+                <label>{{ t("release_monitoring.provider") }}
+                  <select name="release_monitoring_provider" required>{% for provider in release_monitoring_providers %}<option value="{{ provider }}" selected>{{ t("release_monitoring.provider." ~ provider) }}</option>{% endfor %}</select>
+                </label>
+                <label>{{ t("release_monitoring.owner") }}<input type="text" name="release_monitoring_owner" value="{{ release_monitoring_form.owner }}" maxlength="39" autocomplete="off" spellcheck="false" /></label>
+                <label>{{ t("release_monitoring.repo") }}<input type="text" name="release_monitoring_repo" value="{{ release_monitoring_form.repo }}" maxlength="100" autocomplete="off" spellcheck="false" /></label>
+                <label class="checkbox-label"><input type="checkbox" name="release_monitoring_interval_overridden" value="true"{% if release_monitoring_form.interval_overridden %} checked{% endif %} /> {{ t("release_monitoring.interval_override") }}</label>
+                <label>{{ t("release_monitoring.interval_seconds") }}<input type="number" name="release_monitoring_interval_seconds" value="{{ release_monitoring_form.interval_seconds }}" min="3600" max="604800" step="1" inputmode="numeric" /></label>
+                <p class="meta">{{ t("release_monitoring.security_help") }}</p>
+                <div class="button-row"><button type="submit">{{ t("detail.save") }}</button><a class="button button-muted" href="{{ detail_href }}">{{ t("detail.cancel") }}</a></div>
+              </form>
+            {% else %}
+              {% if release_monitoring is not none %}
+                {% if release_monitoring.diagnostic %}<div class="error" role="status">{{ t("release_monitoring.diagnostic." ~ release_monitoring.diagnostic) }}</div>{% endif %}
+                <dl class="fact-grid">
+                  <div><dt>{{ t("release_monitoring.enabled") }}</dt><dd>{{ t("monitoring.yes") if release_monitoring.enabled else t("monitoring.no") }}</dd></div>
+                  <div><dt>{{ t("release_monitoring.status") }}</dt><dd><span class="badge release-status-{{ release_monitoring.status }}">{{ t("release_monitoring.status." ~ release_monitoring.status) }}</span></dd></div>
+                  <div><dt>{{ t("release_monitoring.running_version") }}</dt><dd><code>{{ release_monitoring.running_version or t("asset.no_value") }}</code></dd></div>
+                  <div><dt>{{ t("release_monitoring.latest_version") }}</dt><dd><code>{{ release_monitoring.latest_version or t("asset.no_value") }}</code></dd></div>
+                  <div><dt>{{ t("release_monitoring.repository") }}</dt><dd>{% if release_monitoring.target %}<a href="{{ release_monitoring.target.repository_url }}" rel="noreferrer noopener">{{ release_monitoring.target.slug }}</a>{% else %}{{ t("asset.no_value") }}{% endif %}</dd></div>
+                  <div><dt>{{ t("release_monitoring.release") }}</dt><dd>{% if release_monitoring.release_url %}<a href="{{ release_monitoring.release_url }}" rel="noreferrer noopener">{{ release_monitoring.latest_tag }}</a>{% else %}{{ t("asset.no_value") }}{% endif %}</dd></div>
+                  <div><dt>{{ t("release_monitoring.released_at") }}</dt><dd>{{ release_monitoring.released_at or t("asset.no_value") }}</dd></div>
+                  <div><dt>{{ t("release_monitoring.freshness") }}</dt><dd>{{ t("release_monitoring.freshness." ~ release_monitoring.freshness) }}</dd></div>
+                  <div><dt>{{ t("release_monitoring.last_success_at") }}</dt><dd>{{ release_monitoring.last_success_at or t("asset.no_value") }}</dd></div>
+                  <div><dt>{{ t("release_monitoring.next_due_at") }}</dt><dd>{{ release_monitoring.next_due_at or t("asset.no_value") }}</dd></div>
+                </dl>
+                {% if release_monitoring.error_code %}<p class="meta">{{ t("release_monitoring.error") }}: <code>{{ t("release_monitoring.error." ~ release_monitoring.error_code) }}</code></p>{% endif %}
+                {% if can_write and release_monitoring.enabled %}<form method="post" action="{{ detail_post_urls.release_check }}"><input type="hidden" name="csrf_token" value="{{ csrf_token }}" /><button class="button button-small" type="submit">{{ t("release_monitoring.check_now") }}</button></form>{% endif %}
+              {% else %}
+                <p class="meta">{{ t("release_monitoring.not_configured") }}</p>
+                <dl class="fact-grid">
+                  <div><dt>{{ t("release_monitoring.running_version") }}</dt><dd><code>{{ service_information.running_version or t("asset.no_value") }}</code></dd></div>
+                </dl>
+              {% endif %}
+            {% endif %}
+          </section>
+        {% endif %}
+
         {% if supports_service_components %}
           <section class="panel service-components-panel" aria-labelledby="service-components-title">
             <div class="panel-head">

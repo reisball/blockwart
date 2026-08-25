@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="{{ locale }}">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>{{ title }}</title>
+    <link rel="stylesheet" href="/static/app.css" />
+  </head>
+  <body>
+    <main class="page stack">
+      <header class="integrated-detail-heading">
+        <a class="detail-back-button" href="/">← {{ t("nav.catalog") }}</a>
+        <div><p class="eyebrow">{{ t("release_updates.eyebrow") }}</p><h1>{{ t("release_updates.title") }}</h1><span>{{ t("release_updates.help") }}</span></div>
+      </header>
+      <section class="panel">
+        <form class="form-grid" method="get" action="/release-updates">
+          <label>{{ t("release_monitoring.status") }}
+            <select name="status"><option value="">{{ t("release_updates.all_statuses") }}</option>{% for status in statuses %}<option value="{{ status }}"{% if selected_status == status %} selected{% endif %}>{{ t("release_monitoring.status." ~ status) }}</option>{% endfor %}</select>
+          </label>
+          <div class="button-row"><button type="submit">{{ t("release_updates.filter") }}</button><a class="button button-muted" href="/release-updates">{{ t("attention.clear") }}</a></div>
+        </form>
+      </section>
+      <section class="panel">
+        {% if items %}
+          <div class="table-wrap"><table class="table">
+            <thead><tr><th>{{ t("release_updates.service") }}</th><th>{{ t("release_monitoring.running_version") }}</th><th>{{ t("release_monitoring.latest_version") }}</th><th>{{ t("release_monitoring.status") }}</th><th>{{ t("release_monitoring.release") }}</th><th>{{ t("release_monitoring.last_success_at") }}</th><th>{{ t("release_monitoring.next_due_at") }}</th></tr></thead>
+            <tbody>{% for item in items %}{% set release = item.release_monitoring %}<tr>
+              <td><a href="/objects/{{ item.object_id }}"><strong>{{ item.label }}</strong></a><br /><code>{{ item.ref }}</code></td>
+              <td><code>{{ release.running_version or t("asset.no_value") }}</code></td>
+              <td><code>{{ release.latest_version or t("asset.no_value") }}</code></td>
+              <td><span class="badge release-status-{{ release.status }}">{{ t("release_monitoring.status." ~ release.status) }}</span><br /><span class="meta">{{ t("release_monitoring.freshness." ~ release.freshness) }}</span>{% if release.error_code %}<br /><code>{{ t("release_monitoring.error." ~ release.error_code) }}</code>{% endif %}</td>
+              <td>{% if release.release_url %}<a href="{{ release.release_url }}" rel="noreferrer noopener">{{ release.latest_tag }}</a>{% else %}{{ t("asset.no_value") }}{% endif %}</td>
+              <td>{{ release.last_success_at or t("asset.no_value") }}</td>
+              <td>{{ release.next_due_at or t("asset.no_value") }}</td>
+            </tr>{% endfor %}</tbody>
+          </table></div>
+        {% else %}<p class="meta">{{ t("release_updates.empty") }}</p>{% endif %}
+        {% if next_url %}<div class="button-row"><a class="button button-muted" href="{{ next_url }}">{{ t("attention.next_page") }}</a></div>{% endif %}
+        <p class="meta">{{ t("attention.generated_at") }} <time>{{ generated_at }}</time></p>
+      </section>
+    </main>
+  </body>
+</html>

@@ -22,6 +22,7 @@ and are corrected in different places:
 |---|---|---|
 | `record_integrity` | Does the stored row satisfy the canonical schema? | catalog record diagnostics |
 | `monitoring` | What does the current observation say? | the provider-neutral projection (`service-monitoring.md`) |
+| `release` | Is a newer stable upstream release safely proven? | the separate public release projection (`release-monitoring.md`) |
 | `lifecycle` | What did an operator manually record? | canonical `lifecycle`/`health` |
 | `endpoint` | Does the endpoint contract resolve one target? | monitoring target resolution |
 | `placement` | Is the object placed in the canonical hierarchy? | canonical placement state |
@@ -48,6 +49,7 @@ The closed reason codes are:
 | `monitoring_config_invalid` | `monitoring` | `warning` | `unknown` |
 | `monitoring_observation_stale` | `monitoring` | `warning` | `stale` |
 | `monitoring_never_observed` | `monitoring` | `info` | `unknown` |
+| `release_update_available` | `release` | `warning` | `current` |
 | `lifecycle_health_down` | `lifecycle` | `critical` | `current` |
 | `lifecycle_health_degraded` | `lifecycle` | `warning` | `current` |
 | `lifecycle_health_unknown` | `lifecycle` | `info` | `unknown` |

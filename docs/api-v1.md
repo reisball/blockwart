@@ -87,7 +87,7 @@ Each item carries a closed `category`, `severity`, `reason_code`,
 `signal_state`, a fixed English `description`, an optional `detail_code` from an
 existing closed domain vocabulary, an optional evidence timestamp, and one
 `target` with the canonical `kind:id` reference plus its detail path. Categories
-are `record_integrity`, `monitoring`, `lifecycle`, `endpoint`, `placement`,
+are `record_integrity`, `monitoring`, `release`, `lifecycle`, `endpoint`, `placement`,
 `relationship_integrity`, `provenance`, `runbook`, `knowledge`, and
 `source_coverage`. Severities are
 `critical`, `warning`, and `info`. Item signal states are `current`, `stale`,
@@ -340,6 +340,39 @@ applying configuration defaults or exposing the rejected value.
 The same projection is used by context pages and known-ID batches. See
 [Service monitoring](service-monitoring.md).
 
+A readable, explicitly configured Service also includes the separate
+`release_monitoring` projection. It is derived only from explicit
+`data.release_monitoring` configuration, the
+manually curated `data.service_information.running_version`, and the matching
+target-bound release observation. It never reads `installed_software`, never
+changes effective health, and is absent from discover-only stubs.
+
+### `GET /api/v1/release-updates`
+
+Returns only fully readable Services with release monitoring enabled. The
+optional exact `status` filter accepts `current`, `update_available`, `unknown`,
+or `error`; paging, opaque cursors, direction, and optional authorized total use
+the standard page contract. Authorization is applied before status evaluation,
+counts, ordering, and cursor creation, so concealed and discover-only Services
+cannot affect any returned metadata.
+
+Each item contains the Service identity and the same closed
+`release_monitoring` projection used by object detail/context reads: running and
+observed versions, canonical repository and release links, status, freshness,
+last check/success, next due time, and a controlled error code. Release notes
+and arbitrary upstream text are never part of the response.
+
+### `POST /api/v1/objects/{object_id}/release-check`
+
+Requires effective `write` on the fully discoverable Service. Missing and
+concealed IDs are indistinguishable. The command invokes the same bounded,
+leased application path as the scheduler; the deployment master switch must be
+enabled, and the per-Service cooldown plus multi-process lease can return a
+stable `skipped` outcome without network access. A check never mutates the
+catalog object, revision, business `updated_at`, running version, software, or
+object audit timeline. See [Public GitHub release
+monitoring](release-monitoring.md).
+
 ## Commands
 
 ### `GET|POST /api/v1/objects/{object_id}/comments`
@@ -436,6 +469,13 @@ document. It is written through this same command and therefore uses `write`,
 `If-Match`, schema/secret validation, audit, and rollback without a monitoring
 bypass endpoint. An absent document is disabled. See
 [Service monitoring](service-monitoring.md).
+
+Service payloads may additionally include the closed canonical
+`data.release_monitoring` document. It is written through the ordinary
+conditional object update and therefore inherits `write`, `If-Match`,
+schema/secret validation, audit, and rollback. Merely storing a free-form
+`sources` entry never enables a network request. See [Public GitHub release
+monitoring](release-monitoring.md).
 
 ### `POST /api/v1/objects/{object_id}/update-preview`
 

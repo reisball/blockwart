@@ -59,6 +59,7 @@ from blockwart.schemas.agent import (
     AgentCatalogObjectSummary,
     AgentRelationshipOut,
     AgentServiceMonitoring,
+    AgentServiceReleaseMonitoring,
 )
 from blockwart.schemas.catalog import CatalogRecordDiagnostic
 from blockwart.schemas.comments import CommentOut
@@ -81,6 +82,11 @@ from blockwart.services.project_chronology import (
 )
 from blockwart.services.read_access import ReadAccess
 from blockwart.services.record_integrity import read_catalog_record_data
+from blockwart.services.release_monitoring import (
+    current_release_monitoring_settings,
+    load_release_observation_index,
+    release_monitoring_projection,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -146,8 +152,7 @@ def query_agent_objects_page(
     )
     return AgentObjectPage(
         items=[
-            rows_page.resolver.summary(catalog_object)
-            for catalog_object in rows_page.page.items
+            rows_page.resolver.summary(catalog_object) for catalog_object in rows_page.page.items
         ],
         next_cursor=rows_page.page.next_cursor,
         total=rows_page.page.total,
@@ -185,9 +190,7 @@ def query_agent_context_page(
     )
     page_objects = rows_page.page.items
     recent_comments = (
-        rows_page.resolver.prefetch_recent_comments(page_objects)
-        if include_recent_comments
-        else {}
+        rows_page.resolver.prefetch_recent_comments(page_objects) if include_recent_comments else {}
     )
     recent_chronology = (
         rows_page.resolver.prefetch_project_chronology(page_objects)
@@ -236,10 +239,7 @@ def get_agent_object_context(
 ) -> AgentCatalogContextRead | None:
     resolver = _AgentCatalogResolver(session, access)
     catalog_object = resolver.object_by_id.get(object_id)
-    if (
-        catalog_object is None
-        or access.policy.visibility_for(object_id) == ObjectVisibility.NONE
-    ):
+    if catalog_object is None or access.policy.visibility_for(object_id) == ObjectVisibility.NONE:
         return None
     return resolver.context(catalog_object)
 
@@ -387,6 +387,11 @@ class _AgentCatalogResolver:
             session,
             object_ids=readable_service_ids,
         )
+        self.release_monitoring_settings = current_release_monitoring_settings()
+        self.release_observations = load_release_observation_index(
+            session,
+            object_ids=readable_service_ids,
+        )
 
     def search(self, search: SearchQuery) -> _SearchMatches:
         """Return the authorized matches of one search query with their ranks.
@@ -399,9 +404,7 @@ class _AgentCatalogResolver:
         matches: list[CatalogObject] = []
         ranks: dict[str, int] = {}
         parsed_applies_to = (
-            validate_applies_to_filter(search.applies_to)
-            if search.applies_to is not None
-            else None
+            validate_applies_to_filter(search.applies_to) if search.applies_to is not None else None
         )
         if parsed_applies_to is not None and not self.access.policy.can(
             Permission.DISCOVER,
@@ -507,10 +510,7 @@ class _AgentCatalogResolver:
                 continue
             if search.source_type is not None or search.stale is not None:
                 provenance = self.provenance(obj)
-                if (
-                    search.source_type is not None
-                    and provenance.source_type != search.source_type
-                ):
+                if search.source_type is not None and provenance.source_type != search.source_type:
                     continue
                 if search.stale is not None and provenance.is_stale is not search.stale:
                     continue
@@ -543,7 +543,6 @@ class _AgentCatalogResolver:
             ranks[obj.id] = rank
         return _SearchMatches(objects=matches, ranks=ranks)
 
-
     def _project_knowledge_data(
         self,
         kind: str,
@@ -558,9 +557,7 @@ class _AgentCatalogResolver:
         if kind == "project":
             return project_authorized_data(data, can_discover=self._can_discover)
         if kind == "runbook":
-            return authorized_runbook_data(
-                data, can_discover=self._can_discover
-            )
+            return authorized_runbook_data(data, can_discover=self._can_discover)
         return data
 
     def _can_discover(self, object_id: str) -> bool:
@@ -619,9 +616,7 @@ class _AgentCatalogResolver:
             lifecycle=state.lifecycle if state is not None else None,
             health=projected_health,
             decision_status=(
-                projected_knowledge_data.get("decision_status")
-                if obj.kind == "decision"
-                else None
+                projected_knowledge_data.get("decision_status") if obj.kind == "decision" else None
             ),
             applies_to=(
                 _string_list(projected_knowledge_data.get("applies_to"))
@@ -629,14 +624,10 @@ class _AgentCatalogResolver:
                 else []
             ),
             project_category=(
-                projected_knowledge_data.get("category")
-                if obj.kind == "project"
-                else None
+                projected_knowledge_data.get("category") if obj.kind == "project" else None
             ),
             project_status=(
-                projected_knowledge_data.get("project_status")
-                if obj.kind == "project"
-                else None
+                projected_knowledge_data.get("project_status") if obj.kind == "project" else None
             ),
             related_assets=(
                 _string_list(projected_knowledge_data.get("related_assets"))
@@ -644,14 +635,10 @@ class _AgentCatalogResolver:
                 else []
             ),
             runbook_status=(
-                projected_knowledge_data.get("runbook_status")
-                if obj.kind == "runbook"
-                else None
+                projected_knowledge_data.get("runbook_status") if obj.kind == "runbook" else None
             ),
             runbook_risk=(
-                projected_knowledge_data.get("risk_level")
-                if obj.kind == "runbook"
-                else None
+                projected_knowledge_data.get("risk_level") if obj.kind == "runbook" else None
             ),
             runbook_applies_to=(
                 _string_list(projected_knowledge_data.get("applies_to"))
@@ -670,6 +657,7 @@ class _AgentCatalogResolver:
             ],
             provenance=self.provenance(obj),
             monitoring=monitoring,
+            release_monitoring=self.release_monitoring(obj, data),
         )
 
     def monitoring(
@@ -689,6 +677,22 @@ class _AgentCatalogResolver:
             settings=self.monitoring_settings,
         )
         return None if view is None else AgentServiceMonitoring.model_validate(view)
+
+    def release_monitoring(
+        self,
+        obj: CatalogObject,
+        data: Mapping[str, Any],
+    ) -> AgentServiceReleaseMonitoring | None:
+        view = release_monitoring_projection(
+            kind=obj.kind,
+            object_id=obj.id,
+            object_instance_id=obj.instance_id,
+            data=dict(data),
+            observations=self.release_observations,
+            now=self.now,
+            settings=self.release_monitoring_settings,
+        )
+        return None if view is None else AgentServiceReleaseMonitoring.model_validate(view)
 
     def provenance(self, obj: CatalogObject) -> CatalogProvenanceOut:
         provenance, _ = load_provenance(obj.provenance_json)
@@ -755,9 +759,7 @@ class _AgentCatalogResolver:
             credential_references=sorted(_collect_credential_references(data)),
             recent_comments=recent_comments.get(obj.id, []),
             recent_project_chronology=(
-                recent_project_chronology.get(obj.id, [])
-                if obj.kind == "project"
-                else None
+                recent_project_chronology.get(obj.id, []) if obj.kind == "project" else None
             ),
         )
 
@@ -779,11 +781,7 @@ class _AgentCatalogResolver:
         object_ref = _object_ref(obj)
         parent_ref = self.canonical_parent_ref(obj)
         visible_parent_refs = self.visible_parent_path_refs(obj)
-        visible_parent = (
-            parent_ref
-            if parent_ref in visible_parent_refs
-            else None
-        )
+        visible_parent = parent_ref if parent_ref in visible_parent_refs else None
         state = placement_state(
             kind=obj.kind,
             parent_ref=visible_parent,
@@ -808,10 +806,7 @@ class _AgentCatalogResolver:
 
     def node(self, object_ref: str) -> AgentAssetReadNode | None:
         obj = self.object_by_ref.get(object_ref)
-        if (
-            obj is None
-            or not self.access.policy.can(Permission.DISCOVER, obj.id)
-        ):
+        if obj is None or not self.access.policy.can(Permission.DISCOVER, obj.id):
             return None
         capabilities = self.access.capabilities_for(obj.id)
         if not self.access.policy.can(Permission.READ, obj.id):
@@ -851,10 +846,7 @@ class _AgentCatalogResolver:
         authorized: list[str] = []
         for object_ref in reversed(self.parent_path_refs(obj)):
             ancestor = self.object_by_ref.get(object_ref)
-            if (
-                ancestor is None
-                or not self.access.policy.can(permission, ancestor.id)
-            ):
+            if ancestor is None or not self.access.policy.can(permission, ancestor.id):
                 break
             authorized.append(object_ref)
         authorized.reverse()
@@ -871,10 +863,7 @@ class _AgentCatalogResolver:
             ).data
         except InterfaceContractError:
             return []
-        return [
-            dict(endpoint)
-            for endpoint in _mapping_list(normalized.get("endpoints"))
-        ]
+        return [dict(endpoint) for endpoint in _mapping_list(normalized.get("endpoints"))]
 
     def resolved_ips(self, obj: CatalogObject) -> list[str]:
         own_ips = _object_ips(_safe_object_data(obj), self.endpoints(obj))
@@ -946,13 +935,10 @@ class _AgentCatalogResolver:
         if from_object is None or to_object is None:
             return False
         permission = (
-            Permission.DISCOVER
-            if relationship.relation_type == "hosts"
-            else Permission.READ
+            Permission.DISCOVER if relationship.relation_type == "hosts" else Permission.READ
         )
-        return (
-            self.access.policy.can(permission, from_object.id)
-            and self.access.policy.can(permission, to_object.id)
+        return self.access.policy.can(permission, from_object.id) and self.access.policy.can(
+            permission, to_object.id
         )
 
 
@@ -976,8 +962,7 @@ def _endpoint_value_matches(
     expected: str,
 ) -> bool:
     return any(
-        isinstance(value := endpoint.get(field), str)
-        and value.casefold() == expected.casefold()
+        isinstance(value := endpoint.get(field), str) and value.casefold() == expected.casefold()
         for endpoint in endpoints
     )
 
@@ -1026,9 +1011,7 @@ def _object_ips(data: Mapping[str, Any], endpoints: list[dict[str, Any]]) -> lis
     candidates: list[Any] = []
     network = data.get("network")
     if isinstance(network, Mapping):
-        candidates.extend(
-            address.get("ip") for address in _mapping_list(network.get("addresses"))
-        )
+        candidates.extend(address.get("ip") for address in _mapping_list(network.get("addresses")))
     candidates.extend(endpoint.get("host") for endpoint in endpoints)
     return _unique_strings(value for value in candidates if _is_ip(value))
 
@@ -1069,8 +1052,6 @@ def _unique_strings(values: Any) -> list[str]:
         if isinstance(value, str) and value not in unique:
             unique.append(value)
     return unique
-
-
 
 
 def _collect_credential_references(value: Any) -> set[str]:

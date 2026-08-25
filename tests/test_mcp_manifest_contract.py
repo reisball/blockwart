@@ -19,7 +19,7 @@ def test_update_preview_tool_has_the_reviewed_manifest_evidence() -> None:
     assert metadata == {
         "build_revision": "issue-189",
         "contract_version": "1",
-        "manifest_digest": "c63532249f1eb1119da246a967b4f3a73af7a1c4a127c1052979f38385585383",
+        "manifest_digest": "8363f114876a122a95a2a05ca822058dab788e8d432332aa3a39ae7cd8cf5f6d",
         "tool_count": 31,
     }
 

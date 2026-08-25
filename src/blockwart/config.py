@@ -170,8 +170,7 @@ class Settings(BaseSettings):
         default="",
         max_length=4096,
         description=(
-            "Comma-separated IP networks a health check may connect to. Empty "
-            "denies every target."
+            "Comma-separated IP networks a health check may connect to. Empty denies every target."
         ),
     )
     monitoring_allowed_target_ports: str = Field(
@@ -248,6 +247,35 @@ class Settings(BaseSettings):
             "value is never stored, projected, or logged. Never a token value."
         ),
     )
+    release_monitoring_enabled: bool = Field(
+        default=False,
+        description=(
+            "Master switch for outbound public GitHub release checks, including "
+            "authorized manual checks. Disabled by default."
+        ),
+    )
+    release_monitoring_poller_enabled: bool = Field(
+        default=False,
+        description="Whether this deployment schedules periodic release checks.",
+    )
+    release_monitoring_default_interval_seconds: int = Field(
+        default=86400,
+        ge=3600,
+        le=604800,
+        description="Daily-by-default release check interval without a service override.",
+    )
+    release_monitoring_connect_timeout_ms: int = Field(default=2000, ge=100, le=15000)
+    release_monitoring_total_timeout_ms: int = Field(default=5000, ge=200, le=30000)
+    release_monitoring_max_response_bytes: int = Field(
+        default=65536,
+        ge=1024,
+        le=262144,
+        description="Maximum GitHub latest-release response body accepted.",
+    )
+    release_monitoring_max_checks_per_run: int = Field(default=10, ge=1, le=100)
+    release_monitoring_lease_seconds: int = Field(default=60, ge=10, le=3600)
+    release_monitoring_jitter_seconds: int = Field(default=3600, ge=0, le=21600)
+    release_monitoring_poll_interval_seconds: int = Field(default=30, ge=5, le=300)
 
     @model_validator(mode="after")
     def validate_monitoring_time_bounds(self) -> "Settings":
@@ -296,6 +324,21 @@ class Settings(BaseSettings):
             # The registry error names the identity and the broken rule only,
             # never a URL, host, path, or credential.
             raise ValueError(f"monitoring gatus sources are invalid: {exc}") from exc
+        return self
+
+    @model_validator(mode="after")
+    def validate_release_monitoring_bounds(self) -> "Settings":
+        if self.release_monitoring_connect_timeout_ms > self.release_monitoring_total_timeout_ms:
+            raise ValueError("release monitoring connect timeout must not exceed total timeout")
+        if (
+            self.release_monitoring_lease_seconds * 1000
+            < self.release_monitoring_total_timeout_ms + MONITORING_LEASE_SAFETY_MARGIN_MS
+        ):
+            raise ValueError("release monitoring lease must cover total timeout and safety margin")
+        if self.release_monitoring_poller_enabled and not self.release_monitoring_enabled:
+            raise ValueError(
+                "release monitoring poller requires the release monitoring master switch"
+            )
         return self
 
 

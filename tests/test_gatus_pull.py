@@ -935,6 +935,12 @@ def test_a_chunked_status_response_is_decoded(monkeypatch) -> None:
     assert monitoring_probe._decode_chunked_body(chunked) == payload
 
 
+def test_a_complete_chunked_trailer_is_decoded(monkeypatch) -> None:
+    payload = _statuses()
+    chunked = b"%x\r\n%s\r\n0\r\nX-Check: complete\r\n\r\n" % (len(payload), payload)
+    assert monitoring_probe._decode_chunked_body(chunked) == payload
+
+
 # ---------------------------------------------------------------------------
 # Storage: replay, delay, and the acquisition/evidence split
 # ---------------------------------------------------------------------------

@@ -444,6 +444,16 @@
             "title": "Relationships",
             "type": "array"
           },
+          "release_monitoring": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AgentServiceReleaseMonitoring"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "revision": {
             "minimum": 1.0,
             "title": "Revision",
@@ -881,6 +891,16 @@
             "title": "Related Assets",
             "type": "array"
           },
+          "release_monitoring": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AgentServiceReleaseMonitoring"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "revision": {
             "minimum": 1.0,
             "title": "Revision",
@@ -1150,6 +1170,39 @@
           "exposure"
         ],
         "title": "AgentEndpoint",
+        "type": "object"
+      },
+      "AgentGithubReleaseTarget": {
+        "properties": {
+          "api_url": {
+            "title": "Api Url",
+            "type": "string"
+          },
+          "owner": {
+            "title": "Owner",
+            "type": "string"
+          },
+          "repo": {
+            "title": "Repo",
+            "type": "string"
+          },
+          "repository_url": {
+            "title": "Repository Url",
+            "type": "string"
+          },
+          "slug": {
+            "title": "Slug",
+            "type": "string"
+          }
+        },
+        "required": [
+          "owner",
+          "repo",
+          "slug",
+          "repository_url",
+          "api_url"
+        ],
+        "title": "AgentGithubReleaseTarget",
         "type": "object"
       },
       "AgentMonitoringTarget": {
@@ -1605,6 +1658,16 @@
               }
             ],
             "title": "Relationships"
+          },
+          "release_monitoring": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AgentServiceReleaseMonitoring"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "revision": {
             "minimum": 1.0,
@@ -2150,6 +2213,240 @@
           "freshness"
         ],
         "title": "AgentServiceMonitoring",
+        "type": "object"
+      },
+      "AgentServiceReleaseMonitoring": {
+        "description": "Bounded release evidence, separate from availability monitoring.",
+        "properties": {
+          "consecutive_failures": {
+            "minimum": 0.0,
+            "title": "Consecutive Failures",
+            "type": "integer"
+          },
+          "diagnostic": {
+            "anyOf": [
+              {
+                "enum": [
+                  "invalid_release_monitoring_config",
+                  "missing_github_repository"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Diagnostic"
+          },
+          "enabled": {
+            "title": "Enabled",
+            "type": "boolean"
+          },
+          "error_code": {
+            "anyOf": [
+              {
+                "enum": [
+                  "connect_failed",
+                  "dns_failed",
+                  "http_client_error",
+                  "http_server_error",
+                  "invalid_release_version",
+                  "invalid_target",
+                  "not_a_stable_release",
+                  "not_found",
+                  "policy_denied",
+                  "provider_failed",
+                  "rate_limited",
+                  "redirect_not_supported",
+                  "response_too_large",
+                  "timeout",
+                  "tls_failed",
+                  "unreadable_release"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error Code"
+          },
+          "freshness": {
+            "enum": [
+              "pending",
+              "fresh",
+              "stale"
+            ],
+            "title": "Freshness",
+            "type": "string"
+          },
+          "http_status": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Http Status"
+          },
+          "interval_overridden": {
+            "title": "Interval Overridden",
+            "type": "boolean"
+          },
+          "interval_seconds": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Interval Seconds"
+          },
+          "last_checked_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Checked At"
+          },
+          "last_success_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Success At"
+          },
+          "latest_tag": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Latest Tag"
+          },
+          "latest_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Latest Version"
+          },
+          "next_due_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Due At"
+          },
+          "observed_status": {
+            "enum": [
+              "unknown",
+              "current",
+              "update_available"
+            ],
+            "title": "Observed Status",
+            "type": "string"
+          },
+          "provider": {
+            "anyOf": [
+              {
+                "const": "github_releases",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Provider"
+          },
+          "release_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Release Url"
+          },
+          "released_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Released At"
+          },
+          "running_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Running Version"
+          },
+          "status": {
+            "enum": [
+              "unknown",
+              "current",
+              "update_available",
+              "error"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "target": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AgentGithubReleaseTarget"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "enabled",
+          "provider",
+          "interval_seconds",
+          "interval_overridden",
+          "status",
+          "observed_status",
+          "freshness",
+          "consecutive_failures"
+        ],
+        "title": "AgentServiceReleaseMonitoring",
         "type": "object"
       },
       "ApiError": {
@@ -4607,6 +4904,7 @@
             "enum": [
               "record_integrity",
               "monitoring",
+              "release",
               "lifecycle",
               "endpoint",
               "placement",
@@ -4725,6 +5023,7 @@
               "monitoring_config_invalid",
               "monitoring_observation_stale",
               "monitoring_never_observed",
+              "release_update_available",
               "lifecycle_health_down",
               "lifecycle_health_degraded",
               "lifecycle_health_unknown",
@@ -4891,6 +5190,7 @@
               "enum": [
                 "record_integrity",
                 "monitoring",
+                "release",
                 "lifecycle",
                 "endpoint",
                 "placement",
@@ -4916,6 +5216,7 @@
                 "monitoring_config_invalid",
                 "monitoring_observation_stale",
                 "monitoring_never_observed",
+                "release_update_available",
                 "lifecycle_health_down",
                 "lifecycle_health_degraded",
                 "lifecycle_health_unknown",
@@ -4973,6 +5274,7 @@
               "enum": [
                 "record_integrity",
                 "monitoring",
+                "release",
                 "lifecycle",
                 "endpoint",
                 "placement",
@@ -7182,6 +7484,130 @@
           "direction"
         ],
         "title": "V1RelationshipPageOut",
+        "type": "object"
+      },
+      "V1ReleaseCheckOut": {
+        "properties": {
+          "object_id": {
+            "title": "Object Id",
+            "type": "string"
+          },
+          "outcome": {
+            "enum": [
+              "observed",
+              "not_modified",
+              "error",
+              "skipped"
+            ],
+            "title": "Outcome",
+            "type": "string"
+          },
+          "release_monitoring": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AgentServiceReleaseMonitoring"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "skipped_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Skipped Reason"
+          }
+        },
+        "required": [
+          "object_id",
+          "outcome"
+        ],
+        "title": "V1ReleaseCheckOut",
+        "type": "object"
+      },
+      "V1ReleaseOverviewItemOut": {
+        "properties": {
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "object_id": {
+            "title": "Object Id",
+            "type": "string"
+          },
+          "ref": {
+            "title": "Ref",
+            "type": "string"
+          },
+          "release_monitoring": {
+            "$ref": "#/components/schemas/AgentServiceReleaseMonitoring"
+          }
+        },
+        "required": [
+          "object_id",
+          "ref",
+          "label",
+          "release_monitoring"
+        ],
+        "title": "V1ReleaseOverviewItemOut",
+        "type": "object"
+      },
+      "V1ReleaseOverviewPageOut": {
+        "properties": {
+          "direction": {
+            "enum": [
+              "asc",
+              "desc"
+            ],
+            "title": "Direction",
+            "type": "string"
+          },
+          "generated_at": {
+            "title": "Generated At",
+            "type": "string"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/V1ReleaseOverviewItemOut"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Cursor"
+          },
+          "total": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Total"
+          }
+        },
+        "required": [
+          "items",
+          "generated_at",
+          "direction"
+        ],
+        "title": "V1ReleaseOverviewPageOut",
         "type": "object"
       },
       "V1ScopePreviewObjectOut": {
@@ -11624,6 +12050,7 @@
                   "enum": [
                     "record_integrity",
                     "monitoring",
+                    "release",
                     "lifecycle",
                     "endpoint",
                     "placement",
@@ -11677,6 +12104,7 @@
                     "monitoring_config_invalid",
                     "monitoring_observation_stale",
                     "monitoring_never_observed",
+                    "release_update_available",
                     "lifecycle_health_down",
                     "lifecycle_health_degraded",
                     "lifecycle_health_unknown",
@@ -16506,6 +16934,143 @@
         ]
       }
     },
+    "/api/v1/objects/{object_id}/release-check": {
+      "post": {
+        "operationId": "create_v1_release_check_api_v1_objects__object_id__release_check_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "object_id",
+            "required": true,
+            "schema": {
+              "title": "Object Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ReleaseCheckOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Authentication required"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Permission denied"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Resource not found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "412": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Precondition failed"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Request validation failed"
+          },
+          "428": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Precondition required"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Internal server error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Service unavailable"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Run one authorized, leased public GitHub release check",
+        "tags": [
+          "api-v1-readonly"
+        ]
+      }
+    },
     "/api/v1/objects/{object_id}/topology": {
       "get": {
         "operationId": "get_v1_topology_api_v1_objects__object_id__topology_get",
@@ -17720,6 +18285,211 @@
         ]
       }
     },
+    "/api/v1/release-updates": {
+      "get": {
+        "operationId": "get_v1_release_updates_api_v1_release_updates_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "unknown",
+                    "current",
+                    "update_available",
+                    "error"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Status"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Opaque cursor returned by the previous page",
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 2048,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Opaque cursor returned by the previous page",
+              "title": "Cursor"
+            }
+          },
+          {
+            "in": "query",
+            "name": "direction",
+            "required": false,
+            "schema": {
+              "default": "asc",
+              "enum": [
+                "asc",
+                "desc"
+              ],
+              "title": "Direction",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "include_total",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Include Total",
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ReleaseOverviewPageOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Authentication required"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Permission denied"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Resource not found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "412": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Precondition failed"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Request validation failed"
+          },
+          "428": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Precondition required"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Internal server error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Service unavailable"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Read authorized service release-monitoring results",
+        "tags": [
+          "api-v1-readonly"
+        ]
+      }
+    },
     "/api/v1/roots": {
       "post": {
         "operationId": "create_v1_catalog_root_api_v1_roots_post",
@@ -18700,6 +19470,19 @@
             },
             {
               "json_types": [
+                "object"
+              ],
+              "normalization": [],
+              "path": "release_monitoring",
+              "reason": "is supported only for service objects",
+              "requirement": "forbidden",
+              "type": "object",
+              "violations": [
+                "field_not_allowed"
+              ]
+            },
+            {
+              "json_types": [
                 "array"
               ],
               "normalization": [],
@@ -19486,6 +20269,19 @@
               ],
               "normalization": [],
               "path": "monitoring",
+              "reason": "is supported only for service objects",
+              "requirement": "forbidden",
+              "type": "object",
+              "violations": [
+                "field_not_allowed"
+              ]
+            },
+            {
+              "json_types": [
+                "object"
+              ],
+              "normalization": [],
+              "path": "release_monitoring",
               "reason": "is supported only for service objects",
               "requirement": "forbidden",
               "type": "object",
@@ -20301,6 +21097,19 @@
               "violations": [
                 "field_not_allowed"
               ]
+            },
+            {
+              "json_types": [
+                "object"
+              ],
+              "normalization": [],
+              "path": "release_monitoring",
+              "reason": "is supported only for service objects",
+              "requirement": "forbidden",
+              "type": "object",
+              "violations": [
+                "field_not_allowed"
+              ]
             }
           ],
           "rules": [],
@@ -21015,6 +21824,19 @@
               ],
               "normalization": [],
               "path": "monitoring",
+              "reason": "is supported only for service objects",
+              "requirement": "forbidden",
+              "type": "object",
+              "violations": [
+                "field_not_allowed"
+              ]
+            },
+            {
+              "json_types": [
+                "object"
+              ],
+              "normalization": [],
+              "path": "release_monitoring",
               "reason": "is supported only for service objects",
               "requirement": "forbidden",
               "type": "object",
@@ -21872,6 +22694,124 @@
               ]
             },
             {
+              "additional_properties": false,
+              "allowed_keys": [
+                "enabled",
+                "github",
+                "interval_seconds",
+                "provider"
+              ],
+              "json_types": [
+                "object"
+              ],
+              "normalization": [],
+              "path": "release_monitoring",
+              "requirement": "optional",
+              "type": "object",
+              "violations": [
+                "field_not_allowed",
+                "type_mismatch"
+              ]
+            },
+            {
+              "json_types": [
+                "boolean"
+              ],
+              "normalization": [],
+              "path": "release_monitoring.enabled",
+              "requirement": "optional",
+              "type": "boolean",
+              "violations": [
+                "type_mismatch"
+              ]
+            },
+            {
+              "constraint": "must be the supported public release provider",
+              "enum": [
+                "github_releases"
+              ],
+              "json_types": [
+                "string"
+              ],
+              "normalization": [],
+              "path": "release_monitoring.provider",
+              "requirement": "optional",
+              "type": "enum",
+              "violations": [
+                "value_not_allowed"
+              ]
+            },
+            {
+              "constraint": "must be an integer from 3600 to 604800",
+              "json_types": [
+                "integer"
+              ],
+              "maximum": 604800,
+              "minimum": 3600,
+              "normalization": [],
+              "path": "release_monitoring.interval_seconds",
+              "requirement": "optional",
+              "type": "integer",
+              "violations": [
+                "type_mismatch",
+                "value_out_of_range"
+              ]
+            },
+            {
+              "additional_properties": false,
+              "allowed_keys": [
+                "owner",
+                "repo"
+              ],
+              "json_types": [
+                "object"
+              ],
+              "normalization": [],
+              "path": "release_monitoring.github",
+              "requirement": "optional",
+              "type": "object",
+              "violations": [
+                "field_not_allowed",
+                "type_mismatch"
+              ]
+            },
+            {
+              "json_types": [
+                "string"
+              ],
+              "max_length": 39,
+              "min_length": 1,
+              "normalization": [
+                "strip_whitespace"
+              ],
+              "path": "release_monitoring.github.owner",
+              "requirement": "optional",
+              "type": "string",
+              "violations": [
+                "type_mismatch",
+                "value_too_long",
+                "value_too_short"
+              ]
+            },
+            {
+              "json_types": [
+                "string"
+              ],
+              "max_length": 100,
+              "min_length": 1,
+              "normalization": [
+                "strip_whitespace"
+              ],
+              "path": "release_monitoring.github.repo",
+              "requirement": "optional",
+              "type": "string",
+              "violations": [
+                "type_mismatch",
+                "value_too_long",
+                "value_too_short"
+              ]
+            },
+            {
               "json_types": [
                 "array"
               ],
@@ -22107,6 +23047,16 @@
               "violation": "required_field_missing"
             },
             {
+              "description": "data.release_monitoring is a closed service-only document. It requires an explicit enabled flag and, when enabled, one canonical public GitHub owner/repository identity. No host, URL, token, channel, or alternative installed-software source is expressible.",
+              "rule": "validate_service_release_monitoring",
+              "violation": "required_field_missing"
+            },
+            {
+              "description": "The GitHub identity accepts only canonical bounded owner and repository segments; it cannot contain a host, scheme, port, path, or query.",
+              "rule": "reject_invalid_public_github_identity",
+              "violation": "value_not_allowed"
+            },
+            {
               "description": "data.monitoring.gatus names a deployment-bound status source and one endpoint inside it. The source identity is a bounded lowercase name and the endpoint must not be empty; no URL, host, port, or credential is expressible here.",
               "rule": "reject_invalid_gatus_identity",
               "violation": "value_not_allowed"
@@ -22325,6 +23275,95 @@
             ],
             "requires_single_complete_http_endpoint": true
           }
+        },
+        "service_release_monitoring": {
+          "absent_configuration": "disabled",
+          "affects_health": false,
+          "comparison": {
+            "case_insensitive_equality": true,
+            "named_calver_conventions": false,
+            "normalizes_leading_v_prefix": true,
+            "numeric_dotted_ordering": true,
+            "prerelease_ordering": false,
+            "semver_precedence": false,
+            "unresolved_comparison": "unknown"
+          },
+          "default_provider": "github_releases",
+          "diagnostics": [
+            "invalid_release_monitoring_config",
+            "missing_github_repository"
+          ],
+          "error_codes": [
+            "connect_failed",
+            "dns_failed",
+            "http_client_error",
+            "http_server_error",
+            "invalid_release_version",
+            "invalid_target",
+            "not_a_stable_release",
+            "not_found",
+            "policy_denied",
+            "provider_failed",
+            "rate_limited",
+            "redirect_not_supported",
+            "response_too_large",
+            "timeout",
+            "tls_failed",
+            "unreadable_release"
+          ],
+          "external_delivery": false,
+          "freshness": [
+            "pending",
+            "fresh",
+            "stale"
+          ],
+          "inheritance": {
+            "advances_business_updated_at": false,
+            "advances_object_revision": false,
+            "object_audit_per_check": false,
+            "rbac": true,
+            "visibility": true
+          },
+          "interval_seconds": {
+            "default": 86400,
+            "max_backoff_factor": 8,
+            "maximum": 604800,
+            "min_check_cooldown_seconds": 300,
+            "minimum": 3600,
+            "server_default_configurable": true
+          },
+          "providers": [
+            "github_releases"
+          ],
+          "running_version_source": "data.service_information.running_version",
+          "statuses": [
+            "unknown",
+            "current",
+            "update_available",
+            "error"
+          ],
+          "storage_path": "data.release_monitoring",
+          "target": {
+            "api_origin": "https://api.github.com",
+            "api_path_template": "/repos/{owner}/{repo}/releases/latest",
+            "authenticated": false,
+            "drafts": false,
+            "host_configurable": false,
+            "identity_fields": [
+              "owner",
+              "repo"
+            ],
+            "identity_path": "data.release_monitoring.github",
+            "path_configurable": false,
+            "port_configurable": false,
+            "prereleases": false,
+            "private_repositories": false,
+            "raw_tags": false,
+            "redirects_followed": false,
+            "release_notes_stored": false,
+            "scheme_configurable": false
+          },
+          "writes_running_version": false
         },
         "status": {
           "default": "active",
@@ -22773,6 +23812,19 @@
               ],
               "normalization": [],
               "path": "monitoring",
+              "reason": "is supported only for service objects",
+              "requirement": "forbidden",
+              "type": "object",
+              "violations": [
+                "field_not_allowed"
+              ]
+            },
+            {
+              "json_types": [
+                "object"
+              ],
+              "normalization": [],
+              "path": "release_monitoring",
               "reason": "is supported only for service objects",
               "requirement": "forbidden",
               "type": "object",
@@ -24125,6 +25177,19 @@
               "violations": [
                 "field_not_allowed"
               ]
+            },
+            {
+              "json_types": [
+                "object"
+              ],
+              "normalization": [],
+              "path": "release_monitoring",
+              "reason": "is supported only for service objects",
+              "requirement": "forbidden",
+              "type": "object",
+              "violations": [
+                "field_not_allowed"
+              ]
             }
           ],
           "rules": [
@@ -24823,6 +25888,19 @@
               ],
               "normalization": [],
               "path": "monitoring",
+              "reason": "is supported only for service objects",
+              "requirement": "forbidden",
+              "type": "object",
+              "violations": [
+                "field_not_allowed"
+              ]
+            },
+            {
+              "json_types": [
+                "object"
+              ],
+              "normalization": [],
+              "path": "release_monitoring",
               "reason": "is supported only for service objects",
               "requirement": "forbidden",
               "type": "object",
@@ -26677,6 +27755,19 @@
               "violations": [
                 "field_not_allowed"
               ]
+            },
+            {
+              "json_types": [
+                "object"
+              ],
+              "normalization": [],
+              "path": "release_monitoring",
+              "reason": "is supported only for service objects",
+              "requirement": "forbidden",
+              "type": "object",
+              "violations": [
+                "field_not_allowed"
+              ]
             }
           ],
           "rules": [
@@ -26950,7 +28041,7 @@
       "raw_secret_values_rejected": true
     },
     "source": "blockwart.domain.object_schema",
-    "version": 7,
+    "version": 8,
     "violation_policy": {
       "description": "A rejected write names the canonical public data path, one violation code, and the published rule when a schema postcondition rejected it. Rejected values are never returned.",
       "detail_fields": [
