@@ -279,6 +279,55 @@ class V1AttentionPageOut(BaseModel):
     direction: SortDirection
 
 
+ActivityEventTypeValue = Literal[
+    "object_revision",
+    "relationship_mutation",
+    "comment_create",
+    "audit",
+]
+
+
+class V1ActivityObjectOut(BaseModel):
+    """The authorized visible-object reference of one activity event."""
+
+    model_config = ConfigDict(from_attributes=True, extra="forbid")
+
+    ref: str = Field(min_length=1, max_length=256)
+    object_id: str = Field(max_length=128)
+    kind: ObjectKind
+    label: str | None = Field(default=None, max_length=255)
+
+
+class V1ActivityItemOut(BaseModel):
+    """One classified activity envelope entry.
+
+    Comment bodies, audit diffs, and project state stay in their canonical
+    resources (#131/#143/#184); this envelope only carries a safe short
+    description plus the detail path into the resource that owns the details.
+    """
+
+    model_config = ConfigDict(from_attributes=True, extra="forbid")
+
+    event_id: str = Field(min_length=1, max_length=64)
+    event_type: ActivityEventTypeValue
+    occurred_at: str = Field(max_length=64)
+    object: V1ActivityObjectOut
+    summary: str = Field(max_length=512)
+    actor: str | None = Field(default=None, max_length=128)
+    detail_path: str = Field(max_length=512)
+
+
+class V1ActivityPageOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True, extra="forbid")
+
+    items: list[V1ActivityItemOut]
+    next_cursor: str | None = None
+    total: int | None = None
+    generated_at: str = Field(max_length=64)
+    sort: Literal["occurred_at"] = "occurred_at"
+    direction: SortDirection
+
+
 # The known-id batch surface is bounded to 20 ids. Each id follows the same
 # pattern as CatalogObjectIn so an obviously malformed id is rejected before
 # any authorization lookup; concealed and missing ids stay indistinguishable
