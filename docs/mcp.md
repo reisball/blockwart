@@ -62,12 +62,16 @@ This repository supplies the evidence and verifier only. It does not edit
 OpenClaw configuration, refresh a foreign runtime, restart a process, deploy,
 or obtain cross-agent rights.
 
-CI proves both directions end to end against an installed wheel: the installed
-wrapper and the running API must publish identical metadata from the same
-commit, and a deliberately reduced materialized tool catalog (the 2026-08-13
-production drift shape) must be diagnosed `incompatible` through both the
-installed `blockwart-mcp --validate-runtime-catalog` and the live
-`blockwart-mcp --doctor` paths before the smoke passes.
+CI proves two contract properties against an installed wheel from the same
+commit: (1) the installed wrapper and the running API publish identical
+metadata, and (2) a deliberately reduced materialized tool catalog (mirroring
+the 2026-08-13 production drift of 26 API tools versus 21 wrapper tools) is
+diagnosed `incompatible` through both the installed
+`blockwart-mcp --validate-runtime-catalog` and the live
+`blockwart-mcp --doctor` paths. The installed integration test proves that a
+reduced catalog is rejected against a same-commit API; a genuinely stale
+wrapper against a newer API is covered by the unit tests in
+`tests/test_mcp_manifest_contract.py`, not by the installed smoke.
 
 It wraps the object-authorized v1 API:
 

@@ -720,10 +720,16 @@ def _tool_payload(result) -> dict:
 def prove_contract_drift_fail_fast(mcp_entrypoint: Path, api_token: str) -> None:
     """Fail CI on the 2026-08-13 production drift shape through installed CLIs.
 
-    A deliberately reduced materialized tool catalog must be diagnosed as
+    A deliberately reduced materialized tool catalog (mirroring the 2026-08-13
+    drift of 26 API tools vs 21 wrapper tools) must be diagnosed as
     incompatible before normal agent work, both by the local verifier and by
-    the doctor path against this live same-commit API. Tool count alone never
-    decides compatibility.
+    the doctor path against this live same-commit API.
+
+    This installed integration test proves that a reduced catalog is rejected
+    when the installed wrapper and live API are from the same build. A
+    genuinely stale wrapper against a newer API is covered by the unit tests
+    in ``tests/test_mcp_manifest_contract.py``, not by this smoke. Tool count
+    alone never decides compatibility.
     """
     with tempfile.TemporaryDirectory(prefix="blockwart-mcp-drift-") as drift_dir:
         catalog_path = Path(drift_dir) / "materialized-tools.json"
