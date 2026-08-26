@@ -42,6 +42,7 @@ class DirectGrantView:
     principal: PrincipalSummary
     role: Role
     scope: GrantScope
+    expires_at: str | None
     created_at: str
     updated_at: str
 
@@ -693,6 +694,7 @@ def _direct_grant_view(
         principal=_principal_summary(principal),
         role=Role(grant.role),
         scope=GrantScope(grant.scope),
+        expires_at=format_rfc3339_utc(grant.expires_at),
         created_at=format_rfc3339_utc(grant.created_at) or "",
         updated_at=format_rfc3339_utc(grant.updated_at) or "",
     )
