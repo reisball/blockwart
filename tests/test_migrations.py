@@ -46,7 +46,8 @@ PROJECT_CHRONOLOGY_REVISION = "20260818_0018"
 CATALOG_VIEWER_REVISION = "20260822_0019"
 GATUS_SOURCE_REVISION = "20260824_0020"
 RELEASE_MONITORING_REVISION = "20260825_0021"
-HEAD_REVISION = RELEASE_MONITORING_REVISION
+ACCESS_REQUESTS_REVISION = "20260826_0022"
+HEAD_REVISION = ACCESS_REQUESTS_REVISION
 PROJECT_ALEMBIC_CONFIG = Path(__file__).resolve().parents[1] / "alembic.ini"
 LEGACY_SNAPSHOT = Path(__file__).resolve().parent / "fixtures" / "legacy_snapshot.sql"
 
@@ -248,6 +249,7 @@ def test_real_alembic_upgrade_creates_fresh_database_and_has_no_drift(
     engine = create_engine(database_url)
     try:
         assert set(inspect(engine).get_table_names()) == {
+            "access_requests",
             "alembic_version",
             "audit_events",
             "browser_sessions",
@@ -274,6 +276,7 @@ def test_real_alembic_upgrade_creates_fresh_database_and_has_no_drift(
     finally:
         engine.dispose()
     assert set(Base.metadata.tables) == {
+        "access_requests",
         "audit_events",
         "browser_sessions",
         "catalog_objects",
@@ -1956,6 +1959,7 @@ def downgrade() -> None:
     try:
         assert upgrade_database(database_url) == future_revision
         assert set(inspect(engine).get_table_names()) == {
+            "access_requests",
             "alembic_version",
             "audit_events",
             "browser_sessions",
