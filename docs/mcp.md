@@ -62,6 +62,13 @@ This repository supplies the evidence and verifier only. It does not edit
 OpenClaw configuration, refresh a foreign runtime, restart a process, deploy,
 or obtain cross-agent rights.
 
+CI proves both directions end to end against an installed wheel: the installed
+wrapper and the running API must publish identical metadata from the same
+commit, and a deliberately reduced materialized tool catalog (the 2026-08-13
+production drift shape) must be diagnosed `incompatible` through both the
+installed `blockwart-mcp --validate-runtime-catalog` and the live
+`blockwart-mcp --doctor` paths before the smoke passes.
+
 It wraps the object-authorized v1 API:
 
 - blockwart.describe_schema -> local projection of the canonical domain object and
