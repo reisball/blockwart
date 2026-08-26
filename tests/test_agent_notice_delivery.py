@@ -1,7 +1,8 @@
 """Deterministic end-to-end coverage for agent notice delivery (Issue #106).
 
-All scenarios use the FakeNoticeTransport; CI never contacts a productive
-gateway, agent turn, network, or credential store.
+Most scenarios use the FakeNoticeTransport; the loopback transport is
+covered end to end against a local HTTP server on 127.0.0.1, so CI never
+contacts a productive gateway, agent turn, network, or credential store.
 """
 
 from __future__ import annotations
@@ -38,7 +39,13 @@ from blockwart.services.agent_notices import (
     record_agent_notice_event,
     revoke_agent_notice_subscription,
 )
-from blockwart.services.notice_transport import DeliveryOutcome, FakeNoticeTransport
+from blockwart.services.notice_transport import (
+    DeliveryOutcome,
+    DeliveryRequest,
+    FakeNoticeTransport,
+    OpenClawTestGatewayTransport,
+    TransportConfigError,
+)
 from blockwart.services.read_access import read_access_for_principal
 
 NOW = datetime(2026, 8, 26, 12, 0, 0)
@@ -553,3 +560,48 @@ def test_admin_diagnostics_show_states_without_transport_secrets(
     item = body["items"][0]
     assert item["status"] == "delivered"
     assert set(item).isdisjoint({"payload", "message", "token", "transport_url", "endpoint"})
+
+
+def test_loopback_transport_delivers_end_to_end() -> None:
+    """The real loopback transport reaches a local HTTP server (Issue #106)."""
+
+    import json
+    import threading
+    from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+    received: list[dict] = []
+
+    class Handler(BaseHTTPRequestHandler):
+        def do_POST(self) -> None:  # noqa: N802 - stdlib naming
+            length = int(self.headers.get("Content-Length", "0"))
+            body = json.loads(self.rfile.read(length).decode("utf-8"))
+            received.append(body)
+            self.send_response(200)
+            self.end_headers()
+            self.wfile.write(b"{}")
+
+        def log_message(self, *args) -> None:  # noqa: ANN002 - stdlib hook
+            return
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        transport = OpenClawTestGatewayTransport(
+            endpoint_url=f"http://127.0.0.1:{server.server_port}/notify"
+        )
+        outcome = transport.deliver(
+            DeliveryRequest(target_id="target-1", payload={"event_id": "evt-1"})
+        )
+        assert outcome.ok
+        assert received == [{"event_id": "evt-1"}]
+    finally:
+        server.shutdown()
+        thread.join(timeout=5)
+
+
+def test_loopback_transport_refuses_non_loopback_destinations() -> None:
+    """The transport refuses every non-loopback destination by construction."""
+
+    with pytest.raises(TransportConfigError):
+        OpenClawTestGatewayTransport(endpoint_url="http://example.com/notify")

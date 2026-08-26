@@ -16,6 +16,7 @@ and approval round.
 from __future__ import annotations
 
 import json
+import os
 import urllib.error
 import urllib.request
 from dataclasses import dataclass
@@ -123,3 +124,26 @@ class FakeNoticeTransport:
         if self._results:
             return self._results.pop(0)
         return DeliveryOutcome(ok=True)
+
+
+
+def build_notice_transport(settings) -> NoticeTransport | None:
+    """Build the configured notice transport, or None when unconfigured.
+
+    The endpoint URL is read from settings; the bearer token is read from the
+    environment (BLOCKWART_NOTICE_DELIVERY_TOKEN) so it never lands in
+    settings, logs, or audit rows. An empty endpoint disables delivery.
+    """
+    endpoint = getattr(settings, 'notice_delivery_endpoint_url', '')
+    if not endpoint:
+        return None
+    token = os.environ.get('BLOCKWART_NOTICE_DELIVERY_TOKEN') or None
+    transport = OpenClawTestGatewayTransport(endpoint_url=endpoint)
+    if token:
+        original_deliver = transport.deliver
+
+        def deliver_with_token(request: DeliveryRequest) -> DeliveryOutcome:
+            return original_deliver(request, token=token)
+
+        transport.deliver = deliver_with_token  # type: ignore[method-assign]
+    return transport

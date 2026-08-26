@@ -266,12 +266,13 @@ def acknowledge_notice(
     session: Annotated[Session, Depends(get_session)],
     access: Annotated[ReadAccess, Depends(require_api_read_access)],
 ) -> AgentNoticeAcknowledgeOut:
-    acknowledged, error_code = acknowledge_agent_notice(
-        session,
-        principal_id=access.principal.id,
-        event_id=event_id,
-        now=_utcnow(),
-    )
+    with transaction(session):
+        acknowledged, error_code = acknowledge_agent_notice(
+            session,
+            principal_id=access.principal.id,
+            event_id=event_id,
+            now=_utcnow(),
+        )
     if error_code == "not_found":
         raise HTTPException(status_code=404, detail="Notice not found")
     return AgentNoticeAcknowledgeOut(acknowledged=acknowledged, error_code=error_code)

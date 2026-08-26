@@ -15,13 +15,17 @@ Safety properties implemented here:
 
 from __future__ import annotations
 
+import asyncio
+import secrets
+import logging
+
 import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, sessionmaker
 
 from blockwart.domain.agent_notices import (
     AGENT_NOTICE_TRANSPORTS,
@@ -189,6 +193,7 @@ def fanout_agent_notice_jobs(
         )
     )
     created: list[AgentDeliveryJob] = []
+    seen_targets: set[str] = set()
     for subscription in subscriptions:
         if subscription.scope not in NOTICE_SCOPE_VALUES:
             continue
@@ -199,6 +204,12 @@ def fanout_agent_notice_jobs(
             # No job, no hint: an inactive target simply does not exist for
             # routing purposes.
             continue
+        if target.id in seen_targets:
+            # Two matching subscriptions for the same target must produce one
+            # job: the unique (event_id, target_id) identity would otherwise
+            # fail the fan-out with an IntegrityError.
+            continue
+        seen_targets.add(target.id)
         pending_count = len(
             list(
                 session.scalars(
@@ -337,6 +348,7 @@ def deliver_due_agent_notices(
             )
             .order_by(AgentDeliveryJob.next_attempt_at, AgentDeliveryJob.id)
             .limit(active_policy.max_deliveries_per_run)
+            .with_for_update(skip_locked=True)
         )
     )
     for job in due_jobs:
@@ -535,3 +547,66 @@ def deactivate_agent_delivery_target(
     row.active = False
     session.flush()
     return True
+
+
+logger = logging.getLogger(__name__)
+
+
+async def run_notice_delivery_poller(
+    settings: Settings,
+    stop_event: asyncio.Event,
+) -> None:
+    """Periodically deliver due agent notices in the running application.
+
+    Mirrors the release-monitoring poller: a bounded pass runs in a worker
+    thread, failures are logged with a stable code, and the loop stops on the
+    shared stop event. The transport is built from settings; an empty
+    transport URL disables productive delivery while keeping the poller
+    harmless.
+    """
+    from blockwart.config import Settings as _Settings
+    from blockwart.services.notice_transport import build_notice_transport
+
+    if not settings.notice_delivery_poller_enabled:
+        return
+    transport = build_notice_transport(settings)
+    if transport is None:
+        logger.error("notice_delivery_poller_error code=transport_unconfigured")
+        return
+    try:
+        engine = build_engine(settings.database_url)
+        sessions = sessionmaker(engine, expire_on_commit=False)
+    except Exception:  # noqa: BLE001 - process boundary emits only a stable code
+        logger.error("notice_delivery_poller_error code=initialization_failed")
+        return
+    policy = NoticeDeliveryPolicy(max_deliveries_per_run=settings.notice_delivery_max_per_run)
+    try:
+        while not stop_event.is_set():
+            try:
+                await asyncio.to_thread(_run_delivery_pass, sessions, transport, policy)
+            except Exception:  # noqa: BLE001
+                logger.error("notice_delivery_poller_error code=delivery_pass_failed")
+            try:
+                await asyncio.wait_for(
+                    stop_event.wait(),
+                    timeout=settings.notice_delivery_poll_interval_seconds,
+                )
+            except TimeoutError:
+                pass
+    finally:
+        engine.dispose()
+
+
+def _run_delivery_pass(
+    sessions: sessionmaker[Session],
+    transport: NoticeTransport,
+    policy: NoticeDeliveryPolicy,
+) -> None:
+    with sessions() as session:
+        deliver_due_agent_notices(
+            session,
+            transport,
+            now=datetime.now(UTC),
+            policy=policy,
+        )
+        session.commit()

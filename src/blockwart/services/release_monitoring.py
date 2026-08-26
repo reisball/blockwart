@@ -518,7 +518,11 @@ def check_service_release(
     # logical notice event; fan-out and delivery deduplication happen in the
     # notice layer. Emission shares this transaction so event and observation
     # stay consistent across process restarts.
-    if observed.outcome == "observed" and record.latest_version != previous_version:
+    if (
+        observed.outcome == "observed"
+        and previous_version is not None
+        and record.latest_version != previous_version
+    ):
         from blockwart.services.agent_notices import record_release_notice_event
 
         record_release_notice_event(

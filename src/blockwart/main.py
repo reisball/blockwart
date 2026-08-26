@@ -18,6 +18,7 @@ from blockwart.domain.schema_projection import object_schema_projection
 from blockwart.services.login_protection import LoginProtector
 from blockwart.services.monitoring import run_monitoring_poller
 from blockwart.services.release_monitoring import run_release_monitoring_poller
+from blockwart.services.agent_notices import run_notice_delivery_poller
 from blockwart.ui.admin import router as admin_ui_router
 from blockwart.ui.auth import router as auth_router
 from blockwart.ui.i18n import persist_locale_cookie, validate_locale_catalogs
@@ -83,6 +84,8 @@ def _monitoring_lifespan(
             tasks.append(asyncio.create_task(run_monitoring_poller(settings, stop_event)))
         if settings.release_monitoring_poller_enabled:
             tasks.append(asyncio.create_task(run_release_monitoring_poller(settings, stop_event)))
+        if settings.notice_delivery_poller_enabled:
+            tasks.append(asyncio.create_task(run_notice_delivery_poller(settings, stop_event)))
         try:
             yield
         finally:
