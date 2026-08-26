@@ -14,6 +14,7 @@ from pydantic import ValidationError
 from sqlalchemy.orm import Session
 
 from blockwart.api.deps import get_session
+from blockwart.domain.activity import ACTIVITY_EVENT_TYPES
 from blockwart.domain.attention import (
     ATTENTION_CATEGORY_VALUES,
     ATTENTION_SEVERITY_VALUES,
@@ -71,6 +72,10 @@ from blockwart.schemas.catalog import (
     PUBLIC_OBJECT_KINDS,
     CatalogObjectIn,
     CatalogObjectOut,
+)
+from blockwart.services.activity import (
+    ActivityQueryError,
+    query_activity_page,
 )
 from blockwart.services.attention import (
     ATTENTION_ITEM_SIGNAL_STATES,
@@ -833,6 +838,58 @@ def attention_overview(
             "selected_category": category or "",
             "selected_severity": severity or "",
             "selected_signal_state": signal_state or "",
+            "generated_at": page.generated_at,
+            "next_url": next_url,
+            **i18n,
+        },
+    )
+
+
+@router.get("/activity", response_class=HTMLResponse)
+def activity_overview(
+    request: Request,
+    session: Annotated[Session, Depends(get_session)],
+    event_type: str | None = None,
+    since: str | None = None,
+    cursor: str | None = None,
+):
+    """Render the authorized activity feed from the shared application result."""
+    access = read_access_from_request(request)
+    try:
+        page = query_activity_page(
+            session,
+            access,
+            since=since or None,
+            event_type=event_type or None,
+            limit=100,
+            cursor=cursor,
+            direction="desc",
+            include_total=False,
+        )
+    except InvalidCursor as exc:
+        raise HTTPException(status_code=400, detail="Invalid pagination cursor") from exc
+    except ActivityQueryError as exc:
+        raise HTTPException(status_code=400, detail="Invalid activity filter") from exc
+    params = {
+        "event_type": event_type,
+        "since": since,
+        "cursor": page.next_cursor,
+    }
+    next_url = (
+        f"/activity?{urlencode({key: value for key, value in params.items() if value})}"
+        if page.next_cursor
+        else None
+    )
+    i18n = translation_context(request)
+    return templates.TemplateResponse(
+        request,
+        "activity.html",
+        context={
+            "title": i18n["t"]("activity.title"),
+            "items": page.items,
+            "event_types": list(ACTIVITY_EVENT_TYPES),
+            "selected_event_type": event_type or "",
+            "selected_since": since or "",
             "generated_at": page.generated_at,
             "next_url": next_url,
             **i18n,

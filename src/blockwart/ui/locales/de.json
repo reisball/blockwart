@@ -1205,5 +1205,20 @@
   "validation.network_ip_required": "Adresszeile {row}: Die IP ist erforderlich.",
   "validation.port_invalid": "Zeile {row}: Der Port muss eine Ganzzahl von 1 bis 65535 sein.",
   "value.no": "Nein",
-  "value.yes": "Ja"
+  "value.yes": "Ja",
+  "nav.activity": "Aktivität",
+  "activity.title": "Aktivität",
+  "activity.eyebrow": "Agent-Aktivität",
+  "activity.help": "Autorisierter katalogweiter Änderungsfeed. Nur-Lese-Pull-Sicht über aufgezeichnete Audit-Aktivität; typabhängige Details bleiben in den Objekt-, Kommentar- und Audit-Ressourcen.",
+  "activity.empty": "Keine sichtbare Aktivität für diesen Filter.",
+  "activity.filter": "Filtern",
+  "activity.clear": "Zurücksetzen",
+  "activity.type_label": "Ereignistyp",
+  "activity.all_types": "Alle Ereignistypen",
+  "activity.since_label": "Seit (RFC3339)",
+  "activity.occurred_at": "Zeitpunkt",
+  "activity.type.object_revision": "Objektrevision",
+  "activity.type.relationship_mutation": "Beziehungsmutation",
+  "activity.type.comment_create": "Kommentar erstellt",
+  "activity.type.audit": "Technisches Audit"
 }
