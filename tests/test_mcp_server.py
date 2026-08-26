@@ -385,6 +385,11 @@ def test_mcp_client_completes_handshake_and_calls_every_read_only_tool() -> None
     assert initialize.serverInfo.name == "blockwart-mcp"
     tools = {tool.name: tool for tool in listed.tools}
     assert set(tools) == {
+        "blockwart.create_access_request",
+        "blockwart.list_my_access_requests",
+        "blockwart.list_pending_access_requests",
+        "blockwart.cancel_access_request",
+        "blockwart.decide_access_request",
         "blockwart.describe_schema",
         "blockwart.search",
         "blockwart.get_object_context",
@@ -1243,6 +1248,11 @@ def test_mcp_tools_publish_explicit_read_write_and_delete_hints() -> None:
     names = {tool["name"] for tool in TOOLS}
 
     assert names == {
+        "blockwart.create_access_request",
+        "blockwart.list_my_access_requests",
+        "blockwart.list_pending_access_requests",
+        "blockwart.cancel_access_request",
+        "blockwart.decide_access_request",
         "blockwart.describe_schema",
         "blockwart.search",
         "blockwart.get_object_context",

@@ -1191,6 +1191,86 @@ TOOLS: list[JSON] = [
         },
         "annotations": DELETE_ANNOTATIONS,
     },
+    {
+        "name": "blockwart.create_access_request",
+        "description": (
+            "Request temporary or permanent Viewer access on one discoverable object. "
+            "Retries with identical arguments are idempotent."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "object_id": {"type": "string", "minLength": 1, "maxLength": 128},
+                "duration": {"type": "string", "enum": ["temporary", "permanent"]},
+                "ttl_seconds": {
+                    "type": "integer",
+                    "minimum": 300,
+                    "maximum": 2592000,
+                },
+                "reason": {"type": "string", "maxLength": 500},
+            },
+            "required": ["object_id", "duration"],
+            "additionalProperties": False,
+        },
+        "annotations": WRITE_ANNOTATIONS,
+    },
+    {
+        "name": "blockwart.list_my_access_requests",
+        "description": "List your own access requests with their current status.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {},
+            "additionalProperties": False,
+        },
+        "annotations": READ_ONLY_ANNOTATIONS,
+    },
+    {
+        "name": "blockwart.list_pending_access_requests",
+        "description": (
+            "List open access requests you are currently authorized to decide."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {},
+            "additionalProperties": False,
+        },
+        "annotations": READ_ONLY_ANNOTATIONS,
+    },
+    {
+        "name": "blockwart.cancel_access_request",
+        "description": "Withdraw one of your own pending access requests.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request_id": {"type": "string", "minLength": 1, "maxLength": 36},
+            },
+            "required": ["request_id"],
+            "additionalProperties": False,
+        },
+        "annotations": DELETE_ANNOTATIONS,
+    },
+    {
+        "name": "blockwart.decide_access_request",
+        "description": (
+            "Approve or deny one pending access request you are authorized to decide. "
+            "Approval may shorten but never extend the requested duration."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "request_id": {"type": "string", "minLength": 1, "maxLength": 36},
+                "decision": {"type": "string", "enum": ["approve", "deny"]},
+                "ttl_seconds": {
+                    "type": "integer",
+                    "minimum": 300,
+                    "maximum": 2592000,
+                },
+            },
+            "required": ["request_id", "decision"],
+            "additionalProperties": False,
+        },
+        "annotations": WRITE_ANNOTATIONS,
+    },
 ]
 TOOL_DEFINITIONS: dict[str, JSON] = {tool["name"]: tool for tool in TOOLS}
 
@@ -1961,6 +2041,44 @@ def call_tool(
                 "If-Match": _required_string(args, "if_match"),
                 "X-Blockwart-Channel": "mcp",
             },
+        )
+    elif name == "blockwart.create_access_request":
+        object_id = _required_string(args, "object_id")
+        body = {
+            "duration": _required_string(args, "duration"),
+        }
+        if "ttl_seconds" in args:
+            body["ttl_seconds"] = _required_integer(args, "ttl_seconds")
+        if "reason" in args:
+            body["reason"] = _required_string(args, "reason")
+        payload = request(
+            "POST",
+            f"/api/v1/objects/{quote(object_id, safe='')}/access-requests",
+            body,
+            {"X-Blockwart-Channel": "mcp"},
+        )
+    elif name == "blockwart.list_my_access_requests":
+        payload = fetch("/api/v1/me/access-requests", {})
+    elif name == "blockwart.list_pending_access_requests":
+        payload = fetch("/api/v1/access-requests", {})
+    elif name == "blockwart.cancel_access_request":
+        request_id = _required_string(args, "request_id")
+        payload = request(
+            "POST",
+            f"/api/v1/access-requests/{quote(request_id, safe='')}/cancellation",
+            {},
+            {"X-Blockwart-Channel": "mcp"},
+        )
+    elif name == "blockwart.decide_access_request":
+        request_id = _required_string(args, "request_id")
+        body = {"decision": _required_string(args, "decision")}
+        if "ttl_seconds" in args:
+            body["ttl_seconds"] = _required_integer(args, "ttl_seconds")
+        payload = request(
+            "POST",
+            f"/api/v1/access-requests/{quote(request_id, safe='')}/decision",
+            body,
+            {"X-Blockwart-Channel": "mcp"},
         )
     else:
         raise UnknownToolError(f"Unknown tool: {name}")
