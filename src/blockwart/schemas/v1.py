@@ -10,6 +10,7 @@ from pydantic import (
     model_validator,
 )
 
+from blockwart.domain.access_requests import AccessRequestDuration
 from blockwart.domain.attention import (
     ATTENTION_CATEGORY_VALUES,
     ATTENTION_DETAIL_CODE_VALUES,
@@ -742,6 +743,7 @@ class V1DirectGrantOut(BaseModel):
     principal: V1PrincipalSummaryOut
     role: Role
     scope: GrantScope
+    expires_at: str | None = None
     created_at: str
     updated_at: str
 
@@ -817,3 +819,83 @@ class V1GrantCommandOut(BaseModel):
     changed: bool
     grant: V1DirectGrantOut | None = None
     revoked_grant_id: int | None = None
+
+
+class V1AccessRequestCreateIn(BaseModel):
+    """Untrusted input for one Viewer/self access request."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    duration: AccessRequestDuration = AccessRequestDuration.TEMPORARY
+    ttl_seconds: int | None = Field(
+        default=None,
+        ge=5 * 60,
+        le=30 * 24 * 60 * 60,
+    )
+    reason: str | None = Field(default=None, max_length=500)
+
+
+class V1AccessRequestDecisionIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    decision: Literal["approve", "deny"]
+    # Optional approver-side shortening of the requested window.
+    ttl_seconds: int | None = Field(
+        default=None,
+        ge=5 * 60,
+        le=30 * 24 * 60 * 60,
+    )
+
+
+class V1AccessRequestCommandOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    request_id: str
+    status: str
+    changed: bool
+
+
+class V1AccessRequestOut(BaseModel):
+    """A request as its requester sees it: no approver or policy data."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    object_id: str
+    role: Role
+    scope: GrantScope
+    duration: AccessRequestDuration
+    status: str
+    reason: str | None = None
+    requested_expires_at: str | None = None
+    approved_expires_at: str | None = None
+    grant_id: int | None = None
+    created_at: str | None = None
+
+
+class V1AccessRequestListOut(BaseModel):
+    items: list[V1AccessRequestOut]
+
+
+class V1ApproverAccessRequestOut(BaseModel):
+    """A pending request as a currently authorized approver sees it."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    object_id: str
+    object_label: str
+    object_kind: str
+    requester_login: str
+    requester_display_name: str
+    role: Role
+    scope: GrantScope
+    duration: AccessRequestDuration
+    status: str
+    reason: str | None = None
+    requested_expires_at: str | None = None
+    created_at: str | None = None
+
+
+class V1AccessRequestQueueOut(BaseModel):
+    items: list[V1ApproverAccessRequestOut]
