@@ -25,8 +25,6 @@ read and never rewrites the catalog database into an event store.
 
 from __future__ import annotations
 
-import hashlib
-import json
 from datetime import UTC, datetime
 
 from sqlalchemy import select
@@ -34,21 +32,22 @@ from sqlalchemy.orm import Session
 
 from blockwart.domain.activity import (
     ACTIVITY_EVENT_TYPES,
+    COMMENT_CREATE_AUDIT_ACTIONS,
+    OBJECT_REVISION_AUDIT_ACTIONS,
+    RELATIONSHIP_MUTATION_AUDIT_ACTIONS,
     ActivityItem,
     ActivityObject,
     ActivityPage,
     activity_detail_path,
     classify_activity_event_type,
 )
-from blockwart.domain.auth import ObjectVisibility
+from blockwart.domain.auth import Permission
 from blockwart.domain.placement import CANONICAL_PLACEMENT_RELATION_TYPE
 from blockwart.domain.search import SEARCH_LIMIT_MAX, SEARCH_LIMIT_MIN
 from blockwart.domain.timestamps import format_rfc3339_utc
 from blockwart.models import AuditEvent, CatalogObject, Relationship
 from blockwart.services.audit import load_audit_details, render_audit_summary_english
-from blockwart.services.catalog import catalog_objects_from_snapshot
 from blockwart.services.pagination import SortDirection, paginate_items
-from blockwart.services.queries import project_catalog_objects
 from blockwart.services.read_access import ReadAccess
 
 ACTIVITY_RESOURCE = "activity"
@@ -113,6 +112,26 @@ def query_activity_page(
         statement = statement.where(AuditEvent.created_at >= since_dt)
     if object_id is not None:
         statement = statement.where(AuditEvent.object_id == object_id)
+    # Authorization and filters are pushed into SQL before the bounded scan:
+    # only rows attributed to currently DETAIL-visible objects are examined,
+    # and event_type/kind/parent narrow the window before the limit applies.
+    statement = statement.where(AuditEvent.object_id.in_(readable.ids))
+    if event_type is not None:
+        action_set = _actions_for_event_type(event_type)
+        if action_set is not None:
+            statement = statement.where(AuditEvent.action.in_(action_set))
+        else:
+            all_known = (
+                OBJECT_REVISION_AUDIT_ACTIONS
+                | RELATIONSHIP_MUTATION_AUDIT_ACTIONS
+                | COMMENT_CREATE_AUDIT_ACTIONS
+            )
+            statement = statement.where(AuditEvent.action.notin_(all_known))
+    if kind is not None:
+        kind_ids = readable.ids_by_kind.get(kind, frozenset())
+        statement = statement.where(AuditEvent.object_id.in_(kind_ids))
+    if subtree_ids is not None:
+        statement = statement.where(AuditEvent.object_id.in_(subtree_ids))
     statement = statement.limit(ACTIVITY_MAX_SCAN_EVENTS)
 
     items: list[ActivityItem] = []
@@ -137,7 +156,6 @@ def query_activity_page(
         direction=direction,
         query={
             "access": access.cursor_scope,
-            "authorized_view": _authorized_digest(items),
             "direction_note": "newest_first_default",
             "event_type": event_type or "",
             "kind": kind or "",
@@ -176,41 +194,51 @@ def _parse_since(value: str | None) -> datetime | None:
 class _ReadableCatalog:
     """The authorized DETAIL-visibility projection used for attribution."""
 
-    __slots__ = ("ids", "refs", "kinds", "labels")
+    __slots__ = ("ids", "refs", "kinds", "labels", "ids_by_kind")
 
     def __init__(self) -> None:
         self.ids: set[str] = set()
         self.refs: dict[str, str] = {}
         self.kinds: dict[str, str] = {}
         self.labels: dict[str, str] = {}
+        self.ids_by_kind: dict[str, set[str]] = {}
 
 
 def _readable_objects(session: Session, access: ReadAccess) -> _ReadableCatalog:
-    catalog_rows = list(
+    """Load only the currently DETAIL-visible catalog rows.
+
+    The visibility decision comes from the already-built policy snapshot
+    (``authorized_ids(READ)``), never from a full-catalog scan. Only the rows
+    for those ids are loaded, so the feed stays bounded by the authorized set
+    instead of the whole catalog.
+    """
+    readable_ids = access.policy.authorized_ids(Permission.READ)
+    readable = _ReadableCatalog()
+    if not readable_ids:
+        return readable
+    rows = list(
         session.scalars(
-            select(CatalogObject).order_by(CatalogObject.kind, CatalogObject.label)
+            select(CatalogObject).where(CatalogObject.id.in_(readable_ids))
         ).all()
     )
-    relationship_rows = list(
-        session.scalars(select(Relationship).order_by(Relationship.id)).all()
-    )
-    canonical = catalog_objects_from_snapshot(
-        catalog_rows,
-        all_objects=catalog_rows,
-        relationships=relationship_rows,
-    )
-    projected = project_catalog_objects(canonical, access)
-    readable = _ReadableCatalog()
-    for catalog_object in projected:
-        if catalog_object.visibility != ObjectVisibility.DETAIL:
-            continue
-        readable.ids.add(catalog_object.id)
-        readable.refs[catalog_object.id] = (
-            f"{catalog_object.kind}:{catalog_object.id}"
-        )
-        readable.kinds[catalog_object.id] = catalog_object.kind
-        readable.labels[catalog_object.id] = catalog_object.label
+    for row in rows:
+        readable.ids.add(row.id)
+        readable.refs[row.id] = f"{row.kind}:{row.id}"
+        readable.kinds[row.id] = row.kind
+        readable.labels[row.id] = row.label
+        readable.ids_by_kind.setdefault(row.kind, set()).add(row.id)
     return readable
+
+
+def _actions_for_event_type(event_type: str) -> frozenset[str] | None:
+    """Map one activity event type to its audit action set, or None for ``audit``."""
+    if event_type == "object_revision":
+        return OBJECT_REVISION_AUDIT_ACTIONS
+    if event_type == "relationship_mutation":
+        return RELATIONSHIP_MUTATION_AUDIT_ACTIONS
+    if event_type == "comment_create":
+        return COMMENT_CREATE_AUDIT_ACTIONS
+    return None
 
 
 def _placement_subtree_ids(
@@ -291,9 +319,3 @@ def _project_event(
         detail_path=activity_detail_path(resolved_type, object_id),
     )
 
-
-def _authorized_digest(items: list[ActivityItem]) -> str:
-    """Bind cursors to exactly the authorized filtered projection."""
-    payload = sorted(f"{item.event_id}|{item.key[0]}|{item.key[1]}" for item in items)
-    serialized = json.dumps(payload, ensure_ascii=True, separators=(",", ":"))
-    return hashlib.sha256(serialized.encode("utf-8")).hexdigest()
