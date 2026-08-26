@@ -11,6 +11,8 @@ from blockwart.api.errors import (
     install_request_context,
 )
 from blockwart.api.routes import admin, agent, auth, catalog, health, v1
+from blockwart.api.routes.notices import admin_router as notices_admin_router
+from blockwart.api.routes.notices import agent_router as notices_agent_router
 from blockwart.config import Settings, get_settings
 from blockwart.domain.schema_projection import object_schema_projection
 from blockwart.services.login_protection import LoginProtector
@@ -53,6 +55,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(v1.router, prefix="/api")
     app.include_router(admin.router, prefix="/api")
     app.include_router(auth.router, prefix="/api")
+    app.include_router(notices_admin_router, prefix="/api")
+    app.include_router(notices_agent_router, prefix="/api")
     app.include_router(auth_router)
     app.include_router(admin_ui_router)
     app.include_router(ui_router)

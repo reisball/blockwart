@@ -479,6 +479,7 @@ def check_service_release(
             ServiceReleaseObservation.provider == lease.provider,
         )
     )
+    previous_version = current.latest_version if current is not None else None
     request = GithubReleaseRequest(
         target=resolution.target,
         etag=(
@@ -513,6 +514,22 @@ def check_service_release(
         _delete_claim(session, lease.id, lease_owner)
         session.commit()
         return ReleaseCheckResult(object_id, "skipped", None, "changed")
+    # Issue #106: a genuinely new stable upstream version emits exactly one
+    # logical notice event; fan-out and delivery deduplication happen in the
+    # notice layer. Emission shares this transaction so event and observation
+    # stay consistent across process restarts.
+    if observed.outcome == "observed" and record.latest_version != previous_version:
+        from blockwart.services.agent_notices import record_release_notice_event
+
+        record_release_notice_event(
+            session,
+            object_id=row.id,
+            object_instance_id=row.instance_id,
+            provider=lease.provider,
+            latest_tag=record.latest_tag,
+            latest_version=record.latest_version,
+            observed_at=observed.checked_at,
+        )
     session.execute(
         update(ServiceReleaseCheckLease)
         .where(
