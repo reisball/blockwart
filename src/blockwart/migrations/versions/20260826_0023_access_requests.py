@@ -1,6 +1,6 @@
 """add access requests and temporary grant expiry
 
-Revision ID: 20260826_0022
+Revision ID: 20260826_0023
 Revises: 20260825_0021
 
 The revision is purely additive for existing rows.  It adds one nullable
@@ -31,7 +31,7 @@ from collections.abc import Sequence
 import sqlalchemy as sa
 from alembic import op
 
-revision: str = "20260826_0022"
+revision: str = "20260826_0023"
 down_revision: str | Sequence[str] | None = "20260825_0021"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None

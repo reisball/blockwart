@@ -72,5 +72,5 @@ timestamps, no secrets and no reason text lengths beyond a count.
 Manual recovery: revoke the generated grant through the normal grant
 management surface (`DELETE /api/v1/objects/{id}/access/grants/{grant_id}`);
 completed request rows are historical evidence and need no cleanup. To roll
-back the feature, use migration `20260826_0022` downgrade after exporting the
+back the feature, use migration `20260826_0023` downgrade after exporting the
 audit trail.
