@@ -101,6 +101,7 @@ class ActivityPage:
     next_cursor: str | None
     total: int | None
     generated_at: str
+    truncated: bool = False
 
 
 __all__ = [

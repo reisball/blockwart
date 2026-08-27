@@ -383,6 +383,7 @@ def get_v1_activity(
             "total": page.total,
             "generated_at": page.generated_at,
             "direction": direction,
+            "truncated": page.truncated,
         }
     )
 

@@ -50,31 +50,41 @@ envelope.
 - Deleted objects lose readability, so their past events leave the feed. A
   deletion therefore cannot leak through the feed to principals who must not
   know about the object.
-- Cursors bind to the principal/policy fingerprint and a digest of exactly the
-  authorized filtered item set. Losing access between pages invalidates the
-  cursor (fail-closed); the next page request starts from a freshly authorized
-  result set instead of skipping a concealed gap.
+- Cursors bind to the principal/policy fingerprint and the exact query
+  parameters. Losing access between pages invalidates the cursor (fail-closed);
+  the next page request starts from a freshly authorized result set instead of
+  skipping a concealed gap.
 
 ## Filters, Ordering, Pagination
 
 - `since`: RFC3339 timestamp; stored naive-UTC timestamps compare in UTC.
 - `event_type`, `kind`: closed vocabularies; unknown values are request errors.
 - `parent`: placement-subtree scope (canonical `hosts` edges), including the
-  parent itself. Unknown or concealed parents yield an empty page that is
+  parent itself, resolved by a parent-anchored recursive CTE that only follows
+  readable targets. Unknown or concealed parents yield an empty page that is
   indistinguishable from a quiet parent.
 - `object_id`: exact object attribution filter.
 - Order: newest-first by default (`direction=desc`); ties break on the
   zero-padded event id, so equal timestamps keep one stable order in both
   directions.
 - Cursor keyset pagination with `limit` between 1 and 100; counts
-  (`include_total=true`) aggregate exactly the authorized filtered set.
+  (`include_total=true`) aggregate exactly the authorized filtered set via a
+  separate `COUNT` over the same WHERE chain. When the exact total exceeds
+  `ACTIVITY_MAX_SCAN_EVENTS`, the response exposes `truncated: true` so callers
+  can narrow their filters instead of mistaking a window for the full result.
 
 ## Size Budget
 
 Every request performs a bounded constant amount of work:
 
-- at most `ACTIVITY_MAX_SCAN_EVENTS = 5000` newest audit rows are examined
-  (applied in SQL after the optional `since` filter);
+- keyset pagination walks the authorized filtered set via a `(created_at, id)`
+  predicate before `LIMIT limit + 1`, so every matching event stays reachable
+  and no event is skipped or duplicated;
+- `include_total` runs one authorized filtered `COUNT` over the same WHERE
+  chain (no `limit + 1`), so the total is the exact full result count;
+- `ACTIVITY_MAX_SCAN_EVENTS = 5000` is a documented size budget, not a hard
+  scan cap: when the exact total exceeds it the response sets
+  `truncated: true`;
 - one bounded catalog + relationship snapshot powers the visibility decision,
   as in #176;
 - no full-catalog scan grows per readable object, and no catalog database

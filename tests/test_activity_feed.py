@@ -411,6 +411,170 @@ def test_classification_covers_the_closed_vocabulary() -> None:
     assert classify_activity_event_type("placement_state_normalize") == "audit"
 
 
+def test_more_events_than_scan_budget_stay_reachable_without_gaps_or_duplicates(
+    alembic_session_factory,
+    monkeypatch,
+) -> None:
+    # The scan budget is a documented size signal, not a hard cap: keyset
+    # pagination must walk every matching event, so the 5001st event is
+    # reachable and no event is skipped or duplicated.
+    monkeypatch.setattr(activity_service, "ACTIVITY_MAX_SCAN_EVENTS", 3)
+    base = NOW - timedelta(minutes=11)
+    ids = [f"scan-{index}" for index in range(7)]
+    with alembic_session_factory() as session, session.begin():
+        for index, object_id in enumerate(ids):
+            _seed(session, object_id, created_at=base - timedelta(seconds=index))
+
+    access = _access(readable=set(ids), principal_id="scanner")
+    collected: list[str] = []
+    with alembic_session_factory() as session:
+        cursor = None
+        while True:
+            page = _page(session, access, limit=2, direction="asc", cursor=cursor)
+            collected.extend(item.event_id for item in page.items)
+            if page.next_cursor is None:
+                break
+            cursor = page.next_cursor
+
+    assert len(collected) == 7
+    assert len(set(collected)) == 7
+
+
+def test_include_total_reports_the_full_result_and_flags_truncation(
+    alembic_session_factory,
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(activity_service, "ACTIVITY_MAX_SCAN_EVENTS", 3)
+    base = NOW - timedelta(minutes=12)
+    ids = [f"total-{index}" for index in range(7)]
+    with alembic_session_factory() as session, session.begin():
+        for index, object_id in enumerate(ids):
+            _seed(session, object_id, created_at=base - timedelta(seconds=index))
+
+    with alembic_session_factory() as session:
+        page = _page(session, _access(readable=set(ids)), limit=2, include_total=True)
+
+    # The total is the exact authorized filtered count, never a truncated window.
+    assert page.total == 7
+    assert page.truncated is True
+
+
+def test_new_event_between_pages_does_not_duplicate_or_gap(
+    alembic_session_factory,
+) -> None:
+    base = NOW - timedelta(minutes=13)
+    ids = [f"live-{index}" for index in range(5)]
+    with alembic_session_factory() as session, session.begin():
+        for index, object_id in enumerate(ids):
+            _seed(session, object_id, created_at=base - timedelta(seconds=index))
+
+    access = _access(readable=set(ids), principal_id="live")
+    with alembic_session_factory() as session:
+        first = _page(session, access, limit=2, direction="asc")
+        assert first.next_cursor
+
+    # A new audit event for an already-readable object lands between the two
+    # page requests. It must not invalidate the continuation, duplicate an
+    # already-seen event, or open a gap.
+    with alembic_session_factory() as session, session.begin():
+        session.add(
+            _audit(
+                "live-0",
+                "update",
+                created_at=base - timedelta(seconds=2, microseconds=500000),
+            )
+        )
+
+    collected = [item.event_id for item in first.items]
+    with alembic_session_factory() as session:
+        cursor = first.next_cursor
+        while True:
+            page = _page(session, access, limit=2, direction="asc", cursor=cursor)
+            collected.extend(item.event_id for item in page.items)
+            if page.next_cursor is None:
+                break
+            cursor = page.next_cursor
+
+    assert len(collected) == len(set(collected))
+    assert len(collected) == 6
+
+
+def test_cursor_binds_to_policy_fingerprint_across_principals(
+    alembic_session_factory,
+) -> None:
+    stamp = NOW - timedelta(minutes=14)
+    with alembic_session_factory() as session, session.begin():
+        upsert_object(session, _asset("fp-a"))
+        upsert_object(session, _asset("fp-b"))
+        for offset, object_id in enumerate(("fp-a", "fp-b")):
+            session.add(
+                _audit(object_id, "update", created_at=stamp - timedelta(seconds=offset))
+            )
+
+    with alembic_session_factory() as session:
+        first = _page(
+            session,
+            _access(readable={"fp-a", "fp-b"}, principal_id="alice"),
+            limit=1,
+            direction="asc",
+        )
+        assert first.next_cursor
+
+    with alembic_session_factory() as session:
+        # Same readable set, different principal: the policy fingerprint differs,
+        # so the cursor is rejected instead of silently reused across principals.
+        with pytest.raises(InvalidCursor):
+            _page(
+                session,
+                _access(readable={"fp-a", "fp-b"}, principal_id="bob"),
+                limit=1,
+                direction="asc",
+                cursor=first.next_cursor,
+            )
+
+
+def test_parent_subtree_ignores_unrelated_placement_relationships(
+    alembic_session_factory,
+) -> None:
+    base = NOW - timedelta(minutes=15)
+    with alembic_session_factory() as session, session.begin():
+        _seed(session, "root-host", created_at=base)
+        _seed(session, "child-system", kind="system", created_at=base)
+        _seed(session, "unrelated-host", created_at=base)
+        _seed(session, "unrelated-system", kind="system", created_at=base)
+        session.add(
+            Relationship(
+                from_ref="host:root-host",
+                relation_type="hosts",
+                to_ref="system:child-system",
+                metadata_json="{}",
+            )
+        )
+        session.add(
+            Relationship(
+                from_ref="host:unrelated-host",
+                relation_type="hosts",
+                to_ref="system:unrelated-system",
+                metadata_json="{}",
+            )
+        )
+        for object_id in ("root-host", "child-system", "unrelated-host", "unrelated-system"):
+            session.add(_audit(object_id, "update", created_at=base))
+
+    access = _access(
+        readable={"root-host", "child-system", "unrelated-host", "unrelated-system"}
+    )
+    with alembic_session_factory() as session:
+        subtree = _page(session, access, parent="root-host")
+
+    # The unrelated placement edge (unrelated-host -> unrelated-system) is not
+    # part of root-host's subtree and must not leak into the parent scope.
+    assert {item.object.object_id for item in subtree.items} == {
+        "root-host",
+        "child-system",
+    }
+
+
 def test_rest_ui_and_mcp_share_the_application_query(
     alembic_session_factory,
     install_unrestricted_read_access,

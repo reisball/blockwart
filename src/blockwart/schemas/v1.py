@@ -326,6 +326,7 @@ class V1ActivityPageOut(BaseModel):
     generated_at: str = Field(max_length=64)
     sort: Literal["occurred_at"] = "occurred_at"
     direction: SortDirection
+    truncated: bool = False
 
 
 # The known-id batch surface is bounded to 20 ids. Each id follows the same
