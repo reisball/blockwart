@@ -15,10 +15,10 @@ from blockwart.api.routes.notices import admin_router as notices_admin_router
 from blockwart.api.routes.notices import agent_router as notices_agent_router
 from blockwart.config import Settings, get_settings
 from blockwart.domain.schema_projection import object_schema_projection
+from blockwart.services.agent_notices import run_notice_delivery_poller
 from blockwart.services.login_protection import LoginProtector
 from blockwart.services.monitoring import run_monitoring_poller
 from blockwart.services.release_monitoring import run_release_monitoring_poller
-from blockwart.services.agent_notices import run_notice_delivery_poller
 from blockwart.ui.admin import router as admin_ui_router
 from blockwart.ui.auth import router as auth_router
 from blockwart.ui.i18n import persist_locale_cookie, validate_locale_catalogs

@@ -285,7 +285,10 @@ class Settings(BaseSettings):
     notice_delivery_endpoint_url: str = Field(
         default="",
         max_length=2048,
-        description="Loopback HTTP endpoint for the OpenClaw test-gateway notice transport. Empty disables delivery.",
+        description=(
+            "Loopback HTTP endpoint for the OpenClaw test-gateway notice transport."
+            " Empty disables delivery."
+        ),
     )
 
     @model_validator(mode="after")

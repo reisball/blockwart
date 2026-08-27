@@ -16,9 +16,7 @@ Safety properties implemented here:
 from __future__ import annotations
 
 import asyncio
-import secrets
 import logging
-
 import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
@@ -27,6 +25,8 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
 
+from blockwart.config import Settings
+from blockwart.db.session import build_engine
 from blockwart.domain.agent_notices import (
     AGENT_NOTICE_TRANSPORTS,
     NOTICE_EVENT_TYPES,
@@ -564,7 +564,6 @@ async def run_notice_delivery_poller(
     transport URL disables productive delivery while keeping the poller
     harmless.
     """
-    from blockwart.config import Settings as _Settings
     from blockwart.services.notice_transport import build_notice_transport
 
     if not settings.notice_delivery_poller_enabled:
