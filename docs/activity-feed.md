@@ -67,31 +67,39 @@ envelope.
 - Order: newest-first by default (`direction=desc`); ties break on the
   zero-padded event id, so equal timestamps keep one stable order in both
   directions.
-- Cursor keyset pagination with `limit` between 1 and 100; counts
+- Cursor keyset pagination with `limit` between 1 and 100; each page reads at
+  most `limit + 1` rows, so pagination is bounded per page. Counts
   (`include_total=true`) aggregate exactly the authorized filtered set via a
-  separate `COUNT` over the same WHERE chain. When the exact total exceeds
-  `ACTIVITY_MAX_SCAN_EVENTS`, the response exposes `truncated: true` so callers
-  can narrow their filters instead of mistaking a window for the full result.
+  separate `COUNT` over the same WHERE chain; that exact count is optional and
+  potentially expensive because it scans the whole authorized filtered set.
+  When an exact total is requested and exceeds `ACTIVITY_MAX_SCAN_EVENTS`, the
+  response exposes `total_exceeds_budget: true` so callers can narrow their
+  filters instead of mistaking a page for the full result.
 
 ## Size Budget
 
-Every request performs a bounded constant amount of work:
+Keyset pagination is bounded per page: each page reads at most `limit + 1`
+rows, so every matching event stays reachable through cursor walking and no
+event is skipped or duplicated. The exact total is a separate, optional cost:
 
 - keyset pagination walks the authorized filtered set via a `(created_at, id)`
-  predicate before `LIMIT limit + 1`, so every matching event stays reachable
-  and no event is skipped or duplicated;
+  predicate before `LIMIT limit + 1`, so each page is bounded regardless of how
+  many events match;
 - `include_total` runs one authorized filtered `COUNT` over the same WHERE
-  chain (no `limit + 1`), so the total is the exact full result count;
+  chain (no `limit + 1`), so the total is the exact full result count, but
+  that count is optional and potentially expensive because it scans the whole
+  authorized filtered set;
 - `ACTIVITY_MAX_SCAN_EVENTS = 5000` is a documented size budget, not a hard
-  scan cap: when the exact total exceeds it the response sets
-  `truncated: true`;
+  scan cap: when an exact total is requested and exceeds it the response sets
+  `total_exceeds_budget: true` (and `null` when no exact count was requested);
 - one bounded catalog + relationship snapshot powers the visibility decision,
   as in #176;
 - no full-catalog scan grows per readable object, and no catalog database
   rewrite (event sourcing) happens or is required.
 
-Activity older than the scanned window stays reachable through narrower
-filters (`since`, `event_type`, `object_id`), not through unbounded scans.
+Activity older than the first page stays reachable through cursor walking or
+narrower filters (`since`, `event_type`, `object_id`), not through unbounded
+scans.
 
 ## Conservative Design Decisions
 

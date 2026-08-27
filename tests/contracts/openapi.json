@@ -5006,10 +5006,16 @@
             ],
             "title": "Total"
           },
-          "truncated": {
-            "default": false,
-            "title": "Truncated",
-            "type": "boolean"
+          "total_exceeds_budget": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Total Exceeds Budget"
           }
         },
         "required": [
@@ -10358,13 +10364,13 @@
             }
           },
           {
-            "description": "Compute the total over the authorized filtered item set",
+            "description": "Compute the exact total over the authorized filtered item set. This is optional and potentially expensive: it runs a full authorized COUNT, not a bounded page read.",
             "in": "query",
             "name": "include_total",
             "required": false,
             "schema": {
               "default": false,
-              "description": "Compute the total over the authorized filtered item set",
+              "description": "Compute the exact total over the authorized filtered item set. This is optional and potentially expensive: it runs a full authorized COUNT, not a bounded page read.",
               "title": "Include Total",
               "type": "boolean"
             }

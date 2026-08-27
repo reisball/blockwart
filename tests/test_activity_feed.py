@@ -440,7 +440,7 @@ def test_more_events_than_scan_budget_stay_reachable_without_gaps_or_duplicates(
     assert len(set(collected)) == 7
 
 
-def test_include_total_reports_the_full_result_and_flags_truncation(
+def test_include_total_reports_the_full_result_and_flags_budget_overshoot(
     alembic_session_factory,
     monkeypatch,
 ) -> None:
@@ -454,9 +454,52 @@ def test_include_total_reports_the_full_result_and_flags_truncation(
     with alembic_session_factory() as session:
         page = _page(session, _access(readable=set(ids)), limit=2, include_total=True)
 
-    # The total is the exact authorized filtered count, never a truncated window.
+    # The total is the exact authorized filtered count, never a page-sized window.
     assert page.total == 7
-    assert page.truncated is True
+    assert page.total_exceeds_budget is True
+
+
+def test_total_exceeds_budget_is_null_without_an_exact_count(
+    alembic_session_factory,
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(activity_service, "ACTIVITY_MAX_SCAN_EVENTS", 3)
+    base = NOW - timedelta(minutes=12, seconds=30)
+    ids = [f"no-total-{index}" for index in range(7)]
+    with alembic_session_factory() as session, session.begin():
+        for index, object_id in enumerate(ids):
+            _seed(session, object_id, created_at=base - timedelta(seconds=index))
+
+    with alembic_session_factory() as session:
+        page = _page(
+            session,
+            _access(readable=set(ids)),
+            limit=2,
+            include_total=False,
+        )
+
+    # Without an exact count the budget signal is undefined, never a false
+    # positive: keyset pagination still reaches every matching row.
+    assert page.total is None
+    assert page.total_exceeds_budget is None
+
+
+def test_total_exceeds_budget_is_false_when_exact_count_is_within_budget(
+    alembic_session_factory,
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(activity_service, "ACTIVITY_MAX_SCAN_EVENTS", 100)
+    base = NOW - timedelta(minutes=12, seconds=45)
+    ids = [f"within-{index}" for index in range(3)]
+    with alembic_session_factory() as session, session.begin():
+        for index, object_id in enumerate(ids):
+            _seed(session, object_id, created_at=base - timedelta(seconds=index))
+
+    with alembic_session_factory() as session:
+        page = _page(session, _access(readable=set(ids)), limit=2, include_total=True)
+
+    assert page.total == 3
+    assert page.total_exceeds_budget is False
 
 
 def test_new_event_between_pages_does_not_duplicate_or_gap(

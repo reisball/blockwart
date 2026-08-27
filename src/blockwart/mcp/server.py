@@ -785,7 +785,11 @@ TOOLS: list[JSON] = [
             "strictly pull and read-only: no push delivery, no probe, no source "
             "read, and no catalog write. Events of concealed or deleted objects "
             "influence neither items, counts, cursors, nor ordering; losing access "
-            "between pages fails closed to a freshly authorized result set."
+            "between pages fails closed to a freshly authorized result set. "
+            "Keyset pagination is bounded per page; include_total runs an exact "
+            "authorized COUNT that is optional and potentially expensive, and "
+            "total_exceeds_budget flags when that exact total overshoots the "
+            "documented size budget."
         ),
         "inputSchema": {
             "type": "object",

@@ -354,7 +354,13 @@ def get_v1_activity(
     direction: SortDirection = "desc",
     include_total: Annotated[
         bool,
-        Query(description="Compute the total over the authorized filtered item set"),
+        Query(
+            description=(
+                "Compute the exact total over the authorized filtered item set. "
+                "This is optional and potentially expensive: it runs a full "
+                "authorized COUNT, not a bounded page read."
+            )
+        ),
     ] = False,
 ) -> V1ActivityPageOut:
     """Read one classified audit-activity page; strictly pull and read-only."""
@@ -383,7 +389,7 @@ def get_v1_activity(
             "total": page.total,
             "generated_at": page.generated_at,
             "direction": direction,
-            "truncated": page.truncated,
+            "total_exceeds_budget": page.total_exceeds_budget,
         }
     )
 

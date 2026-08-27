@@ -101,7 +101,7 @@ class ActivityPage:
     next_cursor: str | None
     total: int | None
     generated_at: str
-    truncated: bool = False
+    total_exceeds_budget: bool | None = None
 
 
 __all__ = [

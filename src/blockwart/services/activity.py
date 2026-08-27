@@ -20,11 +20,14 @@ influence neither items, nor counts, nor cursors, nor ordering.
 Pagination is database-level keyset pagination over ``(created_at, id)``: the
 opaque cursor is translated into a SQL predicate before ``LIMIT limit + 1``, so
 every matching event stays reachable through cursor walking and no event is
-skipped or duplicated. ``include_total`` runs a separate authorized filtered
-``COUNT`` over the same WHERE chain, so the total is the exact full result
-count, never a truncated window. ``ACTIVITY_MAX_SCAN_EVENTS`` remains a
-documented size budget: when the exact total exceeds it, the response exposes
-``truncated: true`` instead of silently relabeling a window as the full total.
+skipped or duplicated. Keyset pagination is bounded per page: each page reads
+at most ``limit + 1`` rows. ``include_total`` runs a separate authorized
+filtered ``COUNT`` over the same WHERE chain, so the total is the exact full
+result count; that exact count is optional and potentially expensive because it
+scans the whole authorized filtered set. ``ACTIVITY_MAX_SCAN_EVENTS`` is a
+documented size budget: when an exact total is requested and exceeds it, the
+response exposes ``total_exceeds_budget: true`` so callers can narrow their
+filters instead of mistaking a page for the full result.
 """
 
 from __future__ import annotations
@@ -62,11 +65,12 @@ from blockwart.services.read_access import ReadAccess
 ACTIVITY_RESOURCE = "activity"
 ACTIVITY_SORT_FIELD = "occurred_at"
 # Documented size budget: the feed is designed around at most this many newest
-# audit rows per result set. It is no longer a hard scan cap: keyset pagination
-# walks the full authorized filtered set, and ``include_total`` counts it
-# exactly. When the exact total exceeds this budget the response exposes
-# ``truncated: true`` so callers can narrow their filters instead of mistaking
-# a window for the full result.
+# audit rows per result set. It is not a hard scan cap: keyset pagination walks
+# the full authorized filtered set one bounded page at a time, and
+# ``include_total`` counts it exactly. When an exact total is requested and
+# exceeds this budget the response exposes ``total_exceeds_budget: true`` so
+# callers can narrow their filters instead of mistaking a page for the full
+# result.
 ACTIVITY_MAX_SCAN_EVENTS = 5000
 # Defensive depth bound for the parent-anchored recursive placement traversal.
 # The canonical hierarchy is host -> system -> service (depth <= 2); this bound
@@ -203,8 +207,8 @@ def query_activity_page(
         next_cursor=next_cursor,
         total=total,
         generated_at=format_rfc3339_utc(reference) or "",
-        truncated=bool(
-            include_total and total is not None and total > ACTIVITY_MAX_SCAN_EVENTS
+        total_exceeds_budget=(
+            total > ACTIVITY_MAX_SCAN_EVENTS if include_total and total is not None else None
         ),
     )
 
