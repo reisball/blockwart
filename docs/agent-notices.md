@@ -72,9 +72,19 @@ coarse outcome (`ok`, or `transport_timeout` / `transport_unavailable` /
   network path, or credential. Productive transports need their own design
   and approval round.
 
-Delivery runs are driven by an operator/scheduler calling
-`deliver_due_agent_notices(session, transport, now=...)`; no background poller
-is enabled by this change.
+Delivery is driven by a built-in application poller. When
+`BLOCKWART_NOTICE_DELIVERY_POLLER_ENABLED=true` and a loopback
+`BLOCKWART_NOTICE_DELIVERY_ENDPOINT_URL` are configured, the FastAPI lifespan
+runs `run_notice_delivery_poller()` on a bounded interval
+(`BLOCKWART_NOTICE_DELIVERY_POLL_INTERVAL_SECONDS`, default 30, minimum 5) and
+delivers at most `BLOCKWART_NOTICE_DELIVERY_MAX_PER_RUN` due jobs per pass. Each
+pass atomically claims due jobs with a bounded lease (`lease_seconds`, default
+60): only the lease holder delivers a job, an expired lease makes the job
+claimable again (crashed-worker recovery), and every payload carries the
+stable `delivery_id` idempotency key plus the non-secret `target` route that
+lets one gateway address separate agent destinations. Operators may still call
+`deliver_due_agent_notices(session, transport, now=...)` manually with the
+same claim semantics.
 
 ## REST Surface
 

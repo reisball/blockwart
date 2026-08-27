@@ -73,6 +73,7 @@ def create_notice_target(
                 session,
                 principal_id=str(payload.get("principal_id", "")),
                 label=str(payload.get("label", ""))[:128],
+                route=str(payload.get("route", ""))[:191],
                 transport=str(payload.get("transport", "")),
             )
     except SubscriptionValidationError as exc:
@@ -81,6 +82,7 @@ def create_notice_target(
         "id": target.id,
         "principal_id": target.principal_id,
         "label": target.label,
+        "route": target.route,
         "transport": target.transport,
         "active": target.active,
     }

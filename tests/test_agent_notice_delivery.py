@@ -17,6 +17,7 @@ from sqlalchemy.orm import Session
 
 from blockwart.api.deps import get_session
 from blockwart.api.security import require_api_read_access
+from blockwart.config import Settings
 from blockwart.db.session import transaction
 from blockwart.domain.agent_notices import NOTICE_PAYLOAD_VERSION
 from blockwart.domain.auth import PrincipalContext, PrincipalType
@@ -123,6 +124,7 @@ def service_env(session):
                 s,
                 principal_id="principal-agent",
                 label="test agent inbox",
+                route="openclaw-agent:test-inbox",
                 transport="openclaw_test_gateway",
             )
             subscription = create_agent_notice_subscription(
@@ -591,10 +593,21 @@ def test_loopback_transport_delivers_end_to_end() -> None:
             endpoint_url=f"http://127.0.0.1:{server.server_port}/notify"
         )
         outcome = transport.deliver(
-            DeliveryRequest(target_id="target-1", payload={"event_id": "evt-1"})
+            DeliveryRequest(
+                target_id="target-1",
+                target_route="openclaw-agent:test-inbox",
+                delivery_id="agent-notice-job-42",
+                payload={"event_id": "evt-1"},
+            )
         )
         assert outcome.ok
-        assert received == [{"event_id": "evt-1"}]
+        assert received == [
+            {
+                "delivery_id": "agent-notice-job-42",
+                "target": "openclaw-agent:test-inbox",
+                "notice": {"event_id": "evt-1"},
+            }
+        ]
     finally:
         server.shutdown()
         thread.join(timeout=5)
@@ -605,3 +618,266 @@ def test_loopback_transport_refuses_non_loopback_destinations() -> None:
 
     with pytest.raises(TransportConfigError):
         OpenClawTestGatewayTransport(endpoint_url="http://example.com/notify")
+
+
+def test_concurrent_claim_is_single_winner(db, service_env) -> None:
+    """Two racing workers cannot both claim the same pending job."""
+    from blockwart.services.agent_notices import _claim_due_jobs
+
+    with db.sessions() as first, db.sessions() as second:
+        with transaction(first):
+            _emit(first)
+        first.commit()
+        won_first = _claim_due_jobs(
+            first, worker_id="worker-a", policy=POLICY, moment=NOW
+        )
+        assert len(won_first) == 1
+        first.commit()
+        won_second = _claim_due_jobs(
+            second, worker_id="worker-b", policy=POLICY, moment=NOW
+        )
+        assert won_second == []
+
+
+def test_expired_lease_is_reclaimable(db, service_env) -> None:
+    """A crashed worker's expired lease lets another worker claim the job."""
+    from blockwart.services.agent_notices import _claim_due_jobs
+
+    with db.sessions() as first, db.sessions() as second:
+        with transaction(first):
+            _emit(first)
+        first.commit()
+        won_first = _claim_due_jobs(
+            first, worker_id="worker-crashed", policy=POLICY, moment=NOW
+        )
+        assert len(won_first) == 1
+        first.commit()
+        # Within the lease window: no other worker can claim it.
+        still_held = _claim_due_jobs(
+            second, worker_id="worker-b", policy=POLICY, moment=NOW + timedelta(seconds=30)
+        )
+        assert still_held == []
+        # After lease expiry the job is claimable again.
+        reclaimed = _claim_due_jobs(
+            second,
+            worker_id="worker-b",
+            policy=POLICY,
+            moment=NOW + timedelta(seconds=61),
+        )
+        assert len(reclaimed) == 1
+        assert reclaimed[0].claimed_by.startswith("worker-b:")
+
+
+def test_delivery_id_is_stable_across_retries(session, service_env) -> None:
+    """Receiver-enforced idempotency: one logical job = one stable key."""
+    with session() as s:
+        with transaction(s):
+            _emit(s)
+            job = s.query(AgentDeliveryJob).one()
+            job.next_attempt_at = NOW - timedelta(seconds=1)
+        transport = FakeNoticeTransport()
+        transport.enqueue_result(
+            DeliveryOutcome(ok=False, error_code="transport_timeout"),
+            DeliveryOutcome(ok=True),
+        )
+        with transaction(s):
+            deliver_due_agent_notices(s, transport, now=NOW, worker_id="w1")
+            deliver_due_agent_notices(
+                s, transport, now=NOW + timedelta(seconds=120), worker_id="w1"
+            )
+        assert len(transport.calls) == 2
+        expected = f"agent-notice-job-{job.id}"
+        assert transport.calls[0].delivery_id == expected
+        assert transport.calls[1].delivery_id == expected
+        refreshed = s.query(AgentDeliveryJob).one()
+        assert refreshed.status == "delivered"
+
+
+def test_two_targets_reach_two_different_routes(session, service_env) -> None:
+    """Two approved targets are distinguishable via non-secret route identity."""
+    with session() as s:
+        with transaction(s):
+            second_target = create_agent_delivery_target(
+                s,
+                principal_id="principal-agent",
+                label="second agent inbox",
+                route="openclaw-agent:second-inbox",
+                transport="openclaw_test_gateway",
+            )
+            create_agent_notice_subscription(
+                s,
+                event_type="release_update_available",
+                scope="object",
+                object_id="svc-01",
+                principal_id="principal-agent",
+                target_id=second_target.id,
+            )
+            _emit(s)
+        transport = FakeNoticeTransport()
+        with transaction(s):
+            stats = deliver_due_agent_notices(s, transport, now=NOW, worker_id="w1")
+        assert stats["delivered"] == 2
+        routes = sorted(call.target_route for call in transport.calls)
+        assert routes == [
+            "openclaw-agent:second-inbox",
+            "openclaw-agent:test-inbox",
+        ]
+        ids = {call.delivery_id for call in transport.calls}
+        assert len(ids) == 2  # one distinct idempotency key per job
+
+
+def test_lifespan_poller_delivers_end_to_end(alembic_database) -> None:
+    """Lifespan -> poller -> gateway -> persisted terminal state -> ack (full path)."""
+    import json
+    import threading
+    import time as time_module
+    from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+    from blockwart.main import create_app as create_notice_app
+    from blockwart.services.agent_notices import acknowledge_agent_notice
+
+    received: list[dict] = []
+    seen_delivery_ids: set[str] = set()
+
+    class GatewayHandler(BaseHTTPRequestHandler):
+        def do_POST(self) -> None:  # noqa: N802 - stdlib naming
+            length = int(self.headers.get("Content-Length", "0"))
+            body = json.loads(self.rfile.read(length).decode("utf-8"))
+            # Receiver-enforced idempotency: a repeated delivery_id is rejected.
+            if body["delivery_id"] in seen_delivery_ids:
+                self.send_response(409)
+                self.end_headers()
+                return
+            seen_delivery_ids.add(body["delivery_id"])
+            received.append(body)
+            self.send_response(200)
+            self.end_headers()
+            self.wfile.write(b"{}")
+
+        def log_message(self, *args) -> None:  # noqa: ANN002 - stdlib hook
+            return
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), GatewayHandler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        from datetime import UTC as DT_UTC
+
+        live_now = datetime.now(DT_UTC).replace(tzinfo=None)
+        with alembic_database.sessions() as s:
+            with transaction(s):
+                _seed_service_principal_and_target(s)
+                record_agent_notice_event(
+                    s,
+                    event_type="release_update_available",
+                    object_id="svc-01",
+                    dedupe_key="inst-lifespan:github_releases:v9.9.9",
+                    latest_tag="v9.9.9",
+                    latest_version="9.9.9",
+                    occurred_at=live_now - timedelta(seconds=1),
+                    policy=NoticeDeliveryPolicy(
+                        ttl_seconds=86400,
+                        lease_seconds=60,
+                    ),
+                )
+                s.query(AgentDeliveryJob).update({"next_attempt_at": live_now})
+
+        settings = Settings(
+            database_url=alembic_database.database_url,
+            notice_delivery_poller_enabled=True,
+            notice_delivery_poll_interval_seconds=5,
+            notice_delivery_max_per_run=10,
+            notice_delivery_endpoint_url=f"http://127.0.0.1:{server.server_port}/notify",
+        )
+        app = create_notice_app(settings)
+        with TestClient(app):
+            # The lifespan poller owns delivery now; wait for the terminal state.
+            deadline = time_module.time() + 15
+            status = None
+            while time_module.time() < deadline:
+                with alembic_database.sessions() as s:
+                    job = s.query(AgentDeliveryJob).one()
+                    s.refresh(job)
+                    status = job.status
+                    if status == "delivered":
+                        break
+                time_module.sleep(0.5)
+            assert status == "delivered", f"job ended as {status!r}"
+        assert len(received) == 1
+        envelope = received[0]
+        assert envelope["target"] == "openclaw-agent:e2e-inbox"
+        assert envelope["delivery_id"].startswith("agent-notice-job-")
+        # Acknowledgement after a fresh session persists (committed).
+        with alembic_database.sessions() as fresh:
+            acknowledged, error_code = acknowledge_agent_notice(
+                fresh,
+                principal_id="principal-agent",
+                event_id=envelope["notice"]["event_id"],
+                now=datetime.now(DT_UTC),
+            )
+            assert acknowledged is True and error_code is None
+            fresh.commit()
+            refreshed = fresh.query(AgentDeliveryJob).one()
+            assert refreshed.status == "acknowledged"
+    finally:
+        server.shutdown()
+        thread.join(timeout=5)
+
+
+
+def _seed_service_principal_and_target(session: Session) -> None:
+    """Seed service, active service principal, grant, and routed target."""
+    session.add(
+        CatalogObject(
+            id="svc-01",
+            kind="service",
+            label="Runtime API",
+            status="active",
+            lifecycle="active",
+            health="healthy",
+            summary="Service under release monitoring.",
+            data_json='{"schema_version": 1}',
+        )
+    )
+    session.add(
+        Principal(
+            id="principal-agent",
+            principal_type="service_account",
+            login="agent-bot",
+            display_name="Agent Bot",
+            active=True,
+        )
+    )
+    session.add(
+        ServiceToken(
+            id="token-1",
+            principal_id="principal-agent",
+            name="default",
+            token_prefix="bw_test_1234",
+            token_hash="a" * 64,
+        )
+    )
+    session.flush()
+    session.add(
+        ObjectGrant(
+            principal_id="principal-agent",
+            object_id="svc-01",
+            role="viewer",
+            scope="subtree",
+        )
+    )
+    target = create_agent_delivery_target(
+        session,
+        principal_id="principal-agent",
+        label="e2e agent inbox",
+        route="openclaw-agent:e2e-inbox",
+        transport="openclaw_test_gateway",
+    )
+    create_agent_notice_subscription(
+        session,
+        event_type="release_update_available",
+        scope="object",
+        object_id="svc-01",
+        principal_id="principal-agent",
+        target_id=target.id,
+    )

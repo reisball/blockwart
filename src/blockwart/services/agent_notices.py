@@ -17,11 +17,12 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
-from sqlalchemy import select
+from sqlalchemy import or_, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
 
@@ -59,9 +60,13 @@ class NoticeDeliveryPolicy:
         backoff_max_seconds: int = 3600,
         max_pending_jobs_per_target: int = 20,
         max_deliveries_per_run: int = 50,
+        lease_seconds: int = 60,
     ) -> None:
         if max_attempts < 1:
             raise ValueError("max_attempts must be positive")
+        if lease_seconds < 5:
+            raise ValueError("lease_seconds must cover at least one delivery attempt")
+        self.lease_seconds = lease_seconds
         self.max_attempts = max_attempts
         self.ttl_seconds = ttl_seconds
         self.backoff_base_seconds = backoff_base_seconds
@@ -278,19 +283,16 @@ def check_delivery_authorization(
     if target is None or not target.active:
         return AuthorizationState(False, "target_inactive")
     principal = session.get(Principal, target.principal_id)
-    if (
-        principal is None
-        or not principal.active
-        or principal.principal_type != "service_account"
-    ):
+    if principal is None or not principal.active or principal.principal_type != "service_account":
         return AuthorizationState(False, "principal_inactive")
     active_token = session.scalar(
-        select(ServiceToken.id).where(
+        select(ServiceToken.id)
+        .where(
             ServiceToken.principal_id == principal.id,
             ServiceToken.revoked_at.is_(None),
-            (ServiceToken.expires_at.is_(None))
-            | (ServiceToken.expires_at > moment),
-        ).limit(1)
+            (ServiceToken.expires_at.is_(None)) | (ServiceToken.expires_at > moment),
+        )
+        .limit(1)
     )
     if active_token is None:
         return AuthorizationState(False, "principal_inactive")
@@ -334,27 +336,37 @@ def deliver_due_agent_notices(
     *,
     now: datetime,
     policy: NoticeDeliveryPolicy | None = None,
+    worker_id: str = "inline",
 ) -> dict[str, int]:
-    """Run one bounded delivery pass over due pending jobs."""
+    """Atomically claim due jobs and run one bounded delivery pass.
+
+    Claiming is a portable conditional UPDATE (works identically on SQLite and
+    PostgreSQL): only rows that are still pending and either unclaimed or
+    whose lease expired are transitioned to this worker. The lease releases on
+    every terminal transition or retry; a crashed worker's lease expires and
+    the job is claimable again. A stable per-job idempotency key travels with
+    every payload so a receiver can collapse response-loss retries.
+    """
     active_policy = policy or NoticeDeliveryPolicy()
     moment = _naive_utc(now)
-    stats = {"delivered": 0, "failed": 0, "suppressed": 0, "expired": 0, "retried": 0}
-    due_jobs = list(
-        session.scalars(
-            select(AgentDeliveryJob)
-            .where(
-                AgentDeliveryJob.status == "pending",
-                AgentDeliveryJob.next_attempt_at <= moment,
-            )
-            .order_by(AgentDeliveryJob.next_attempt_at, AgentDeliveryJob.id)
-            .limit(active_policy.max_deliveries_per_run)
-            .with_for_update(skip_locked=True)
-        )
+    stats = {
+        "delivered": 0,
+        "failed": 0,
+        "suppressed": 0,
+        "expired": 0,
+        "retried": 0,
+    }
+    claimed = _claim_due_jobs(
+        session,
+        worker_id=worker_id,
+        policy=active_policy,
+        moment=moment,
     )
-    for job in due_jobs:
+    for job in claimed:
         if job.expires_at <= moment:
             job.status = "expired"
             job.last_error_code = "ttl_expired"
+            _release_claim(job)
             stats["expired"] += 1
             continue
         authorization = check_delivery_authorization(session, job, now=moment)
@@ -362,6 +374,15 @@ def deliver_due_agent_notices(
             job.status = "suppressed"
             job.suppressed_at = moment
             job.last_error_code = authorization.error_code
+            _release_claim(job)
+            stats["suppressed"] += 1
+            continue
+        target = session.get(AgentDeliveryTarget, job.target_id)
+        if target is None:
+            job.status = "suppressed"
+            job.suppressed_at = moment
+            job.last_error_code = "target_missing"
+            _release_claim(job)
             stats["suppressed"] += 1
             continue
         payload = _build_job_payload(session, job)
@@ -369,9 +390,17 @@ def deliver_due_agent_notices(
             job.status = "suppressed"
             job.suppressed_at = moment
             job.last_error_code = "read_permission_lost"
+            _release_claim(job)
             stats["suppressed"] += 1
             continue
-        outcome = transport.deliver(DeliveryRequest(target_id=job.target_id, payload=payload))
+        outcome = transport.deliver(
+            DeliveryRequest(
+                target_id=job.target_id,
+                target_route=target.route,
+                delivery_id=f"agent-notice-job-{job.id}",
+                payload=payload,
+            )
+        )
         attempt_no = job.attempts + 1
         job.attempts = attempt_no
         # Audit keeps its own coarse vocabulary, separate from job error codes.
@@ -396,21 +425,84 @@ def deliver_due_agent_notices(
             job.status = "delivered"
             job.delivered_at = moment
             job.last_error_code = None
+            _release_claim(job)
             stats["delivered"] += 1
             continue
         job.last_error_code = outcome.error_code
-        retry_due = moment + timedelta(
-            seconds=active_policy.next_backoff_seconds(attempt_no)
-        )
+        retry_due = moment + timedelta(seconds=active_policy.next_backoff_seconds(attempt_no))
         if attempt_no >= active_policy.max_attempts or retry_due > job.expires_at:
             job.status = "failed"
             job.last_error_code = job.last_error_code or "attempt_limit_reached"
+            _release_claim(job)
             stats["failed"] += 1
         else:
             job.next_attempt_at = retry_due
+            _release_claim(job)
             stats["retried"] += 1
     session.flush()
     return stats
+
+
+def _claim_due_jobs(
+    session: Session,
+    *,
+    worker_id: str,
+    policy: NoticeDeliveryPolicy,
+    moment: datetime,
+) -> list[AgentDeliveryJob]:
+    """Atomically claim due jobs with a bounded lease (SQLite + PostgreSQL).
+
+    The conditional UPDATE is the concurrency guard: two workers racing on the
+    same row cannot both satisfy ``status = 'pending'`` plus the unclaimed-or-
+    expired-lease predicate, so exactly one worker wins each row on both
+    backends (SQLite serializes writers; PostgreSQL row-locks the UPDATE).
+    """
+    claim_pass = uuid.uuid4().hex[:12]
+    claim_token = f"{worker_id}:{claim_pass}"
+    lease_end = moment + timedelta(seconds=policy.lease_seconds)
+    subquery = (
+        select(AgentDeliveryJob.id)
+        .where(
+            AgentDeliveryJob.status == "pending",
+            AgentDeliveryJob.next_attempt_at <= moment,
+            or_(
+                AgentDeliveryJob.claimed_by.is_(None),
+                AgentDeliveryJob.lease_expires_at.is_(None),
+                AgentDeliveryJob.lease_expires_at <= moment,
+            ),
+        )
+        .order_by(AgentDeliveryJob.next_attempt_at, AgentDeliveryJob.id)
+        .limit(policy.max_deliveries_per_run)
+        .scalar_subquery()
+    )
+    session.execute(
+        update(AgentDeliveryJob)
+        .where(AgentDeliveryJob.id.in_(subquery))
+        .values(
+            claimed_by=claim_token,
+            claimed_at=moment,
+            lease_expires_at=lease_end,
+        )
+        .execution_options(synchronize_session=False)
+    )
+    claimed = list(
+        session.scalars(
+            select(AgentDeliveryJob)
+            .where(
+                AgentDeliveryJob.claimed_by == claim_token,
+                AgentDeliveryJob.status == "pending",
+            )
+            .order_by(AgentDeliveryJob.next_attempt_at, AgentDeliveryJob.id)
+        )
+    )
+    return claimed
+
+
+def _release_claim(job: AgentDeliveryJob) -> None:
+    """Clear the delivery claim; terminal or retried jobs are claim-agnostic."""
+    job.claimed_by = None
+    job.claimed_at = None
+    job.lease_expires_at = None
 
 
 def acknowledge_agent_notice(
@@ -479,11 +571,7 @@ def create_agent_notice_subscription(
         raise SubscriptionValidationError("catalog_scope_rejects_object")
     session.flush()
     principal = session.get(Principal, principal_id)
-    if (
-        principal is None
-        or not principal.active
-        or principal.principal_type != "service_account"
-    ):
+    if principal is None or not principal.active or principal.principal_type != "service_account":
         raise SubscriptionValidationError("principal_not_service_account")
     target = session.get(AgentDeliveryTarget, target_id)
     if target is None or not target.active:
@@ -504,29 +592,37 @@ def create_agent_notice_subscription(
     return row
 
 
+_ROUTE_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,190}$")
+
+
 def create_agent_delivery_target(
     session: Session,
     *,
     principal_id: str,
     label: str,
+    route: str,
     transport: str,
 ) -> AgentDeliveryTarget:
-    """Approve one addressable agent destination for a service account."""
+    """Approve one addressable agent destination for a service account.
+
+    ``route`` is the stable, non-secret OpenClaw routing identity (agent/
+    session/inbox) the gateway uses to distinguish targets. It is never a
+    credential and never a freely configurable callback URL.
+    """
     if transport not in AGENT_NOTICE_TRANSPORTS:
         raise SubscriptionValidationError("unknown_transport")
+    if not _ROUTE_PATTERN.fullmatch(route or ""):
+        raise SubscriptionValidationError("invalid_target_route")
     # Callers may run with autoflush disabled; make pending rows visible.
     session.flush()
     principal = session.get(Principal, principal_id)
-    if (
-        principal is None
-        or not principal.active
-        or principal.principal_type != "service_account"
-    ):
+    if principal is None or not principal.active or principal.principal_type != "service_account":
         raise SubscriptionValidationError("principal_not_service_account")
     row = AgentDeliveryTarget(
         id=str(uuid.uuid4()),
         principal_id=principal.id,
         label=label[:128],
+        route=route[:191],
         transport=transport,
     )
     session.add(row)

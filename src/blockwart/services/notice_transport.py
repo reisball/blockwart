@@ -34,9 +34,16 @@ class DeliveryOutcome:
 
 @dataclass(frozen=True, slots=True)
 class DeliveryRequest:
-    """Everything one delivery needs; contains no secret material."""
+    """Everything one delivery needs; contains no secret material.
+
+    ``delivery_id`` is a stable receiver-enforced idempotency key (one logical
+    job = one key across retries). ``target_route`` is the non-secret OpenClaw
+    routing identity that lets one gateway distinguish and address targets.
+    """
 
     target_id: str
+    target_route: str
+    delivery_id: str
     payload: dict[str, Any]
 
 
@@ -54,9 +61,7 @@ def _require_loopback_url(url: str) -> None:
         raise TransportConfigError("openclaw test gateway requires plain http on loopback")
     host = (parsed.hostname or "").casefold()
     if host not in {"127.0.0.1", "localhost", "::1"}:
-        raise TransportConfigError(
-            "openclaw test gateway refuses non-loopback destinations"
-        )
+        raise TransportConfigError("openclaw test gateway refuses non-loopback destinations")
 
 
 class OpenClawTestGatewayTransport:
@@ -80,7 +85,12 @@ class OpenClawTestGatewayTransport:
         *,
         token: str | None = None,
     ) -> DeliveryOutcome:
-        body = json.dumps(request.payload).encode("utf-8")
+        envelope = {
+            "delivery_id": request.delivery_id,
+            "target": request.target_route,
+            "notice": request.payload,
+        }
+        body = json.dumps(envelope).encode("utf-8")
         headers = {"Content-Type": "application/json"}
         if token:
             headers["Authorization"] = f"Bearer {token}"
@@ -126,7 +136,6 @@ class FakeNoticeTransport:
         return DeliveryOutcome(ok=True)
 
 
-
 def build_notice_transport(settings) -> NoticeTransport | None:
     """Build the configured notice transport, or None when unconfigured.
 
@@ -134,10 +143,10 @@ def build_notice_transport(settings) -> NoticeTransport | None:
     environment (BLOCKWART_NOTICE_DELIVERY_TOKEN) so it never lands in
     settings, logs, or audit rows. An empty endpoint disables delivery.
     """
-    endpoint = getattr(settings, 'notice_delivery_endpoint_url', '')
+    endpoint = getattr(settings, "notice_delivery_endpoint_url", "")
     if not endpoint:
         return None
-    token = os.environ.get('BLOCKWART_NOTICE_DELIVERY_TOKEN') or None
+    token = os.environ.get("BLOCKWART_NOTICE_DELIVERY_TOKEN") or None
     transport = OpenClawTestGatewayTransport(endpoint_url=endpoint)
     if token:
         original_deliver = transport.deliver

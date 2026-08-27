@@ -65,6 +65,9 @@ class AgentDeliveryTarget(Base):
         nullable=False,
     )
     label: Mapped[str] = mapped_column(String(128))
+    # Stable, non-secret OpenClaw routing identity (agent/session/inbox). The
+    # gateway uses this to distinguish targets; it is never a credential.
+    route: Mapped[str] = mapped_column(String(191), nullable=False)
     transport: Mapped[str] = mapped_column(String(32), nullable=False)
     active: Mapped[bool] = mapped_column(Boolean, default=True, server_default="true")
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
@@ -233,6 +236,12 @@ class AgentDeliveryJob(Base):
     attempts: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
     next_attempt_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
     expires_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    # Atomic delivery claim. A pending job is delivered only by the worker
+    # that holds the unexpired lease; a crashed worker's lease expires and the
+    # job is claimable again. Clearing both fields releases the claim.
+    claimed_by: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    claimed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    lease_expires_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     delivered_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     acknowledged_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     suppressed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
