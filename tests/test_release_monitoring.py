@@ -12,7 +12,7 @@ from sqlalchemy import func, select
 import blockwart.services.release_github as github_provider
 import blockwart.services.release_monitoring as release_service
 from blockwart.api.deps import get_session
-from blockwart.config import Settings
+from blockwart.config import RELEASE_MONITORING_MAX_RESPONSE_BYTES, Settings
 from blockwart.domain.auth import Permission, PrincipalContext, PrincipalType
 from blockwart.domain.release_monitoring import (
     GithubReleaseTarget,
@@ -309,6 +309,187 @@ def test_provider_wire_is_pinned_tls_conditional_and_credential_free(monkeypatch
     assert "Proxy-Authorization:" not in request
 
 
+def test_provider_accepts_large_release_response_under_default_limit(monkeypatch) -> None:
+    payload = json.dumps(
+        {
+            "tag_name": "v1.2.0",
+            "draft": False,
+            "prerelease": False,
+            "published_at": "2026-08-24T12:00:00Z",
+            "body": "x" * (256 * 1024),
+        }
+    ).encode()
+    assert 256 * 1024 < len(payload) <= RELEASE_MONITORING_MAX_RESPONSE_BYTES
+
+    class FakeSocket:
+        def __init__(self) -> None:
+            self.response = bytearray(
+                b"HTTP/1.1 200 OK\r\nContent-Length: "
+                + str(len(payload)).encode()
+                + b"\r\n\r\n"
+                + payload
+            )
+
+        def settimeout(self, _timeout: float) -> None:
+            pass
+
+        def send(self, data: bytes) -> int:
+            return len(data)
+
+        def recv(self, size: int) -> bytes:
+            result = bytes(self.response[:size])
+            del self.response[:size]
+            return result
+
+        def close(self) -> None:
+            pass
+
+    class FakeContext:
+        check_hostname = False
+        verify_mode = None
+
+        def wrap_socket(self, wrapped, *, server_hostname):
+            assert server_hostname == "api.github.com"
+            return wrapped
+
+    monkeypatch.setattr(
+        github_provider,
+        "_resolve",
+        lambda *_args, **_kwargs: [ip_address("140.82.121.6")],
+    )
+    monkeypatch.setattr(
+        github_provider.socket,
+        "create_connection",
+        lambda *_args, **_kwargs: FakeSocket(),
+    )
+    monkeypatch.setattr(github_provider.ssl, "create_default_context", FakeContext)
+
+    result = github_provider.fetch_latest_github_release(
+        GithubReleaseRequest(
+            target=GithubReleaseTarget("example-org", "example-service"),
+            etag=None,
+            connect_timeout_ms=1000,
+            total_timeout_ms=2000,
+            max_response_bytes=ReleaseMonitoringSettings().max_response_bytes,
+        )
+    )
+
+    assert result.outcome == "observed"
+    assert result.latest_version == "1.2.0"
+
+
+def test_provider_rejects_declared_response_above_default_limit(monkeypatch) -> None:
+    class FakeSocket:
+        def __init__(self) -> None:
+            self.recv_sizes: list[int] = []
+            self.response = bytearray(
+                b"HTTP/1.1 200 OK\r\nContent-Length: "
+                + str(RELEASE_MONITORING_MAX_RESPONSE_BYTES + 1).encode()
+                + b"\r\n\r\nnot-read"
+            )
+
+        def settimeout(self, _timeout: float) -> None:
+            pass
+
+        def send(self, data: bytes) -> int:
+            return len(data)
+
+        def recv(self, size: int) -> bytes:
+            self.recv_sizes.append(size)
+            result = bytes(self.response[:size])
+            del self.response[:size]
+            return result
+
+        def close(self) -> None:
+            pass
+
+    class FakeContext:
+        check_hostname = False
+        verify_mode = None
+
+        def wrap_socket(self, wrapped, *, server_hostname):
+            assert server_hostname == "api.github.com"
+            return wrapped
+
+    sock = FakeSocket()
+    monkeypatch.setattr(
+        github_provider.socket,
+        "create_connection",
+        lambda *_args, **_kwargs: sock,
+    )
+    monkeypatch.setattr(
+        github_provider.ssl,
+        "create_default_context",
+        FakeContext,
+    )
+    with pytest.raises(github_provider._GithubFailure) as failure:
+        github_provider._request(
+            pinned="140.82.121.6",
+            path="/repos/example-org/example-service/releases/latest",
+            etag=None,
+            connect_timeout=1,
+            total_timeout=2,
+            max_response_bytes=RELEASE_MONITORING_MAX_RESPONSE_BYTES,
+        )
+
+    assert failure.value.code == "response_too_large"
+    assert set(sock.recv_sizes) == {1}
+
+
+def test_provider_rejects_streamed_response_above_default_limit(monkeypatch) -> None:
+    class FakeSocket:
+        def __init__(self) -> None:
+            self.response = bytearray(
+                b"HTTP/1.1 200 OK\r\n\r\n"
+                + b"x" * (RELEASE_MONITORING_MAX_RESPONSE_BYTES + 1)
+            )
+
+        def settimeout(self, _timeout: float) -> None:
+            pass
+
+        def send(self, data: bytes) -> int:
+            return len(data)
+
+        def recv(self, size: int) -> bytes:
+            result = bytes(self.response[:size])
+            del self.response[:size]
+            return result
+
+        def close(self) -> None:
+            pass
+
+    class FakeContext:
+        check_hostname = False
+        verify_mode = None
+
+        def wrap_socket(self, wrapped, *, server_hostname):
+            assert server_hostname == "api.github.com"
+            return wrapped
+
+    sock = FakeSocket()
+    monkeypatch.setattr(
+        github_provider.socket,
+        "create_connection",
+        lambda *_args, **_kwargs: sock,
+    )
+    monkeypatch.setattr(
+        github_provider.ssl,
+        "create_default_context",
+        FakeContext,
+    )
+    with pytest.raises(github_provider._GithubFailure) as failure:
+        github_provider._request(
+            pinned="140.82.121.6",
+            path="/repos/example-org/example-service/releases/latest",
+            etag=None,
+            connect_timeout=1,
+            total_timeout=2,
+            max_response_bytes=RELEASE_MONITORING_MAX_RESPONSE_BYTES,
+        )
+
+    assert failure.value.code == "response_too_large"
+
+
 @pytest.mark.parametrize(
     "framing",
     ("invalid-delimiter", "incomplete-terminal", "incomplete-trailer"),
@@ -521,6 +702,7 @@ def test_provider_transport_failures_are_redacted(monkeypatch, failure, expected
     ("payload", "expected"),
     [
         (b"not-json", "unreadable_release"),
+        (b'{"tag_name": "v1.2.0"', "unreadable_release"),
         (b"[]", "unreadable_release"),
         (
             json.dumps(
@@ -556,6 +738,23 @@ def test_provider_rejects_malformed_or_non_stable_payload(monkeypatch, payload, 
         )
     )
     assert result.error_code == expected
+
+
+def test_release_response_limit_defaults_to_512_kib_and_rejects_larger_configuration() -> None:
+    settings = Settings()
+    assert settings.release_monitoring_max_response_bytes == RELEASE_MONITORING_MAX_RESPONSE_BYTES
+    assert (
+        release_service.release_monitoring_settings(settings).max_response_bytes
+        == RELEASE_MONITORING_MAX_RESPONSE_BYTES
+    )
+    assert (
+        Settings(
+            release_monitoring_max_response_bytes=RELEASE_MONITORING_MAX_RESPONSE_BYTES
+        ).release_monitoring_max_response_bytes
+        == RELEASE_MONITORING_MAX_RESPONSE_BYTES
+    )
+    with pytest.raises(ValidationError):
+        Settings(release_monitoring_max_response_bytes=RELEASE_MONITORING_MAX_RESPONSE_BYTES + 1)
 
 
 def test_manual_and_scheduled_checks_share_idempotent_storage(
