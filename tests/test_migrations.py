@@ -47,6 +47,20 @@ CATALOG_VIEWER_REVISION = "20260822_0019"
 GATUS_SOURCE_REVISION = "20260824_0020"
 RELEASE_MONITORING_REVISION = "20260825_0021"
 HEAD_REVISION = RELEASE_MONITORING_REVISION
+_GUARD_TRIGGER_NAMES = (
+    "ck_principals_last_active_admin_update",
+    "ck_principals_last_active_admin_delete",
+    "ck_principals_last_active_catalog_owner_update",
+    "ck_principals_last_active_catalog_owner_delete",
+)
+_COUNTER_TRIGGER_NAMES = (
+    "ck_principals_active_admin_counter_insert",
+    "ck_principals_active_admin_counter_update",
+    "ck_principals_active_admin_counter_delete",
+    "ck_principals_active_catalog_owner_counter_insert",
+    "ck_principals_active_catalog_owner_counter_update",
+    "ck_principals_active_catalog_owner_counter_delete",
+)
 PROJECT_ALEMBIC_CONFIG = Path(__file__).resolve().parents[1] / "alembic.ini"
 LEGACY_SNAPSHOT = Path(__file__).resolve().parent / "fixtures" / "legacy_snapshot.sql"
 
@@ -2577,6 +2591,144 @@ def test_catalog_viewer_migration_preserves_data_and_has_safe_round_trip(
             )
         connection.rollback()
         assert connection.execute("PRAGMA foreign_key_check").fetchall() == []
+    finally:
+        connection.close()
+
+
+def test_catalog_viewer_migration_repairs_missing_invariant_counts(
+    tmp_path: Path,
+) -> None:
+    """Upgrade the real historical 20260818_0018 schema through Head.
+
+    An installation upgraded to 20260818_0018 before commit 3de8c903
+    retroactively added ``principal_invariant_counts`` to revision
+    20260731_0012 has the four last-active guard triggers but neither the table
+    nor the six counter triggers. Revision 20260822_0019 recreates the counter
+    triggers, so the rebuild in 20260824_0020 used to fail with
+    ``no such table: main.principal_invariant_counts``.
+    """
+    database_path = tmp_path / "historical-invariants.sqlite3"
+    database_url = _database_url(database_path)
+    config = build_alembic_config(database_url)
+    command.upgrade(config, PROJECT_CHRONOLOGY_REVISION)
+    connection = sqlite3.connect(database_path)
+    try:
+        connection.execute(
+            "INSERT INTO principals "
+            "(id, principal_type, login, display_name, active, platform_role, "
+            "catalog_role, revision) VALUES "
+            "('legacy-admin-owner', 'human', 'legacy.admin.owner', "
+            "'Legacy Admin Owner', 1, 'admin', 'catalog_owner', 9), "
+            "('legacy-admin', 'human', 'legacy.admin', 'Legacy Admin', 1, "
+            "'admin', NULL, 5), "
+            "('legacy-owner', 'human', 'legacy.owner', 'Legacy Owner', 1, "
+            "NULL, 'catalog_owner', 3), "
+            "('legacy-retired', 'human', 'legacy.retired', 'Legacy Retired', 0, "
+            "'admin', 'catalog_owner', 2), "
+            "('legacy-service', 'service_account', 'legacy.service', "
+            "'Legacy Service', 1, NULL, NULL, 1)"
+        )
+        connection.execute(
+            "INSERT INTO catalog_objects "
+            "(id, kind, label, status, lifecycle, health, data_json, "
+            "provenance_json, revision) VALUES "
+            "('legacy-root', 'host', 'Legacy Root', 'active', 'active', "
+            "'healthy', '{\"schema_version\":1}', '{}', 4)"
+        )
+        connection.execute(
+            "INSERT INTO object_grants "
+            "(principal_id, object_id, role, scope, created_by_principal_id) "
+            "VALUES ('legacy-service', 'legacy-root', 'viewer', 'self', "
+            "'legacy-admin-owner')"
+        )
+        # Reproduce the deployed schema: the counter table and its six triggers
+        # were never created there, while the four guard triggers exist.
+        connection.execute("DROP TABLE principal_invariant_counts")
+        for trigger in _COUNTER_TRIGGER_NAMES:
+            connection.execute(f"DROP TRIGGER {trigger}")
+        connection.commit()
+        assert {
+            str(row[0])
+            for row in connection.execute(
+                "SELECT name FROM sqlite_master "
+                "WHERE type = 'trigger' AND tbl_name = 'principals'"
+            )
+        } == set(_GUARD_TRIGGER_NAMES)
+        before_principals = connection.execute(
+            "SELECT id, principal_type, login, active, platform_role, "
+            "catalog_role, revision FROM principals ORDER BY id"
+        ).fetchall()
+        before_grants = connection.execute(
+            "SELECT principal_id, object_id, role, scope, created_by_principal_id "
+            "FROM object_grants ORDER BY principal_id, object_id"
+        ).fetchall()
+        before_objects = connection.execute(
+            "SELECT id, kind, label, data_json, revision FROM catalog_objects "
+            "ORDER BY id"
+        ).fetchall()
+    finally:
+        connection.close()
+
+    command.upgrade(config, HEAD_REVISION)
+
+    assert _revision(database_url) == HEAD_REVISION
+    connection = sqlite3.connect(database_path)
+    try:
+        assert connection.execute(
+            "SELECT id, principal_type, login, active, platform_role, "
+            "catalog_role, revision FROM principals ORDER BY id"
+        ).fetchall() == before_principals
+        assert connection.execute(
+            "SELECT principal_id, object_id, role, scope, created_by_principal_id "
+            "FROM object_grants ORDER BY principal_id, object_id"
+        ).fetchall() == before_grants
+        assert connection.execute(
+            "SELECT id, kind, label, data_json, revision FROM catalog_objects "
+            "ORDER BY id"
+        ).fetchall() == before_objects
+        # Reconstructed from the actual principals: two active admins and two
+        # active catalog owners; the inactive principal counts for neither.
+        assert connection.execute(
+            "SELECT invariant, active_count FROM principal_invariant_counts "
+            "ORDER BY invariant"
+        ).fetchall() == [("catalog_owner", 2), ("platform_admin", 2)]
+        assert {
+            str(row[0])
+            for row in connection.execute(
+                "SELECT name FROM sqlite_master "
+                "WHERE type = 'trigger' AND tbl_name = 'principals'"
+            )
+        } == set(_GUARD_TRIGGER_NAMES) | set(_COUNTER_TRIGGER_NAMES)
+        assert connection.execute("PRAGMA integrity_check").fetchall() == [("ok",)]
+        assert connection.execute("PRAGMA foreign_key_check").fetchall() == []
+
+        # The restored counters track further writes from the rebuilt value.
+        connection.execute(
+            "UPDATE principals SET platform_role = NULL WHERE id = 'legacy-admin'"
+        )
+        connection.commit()
+        assert connection.execute(
+            "SELECT active_count FROM principal_invariant_counts "
+            "WHERE invariant = 'platform_admin'"
+        ).fetchone() == (1,)
+
+        # Both safeguards still refuse to remove the last active holder.
+        with pytest.raises(sqlite3.IntegrityError, match="last active platform admin"):
+            connection.execute(
+                "UPDATE principals SET active = 0 WHERE id = 'legacy-admin-owner'"
+            )
+        connection.rollback()
+        connection.execute("DELETE FROM principals WHERE id = 'legacy-owner'")
+        connection.commit()
+        with pytest.raises(sqlite3.IntegrityError, match="last active catalog owner"):
+            connection.execute(
+                "DELETE FROM principals WHERE id = 'legacy-admin-owner'"
+            )
+        connection.rollback()
+        assert connection.execute(
+            "SELECT active_count FROM principal_invariant_counts "
+            "WHERE invariant = 'catalog_owner'"
+        ).fetchone() == (1,)
     finally:
         connection.close()
 
