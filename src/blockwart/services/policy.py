@@ -4,9 +4,10 @@ import hashlib
 import json
 from collections import defaultdict
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from enum import StrEnum
 
-from sqlalchemy import and_, literal, select
+from sqlalchemy import and_, literal, or_, select
 from sqlalchemy.orm import Session, aliased
 
 from blockwart.domain.auth import (
@@ -179,6 +180,14 @@ def policy_for_principal(
         .where(
             ObjectGrant.principal_id == principal_id,
             Principal.active.is_(True),
+            # Temporary grants expire in the request path: an expired grant
+            # stops contributing permissions on the next policy computation,
+            # without a restart and without a cache to invalidate.
+            or_(
+                ObjectGrant.expires_at.is_(None),
+                ObjectGrant.expires_at
+                > datetime.now(UTC).replace(tzinfo=None),
+            ),
         )
     )
     reach = roots.cte("authorized_object_reach", recursive=True)

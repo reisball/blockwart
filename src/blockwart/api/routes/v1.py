@@ -74,6 +74,13 @@ from blockwart.schemas.v1 import (
     ObjectSortField,
     SortDirection,
     SourceClassificationValue,
+    V1AccessRequestCommandOut,
+    V1AccessRequestCreateIn,
+    V1AccessRequestDecisionIn,
+    V1AccessRequestListOut,
+    V1AccessRequestOut,
+    V1AccessRequestQueueOut,
+    V1ApproverAccessRequestOut,
     V1AttachedDeviceCreateIn,
     V1AttentionPageOut,
     V1AuditPageOut,
@@ -103,6 +110,13 @@ from blockwart.schemas.v1 import (
     V1ReleaseOverviewPageOut,
     V1SourceCoveragePageOut,
     V1TopologyOut,
+)
+from blockwart.services.access_requests import (
+    cancel_access_request,
+    create_access_request,
+    decide_access_request,
+    list_my_access_requests,
+    list_pending_access_requests,
 )
 from blockwart.services.agent import (
     get_agent_object_context,
@@ -1453,6 +1467,121 @@ def revoke_v1_object_grant(
     )
     response.headers["ETag"] = result.etag
     return V1GrantCommandOut.model_validate(result)
+
+
+@router.post(
+    "/objects/{object_id}/access-requests",
+    response_model=V1AccessRequestCommandOut,
+    status_code=201,
+)
+def create_v1_access_request(
+    object_id: str,
+    payload: V1AccessRequestCreateIn,
+    request: Request,
+    session: Annotated[Session, Depends(get_session)],
+    access: Annotated[ReadAccess, Depends(require_api_read_access)],
+) -> V1AccessRequestCommandOut:
+    context = api_write_context(request, access)
+    result = execute_api_command(
+        session,
+        context,
+        lambda: create_access_request(
+            session,
+            context,
+            object_id=object_id,
+            duration=payload.duration,
+            ttl_seconds=payload.ttl_seconds,
+            reason=payload.reason,
+        ),
+    )
+    return V1AccessRequestCommandOut.model_validate(result)
+
+
+@router.get(
+    "/me/access-requests",
+    response_model=V1AccessRequestListOut,
+)
+def get_v1_my_access_requests(
+    request: Request,
+    session: Annotated[Session, Depends(get_session)],
+    access: Annotated[ReadAccess, Depends(require_api_read_access)],
+) -> V1AccessRequestListOut:
+    context = api_write_context(request, access)
+    items = execute_api_command(
+        session,
+        context,
+        lambda: list_my_access_requests(session, context),
+    )
+    return V1AccessRequestListOut(items=[V1AccessRequestOut.model_validate(item) for item in items])
+
+
+@router.get(
+    "/access-requests",
+    response_model=V1AccessRequestQueueOut,
+)
+def get_v1_pending_access_requests(
+    request: Request,
+    session: Annotated[Session, Depends(get_session)],
+    access: Annotated[ReadAccess, Depends(require_api_read_access)],
+) -> V1AccessRequestQueueOut:
+    context = api_write_context(request, access)
+    items = execute_api_command(
+        session,
+        context,
+        lambda: list_pending_access_requests(session, context),
+    )
+    return V1AccessRequestQueueOut(
+        items=[V1ApproverAccessRequestOut.model_validate(item) for item in items]
+    )
+
+
+@router.post(
+    "/access-requests/{request_id}/cancellation",
+    response_model=V1AccessRequestCommandOut,
+)
+def cancel_v1_access_request(
+    request_id: str,
+    request: Request,
+    session: Annotated[Session, Depends(get_session)],
+    access: Annotated[ReadAccess, Depends(require_api_read_access)],
+) -> V1AccessRequestCommandOut:
+    context = api_write_context(request, access)
+    result = execute_api_command(
+        session,
+        context,
+        lambda: cancel_access_request(
+            session,
+            context,
+            request_id=request_id,
+        ),
+    )
+    return V1AccessRequestCommandOut.model_validate(result)
+
+
+@router.post(
+    "/access-requests/{request_id}/decision",
+    response_model=V1AccessRequestCommandOut,
+)
+def decide_v1_access_request(
+    request_id: str,
+    payload: V1AccessRequestDecisionIn,
+    request: Request,
+    session: Annotated[Session, Depends(get_session)],
+    access: Annotated[ReadAccess, Depends(require_api_read_access)],
+) -> V1AccessRequestCommandOut:
+    context = api_write_context(request, access)
+    result = execute_api_command(
+        session,
+        context,
+        lambda: decide_access_request(
+            session,
+            context,
+            request_id=request_id,
+            approve=payload.decision == "approve",
+            approved_ttl_seconds=payload.ttl_seconds,
+        ),
+    )
+    return V1AccessRequestCommandOut.model_validate(result)
 
 
 @router.get(

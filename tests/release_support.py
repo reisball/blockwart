@@ -25,7 +25,7 @@ from blockwart.release.spec import ReleaseSpec, parse_spec
 
 COMMIT = "a" * 40
 TREE = "b" * 40
-SCHEMA_REVISION = "20260825_0021"
+SCHEMA_REVISION = "20260826_0023"
 NEW_IMAGE = "sha256:" + "1" * 64
 OLD_IMAGE = "sha256:" + "2" * 64
 STALE_PROBE_END = datetime(2020, 1, 1, tzinfo=UTC)
