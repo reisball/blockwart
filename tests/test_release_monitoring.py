@@ -944,7 +944,13 @@ def test_ui_and_rest_publish_the_same_release_projection_in_english_and_german(
         upsert_object(session, _service("ui-release"))
         session.commit()
     monkeypatch.setattr(
-        release_service, "fetch_latest_github_release", lambda _request: _observed()
+        release_service,
+        "fetch_latest_github_release",
+        # The HTTP routes evaluate freshness against the real clock, so the
+        # observation must be fresh at run time; a fixed past timestamp would
+        # go stale after one release interval and flip the projection to
+        # ``unknown`` (time-bomb regression, 2026-08-26).
+        lambda _request: _observed(checked_at=datetime.now(UTC)),
     )
     app = create_app(
         Settings(
