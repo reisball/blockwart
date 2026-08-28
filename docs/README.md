@@ -47,6 +47,8 @@ deleted by this classification.
 - [Public GitHub release monitoring](release-monitoring.md), including the
   service-only opt-in, conservative comparison, fixed provider boundary,
   leased scheduling, authorized views, rate limits, and recovery
+- [Agent notices](agent-notices.md), the durable, fail-closed push channel
+  that delivers selected events (first: release updates) to approved agents
 - [Canonical Decision objects](decisions.md), including lifecycle, links, and
   dry-run-first legacy classification
 - [Canonical Project knowledge](projects.md), including category-specific results,

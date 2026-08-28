@@ -46,7 +46,8 @@ PROJECT_CHRONOLOGY_REVISION = "20260818_0018"
 CATALOG_VIEWER_REVISION = "20260822_0019"
 GATUS_SOURCE_REVISION = "20260824_0020"
 RELEASE_MONITORING_REVISION = "20260825_0021"
-HEAD_REVISION = RELEASE_MONITORING_REVISION
+AGENT_NOTICES_REVISION = "20260826_0022"
+HEAD_REVISION = AGENT_NOTICES_REVISION
 PROJECT_ALEMBIC_CONFIG = Path(__file__).resolve().parents[1] / "alembic.ini"
 LEGACY_SNAPSHOT = Path(__file__).resolve().parent / "fixtures" / "legacy_snapshot.sql"
 
@@ -249,6 +250,11 @@ def test_real_alembic_upgrade_creates_fresh_database_and_has_no_drift(
     try:
         assert set(inspect(engine).get_table_names()) == {
             "alembic_version",
+            "agent_delivery_attempts",
+            "agent_delivery_jobs",
+            "agent_delivery_targets",
+            "agent_notice_events",
+            "agent_notice_subscriptions",
             "audit_events",
             "browser_sessions",
             "catalog_objects",
@@ -274,6 +280,11 @@ def test_real_alembic_upgrade_creates_fresh_database_and_has_no_drift(
     finally:
         engine.dispose()
     assert set(Base.metadata.tables) == {
+        "agent_delivery_attempts",
+        "agent_delivery_jobs",
+        "agent_delivery_targets",
+        "agent_notice_events",
+        "agent_notice_subscriptions",
         "audit_events",
         "browser_sessions",
         "catalog_objects",
@@ -1957,6 +1968,11 @@ def downgrade() -> None:
         assert upgrade_database(database_url) == future_revision
         assert set(inspect(engine).get_table_names()) == {
             "alembic_version",
+            "agent_delivery_attempts",
+            "agent_delivery_jobs",
+            "agent_delivery_targets",
+            "agent_notice_events",
+            "agent_notice_subscriptions",
             "audit_events",
             "browser_sessions",
             "catalog_objects",
