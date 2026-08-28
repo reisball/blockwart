@@ -13,7 +13,8 @@ import blockwart.services.release_github as github_provider
 import blockwart.services.release_monitoring as release_service
 from blockwart.api.deps import get_session
 from blockwart.config import RELEASE_MONITORING_MAX_RESPONSE_BYTES, Settings
-from blockwart.domain.auth import Permission, PrincipalContext, PrincipalType
+from blockwart.db.session import transaction
+from blockwart.domain.auth import GrantScope, Permission, PrincipalContext, PrincipalType, Role
 from blockwart.domain.release_monitoring import (
     GithubReleaseTarget,
     ReleaseObservation,
@@ -29,7 +30,9 @@ from blockwart.models import (
     ServiceReleaseObservation,
 )
 from blockwart.schemas.catalog import CatalogObjectIn
+from blockwart.services.access import create_object_grant
 from blockwart.services.catalog import upsert_object
+from blockwart.services.identity import create_service_account, issue_service_token
 from blockwart.services.policy import PolicySnapshot
 from blockwart.services.read_access import ReadAccess
 from blockwart.services.release_github import GithubReleaseRequest
@@ -1072,6 +1075,94 @@ def test_overview_filters_after_authorization_without_hidden_counts(
         assert page.total == 1
         assert "stub" not in (page.next_cursor or "")
         assert "concealed" not in (page.next_cursor or "")
+
+
+def test_v1_release_updates_serializes_authenticated_bounded_projection(
+    alembic_session_factory,
+) -> None:
+    upstream_marker = "untrusted upstream release notes and secret metadata"
+    with alembic_session_factory() as session:
+        with transaction(session):
+            upsert_object(
+                session,
+                _service("release-api").model_copy(update={"summary": upstream_marker}),
+            )
+            principal = create_service_account(
+                session,
+                login="release.api.reader",
+                display_name="Release API Reader",
+            )
+            create_object_grant(
+                session,
+                principal_id=principal.id,
+                object_id="release-api",
+                role=Role.VIEWER,
+                scope=GrantScope.SELF,
+            )
+            token = issue_service_token(
+                session,
+                principal_id=principal.id,
+                name="release-api",
+            )
+
+    app = create_app(Settings())
+
+    def override_get_session():
+        with alembic_session_factory() as session:
+            yield session
+
+    app.dependency_overrides[get_session] = override_get_session
+    with TestClient(app) as client:
+        response = client.get(
+            "/api/v1/release-updates",
+            headers={"Authorization": f"Bearer {token.value}"},
+        )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["total"] is None
+    assert body["direction"] == "asc"
+    assert len(body["items"]) == 1
+    item = body["items"][0]
+    assert set(item) == {"object_id", "ref", "label", "release_monitoring"}
+    assert item["object_id"] == "release-api"
+    assert item["ref"] == "service:release-api"
+    assert item["label"] == "release-api"
+    monitoring = item["release_monitoring"]
+    assert set(monitoring) == {
+        "enabled",
+        "provider",
+        "interval_seconds",
+        "interval_overridden",
+        "target",
+        "diagnostic",
+        "status",
+        "observed_status",
+        "freshness",
+        "running_version",
+        "latest_version",
+        "latest_tag",
+        "release_url",
+        "released_at",
+        "http_status",
+        "error_code",
+        "consecutive_failures",
+        "last_checked_at",
+        "last_success_at",
+        "next_due_at",
+    }
+    assert monitoring["enabled"] is True
+    assert monitoring["provider"] == "github_releases"
+    assert monitoring["status"] == "unknown"
+    assert monitoring["target"] == {
+        "owner": "example-org",
+        "repo": "example-service",
+        "slug": "example-org/example-service",
+        "repository_url": "https://github.com/example-org/example-service",
+        "api_url": "https://api.github.com/repos/example-org/example-service/releases/latest",
+    }
+    assert upstream_marker not in response.text
+    assert "secret" not in response.text.casefold()
 
 
 @pytest.mark.parametrize(

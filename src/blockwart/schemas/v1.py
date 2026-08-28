@@ -109,6 +109,8 @@ class V1ObjectPageOut(BaseModel):
 
 
 class V1ReleaseOverviewItemOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
     object_id: str
     ref: str
     label: str
