@@ -16,7 +16,7 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.orm import Session, sessionmaker
 
-from blockwart.config import Settings, get_settings
+from blockwart.config import RELEASE_MONITORING_MAX_RESPONSE_BYTES, Settings, get_settings
 from blockwart.db.session import build_engine
 from blockwart.domain.auth import ObjectVisibility
 from blockwart.domain.release_monitoring import (
@@ -52,7 +52,7 @@ class ReleaseMonitoringSettings:
     default_interval_seconds: int = DEFAULT_RELEASE_INTERVAL_SECONDS
     connect_timeout_ms: int = 2000
     total_timeout_ms: int = 5000
-    max_response_bytes: int = 65536
+    max_response_bytes: int = RELEASE_MONITORING_MAX_RESPONSE_BYTES
     max_checks_per_run: int = 10
     lease_seconds: int = 60
     jitter_seconds: int = 3600

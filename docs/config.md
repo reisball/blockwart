@@ -57,8 +57,8 @@ Current local keys:
   `100..15000`)
 - `BLOCKWART_RELEASE_MONITORING_TOTAL_TIMEOUT_MS` (default `5000`, allowed
   `200..30000`)
-- `BLOCKWART_RELEASE_MONITORING_MAX_RESPONSE_BYTES` (default `65536`, allowed
-  `1024..262144`)
+- `BLOCKWART_RELEASE_MONITORING_MAX_RESPONSE_BYTES` (default `524288` / 512 KiB,
+  allowed `1024..524288`; bound for public GitHub latest-release responses)
 - `BLOCKWART_RELEASE_MONITORING_MAX_CHECKS_PER_RUN` (default `10`, allowed
   `1..100`)
 - `BLOCKWART_RELEASE_MONITORING_LEASE_SECONDS` (default `60`, allowed
