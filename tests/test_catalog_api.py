@@ -450,6 +450,71 @@ def test_catalog_input_rejects_secret_shaped_payload() -> None:
         )
 
 
+def test_upsert_credential_reference_round_trips_infisical_provider(session_factory) -> None:
+    with session_factory() as session:
+        with transaction(session):
+            created = upsert_object(
+                session,
+                CatalogObjectIn(
+                    id="n8n-api-key",
+                    kind="credential_reference",
+                    label="n8n API key",
+                    status="active",
+                    data={
+                        "schema_version": 1,
+                        "provider": "infisical",
+                        "reference": {"path": "/apps/n8n", "key": "API_KEY"},
+                        "scope": {"access_type": "api"},
+                        "secret_value_stored": False,
+                    },
+                ),
+            )
+        assert created.data["provider"] == "infisical"
+
+        with transaction(session):
+            updated = upsert_object(
+                session,
+                CatalogObjectIn(
+                    id="n8n-api-key",
+                    kind="credential_reference",
+                    label="n8n API key",
+                    status="active",
+                    data={
+                        "schema_version": 1,
+                        "provider": "infisical",
+                        "reference": {"path": "/apps/n8n/prod", "key": "API_KEY"},
+                        "scope": {"access_type": "api"},
+                        "secret_value_stored": False,
+                    },
+                ),
+            )
+        assert updated.data["reference"]["path"] == "/apps/n8n/prod"
+
+        stored = session.get(CatalogObject, "n8n-api-key")
+
+    assert stored is not None
+    assert json.loads(stored.data_json)["provider"] == "infisical"
+
+
+def test_catalog_input_rejects_infisical_reference_value_fields() -> None:
+    with pytest.raises(ValidationError):
+        CatalogObjectIn.model_validate(
+            {
+                "id": "n8n-api-key",
+                "kind": "credential_reference",
+                "label": "n8n API key",
+                "data": {
+                    "schema_version": 1,
+                    "provider": "infisical",
+                    "reference": {"path": "/apps/n8n", "key": "API_KEY"},
+                    "scope": {"access_type": "api"},
+                    "secret_value_stored": False,
+                    "value": "not-even-a-secret-but-still-not-a-reference",
+                },
+            }
+        )
+
+
 def test_catalog_input_rejects_credential_reference_value_fields() -> None:
     with pytest.raises(ValidationError):
         CatalogObjectIn.model_validate(

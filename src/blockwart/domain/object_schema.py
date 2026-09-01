@@ -144,7 +144,7 @@ SCHEMA_VIOLATION_CONTRACTS: Mapping[str, str] = MappingProxyType(
 )
 
 CREDENTIAL_PROVIDERS = frozenset(
-    {"vaultwarden", "secrets_json", "env_file", "local_file", "external"}
+    {"vaultwarden", "infisical", "secrets_json", "env_file", "local_file", "external"}
 )
 CREDENTIAL_ACCESS_TYPES = frozenset(
     {"ssh", "web", "api", "database", "smb", "sudo", "token", "other"}

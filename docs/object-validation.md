@@ -129,8 +129,9 @@ schema. A schema cannot disable that policy. Registry construction also rejects
 field paths whose key would represent a raw secret or credential value.
 
 Credential-reference metadata such as a provider name, a protected storage
-path, or a credential reference ID is allowed. Raw passwords, tokens, private
-keys, cookies, sessions, and generic raw/value fields are not.
+path, or a credential reference ID is allowed. Supported providers include
+`infisical` (for example, a path `/apps/n8n` and key `API_KEY`). Raw passwords,
+tokens, private keys, cookies, sessions, and generic raw/value fields are not.
 
 ## Related Validators
 

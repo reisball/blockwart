@@ -1164,6 +1164,8 @@ def _credential_reference_object(
 
 def _credential_provider(auth: str) -> str:
     text = auth.casefold()
+    if "infisical" in text:
+        return "infisical"
     if "vault" in text:
         return "vaultwarden"
     if "secrets.json" in text:

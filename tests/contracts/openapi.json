@@ -23436,6 +23436,7 @@
               "enum": [
                 "env_file",
                 "external",
+                "infisical",
                 "local_file",
                 "secrets_json",
                 "vaultwarden"

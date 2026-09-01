@@ -9,6 +9,7 @@ from blockwart.schemas.catalog import CatalogObjectIn
 from blockwart.services.catalog import upsert_object
 from blockwart.services.markdown_import import (
     MarkdownImportNetworkError,
+    _credential_provider,
     build_tools_import_plan,
     import_tools_markdown,
 )
@@ -17,6 +18,22 @@ from blockwart.services.network_classification import NetworkClassificationEvide
 
 def _session(alembic_session_factory) -> Session:
     return alembic_session_factory()
+
+
+@pytest.mark.parametrize(
+    ("auth", "expected"),
+    [
+        ("API token in Infisical /apps/demo", "infisical"),
+        ("Infisical project secret", "infisical"),
+        ("Web login in Vaultwarden", "vaultwarden"),
+        ("stored in secrets.json", "secrets_json"),
+        ("read from /opt/demo/.env", "env_file"),
+        ("local SSH key", "local_file"),
+        ("managed elsewhere", "external"),
+    ],
+)
+def test_credential_provider_normalizes_named_providers(auth: str, expected: str) -> None:
+    assert _credential_provider(auth) == expected
 
 
 def test_build_tools_import_plan_parses_infrastructure_rows(tmp_path: Path) -> None:

@@ -6,6 +6,7 @@ from pydantic import ValidationError
 
 from blockwart.domain.object_schema import (
     BUILTIN_SCHEMAS,
+    CREDENTIAL_PROVIDERS,
     SECRET_POLICY,
     FieldSpec,
     ObjectSchemaError,
@@ -392,6 +393,64 @@ def test_credential_reference_post_rule_rejects_raw_value_paths() -> None:
                     "provider": "external",
                     "reference": {
                         "name": "Example",
+                        "value": "not-secret-but-not-a-reference",
+                    },
+                },
+            }
+        )
+
+
+def test_credential_reference_provider_enum_includes_infisical() -> None:
+    assert CREDENTIAL_PROVIDERS == {
+        "vaultwarden",
+        "infisical",
+        "secrets_json",
+        "env_file",
+        "local_file",
+        "external",
+    }
+    provider_field = next(
+        field
+        for field in BUILTIN_SCHEMAS["credential_reference"].fields
+        if field.path == "provider"
+    )
+    assert provider_field.enum_values == CREDENTIAL_PROVIDERS
+
+
+@pytest.mark.parametrize("provider", sorted(CREDENTIAL_PROVIDERS))
+def test_credential_reference_accepts_every_supported_provider(provider: str) -> None:
+    accepted = CatalogObjectIn.model_validate(
+        {
+            "id": f"{provider}-reference",
+            "kind": "credential_reference",
+            "label": f"{provider} reference",
+            "data": {
+                "schema_version": 1,
+                "provider": provider,
+                "reference": {"item_hint": "pointer only"},
+                "scope": {"access_type": "api"},
+                "secret_value_stored": False,
+            },
+        }
+    )
+
+    assert accepted.data["provider"] == provider
+
+
+def test_infisical_reference_still_rejects_raw_value_paths() -> None:
+    with pytest.raises(
+        ValidationError,
+        match=r"data\.reference\.value.*credential references may not contain raw value fields",
+    ):
+        CatalogObjectIn.model_validate(
+            {
+                "id": "unsafe-infisical-reference",
+                "kind": "credential_reference",
+                "label": "Unsafe Infisical reference",
+                "data": {
+                    "provider": "infisical",
+                    "reference": {
+                        "path": "/apps/n8n/API_KEY",
                         "value": "not-secret-but-not-a-reference",
                     },
                 },
