@@ -4842,6 +4842,190 @@
         "title": "ServiceTokenRotateIn",
         "type": "object"
       },
+      "V1ActivityItemOut": {
+        "additionalProperties": false,
+        "description": "One classified activity envelope entry.\n\nComment bodies, audit diffs, and project state stay in their canonical\nresources (#131/#143/#184); this envelope only carries a safe short\ndescription plus the detail path into the resource that owns the details.",
+        "properties": {
+          "actor": {
+            "anyOf": [
+              {
+                "maxLength": 128,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Actor"
+          },
+          "detail_path": {
+            "maxLength": 512,
+            "title": "Detail Path",
+            "type": "string"
+          },
+          "event_id": {
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Event Id",
+            "type": "string"
+          },
+          "event_type": {
+            "enum": [
+              "object_revision",
+              "relationship_mutation",
+              "comment_create",
+              "audit"
+            ],
+            "title": "Event Type",
+            "type": "string"
+          },
+          "object": {
+            "$ref": "#/components/schemas/V1ActivityObjectOut"
+          },
+          "occurred_at": {
+            "maxLength": 64,
+            "title": "Occurred At",
+            "type": "string"
+          },
+          "summary": {
+            "maxLength": 512,
+            "title": "Summary",
+            "type": "string"
+          }
+        },
+        "required": [
+          "event_id",
+          "event_type",
+          "occurred_at",
+          "object",
+          "summary",
+          "detail_path"
+        ],
+        "title": "V1ActivityItemOut",
+        "type": "object"
+      },
+      "V1ActivityObjectOut": {
+        "additionalProperties": false,
+        "description": "The authorized visible-object reference of one activity event.",
+        "properties": {
+          "kind": {
+            "enum": [
+              "host",
+              "system",
+              "network",
+              "device",
+              "service",
+              "credential_reference",
+              "runbook",
+              "decision",
+              "project"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "label": {
+            "anyOf": [
+              {
+                "maxLength": 255,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Label"
+          },
+          "object_id": {
+            "maxLength": 128,
+            "title": "Object Id",
+            "type": "string"
+          },
+          "ref": {
+            "maxLength": 256,
+            "minLength": 1,
+            "title": "Ref",
+            "type": "string"
+          }
+        },
+        "required": [
+          "ref",
+          "object_id",
+          "kind"
+        ],
+        "title": "V1ActivityObjectOut",
+        "type": "object"
+      },
+      "V1ActivityPageOut": {
+        "additionalProperties": false,
+        "properties": {
+          "direction": {
+            "enum": [
+              "asc",
+              "desc"
+            ],
+            "title": "Direction",
+            "type": "string"
+          },
+          "generated_at": {
+            "maxLength": 64,
+            "title": "Generated At",
+            "type": "string"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/V1ActivityItemOut"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Cursor"
+          },
+          "sort": {
+            "const": "occurred_at",
+            "default": "occurred_at",
+            "title": "Sort",
+            "type": "string"
+          },
+          "total": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Total"
+          },
+          "total_exceeds_budget": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Total Exceeds Budget"
+          }
+        },
+        "required": [
+          "items",
+          "generated_at",
+          "direction"
+        ],
+        "title": "V1ActivityPageOut",
+        "type": "object"
+      },
       "V1AttachedDeviceCreateIn": {
         "description": "One attached-device command payload.\n\nThe device is created and attached with exactly the `attached_to` metadata\ncontract; `uplinks_to`-only fields are not part of this command.",
         "properties": {
@@ -10023,6 +10207,295 @@
         "summary": "Get Object By Id",
         "tags": [
           "catalog"
+        ]
+      }
+    },
+    "/api/v1/activity": {
+      "get": {
+        "description": "Read one classified audit-activity page; strictly pull and read-only.",
+        "operationId": "get_v1_activity_api_v1_activity_get",
+        "parameters": [
+          {
+            "description": "Only events at or after this RFC3339 timestamp",
+            "in": "query",
+            "name": "since",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Only events at or after this RFC3339 timestamp",
+              "title": "Since"
+            }
+          },
+          {
+            "in": "query",
+            "name": "event_type",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "object_revision",
+                    "relationship_mutation",
+                    "comment_create",
+                    "audit"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Event Type"
+            }
+          },
+          {
+            "in": "query",
+            "name": "kind",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "host",
+                    "system",
+                    "network",
+                    "device",
+                    "service",
+                    "credential_reference",
+                    "runbook",
+                    "decision",
+                    "project"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Kind"
+            }
+          },
+          {
+            "description": "Include only the placement subtree of this object id",
+            "in": "query",
+            "name": "parent",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Include only the placement subtree of this object id",
+              "title": "Parent"
+            }
+          },
+          {
+            "description": "Include only events of this exact object id",
+            "in": "query",
+            "name": "object_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Include only events of this exact object id",
+              "title": "Object Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Opaque cursor returned by the previous page",
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 2048,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Opaque cursor returned by the previous page",
+              "title": "Cursor"
+            }
+          },
+          {
+            "in": "query",
+            "name": "direction",
+            "required": false,
+            "schema": {
+              "default": "desc",
+              "enum": [
+                "asc",
+                "desc"
+              ],
+              "title": "Direction",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Compute the exact total over the authorized filtered item set. This is optional and potentially expensive: it runs a full authorized COUNT, not a bounded page read.",
+            "in": "query",
+            "name": "include_total",
+            "required": false,
+            "schema": {
+              "default": false,
+              "description": "Compute the exact total over the authorized filtered item set. This is optional and potentially expensive: it runs a full authorized COUNT, not a bounded page read.",
+              "title": "Include Total",
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ActivityPageOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Authentication required"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Permission denied"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Resource not found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "412": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Precondition failed"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Request validation failed"
+          },
+          "428": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Precondition required"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Internal server error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Service unavailable"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Read the authorized catalog-wide agent activity feed",
+        "tags": [
+          "api-v1-readonly"
         ]
       }
     },

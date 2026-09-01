@@ -23,6 +23,9 @@ from jsonschema.validators import validator_for
 from mcp.server.lowlevel import NotificationOptions, Server
 
 from blockwart.config import Settings
+from blockwart.domain.activity import (
+    ACTIVITY_EVENT_TYPES,
+)
 from blockwart.domain.asset_state import ASSET_KINDS
 from blockwart.domain.attention import (
     ATTENTION_CATEGORY_VALUES,
@@ -762,6 +765,58 @@ TOOLS: list[JSON] = [
                     "type": "string",
                     "enum": ["asc", "desc"],
                     "default": "asc",
+                },
+                "include_total": {"type": "boolean", "default": False},
+            },
+            "additionalProperties": False,
+        },
+        "annotations": READ_ONLY_ANNOTATIONS,
+    },
+    {
+        "name": "blockwart.get_activity",
+        "description": (
+            "Read the authorized, catalog-wide activity feed. It classifies the "
+            "audit events Blockwart already records into a closed event-type "
+            "vocabulary - object revisions, relationship mutations, comment "
+            "creation, and technical audit - and returns one stable newest-first, "
+            "cursor-paginated envelope per event with a visible object reference, "
+            "a safe short description, and a detail path into the existing object, "
+            "comment, or audit resource that owns the type-specific details. It is "
+            "strictly pull and read-only: no push delivery, no probe, no source "
+            "read, and no catalog write. Events of concealed or deleted objects "
+            "influence neither items, counts, cursors, nor ordering; losing access "
+            "between pages fails closed to a freshly authorized result set. "
+            "Keyset pagination is bounded per page; include_total runs an exact "
+            "authorized COUNT that is optional and potentially expensive, and "
+            "total_exceeds_budget flags when that exact total overshoots the "
+            "documented size budget."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "since": {
+                    "type": "string",
+                    "description": "Only events at or after this RFC3339 timestamp.",
+                },
+                "event_type": {
+                    "type": "string",
+                    "enum": list(ACTIVITY_EVENT_TYPES),
+                },
+                "kind": {"type": "string", "enum": list(ALL_OBJECT_KINDS)},
+                "parent": {
+                    "type": "string",
+                    "description": "Include only the placement subtree of this object id.",
+                },
+                "object_id": {
+                    "type": "string",
+                    "description": "Include only events of this exact object id.",
+                },
+                "limit": {"type": "integer", "minimum": 1, "maximum": 100, "default": 50},
+                "cursor": {"type": "string", "maxLength": 2048},
+                "direction": {
+                    "type": "string",
+                    "enum": ["asc", "desc"],
+                    "default": "desc",
                 },
                 "include_total": {"type": "boolean", "default": False},
             },
@@ -1729,6 +1784,21 @@ def call_tool(
                 "limit": args.get("limit", 50),
                 "cursor": args.get("cursor"),
                 "direction": args.get("direction", "asc"),
+                "include_total": args.get("include_total", False),
+            },
+        )
+    elif name == "blockwart.get_activity":
+        payload = fetch(
+            "/api/v1/activity",
+            {
+                "since": args.get("since"),
+                "event_type": args.get("event_type"),
+                "kind": args.get("kind"),
+                "parent": args.get("parent"),
+                "object_id": args.get("object_id"),
+                "limit": args.get("limit", 50),
+                "cursor": args.get("cursor"),
+                "direction": args.get("direction", "desc"),
                 "include_total": args.get("include_total", False),
             },
         )

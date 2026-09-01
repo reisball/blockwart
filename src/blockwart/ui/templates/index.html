@@ -337,6 +337,7 @@
         <a {% if view == "topology" %}class="active"{% endif %} href="/?view=topology&q={{ q|urlencode }}&kind={{ kind }}{% if view == 'topology' and topology_mode == 'network' %}&topology_mode=network{% if network_category %}&network_category={{ network_category }}{% endif %}{% if include_inherited_services %}&services=1{% endif %}{% endif %}">{{ t("nav.topology") }}</a>
         <a href="/projects">{{ t("project.workspace.overview_title") }}</a>
         <a href="/attention">{{ t("nav.attention") }}</a>
+        <a href="/activity">{{ t("nav.activity") }}</a>
         <a href="/release-updates">{{ t("nav.release_updates") }}</a>
       </nav>
 

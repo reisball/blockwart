@@ -19,8 +19,8 @@ def test_update_preview_tool_has_the_reviewed_manifest_evidence() -> None:
     assert metadata == {
         "build_revision": "issue-189",
         "contract_version": "1",
-        "manifest_digest": "8363f114876a122a95a2a05ca822058dab788e8d432332aa3a39ae7cd8cf5f6d",
-        "tool_count": 31,
+        "manifest_digest": "995788021fe66780c97023bc2d455f035caff11116530bdd10c74aa13e782e8d",
+        "tool_count": 32,
     }
 
 
@@ -51,7 +51,7 @@ def test_reduced_catalog_is_incompatible_before_normal_tool_use() -> None:
 
     diagnosis = diagnose_contract(local, api=reduced)
 
-    assert local["tool_count"] == 31
+    assert local["tool_count"] == 32
     assert reduced["tool_count"] == 22
     assert diagnosis["status"] == "incompatible"
     assert diagnosis["classification"] == "wrapper_drift"

@@ -1205,5 +1205,20 @@
   "validation.network_ip_required": "Address row {row}: IP is required.",
   "validation.port_invalid": "Row {row}: Port must be an integer from 1 to 65535.",
   "value.no": "No",
-  "value.yes": "Yes"
+  "value.yes": "Yes",
+  "nav.activity": "Activity",
+  "activity.title": "Activity",
+  "activity.eyebrow": "Agent Activity",
+  "activity.help": "Authorized catalog-wide change feed. A read-only pull view over recorded audit activity; type-specific details stay in the object, comment, and audit resources.",
+  "activity.empty": "No visible activity for this filter.",
+  "activity.filter": "Filter",
+  "activity.clear": "Clear",
+  "activity.type_label": "Event type",
+  "activity.all_types": "All event types",
+  "activity.since_label": "Since (RFC3339)",
+  "activity.occurred_at": "Occurred at",
+  "activity.type.object_revision": "Object revision",
+  "activity.type.relationship_mutation": "Relationship mutation",
+  "activity.type.comment_create": "Comment created",
+  "activity.type.audit": "Technical audit"
 }
