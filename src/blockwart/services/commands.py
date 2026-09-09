@@ -7,6 +7,7 @@ from collections.abc import Collection, Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
+from pydantic import ValidationError
 from sqlalchemy import delete, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
@@ -47,7 +48,11 @@ from blockwart.models import (
     Principal,
     Relationship,
 )
-from blockwart.schemas.catalog import CatalogObjectIn, CatalogObjectOut
+from blockwart.schemas.catalog import (
+    CatalogObjectIn,
+    CatalogObjectOut,
+    ObjectRenameCandidate,
+)
 from blockwart.services.audit import add_audit_event
 from blockwart.services.catalog import (
     ObjectUpsertPlan,
@@ -97,6 +102,10 @@ class CommandPreconditionRequired(CommandError):
 
 class CommandPreconditionFailed(CommandError):
     """The supplied optimistic concurrency precondition is stale."""
+
+
+class CommandValidationFailed(CommandError):
+    """A projected field value was rejected by its canonical domain contract."""
 
 
 class IdempotencyConflict(CommandConflict):
@@ -405,6 +414,307 @@ def preview_catalog_object_update(
         diff_digest=diff_digest,
         contract_version=PREVIEW_CONTRACT_VERSION,
         preview_digest=preview_digest(body),
+    )
+
+
+@dataclass(frozen=True, slots=True)
+class ObjectRenamePlan:
+    """The shared read-only decision behind both rename preview and apply.
+
+    Planning resolves object authorization under the dedicated `rename`
+    capability, the current strong ETag precondition, and the kind-specific
+    validation of the proposed label. It never mutates, flushes, or reserves
+    anything, and it never consults or produces any field other than `label`.
+    """
+
+    row: CatalogObject
+    object_id: str
+    object_kind: str
+    expected_revision: int
+    current_label: str
+    new_label: str
+    context: WriteContext
+
+    @property
+    def changed(self) -> bool:
+        return self.current_label != self.new_label
+
+
+@dataclass(frozen=True, slots=True)
+class ObjectRenamePreviewResult:
+    object_id: str
+    object_kind: str
+    changed: bool
+    base_revision: int
+    base_etag: str
+    expected_result_revision: int
+    expected_result_etag: str
+    diff: list[PreviewDiffEntry]
+    diff_truncated: bool
+    diff_digest: str
+    contract_version: str
+    preview_digest: str
+
+
+@dataclass(frozen=True, slots=True)
+class ObjectRenameResult:
+    object_id: str
+    object_kind: str
+    old_label: str
+    new_label: str
+    revision: int
+    etag: str
+    changed: bool
+
+
+def plan_object_rename(
+    session: Session,
+    context: WriteContext,
+    *,
+    object_id: str,
+    new_label: str,
+    expected_revision: int | str | None,
+    refresh_policy: bool = False,
+) -> ObjectRenamePlan:
+    """Resolve one narrow object rename completely, without mutating anything.
+
+    This is the single shared gate for the real rename and its read-only
+    preview: object concealment, the dedicated `rename` capability on that
+    exact object, the current strong ETag precondition, and the kind-specific
+    label validation of :class:`ObjectRenameCandidate`. General `write` is
+    deliberately not accepted as a substitute, and no other object field is
+    read, projected, or proposed.
+    """
+    current_context = (
+        WriteContext(
+            principal=context.principal,
+            policy=policy_for_principal(session, context.principal.id),
+            channel=context.channel,
+            request_id=context.request_id,
+        )
+        if refresh_policy
+        else context
+    )
+    row = _require_permission(
+        session,
+        current_context,
+        object_id=object_id,
+        permission=Permission.RENAME,
+    )
+    resolved_revision = _resolve_expected_revision(expected_revision)
+    if row.revision != resolved_revision:
+        raise CommandPreconditionFailed("object revision changed")
+    return ObjectRenamePlan(
+        row=row,
+        object_id=object_id,
+        object_kind=row.kind,
+        expected_revision=resolved_revision,
+        current_label=row.label,
+        new_label=_validated_rename_label(row, new_label),
+        context=current_context,
+    )
+
+
+def preview_object_rename(
+    session: Session,
+    context: WriteContext,
+    *,
+    object_id: str,
+    new_label: str,
+    expected_revision: int | str | None,
+    refresh_policy: bool = False,
+) -> ObjectRenamePreviewResult:
+    """Resolve the same rename read-only and publish its exact diff.
+
+    The proposed record is the stored record with `label` replaced and nothing
+    else, so the published diff is both the exact rename diff and the evidence
+    that no other path changes. It shares the bounded, redacted, versioned
+    preview contract of the full-object update preview, and it grants no lock,
+    reservation, or later-apply guarantee.
+    """
+    plan = plan_object_rename(
+        session,
+        context,
+        object_id=object_id,
+        new_label=new_label,
+        expected_revision=expected_revision,
+        refresh_policy=refresh_policy,
+    )
+    before = _current_snapshot(plan.row)
+    after = {**before, "label": plan.new_label}
+    rendered_before = _render_preview_snapshot(before, context=plan.context)
+    rendered_after = _render_preview_snapshot(after, context=plan.context)
+    diff, diff_truncated, diff_digest = preview_diff(
+        before,
+        after,
+        rendered_before=rendered_before,
+        rendered_after=rendered_after,
+        digest_before=rendered_before,
+        digest_after=_render_preview_snapshot(after),
+    )
+    base_revision = plan.expected_revision
+    result_revision = base_revision + 1 if plan.changed else base_revision
+    body: dict[str, object] = {
+        "base_etag": revision_etag(base_revision),
+        "base_revision": base_revision,
+        "changed": plan.changed,
+        "preview_contract_version": PREVIEW_CONTRACT_VERSION,
+        "diff": [entry.as_json() for entry in diff],
+        "diff_digest": diff_digest,
+        "diff_truncated": diff_truncated,
+        "expected_result_etag": revision_etag(result_revision),
+        "expected_result_revision": result_revision,
+        "object_id": object_id,
+        "object_kind": plan.object_kind,
+    }
+    return ObjectRenamePreviewResult(
+        object_id=object_id,
+        object_kind=plan.object_kind,
+        changed=plan.changed,
+        base_revision=base_revision,
+        base_etag=revision_etag(base_revision),
+        expected_result_revision=result_revision,
+        expected_result_etag=revision_etag(result_revision),
+        diff=diff,
+        diff_truncated=diff_truncated,
+        diff_digest=diff_digest,
+        contract_version=PREVIEW_CONTRACT_VERSION,
+        preview_digest=preview_digest(body),
+    )
+
+
+def rename_catalog_object(
+    session: Session,
+    context: WriteContext,
+    *,
+    object_id: str,
+    new_label: str,
+    expected_revision: int | str | None,
+    refresh_policy: bool = False,
+) -> ObjectRenameResult:
+    """Plan and apply one authorized narrow rename in this transaction.
+
+    The plan is resolved again here, inside the write transaction, so a
+    concurrent write between an earlier preview and this call fails the normal
+    precondition. The applied statement names `label` and the optimistic
+    concurrency columns only, so identity, kind, references, relationships,
+    placement, status, lifecycle, health, summary, kind-specific data,
+    provenance, and grants cannot change even in principle.
+
+    A no-op rename is deterministic: it confirms the claimed revision under the
+    same lock the shared upsert uses, then reports the unchanged revision
+    without advancing it and without writing an audit event.
+    """
+    plan = plan_object_rename(
+        session,
+        context,
+        object_id=object_id,
+        new_label=new_label,
+        expected_revision=expected_revision,
+        refresh_policy=refresh_policy,
+    )
+    context = plan.context
+    if not plan.changed:
+        current_id = session.scalar(
+            select(CatalogObject.id)
+            .where(
+                CatalogObject.id == object_id,
+                CatalogObject.revision == plan.expected_revision,
+            )
+            .with_for_update()
+        )
+        if current_id is None:
+            raise CommandPreconditionFailed("object revision changed")
+        return ObjectRenameResult(
+            object_id=object_id,
+            object_kind=plan.object_kind,
+            old_label=plan.current_label,
+            new_label=plan.new_label,
+            revision=plan.expected_revision,
+            etag=revision_etag(plan.expected_revision),
+            changed=False,
+        )
+    before = _object_snapshot(plan.row)
+    result = session.execute(
+        update(CatalogObject)
+        .where(
+            CatalogObject.id == object_id,
+            CatalogObject.revision == plan.expected_revision,
+        )
+        .values(
+            label=plan.new_label,
+            revision=CatalogObject.revision + 1,
+            updated_at=_now(),
+        )
+        .execution_options(synchronize_session=False)
+    )
+    if result.rowcount != 1:
+        raise CommandPreconditionFailed("object revision changed")
+    new_revision = plan.expected_revision + 1
+    session.expire(plan.row)
+    _write_command_audit(
+        session,
+        context,
+        object_id=object_id,
+        action="object_renamed",
+        old_revision=plan.expected_revision,
+        new_revision=new_revision,
+        before=before,
+        after={**before, "label": plan.new_label},
+        changes=[_change("label", plan.current_label, plan.new_label)],
+        extra={
+            "object_ref": f"{plan.object_kind}:{object_id}",
+            "object_kind": plan.object_kind,
+            "old_label": plan.current_label,
+            "new_label": plan.new_label,
+        },
+    )
+    return ObjectRenameResult(
+        object_id=object_id,
+        object_kind=plan.object_kind,
+        old_label=plan.current_label,
+        new_label=plan.new_label,
+        revision=new_revision,
+        etag=revision_etag(new_revision),
+        changed=True,
+    )
+
+
+def _validated_rename_label(row: CatalogObject, new_label: str) -> str:
+    """Validate one proposed label under the stored record's own kind contract.
+
+    The candidate carries the stored document verbatim, so the proposal differs
+    from the record in the label alone. A record whose stored state already
+    fails its own kind contract — a corrupt data document, for instance — is
+    reported as a conflict rather than as a rejected label, because its rename
+    is blocked by the record and not by the caller's input.
+    """
+    raw_data = _raw_object_snapshot(row)["data"]
+    data = raw_data if isinstance(raw_data, dict) else {}
+    try:
+        return _rename_candidate(row, data, new_label).label
+    except ValidationError as exc:
+        try:
+            _rename_candidate(row, data, row.label)
+        except ValidationError as stored:
+            raise CommandConflict("stored object cannot be renamed") from stored
+        raise CommandValidationFailed("proposed label is not valid") from exc
+
+
+def _rename_candidate(
+    row: CatalogObject,
+    data: dict[str, object],
+    label: str,
+) -> ObjectRenameCandidate:
+    return ObjectRenameCandidate(
+        id=row.id,
+        kind=row.kind,
+        label=label,
+        status=row.status,
+        lifecycle=row.lifecycle,
+        health=row.health,
+        summary=row.summary,
+        data=data,
     )
 
 

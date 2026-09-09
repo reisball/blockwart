@@ -90,6 +90,9 @@ from blockwart.schemas.v1 import (
     V1ObjectContextBatchIn,
     V1ObjectContextBatchOut,
     V1ObjectPageOut,
+    V1ObjectRenameIn,
+    V1ObjectRenameOut,
+    V1ObjectRenamePreviewOut,
     V1ObjectUpdatePreviewDiffEntryOut,
     V1ObjectUpdatePreviewOut,
     V1PrincipalSearchOut,
@@ -123,6 +126,8 @@ from blockwart.services.commands import (
     delete_catalog_object,
     delete_object_relationship,
     preview_catalog_object_update,
+    preview_object_rename,
+    rename_catalog_object,
     revision_etag,
     update_catalog_object,
 )
@@ -1170,6 +1175,110 @@ def preview_v1_object_update(
         diff_digest=result.diff_digest,
         diff_truncated=result.diff_truncated,
         preview_digest=result.preview_digest,
+    )
+
+
+@router.post(
+    "/objects/{object_id}/rename-preview",
+    response_model=V1ObjectRenamePreviewOut,
+    summary="Preview one ETag-bound object rename without writing",
+)
+def preview_v1_object_rename(
+    object_id: str,
+    payload: V1ObjectRenameIn,
+    request: Request,
+    response: Response,
+    session: Annotated[Session, Depends(get_session)],
+    access: Annotated[ReadAccess, Depends(require_api_read_only_access)],
+    if_match: Annotated[str | None, Header(alias="If-Match")] = None,
+) -> V1ObjectRenamePreviewOut:
+    """Resolve the proposed rename read-only and publish its exact diff.
+
+    The request is exactly the request of
+    `POST /api/v1/objects/{object_id}/rename`: the exact object ID, the current
+    strong `If-Match` ETag, and the proposed label. Effective `rename` on that
+    exact object is required even though nothing is written, and the shared
+    plan applies the same kind-specific label validation as the apply. The
+    preview creates no lock, reservation, or later-apply guarantee.
+    """
+    context = api_write_context(request, access)
+    result = execute_api_read_only_command(
+        session,
+        context,
+        lambda: preview_object_rename(
+            session,
+            context,
+            object_id=object_id,
+            new_label=payload.new_label,
+            expected_revision=if_match,
+            refresh_policy=True,
+        ),
+    )
+    response.headers["ETag"] = result.base_etag
+    return V1ObjectRenamePreviewOut(
+        preview_contract_version=result.contract_version,
+        object_id=result.object_id,
+        object_kind=result.object_kind,
+        changed=result.changed,
+        base_revision=result.base_revision,
+        base_etag=result.base_etag,
+        expected_result_revision=result.expected_result_revision,
+        expected_result_etag=result.expected_result_etag,
+        diff=[
+            V1ObjectUpdatePreviewDiffEntryOut.model_validate(entry.as_json())
+            for entry in result.diff
+        ],
+        diff_digest=result.diff_digest,
+        diff_truncated=result.diff_truncated,
+        preview_digest=result.preview_digest,
+    )
+
+
+@router.post(
+    "/objects/{object_id}/rename",
+    response_model=V1ObjectRenameOut,
+    summary="Change only the label of one object under its current ETag",
+)
+def rename_v1_object(
+    object_id: str,
+    payload: V1ObjectRenameIn,
+    request: Request,
+    response: Response,
+    session: Annotated[Session, Depends(get_session)],
+    access: Annotated[ReadAccess, Depends(require_api_read_access)],
+    if_match: Annotated[str | None, Header(alias="If-Match")] = None,
+) -> V1ObjectRenameOut:
+    """Apply the same validated rename contract the preview resolved.
+
+    The command requires the dedicated `rename` capability on that exact
+    object; general `write` is not a substitute. It changes the common
+    top-level label only, so object ID, kind, references, relationships,
+    placement, status, lifecycle, health, summary, kind-specific data, and
+    grants are untouched. A no-op rename reports `changed = false` and
+    deliberately does not advance the revision.
+    """
+    context = api_write_context(request, access)
+    result = execute_api_command(
+        session,
+        context,
+        lambda: rename_catalog_object(
+            session,
+            context,
+            object_id=object_id,
+            new_label=payload.new_label,
+            expected_revision=if_match,
+            refresh_policy=True,
+        ),
+    )
+    response.headers["ETag"] = result.etag
+    return V1ObjectRenameOut(
+        object_id=result.object_id,
+        object_kind=result.object_kind,
+        old_label=result.old_label,
+        new_label=result.new_label,
+        revision=result.revision,
+        etag=result.etag,
+        changed=result.changed,
     )
 
 

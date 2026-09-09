@@ -82,6 +82,8 @@ It wraps the object-authorized v1 API:
 - blockwart.create_root -> POST /api/v1/roots
 - blockwart.update_object -> PUT /api/v1/objects/{object_id}
 - blockwart.preview_object_update -> POST /api/v1/objects/{object_id}/update-preview
+- blockwart.rename_object -> POST /api/v1/objects/{object_id}/rename
+- blockwart.preview_object_rename -> POST /api/v1/objects/{object_id}/rename-preview
 - blockwart.delete_object -> DELETE /api/v1/objects/{object_id}
 - blockwart.create_relationship -> POST /api/v1/objects/{object_id}/relationships
 - blockwart.delete_relationship -> DELETE /api/v1/objects/{object_id}/relationships
@@ -214,6 +216,18 @@ versioned preview digest. It creates no lock or reservation; clients still pass
 the original ETag to the real update and receive the ordinary precondition
 failure if anything changed in between.
 
+To change only a display name, `blockwart.rename_object` takes `object_id`,
+`new_label`, and `if_match` and nothing else, for every nameable kind. It
+requires the dedicated `rename` capability rather than general `write`, changes
+only the common top-level `label`, and leaves object ID, kind, references,
+relationships, placement, status, lifecycle, health, summary, kind-specific
+data, and grants untouched. Renaming to the current label reports
+`changed = false` without advancing the revision.
+`blockwart.preview_object_rename` takes the same arguments, is annotated
+read-only, and returns the exact rename diff, the canonical no-op answer, the
+base and expected result revision/ETag, and the same digests as the update
+preview. It creates no lock or reservation either.
+
 For `service`, the same generic context and object write tools carry the
 canonical bounded `data.components` document. `blockwart.describe_schema`
 publishes its local identity, role, direction, cycle, limit, ordering, and
@@ -266,6 +280,8 @@ means it deliberately bundles lower-level API concerns behind one agent call.
 | `create_root` | Create a disconnected catalog root | `intent tool`, `response improved` | Requires an already active catalog-owner principal; proves ownership, revision, idempotency, and the absence of a placement parent. Never mutates any catalog role. |
 | `update_object` | Update one known object | `directly sufficient` | The explicit current ETag preserves visible optimistic concurrency. |
 | `preview_object_update` | Review one proposed full-object update | `directly sufficient` | Uses the exact update arguments and shared plan, but returns only the bounded redacted diff and digest without mutating catalog or authentication state. |
+| `rename_object` | Change only one object's display name | `directly sufficient` | Carries the resource, the proposed label, and the precondition only, so a display-name change needs neither a reconstructed object document nor general write authority. |
+| `preview_object_rename` | Review one proposed rename | `directly sufficient` | Uses the exact rename arguments and shared plan, and its single `/label` diff entry is also the published evidence that no other path changes. |
 | `delete_object` | Delete one known object | `directly sufficient` | The destructive action and current ETag remain explicit. |
 | `create_relationship` | Link existing objects | `directly sufficient` | Its published schema carries the closed relationship vocabulary and the type-dependent metadata; its response contains the exact relationship, metadata, revision, and ETag. |
 | `delete_relationship` | Unlink existing objects | `directly sufficient` | The exact edge and current ETag remain explicit; the same closed vocabulary applies. |
@@ -524,6 +540,7 @@ unchanged. See `api-boundary-contract.md`.
 
 Object-write and relationship tool validation failures (`blockwart.create_root`,
 `blockwart.create_child`, `blockwart.update_object`, `blockwart.preview_object_update`,
+`blockwart.rename_object`, `blockwart.preview_object_rename`,
 `blockwart.create_attached_device`,
 `blockwart.create_relationship`, and `blockwart.delete_relationship`) return field-accurate,
 sanitized `details` on the `invalid_arguments` error. Each detail carries exactly the canonical

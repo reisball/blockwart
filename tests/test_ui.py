@@ -13,6 +13,7 @@ from sqlalchemy.orm import Session
 from blockwart.api.deps import get_session
 from blockwart.config import Settings
 from blockwart.db.session import transaction
+from blockwart.domain.auth import Permission
 from blockwart.domain.ui_schema import (
     CREATE_KIND_ORDER,
     FIELD_DEFINITIONS,
@@ -200,6 +201,14 @@ def test_locale_catalogs_have_identical_keys_and_format_contracts() -> None:
             if field_name is not None
         }
         assert german_fields == english_fields, key
+
+
+def test_locale_catalogs_cover_every_object_permission() -> None:
+    for language in ("en", "de"):
+        catalog = load_catalog(language)
+        assert {f"permission.{permission.value}" for permission in Permission} <= set(
+            catalog
+        )
 
 
 def test_topology_is_a_real_second_view(client: TestClient) -> None:

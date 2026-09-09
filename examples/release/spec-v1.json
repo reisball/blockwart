@@ -2,7 +2,7 @@
   "backup": {
     "root": "/var/backups/blockwart-releases"
   },
-  "expected_schema_revision": "20260825_0021",
+  "expected_schema_revision": "20260909_0022",
   "hooks": [
     {
       "argv": [

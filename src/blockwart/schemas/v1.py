@@ -60,7 +60,12 @@ from blockwart.schemas.agent import (
     AgentServiceReleaseMonitoring,
     ReadProjectionOut,
 )
-from blockwart.schemas.catalog import CatalogObjectIn, CatalogObjectOut, ObjectKind
+from blockwart.schemas.catalog import (
+    OBJECT_LABEL_MAX_LENGTH,
+    CatalogObjectIn,
+    CatalogObjectOut,
+    ObjectKind,
+)
 
 ObjectSortField = Literal["id", "label", "kind", "relevance", "updated_at"]
 SortDirection = Literal["asc", "desc"]
@@ -494,6 +499,73 @@ class V1ObjectUpdatePreviewOut(BaseModel):
     )
     diff_truncated: bool
     preview_digest: str = Field(pattern=r"^sha256:[0-9a-f]{64}$")
+
+
+class V1ObjectRenameIn(BaseModel):
+    """The complete request body of one narrow object rename.
+
+    The body carries the proposed label and nothing else: the object is named
+    by the path, the base revision by the strong `If-Match` ETag. A caller
+    therefore never reconstructs an object document to change a display name,
+    and no other field can be smuggled into the operation.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    new_label: str = Field(min_length=1, max_length=OBJECT_LABEL_MAX_LENGTH)
+
+
+class V1ObjectRenamePreviewOut(BaseModel):
+    """The read-only result of one ETag-bound rename preview.
+
+    The response shares the bounded, redacted, versioned diff contract of the
+    full-object update preview. Because the proposal is the stored record with
+    only `label` replaced, the diff is at once the exact rename diff and the
+    published evidence that the operation touches no other path.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    preview_contract_version: Literal[PREVIEW_CONTRACT_VERSION]
+    object_id: str = Field(
+        min_length=1,
+        max_length=128,
+        pattern=r"^[a-z0-9][a-z0-9_-]*[a-z0-9]$|^[a-z0-9]$",
+    )
+    object_kind: ObjectKind
+    changed: bool
+    base_revision: int = Field(ge=1)
+    base_etag: str = Field(pattern=r'^"rev-[1-9][0-9]*"$')
+    expected_result_revision: int = Field(ge=1)
+    expected_result_etag: str = Field(pattern=r'^"rev-[1-9][0-9]*"$')
+    diff: list[V1ObjectUpdatePreviewDiffEntryOut] = Field(
+        max_length=PREVIEW_DIFF_MAX_ENTRIES,
+        description=(
+            "Canonically ordered, bounded, redacted structured diff of the "
+            "proposed label against the current record."
+        ),
+    )
+    diff_digest: str = Field(pattern=r"^sha256:[0-9a-f]{64}$")
+    diff_truncated: bool
+    preview_digest: str = Field(pattern=r"^sha256:[0-9a-f]{64}$")
+
+
+class V1ObjectRenameOut(BaseModel):
+    """The applied result of one narrow object rename.
+
+    The response is deliberately not an object document: a rename publishes the
+    resource identity, the two labels, and the resulting revision only.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    object_id: str
+    object_kind: ObjectKind
+    old_label: str
+    new_label: str
+    revision: int = Field(ge=1)
+    etag: str = Field(pattern=r'^"rev-[1-9][0-9]*"$')
+    changed: bool
 
 
 class V1DeleteCommandOut(BaseModel):

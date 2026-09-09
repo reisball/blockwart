@@ -103,6 +103,15 @@ counters during its table rebuild, while PostgreSQL retains those owner-specific
 objects unchanged. Back up and test the upgrade/downgrade against the normal
 restored candidate before changing traffic.
 
+Revision `20260909_0022` likewise only expands the object-grant role constraint
+for the new narrow `renamer` value. It writes no grant and rewrites no existing
+row: the `rename` permission that `editor`, `owner`, and `catalog_owner` gain is
+derived from the role each grant already stores, so existing assignments keep
+working without a data migration. Before a downgrade to `20260825_0021`, revoke
+every `renamer` grant; downgrade fails closed otherwise. `object_grants` carries
+no trigger, so the SQLite table rebuild restores its constraints and indexes
+only.
+
 The image healthcheck calls `/api/health/ready`. An unhealthy result therefore means the process
 may still be alive but must not receive normal traffic.
 

@@ -13,14 +13,14 @@ from blockwart.mcp.manifest import (
 from blockwart.mcp.server import TOOLS, local_contract_metadata, validate_runtime_catalog
 
 
-def test_update_preview_tool_has_the_reviewed_manifest_evidence() -> None:
-    metadata = contract_metadata(TOOLS, build_revision="issue-189")
+def test_rename_tools_have_the_reviewed_manifest_evidence() -> None:
+    metadata = contract_metadata(TOOLS, build_revision="issue-233")
 
     assert metadata == {
-        "build_revision": "issue-189",
+        "build_revision": "issue-233",
         "contract_version": "1",
-        "manifest_digest": "8363f114876a122a95a2a05ca822058dab788e8d432332aa3a39ae7cd8cf5f6d",
-        "tool_count": 31,
+        "manifest_digest": "008dbad4f1727134e72ffa8fc5ba12a671dc23a553ad9428d18fa4731132949b",
+        "tool_count": 33,
     }
 
 
@@ -51,7 +51,7 @@ def test_reduced_catalog_is_incompatible_before_normal_tool_use() -> None:
 
     diagnosis = diagnose_contract(local, api=reduced)
 
-    assert local["tool_count"] == 31
+    assert local["tool_count"] == 33
     assert reduced["tool_count"] == 22
     assert diagnosis["status"] == "incompatible"
     assert diagnosis["classification"] == "wrapper_drift"

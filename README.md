@@ -36,6 +36,8 @@ automatically.
 - search and read authorized context through REST and MCP;
 - create, update, relate, and delete catalog objects through authorized UI,
   REST, and MCP commands;
+- rename any nameable object through a narrow, ETag-bound contract that
+  changes only its label and uses its own delegable `rename` capability;
 - keep an append-only, Markdown-capable operational comment timeline per
   object through UI, REST, and MCP;
 - manage human and service-account identities, explicit global catalog-owner

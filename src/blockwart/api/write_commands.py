@@ -17,6 +17,7 @@ from blockwart.services.commands import (
     CommandNotFound,
     CommandPreconditionFailed,
     CommandPreconditionRequired,
+    CommandValidationFailed,
     WriteContext,
     record_command_denial,
 )
@@ -95,6 +96,8 @@ def _command_http_error(
         return HTTPException(status_code=428, detail=str(exc))
     if isinstance(exc, CommandPreconditionFailed):
         return HTTPException(status_code=412, detail=str(exc))
+    if isinstance(exc, CommandValidationFailed):
+        return HTTPException(status_code=422, detail=str(exc))
     if isinstance(
         exc,
         CommandConflict

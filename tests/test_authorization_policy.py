@@ -74,10 +74,16 @@ def test_role_matrix_is_exact_and_closed() -> None:
         Permission.DISCOVER,
         Permission.READ,
     }
+    assert permissions_for_role(Role.RENAMER) == {
+        Permission.DISCOVER,
+        Permission.READ,
+        Permission.RENAME,
+    }
     assert permissions_for_role(Role.EDITOR) == {
         Permission.DISCOVER,
         Permission.READ,
         Permission.WRITE,
+        Permission.RENAME,
     }
     assert permissions_for_role(Role.CREATOR) == {
         Permission.DISCOVER,
@@ -173,6 +179,7 @@ def test_combined_grants_are_additive_but_do_not_reach_parents_or_siblings(
         Permission.DISCOVER,
         Permission.READ,
         Permission.WRITE,
+        Permission.RENAME,
         Permission.CREATE_CHILD,
     }
     assert policy.visibility_for("fabrik") == ObjectVisibility.NONE

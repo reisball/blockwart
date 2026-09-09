@@ -23,6 +23,9 @@ class Permission(StrEnum):
     DISCOVER = "discover"
     READ = "read"
     WRITE = "write"
+    # Changing only the common top-level label is its own capability, so it can
+    # be delegated without the general write authority over an object document.
+    RENAME = "rename"
     CREATE_CHILD = "create_child"
     MANAGE_ACCESS = "manage_access"
     DELETE = "delete"
@@ -31,6 +34,7 @@ class Permission(StrEnum):
 class Role(StrEnum):
     DISCOVERER = "discoverer"
     VIEWER = "viewer"
+    RENAMER = "renamer"
     EDITOR = "editor"
     CREATOR = "creator"
     ACCESS_MANAGER = "access_manager"
@@ -52,11 +56,19 @@ ROLE_PERMISSIONS = MappingProxyType(
     {
         Role.DISCOVERER: frozenset({Permission.DISCOVER}),
         Role.VIEWER: frozenset({Permission.DISCOVER, Permission.READ}),
+        Role.RENAMER: frozenset(
+            {
+                Permission.DISCOVER,
+                Permission.READ,
+                Permission.RENAME,
+            }
+        ),
         Role.EDITOR: frozenset(
             {
                 Permission.DISCOVER,
                 Permission.READ,
                 Permission.WRITE,
+                Permission.RENAME,
             }
         ),
         Role.CREATOR: frozenset(
