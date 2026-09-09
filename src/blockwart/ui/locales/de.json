@@ -552,6 +552,7 @@
   "permission.discover": "Entdecken",
   "permission.manage_access": "Zugriffe verwalten",
   "permission.read": "Lesen",
+  "permission.rename": "Umbenennen",
   "permission.write": "Schreiben",
   "placement.assigned": "Zugeordnet",
   "placement.root": "Wurzel",

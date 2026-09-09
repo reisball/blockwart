@@ -552,6 +552,7 @@
   "permission.discover": "Discover",
   "permission.manage_access": "Manage access",
   "permission.read": "Read",
+  "permission.rename": "Rename",
   "permission.write": "Write",
   "placement.assigned": "Assigned",
   "placement.root": "Root",
