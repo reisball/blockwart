@@ -542,6 +542,66 @@ grant, idempotency, relationship, monitoring, or source-coverage state.
 Invalid credentials retain the normal authentication failure throttling and
 security evidence and never reach preview planning.
 
+### `POST /api/v1/objects/{object_id}/rename`
+
+Changes only the common top-level `label` of one object. It is available for
+every nameable kind: `host`, `system`, `network`, `device`, `service`,
+`credential_reference`, `runbook`, `decision`, and `project`.
+
+The request body is the closed document `{"new_label": "..."}` and nothing
+else, so a caller never reconstructs a complete object document to change a
+display name. The object is named by the path and the base revision by the
+current strong `If-Match` ETag.
+
+Requires the dedicated `rename` permission on that exact object; general
+`write` is not a substitute, and `rename` alone permits no other mutation.
+Missing and concealed path IDs return the usual `404`. A principal that can
+discover the object but holds no `rename` receives `403`. Missing `If-Match` is
+`428 precondition_required`, and a malformed, weak, or stale value is
+`412 precondition_failed`. A proposed label rejected by the kind's existing
+validation — including the shared secret-shaped value rule — is
+`422 validation_error`; no new global label uniqueness rule is introduced.
+
+The response is a closed `V1ObjectRenameOut` document with `object_id`,
+`object_kind`, `old_label`, `new_label`, `revision`, `etag`, and `changed`. It
+is deliberately not an object document.
+
+The operation changes the common top-level `label` and only that. For `host`
+and `system`, the human UI derives its displayed primary name from
+`data.network.hostnames[0]` instead, so renaming those kinds changes the stored
+label without changing that derived display name; use the full-object update to
+change a hostname.
+
+Renaming to the current label is a deterministic no-op: it verifies the claimed
+revision under the same lock the shared upsert uses, reports `changed = false`,
+does not advance the revision, and writes no audit event. Two callers holding
+the same base ETag cannot both rename: the second receives
+`412 precondition_failed`.
+
+A successful rename writes exactly one `label` column plus the optimistic
+concurrency columns, so object ID, kind, references, relationships, placement,
+status, lifecycle, health, summary, kind-specific data, provenance, and grants
+are unchanged. It emits one `object_renamed` audit event carrying the object,
+kind, old and new label, actor, channel, request ID, and resulting revision.
+
+### `POST /api/v1/objects/{object_id}/rename-preview`
+
+Previews exactly the rename above without applying it, from the same path ID,
+body, and `If-Match`. Effective `rename` on that exact object is still
+required, and the shared plan applies the same label validation.
+
+The response is a closed `V1ObjectRenamePreviewOut` document with the same
+fields, bounds, digests, and value/pointer contract as
+`POST /api/v1/objects/{object_id}/update-preview`. Because the proposal is the
+stored record with only `label` replaced, a changed preview publishes exactly
+one `/label` diff entry, which is at once the exact rename diff and the
+evidence that no other path changes. A no-op preview publishes an empty diff
+and equal base and expected result revisions.
+
+Like the update preview, an authenticated rename preview issues reads only and
+creates no lock, reservation, or later-apply guarantee: a write in between
+makes the old ETag stale in the ordinary way.
+
 ### `DELETE /api/v1/objects/{object_id}`
 
 Requires the separate `delete` permission plus current `If-Match`. Referenced

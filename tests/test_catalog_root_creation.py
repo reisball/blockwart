@@ -287,6 +287,7 @@ def test_service_catalog_owner_creates_root_with_real_owner_grant(
         "discover",
         "manage_access",
         "read",
+        "rename",
         "write",
     ]
     with session_factory() as session:

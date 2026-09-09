@@ -3674,6 +3674,7 @@
           "discover",
           "read",
           "write",
+          "rename",
           "create_child",
           "manage_access",
           "delete"
@@ -4728,6 +4729,7 @@
         "enum": [
           "discoverer",
           "viewer",
+          "renamer",
           "editor",
           "creator",
           "access_manager",
@@ -6581,6 +6583,177 @@
           "direction"
         ],
         "title": "V1ObjectPageOut",
+        "type": "object"
+      },
+      "V1ObjectRenameIn": {
+        "additionalProperties": false,
+        "description": "The complete request body of one narrow object rename.\n\nThe body carries the proposed label and nothing else: the object is named\nby the path, the base revision by the strong `If-Match` ETag. A caller\ntherefore never reconstructs an object document to change a display name,\nand no other field can be smuggled into the operation.",
+        "properties": {
+          "new_label": {
+            "maxLength": 255,
+            "minLength": 1,
+            "title": "New Label",
+            "type": "string"
+          }
+        },
+        "required": [
+          "new_label"
+        ],
+        "title": "V1ObjectRenameIn",
+        "type": "object"
+      },
+      "V1ObjectRenameOut": {
+        "additionalProperties": false,
+        "description": "The applied result of one narrow object rename.\n\nThe response is deliberately not an object document: a rename publishes the\nresource identity, the two labels, and the resulting revision only.",
+        "properties": {
+          "changed": {
+            "title": "Changed",
+            "type": "boolean"
+          },
+          "etag": {
+            "pattern": "^\"rev-[1-9][0-9]*\"$",
+            "title": "Etag",
+            "type": "string"
+          },
+          "new_label": {
+            "title": "New Label",
+            "type": "string"
+          },
+          "object_id": {
+            "title": "Object Id",
+            "type": "string"
+          },
+          "object_kind": {
+            "enum": [
+              "host",
+              "system",
+              "network",
+              "device",
+              "service",
+              "credential_reference",
+              "runbook",
+              "decision",
+              "project"
+            ],
+            "title": "Object Kind",
+            "type": "string"
+          },
+          "old_label": {
+            "title": "Old Label",
+            "type": "string"
+          },
+          "revision": {
+            "minimum": 1.0,
+            "title": "Revision",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "object_id",
+          "object_kind",
+          "old_label",
+          "new_label",
+          "revision",
+          "etag",
+          "changed"
+        ],
+        "title": "V1ObjectRenameOut",
+        "type": "object"
+      },
+      "V1ObjectRenamePreviewOut": {
+        "additionalProperties": false,
+        "description": "The read-only result of one ETag-bound rename preview.\n\nThe response shares the bounded, redacted, versioned diff contract of the\nfull-object update preview. Because the proposal is the stored record with\nonly `label` replaced, the diff is at once the exact rename diff and the\npublished evidence that the operation touches no other path.",
+        "properties": {
+          "base_etag": {
+            "pattern": "^\"rev-[1-9][0-9]*\"$",
+            "title": "Base Etag",
+            "type": "string"
+          },
+          "base_revision": {
+            "minimum": 1.0,
+            "title": "Base Revision",
+            "type": "integer"
+          },
+          "changed": {
+            "title": "Changed",
+            "type": "boolean"
+          },
+          "diff": {
+            "description": "Canonically ordered, bounded, redacted structured diff of the proposed label against the current record.",
+            "items": {
+              "$ref": "#/components/schemas/V1ObjectUpdatePreviewDiffEntryOut"
+            },
+            "maxItems": 200,
+            "title": "Diff",
+            "type": "array"
+          },
+          "diff_digest": {
+            "pattern": "^sha256:[0-9a-f]{64}$",
+            "title": "Diff Digest",
+            "type": "string"
+          },
+          "diff_truncated": {
+            "title": "Diff Truncated",
+            "type": "boolean"
+          },
+          "expected_result_etag": {
+            "pattern": "^\"rev-[1-9][0-9]*\"$",
+            "title": "Expected Result Etag",
+            "type": "string"
+          },
+          "expected_result_revision": {
+            "minimum": 1.0,
+            "title": "Expected Result Revision",
+            "type": "integer"
+          },
+          "object_id": {
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[a-z0-9][a-z0-9_-]*[a-z0-9]$|^[a-z0-9]$",
+            "title": "Object Id",
+            "type": "string"
+          },
+          "object_kind": {
+            "enum": [
+              "host",
+              "system",
+              "network",
+              "device",
+              "service",
+              "credential_reference",
+              "runbook",
+              "decision",
+              "project"
+            ],
+            "title": "Object Kind",
+            "type": "string"
+          },
+          "preview_contract_version": {
+            "const": "1",
+            "title": "Preview Contract Version",
+            "type": "string"
+          },
+          "preview_digest": {
+            "pattern": "^sha256:[0-9a-f]{64}$",
+            "title": "Preview Digest",
+            "type": "string"
+          }
+        },
+        "required": [
+          "preview_contract_version",
+          "object_id",
+          "object_kind",
+          "changed",
+          "base_revision",
+          "base_etag",
+          "expected_result_revision",
+          "expected_result_etag",
+          "diff",
+          "diff_digest",
+          "diff_truncated",
+          "preview_digest"
+        ],
+        "title": "V1ObjectRenamePreviewOut",
         "type": "object"
       },
       "V1ObjectUpdatePreviewDiffEntryOut": {
@@ -17066,6 +17239,334 @@
           }
         ],
         "summary": "Run one authorized, leased public GitHub release check",
+        "tags": [
+          "api-v1-readonly"
+        ]
+      }
+    },
+    "/api/v1/objects/{object_id}/rename": {
+      "post": {
+        "description": "Apply the same validated rename contract the preview resolved.\n\nThe command requires the dedicated `rename` capability on that exact\nobject; general `write` is not a substitute. It changes the common\ntop-level label only, so object ID, kind, references, relationships,\nplacement, status, lifecycle, health, summary, kind-specific data, and\ngrants are untouched. A no-op rename reports `changed = false` and\ndeliberately does not advance the revision.",
+        "operationId": "rename_v1_object_api_v1_objects__object_id__rename_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "object_id",
+            "required": true,
+            "schema": {
+              "title": "Object Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "If-Match",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "If-Match"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/V1ObjectRenameIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ObjectRenameOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Authentication required"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Permission denied"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Resource not found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "412": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Precondition failed"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Request validation failed"
+          },
+          "428": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Precondition required"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Internal server error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Service unavailable"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Change only the label of one object under its current ETag",
+        "tags": [
+          "api-v1-readonly"
+        ]
+      }
+    },
+    "/api/v1/objects/{object_id}/rename-preview": {
+      "post": {
+        "description": "Resolve the proposed rename read-only and publish its exact diff.\n\nThe request is exactly the request of\n`POST /api/v1/objects/{object_id}/rename`: the exact object ID, the current\nstrong `If-Match` ETag, and the proposed label. Effective `rename` on that\nexact object is required even though nothing is written, and the shared\nplan applies the same kind-specific label validation as the apply. The\npreview creates no lock, reservation, or later-apply guarantee.",
+        "operationId": "preview_v1_object_rename_api_v1_objects__object_id__rename_preview_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "object_id",
+            "required": true,
+            "schema": {
+              "title": "Object Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "If-Match",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "If-Match"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/V1ObjectRenameIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ObjectRenamePreviewOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Authentication required"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Permission denied"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Resource not found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "412": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Precondition failed"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Request validation failed"
+          },
+          "428": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Precondition required"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Internal server error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Service unavailable"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Preview one ETag-bound object rename without writing",
         "tags": [
           "api-v1-readonly"
         ]

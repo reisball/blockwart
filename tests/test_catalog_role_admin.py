@@ -1135,6 +1135,7 @@ def test_rest_principal_projection_exposes_catalog_role_and_global_authority(
                 "discover",
                 "manage_access",
                 "read",
+                "rename",
                 "write",
             ],
         }

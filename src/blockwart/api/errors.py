@@ -238,6 +238,7 @@ def install_api_error_contract(app: FastAPI) -> None:
             409: "conflict",
             412: "precondition_failed",
             413: "payload_too_large",
+            422: "validation_error",
             428: "precondition_required",
             503: "service_unavailable",
         }.get(exc.status_code, "http_error")

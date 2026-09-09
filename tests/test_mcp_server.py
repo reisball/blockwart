@@ -402,6 +402,8 @@ def test_mcp_client_completes_handshake_and_calls_every_read_only_tool() -> None
         "blockwart.create_root",
         "blockwart.update_object",
         "blockwart.preview_object_update",
+        "blockwart.rename_object",
+        "blockwart.preview_object_rename",
         "blockwart.delete_object",
         "blockwart.create_relationship",
         "blockwart.delete_relationship",
@@ -1260,6 +1262,8 @@ def test_mcp_tools_publish_explicit_read_write_and_delete_hints() -> None:
         "blockwart.create_root",
         "blockwart.update_object",
         "blockwart.preview_object_update",
+        "blockwart.rename_object",
+        "blockwart.preview_object_rename",
         "blockwart.delete_object",
         "blockwart.create_relationship",
         "blockwart.delete_relationship",
@@ -1298,6 +1302,7 @@ def test_mcp_tools_publish_explicit_read_write_and_delete_hints() -> None:
             "blockwart.get_device_graph",
             "blockwart.get_network_topology",
             "blockwart.preview_object_update",
+            "blockwart.preview_object_rename",
         }
     )
     assert tools["blockwart.delete_object"]["annotations"]["destructiveHint"]
@@ -1306,6 +1311,9 @@ def test_mcp_tools_publish_explicit_read_write_and_delete_hints() -> None:
     assert not tools["blockwart.update_object"]["annotations"]["destructiveHint"]
     assert not tools["blockwart.preview_object_update"]["annotations"]["destructiveHint"]
     assert tools["blockwart.preview_object_update"]["annotations"]["idempotentHint"]
+    assert not tools["blockwart.rename_object"]["annotations"]["readOnlyHint"]
+    assert not tools["blockwart.rename_object"]["annotations"]["destructiveHint"]
+    assert not tools["blockwart.preview_object_rename"]["annotations"]["destructiveHint"]
     assert not tools["blockwart.update_grant"]["annotations"]["destructiveHint"]
     assert not tools["blockwart.add_comment"]["annotations"]["destructiveHint"]
     assert not tools["blockwart.append_project_chronology"]["annotations"]["destructiveHint"]

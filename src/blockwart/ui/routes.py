@@ -304,6 +304,7 @@ def _localized_audit_lines(
         "grant_update": "audit.grant_update",
         "grant_revoke": "audit.grant_revoke",
         "comment_create": "audit.comment_create",
+        "object_renamed": "audit.object_renamed",
         "placement_assign": "audit.placement_assign",
         "seed_create": "audit.seed_create",
         "seed_update": "audit.seed_update",

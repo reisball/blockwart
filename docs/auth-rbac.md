@@ -68,7 +68,7 @@ Blockwart stores three independent authorization axes on a principal:
 | Axis | Stored as | Meaning |
 |---|---|---|
 | identity administration | `platform_role = admin` | identity and credential administration |
-| global catalog authority | `catalog_role = catalog_owner` | all six permissions on every object |
+| global catalog authority | `catalog_role = catalog_owner` | all seven permissions on every object |
 | global catalog read-only | `catalog_role = catalog_viewer` | exactly `discover` and `read` on every object |
 | scoped catalog access | `object_grants` rows | one role at one object, `self` or `subtree` |
 
@@ -84,8 +84,9 @@ are freely revocable through the protected catalog-role command.
 Identity administration is a separate authorization axis. A principal may
 have the optional platform role `admin`, which permits user, service-account,
 credential-metadata, and lifecycle administration. It never grants catalog
-`discover`, `read`, `write`, `manage_access`, or `delete`; those permissions
-still come only from explicit object grants or an explicit global catalog role.
+`discover`, `read`, `write`, `rename`, `manage_access`, or `delete`; those
+permissions still come only from explicit object grants or an explicit global
+catalog role.
 
 The admin-only browser UI lives at `/admin/principals`. It provides principal
 search, lifecycle changes, direct and effective assignment views, password
@@ -127,14 +128,25 @@ An object grant assigns one role to one principal at one object with either
 |---|---|
 | `discoverer` | `discover` |
 | `viewer` | `discover`, `read` |
-| `editor` | `discover`, `read`, `write` |
+| `renamer` | `discover`, `read`, `rename` |
+| `editor` | `discover`, `read`, `write`, `rename` |
 | `creator` | `discover`, `read`, `create_child` |
 | `access_manager` | `discover`, `read`, `manage_access` |
-| `owner` | all permissions, including `delete` |
+| `owner` | all permissions, including `rename` and `delete` |
 
 `discover` exposes only the safe stub projection. `read` permits the full
 object projection. Grants are additive, do not imply access to parents or
 siblings, and never live inside `data_json`.
+
+`rename` is a capability of its own rather than a part of `write`. It permits
+exactly one change — the common top-level `label` — through the narrow rename
+contract of [API v1](api-v1.md) and [MCP](mcp.md), and it permits nothing else:
+it never allows a full-object update, a create, a delete, or a grant change.
+`renamer` is the narrow role that delegates only that, while `editor`, `owner`,
+and `catalog_owner` carry it alongside their existing authority. `viewer`,
+`creator`, and `access_manager` deliberately do not receive it. Renaming
+changes no other stored field, so it can never move an object in the placement
+tree or widen anyone's access.
 
 `subtree` follows only the canonical placement graph:
 
@@ -149,8 +161,9 @@ reparenting changes access without a stale application cache.
 ## Global catalog roles
 
 An active principal with `catalog_role = catalog_owner` holds `discover`,
-`read`, `write`, `create_child`, `manage_access`, and `delete` on every object
-that currently exists, including objects created after the role was assigned.
+`read`, `write`, `rename`, `create_child`, `manage_access`, and `delete` on
+every object that currently exists, including objects created after the role
+was assigned.
 
 This is computed centrally in the policy service on every request. No wildcard
 grant, per-object grant, sentinel grant ID, or negative grant ID is ever
@@ -164,8 +177,9 @@ read state. An inactive catalog owner receives nothing.
 An active human or service-account principal with
 `catalog_role = catalog_viewer` holds exactly `discover` and `read` on the same
 complete current catalog and every object created later, including a new
-disconnected root. It never implies `write`, `create_child`, `manage_access`,
-`delete`, platform administration, credential administration, or token
+disconnected root. It never implies `write`, `rename`, `create_child`,
+`manage_access`, `delete`, platform administration, credential administration,
+or token
 administration. Login, a valid browser session or token, and platform admin
 alone likewise never imply catalog viewing. The viewer is a distinct typed
 global policy source; it is not an object grant and is never materialized into
