@@ -83,7 +83,9 @@ directory outside the repository, starts `blockwart-start`, loads packaged templ
 assets, runs the relationship-integrity diagnostic, and exercises all 31
 tools through 38 read/write, preview, Project-workspace, coverage, attention, comment,
 audit, and grant-management calls to the installed `blockwart-mcp` console
-command. It also runs the read-only service-interface
+command. It also proves the wrapper/API contract in both directions: identical
+same-commit metadata and a fail-fast incompatible diagnosis for a deliberately
+reduced materialized tool catalog. It also runs the read-only service-interface
 normalization, placement-state, network-classification, and canonical-Project plans from outside
 the source tree, plus the canonical-Runbook classification plan, the write-free synthetic
 Knowledge plan, and the installed reviewed-apply machine schemas. Productive Knowledge apply is

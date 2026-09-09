@@ -5,6 +5,7 @@ import json
 import os
 import subprocess
 import sysconfig
+import tempfile
 import time
 from datetime import timedelta
 from pathlib import Path
@@ -23,6 +24,7 @@ from blockwart.domain.attention import (
     ATTENTION_SEVERITY_VALUES,
 )
 from blockwart.domain.auth import CatalogRole, GrantScope, PlatformRole, Role
+from blockwart.mcp.server import TOOLS
 from blockwart.models import CatalogObject
 from blockwart.services.access import create_object_grant
 from blockwart.services.identity import (
@@ -718,6 +720,44 @@ def _tool_payload(result) -> dict:
     return json.loads(content.text)
 
 
+def prove_contract_drift_fail_fast(mcp_entrypoint: Path, api_token: str) -> None:
+    """Fail CI on the 2026-08-13 production drift shape through installed CLIs.
+
+    A deliberately reduced materialized tool catalog (mirroring the 2026-08-13
+    drift of 26 API tools vs 21 wrapper tools) must be diagnosed as
+    incompatible before normal agent work, both by the local verifier and by
+    the doctor path against this live same-commit API.
+
+    This installed integration test proves that a reduced catalog is rejected
+    when the installed wrapper and live API are from the same build. A
+    genuinely stale wrapper against a newer API is covered by the unit tests
+    in ``tests/test_mcp_manifest_contract.py``, not by this smoke. Tool count
+    alone never decides compatibility.
+    """
+    with tempfile.TemporaryDirectory(prefix="blockwart-mcp-drift-") as drift_dir:
+        catalog_path = Path(drift_dir) / "materialized-tools.json"
+        # Deliberately fewer materialized tools than the API contract publishes.
+        catalog_path.write_text(json.dumps({"tools": TOOLS[:-9]}), encoding="utf-8")
+        validate_payload = json.loads(
+            subprocess.check_output(
+                [str(mcp_entrypoint), "--validate-runtime-catalog", str(catalog_path)],
+                text=True,
+            )
+        )
+        doctor_payload = json.loads(
+            subprocess.check_output(
+                [str(mcp_entrypoint), "--doctor", "--runtime-catalog", str(catalog_path)],
+                env={**os.environ, "BLOCKWART_API_TOKEN": api_token},
+                text=True,
+            )
+        )
+    assert validate_payload["status"] == "incompatible"
+    assert validate_payload["classification"] == "stale_runtime_catalog"
+    assert doctor_payload["status"] == "incompatible"
+    assert doctor_payload["classification"] == "stale_runtime_catalog"
+    assert doctor_payload["api_status"] == "compatible"
+
+
 def main() -> None:
     readiness = wait_until_ready()
     api_token, browser_session, grant_candidate_id = prepare_authorized_readers()
@@ -753,6 +793,7 @@ def main() -> None:
     assert search["count"] == 1
     assert service["endpoints"]
     assert wrapper_metadata == api_contract_metadata
+    prove_contract_drift_fail_fast(mcp_entrypoint, api_token)
     assert {
         "id",
         "type",
@@ -771,7 +812,7 @@ def main() -> None:
         "installed_package=ok "
         f"cwd={Path.cwd()} revision={readiness['revision']} "
         f"openapi_paths={len(openapi['paths'])} mcp_protocol={protocol} mcp_calls=38 "
-        "mcp_contract=compatible"
+        "mcp_contract=compatible mcp_contract_drift=fail_fast"
     )
 
 
