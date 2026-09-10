@@ -55,6 +55,57 @@ fi
 "$TEMP_DIR/venv/bin/blockwart-seed" \
   --seed "$SOURCE_DIR/seeds/pilot_objects.yaml" \
   --owner-login package.owner
+"$TEMP_DIR/venv/bin/blockwart-auth" \
+  create-service-account \
+  --login package.repair-target \
+  --display-name "Package Repair Target"
+"$VENV_PYTHON" - <<'PY'
+import os
+
+from sqlalchemy import create_engine
+from sqlalchemy.orm import Session
+
+from blockwart.models import CatalogObject
+
+engine = create_engine(os.environ["BLOCKWART_DATABASE_URL"])
+with Session(engine) as session:
+    with session.begin():
+        session.add(
+            CatalogObject(
+                id="package-legacy-ownerless",
+                kind="host",
+                label="Package Legacy Ownerless",
+                status="active",
+                lifecycle="active",
+                health="healthy",
+                data_json='{"schema_version":1}',
+            )
+        )
+engine.dispose()
+PY
+OWNER_REPAIR_PREVIEW=$(
+  "$TEMP_DIR/venv/bin/blockwart-owner-repair" \
+    --actor-login package.owner \
+    --target-login package.repair-target \
+    --reason "Package smoke legacy upgrade" \
+    --request-id package-owner-repair-0001
+)
+printf '%s\n' "$OWNER_REPAIR_PREVIEW"
+OWNER_REPAIR_DIGEST=$(
+  printf '%s\n' "$OWNER_REPAIR_PREVIEW" |
+    sed -n 's/.*plan_digest=\([0-9a-f]\{64\}\).*/\1/p'
+)
+if [[ -z "$OWNER_REPAIR_DIGEST" ]]; then
+  echo "package_smoke_error=owner_repair_digest_missing" >&2
+  exit 1
+fi
+"$TEMP_DIR/venv/bin/blockwart-owner-repair" \
+  --actor-login package.owner \
+  --target-login package.repair-target \
+  --reason "Package smoke legacy upgrade" \
+  --request-id package-owner-repair-0001 \
+  --apply \
+  --expected-plan-digest "$OWNER_REPAIR_DIGEST"
 "$TEMP_DIR/venv/bin/blockwart-db" owners
 "$TEMP_DIR/venv/bin/blockwart-start" >"$TEMP_DIR/server.log" 2>&1 &
 SERVER_PID=$!

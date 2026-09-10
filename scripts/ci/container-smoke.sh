@@ -162,18 +162,53 @@ docker run --rm \
   -v "$MIGRATED_VOLUME:/data" \
   --entrypoint blockwart-db \
   "$IMAGE" upgrade
-printf '%s\n' 'container-smoke-owner-password' | docker run --rm -i \
+docker run --rm \
   -e BLOCKWART_DATABASE_URL=sqlite:////data/blockwart.sqlite3 \
   -v "$MIGRATED_VOLUME:/data" \
   --entrypoint blockwart-auth \
-  "$IMAGE" bootstrap-owner \
-  --login container.owner \
-  --display-name "Container Owner" \
-  --object-id ci-legacy \
-  --object-id ci-legacy-runbook \
-  --scope self \
-  --password-stdin \
-  --catalog-owner
+  "$IMAGE" create-service-account \
+  --login container.repair-actor \
+  --display-name "Container Repair Actor"
+docker run --rm \
+  -e BLOCKWART_DATABASE_URL=sqlite:////data/blockwart.sqlite3 \
+  -v "$MIGRATED_VOLUME:/data" \
+  --entrypoint blockwart-auth \
+  "$IMAGE" create-service-account \
+  --login container.repair-target \
+  --display-name "Container Repair Target"
+docker run --rm \
+  -e BLOCKWART_DATABASE_URL=sqlite:////data/blockwart.sqlite3 \
+  -v "$MIGRATED_VOLUME:/data" \
+  --entrypoint blockwart-auth \
+  "$IMAGE" bootstrap-catalog-owner --login container.repair-actor
+OWNER_REPAIR_PREVIEW=$(
+  docker run --rm \
+    -e BLOCKWART_DATABASE_URL=sqlite:////data/blockwart.sqlite3 \
+    -v "$MIGRATED_VOLUME:/data" \
+    --entrypoint blockwart-owner-repair \
+    "$IMAGE" \
+    --actor-login container.repair-actor \
+    --target-login container.repair-target \
+    --reason "Container smoke legacy upgrade" \
+    --request-id container-owner-repair-0001
+)
+printf '%s\n' "$OWNER_REPAIR_PREVIEW"
+OWNER_REPAIR_DIGEST=$(
+  printf '%s\n' "$OWNER_REPAIR_PREVIEW" |
+    sed -n 's/.*plan_digest=\([0-9a-f]\{64\}\).*/\1/p'
+)
+[[ -n "$OWNER_REPAIR_DIGEST" ]]
+docker run --rm \
+  -e BLOCKWART_DATABASE_URL=sqlite:////data/blockwart.sqlite3 \
+  -v "$MIGRATED_VOLUME:/data" \
+  --entrypoint blockwart-owner-repair \
+  "$IMAGE" \
+  --actor-login container.repair-actor \
+  --target-login container.repair-target \
+  --reason "Container smoke legacy upgrade" \
+  --request-id container-owner-repair-0001 \
+  --apply \
+  --expected-plan-digest "$OWNER_REPAIR_DIGEST"
 
 docker run -d \
   --name "$MIGRATED_CONTAINER" \

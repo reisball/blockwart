@@ -486,14 +486,27 @@ read-only by:
   only to principals that may manage the object's access;
 - `owner_coverage` on the object access resource and in the UI access panel.
 
-The only repair is the audited adoption command (REST `POST
-/api/v1/objects/{object_id}/access/adoption`, MCP
-`blockwart.adopt_ownerless_object`, and the **Adopt ownerless object** form in
+A ready application repairs one object through the audited adoption command
+(REST `POST /api/v1/objects/{object_id}/access/adoption`, MCP
+`blockwart.adopt_ownerless_object`, or the **Adopt ownerless object** form in
 the UI access panel). It requires an active catalog owner on a trusted channel
 and the current strong ETag, assigns exactly one direct `Owner/self` grant to
 one active principal, and refuses as soon as any active direct or inherited
 Owner grant exists. Its compare-and-set revision claim gives concurrent
 adoptions exactly one winner. See `api-v1.md` for the full contract.
+
+An upgraded legacy database that cannot pass readiness uses the packaged
+`blockwart-owner-repair` entry point before startup. Both preview and apply
+require explicit actor and target logins, an audit reason, and a request ID.
+The actor must still be an active `catalog_owner`; the target must still be
+active. Preview is mutation-free and reports the exact object IDs, revisions,
+counts by kind, and a state-bound SHA-256 plan digest. Apply requires that
+reviewed digest, runs as one serializable transaction with the shared
+deterministic lock order, and fails closed on any catalog, relationship,
+principal, grant, or owner-coverage drift. It creates only direct
+`Owner/self` grants and keeps the normal readiness invariant unchanged. See
+`deployment.md` for the exact stop, backup, preview, apply, verification, and
+startup sequence.
 
 ACL-shaped keys such as `acl`, `access_grants`, or `permissions` are rejected
 recursively from catalog write and import data. Object grants can be changed

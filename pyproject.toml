@@ -43,6 +43,7 @@ dev = [
 [project.scripts]
 blockwart-auth = "blockwart.cli.auth:main"
 blockwart-db = "blockwart.cli.database:main"
+blockwart-owner-repair = "blockwart.cli.owner_repair:main"
 blockwart-start = "blockwart.cli.start:main"
 blockwart-mcp = "blockwart.mcp.server:main"
 blockwart-import-markdown = "blockwart.cli.import_markdown:main"

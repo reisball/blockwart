@@ -17,8 +17,10 @@ This module is the one place that
 - lists legacy ownerless objects read-only, without ever guessing an owner
   from unrelated effective permissions.
 
-The audited recovery command for legacy objects lives in grant management,
-because it is an access-management write with its own authority rules.
+The authenticated single-object recovery command lives in grant management,
+because it is an access-management write with its own authority rules. The
+pre-start batch repair lives in `legacy_owner_repair` and reuses this module's
+same coverage definition without weakening it.
 """
 
 from __future__ import annotations
