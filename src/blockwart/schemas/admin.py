@@ -12,6 +12,7 @@ from blockwart.domain.auth import (
     PrincipalType,
     Role,
 )
+from blockwart.schemas.catalog import ObjectKind
 
 SERVICE_TOKEN_MIN_TTL_SECONDS = 300
 SERVICE_TOKEN_MAX_TTL_SECONDS = 31_536_000
@@ -94,8 +95,12 @@ class PrincipalTokenOut(BaseModel):
 class GlobalAuthorityOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
-    source: Literal["catalog_owner", "catalog_viewer"]
+    source: Literal["catalog_owner", "catalog_viewer", "project_creator"]
     permissions: list[Permission]
+    # Creating a top-level root has no object to carry a permission, so the
+    # kinds a catalog role may create as roots are reported separately. A
+    # project creator therefore reports no permission and exactly one kind.
+    root_kinds: list[ObjectKind] = Field(default_factory=list)
 
 
 class PrincipalAdminDetailOut(BaseModel):

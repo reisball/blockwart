@@ -8,7 +8,7 @@ import sysconfig
 import time
 from datetime import timedelta
 from pathlib import Path
-from urllib.error import URLError
+from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
 from mcp import ClientSession, StdioServerParameters
@@ -43,6 +43,31 @@ def fetch_json(path: str, *, token: str | None = None) -> dict:
         return json.load(response)
 
 
+def post_json(
+    path: str,
+    body: dict,
+    *,
+    token: str,
+    headers: dict[str, str] | None = None,
+) -> tuple[int, dict]:
+    """POST one JSON body and return the status with the parsed envelope."""
+    request = Request(
+        f"{BASE_URL}{path}",
+        data=json.dumps(body).encode("utf-8"),
+        headers={
+            "Authorization": f"Bearer {token}",
+            "Content-Type": "application/json",
+            **(headers or {}),
+        },
+        method="POST",
+    )
+    try:
+        with urlopen(request, timeout=7) as response:
+            return response.status, json.load(response)
+    except HTTPError as error:
+        return error.code, json.load(error)
+
+
 def wait_until_ready() -> dict:
     deadline = time.monotonic() + 30
     while time.monotonic() < deadline:
@@ -57,7 +82,7 @@ def wait_until_ready() -> dict:
     raise RuntimeError("installed package did not become ready")
 
 
-def prepare_authorized_readers() -> tuple[str, str, str]:
+def prepare_authorized_readers() -> tuple[str, str, str, str]:
     engine = build_engine(os.environ["BLOCKWART_DATABASE_URL"])
     try:
         with Session(engine) as session:
@@ -79,6 +104,12 @@ def prepare_authorized_readers() -> tuple[str, str, str]:
                     session,
                     login="package-smoke.candidate",
                     display_name="Package Smoke Grant Candidate",
+                )
+                project_creator = create_service_account(
+                    session,
+                    login="package-smoke.project-creator",
+                    display_name="Package Smoke Project Creator",
+                    catalog_role=CatalogRole.PROJECT_CREATOR,
                 )
                 for object_id in session.scalars(
                     select(CatalogObject.id).order_by(CatalogObject.id)
@@ -108,9 +139,76 @@ def prepare_authorized_readers() -> tuple[str, str, str]:
                     principal_id=browser_principal.id,
                     ttl_seconds=3600,
                 )
-        return service_token.value, browser_session.value, grant_candidate.id
+                creator_token = issue_service_token(
+                    session,
+                    principal_id=project_creator.id,
+                    name="package-smoke-project-creator",
+                    audience="api",
+                )
+        return (
+            service_token.value,
+            browser_session.value,
+            grant_candidate.id,
+            creator_token.value,
+        )
     finally:
         engine.dispose()
+
+
+def check_root_project_creator(token: str) -> None:
+    """Prove the installed package delegates root Projects and nothing else.
+
+    The principal holds only ``catalog_role = project_creator``: it creates one
+    root Project, receives Owner/self on it, and is refused every other root
+    kind and every catalog-wide read.
+    """
+    created_status, created = post_json(
+        "/api/v1/roots",
+        {
+            "id": "package-smoke-delegated-project",
+            "kind": "project",
+            "label": "Package Smoke Delegated Project",
+            "data": {
+                "schema_version": 1,
+                "category": "implementation",
+                "project_status": "planned",
+            },
+        },
+        token=token,
+        headers={"Idempotency-Key": "package-smoke-delegated-0001"},
+    )
+    assert created_status == 201, created
+    assert created["catalog_object"]["kind"] == "project"
+    assert created["catalog_object"]["parent_path"] == []
+    assert sorted(created["catalog_object"]["capabilities"]) == [
+        "create_child",
+        "delete",
+        "discover",
+        "manage_access",
+        "read",
+        "rename",
+        "write",
+    ]
+
+    denied_status, denied = post_json(
+        "/api/v1/roots",
+        {
+            "id": "package-smoke-delegated-host",
+            "kind": "host",
+            "label": "Package Smoke Delegated Host",
+            "data": {"schema_version": 1},
+        },
+        token=token,
+        headers={"Idempotency-Key": "package-smoke-delegated-0002"},
+    )
+    assert denied_status == 403, denied
+    assert denied["error"]["code"] == "forbidden"
+
+    # The role grants no catalog-wide read: only the created root is visible.
+    visible = fetch_json("/api/v1/objects", token=token)
+    assert [item["id"] for item in visible["items"]] == [
+        "package-smoke-delegated-project"
+    ]
 
 
 async def check_mcp(
@@ -720,7 +818,12 @@ def _tool_payload(result) -> dict:
 
 def main() -> None:
     readiness = wait_until_ready()
-    api_token, browser_session, grant_candidate_id = prepare_authorized_readers()
+    (
+        api_token,
+        browser_session,
+        grant_candidate_id,
+        project_creator_token,
+    ) = prepare_authorized_readers()
     index_request = Request(
         f"{BASE_URL}/",
         headers={
@@ -743,7 +846,7 @@ def main() -> None:
         token=api_token,
     )["objects"][0]
 
-    assert readiness["revision"] == "20260909_0022"
+    assert readiness["revision"] == "20260909_0023"
     assert "Blockwart" in index
     assert static_content_type == "text/css"
     assert not any(
@@ -760,6 +863,7 @@ def main() -> None:
         "transport",
         "exposure",
     }.issubset(service["endpoints"][0])
+    check_root_project_creator(project_creator_token)
     protocol = asyncio.run(
         check_mcp(
             search["results"][0]["id"],

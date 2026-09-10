@@ -913,10 +913,14 @@ TOOLS: list[JSON] = [
         "name": "blockwart.create_root",
         "description": (
             "Create one disconnected top-level catalog root without a placement parent "
-            "in a single agent call. Requires an already active catalog-owner principal "
-            "with an MCP-audience service token and an idempotency key; it never assigns "
-            "or removes any catalog role. Returns the object, Owner/self assignment, "
-            f"revision, ETag, and idempotency status. Build object.data from {SCHEMA_TOOL_NAME}."
+            "in a single agent call. Requires an already active principal with an "
+            "MCP-audience service token, an idempotency key, and a catalog role that "
+            "covers the requested kind: catalog_owner for every kind, or the narrow "
+            "project_creator for object.kind=project only. project_creator grants no "
+            "catalog-wide read, write, delete, or access-management authority, and this "
+            "call never assigns or removes any catalog role. Returns the object, "
+            "Owner/self assignment, revision, ETag, and idempotency status. Build "
+            f"object.data from {SCHEMA_TOOL_NAME}."
         ),
         "inputSchema": {
             "type": "object",

@@ -2,16 +2,20 @@ from sqlalchemy import event, select
 
 from blockwart.db.session import transaction
 from blockwart.domain.auth import (
+    CATALOG_ROLE_ROOT_KINDS,
     CatalogRole,
     GrantScope,
     ObjectVisibility,
     Permission,
     PlatformRole,
     Role,
+    catalog_role_creates_root_kind,
     permissions_for_catalog_role,
     permissions_for_role,
+    root_kinds_for_catalog_role,
 )
 from blockwart.models import CatalogObject, ObjectGrant, Principal, Relationship
+from blockwart.schemas.catalog import OBJECT_KINDS
 from blockwart.services.access import active_owner_covered_object_ids, create_object_grant
 from blockwart.services.identity import create_service_account, principal_context
 from blockwart.services.policy import GlobalPolicySource, policy_for_principal
@@ -350,12 +354,36 @@ def test_catalog_role_matrix_is_exact_and_closed() -> None:
     assert set(CatalogRole) == {
         CatalogRole.CATALOG_OWNER,
         CatalogRole.CATALOG_VIEWER,
+        CatalogRole.PROJECT_CREATOR,
     }
     assert permissions_for_catalog_role(CatalogRole.CATALOG_OWNER) == set(Permission)
     assert permissions_for_catalog_role(CatalogRole.CATALOG_VIEWER) == {
         Permission.DISCOVER,
         Permission.READ,
     }
+    # The project creator's whole authority is root creation for one kind, so
+    # it carries no catalog-wide object permission at all.
+    assert permissions_for_catalog_role(CatalogRole.PROJECT_CREATOR) == set()
+
+
+def test_catalog_role_root_creation_matrix_is_exact_and_closed() -> None:
+    assert set(CATALOG_ROLE_ROOT_KINDS) == set(CatalogRole)
+    # ``None`` means every kind the object schema accepts, so the catalog owner
+    # keeps covering a kind added later without a second vocabulary to update.
+    assert root_kinds_for_catalog_role(CatalogRole.CATALOG_OWNER) is None
+    assert root_kinds_for_catalog_role(CatalogRole.CATALOG_VIEWER) == frozenset()
+    assert root_kinds_for_catalog_role(CatalogRole.PROJECT_CREATOR) == {"project"}
+
+    for kind in OBJECT_KINDS:
+        assert catalog_role_creates_root_kind(CatalogRole.CATALOG_OWNER, kind)
+        assert not catalog_role_creates_root_kind(CatalogRole.CATALOG_VIEWER, kind)
+        assert not catalog_role_creates_root_kind(None, kind)
+        assert catalog_role_creates_root_kind(
+            CatalogRole.PROJECT_CREATOR, kind
+        ) is (kind == "project")
+        # A stored value outside the vocabulary fails closed instead of
+        # raising out of an authorization gate.
+        assert not catalog_role_creates_root_kind("catalog_editor", kind)
 
 
 def test_active_catalog_viewer_reads_current_and_future_disconnected_objects(

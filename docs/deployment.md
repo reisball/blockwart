@@ -112,6 +112,16 @@ every `renamer` grant; downgrade fails closed otherwise. `object_grants` carries
 no trigger, so the SQLite table rebuild restores its constraints and indexes
 only.
 
+Revision `20260909_0023` again only expands the catalog-role constraint, for the
+new narrow `project_creator` value. It assigns no role and changes no existing
+`catalog_owner` or `catalog_viewer` row. The role carries no catalog-wide object
+permission and no last-active-holder invariant, so no counter row or trigger is
+added for it; SQLite recreates the existing platform-admin and catalog-owner
+guards and counters during its table rebuild, and PostgreSQL retains them
+unchanged. Before a downgrade to `20260909_0022`, remove every
+`project_creator` role through the protected catalog-role UI/REST lifecycle;
+downgrade fails closed otherwise.
+
 The image healthcheck calls `/api/health/ready`. An unhealthy result therefore means the process
 may still be alive but must not receive normal traffic.
 

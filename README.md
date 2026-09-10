@@ -40,8 +40,11 @@ automatically.
   changes only its label and uses its own delegable `rename` capability;
 - keep an append-only, Markdown-capable operational comment timeline per
   object through UI, REST, and MCP;
-- manage human and service-account identities, explicit global catalog-owner
-  and read-only catalog-viewer roles, and additive object grants separately;
+- manage human and service-account identities, explicit global catalog-owner,
+  read-only catalog-viewer, and project-creator roles, and additive object
+  grants separately;
+- delegate creating top-level Project roots on its own, without handing out
+  catalog-wide write, delete, or access-management authority;
 - enforce centralized RBAC, optimistic concurrency, idempotency, audit, and
   last-owner safeguards;
 - import reviewed infrastructure data from Markdown/YAML with a dry-run-first

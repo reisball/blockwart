@@ -277,7 +277,7 @@ means it deliberately bundles lower-level API concerns behind one agent call.
 | `get_attention` | Find what currently needs work | `directly sufficient` | Projects the shared application attention resolver: one closed category, severity, reason-code, and signal-state vocabulary over record and relationship integrity, placement, manual lifecycle, monitoring, endpoints, provenance, critical-service Runbook readiness, knowledge review, and source coverage, deduplicated to one item per target and category. |
 | `get_source_coverage` | Inspect source inventory coverage and drift | `directly sufficient` | Projects the authorized REST snapshot with identical filters, state vocabulary, digest-bound cursor, and no workspace access. |
 | `create_child` | Create a placed child | `intent tool`, `response improved` | Resolves the parent internally and proves placement, ownership, revision, and idempotency. |
-| `create_root` | Create a disconnected catalog root | `intent tool`, `response improved` | Requires an already active catalog-owner principal; proves ownership, revision, idempotency, and the absence of a placement parent. Never mutates any catalog role. |
+| `create_root` | Create a disconnected catalog root | `intent tool`, `response improved` | Requires an already active principal whose catalog role covers the kind: `catalog_owner` for every kind, `project_creator` for `project` only. Proves ownership, revision, idempotency, and the absence of a placement parent. Never mutates any catalog role. |
 | `update_object` | Update one known object | `directly sufficient` | The explicit current ETag preserves visible optimistic concurrency. |
 | `preview_object_update` | Review one proposed full-object update | `directly sufficient` | Uses the exact update arguments and shared plan, but returns only the bounded redacted diff and digest without mutating catalog or authentication state. |
 | `rename_object` | Change only one object's display name | `directly sufficient` | Carries the resource, the proposed label, and the precondition only, so a display-name change needs neither a reconstructed object document nor general write authority. |
@@ -446,14 +446,19 @@ atomic API command; neither tool loads a complete device graph or retries a
 failed concurrency precondition.
 
 `blockwart.create_root` executes the same shared `create_root` command as REST
-and the browser UI. It requires an already active catalog-owner service
-principal with an `mcp`-audience token and an `idempotency_key`, and it never
-assigns or removes any catalog role. Its additive result fields are
-`parent_ref` (always `null`, proving the disconnected root), the same
-`owner_assignment` Owner/self proof, and `revision` alongside `etag`,
-`changed`, and `replayed`. The catalog role (`catalog_owner`, `catalog_viewer`,
-or none) itself remains read-only in MCP
-through the admin principal projections.
+and the browser UI. It requires an already active service principal with an
+`mcp`-audience token, an `idempotency_key`, and a catalog role that covers the
+requested kind: `catalog_owner` for every kind, or the narrow `project_creator`
+for `object.kind = project` only. A `project_creator` agent creating any other
+root kind receives the same denial as a principal with no catalog role, and the
+role adds no catalog-wide read, write, delete, or access-management authority to
+any other tool. The tool never assigns or removes any catalog role. Its additive
+result fields are `parent_ref` (always `null`, proving the disconnected root),
+the same `owner_assignment` Owner/self proof — written for a project creator
+exactly as for a catalog owner — and `revision` alongside `etag`, `changed`, and
+`replayed`. The catalog role (`catalog_owner`, `catalog_viewer`,
+`project_creator`, or none) itself remains read-only in MCP through the admin
+principal projections, which also report the role's creatable root kinds.
 
 Grant read tools expose only minimized principal identity, separated direct
 grants and effective access, and safe canonical-scope previews. Grant write

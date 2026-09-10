@@ -8,7 +8,9 @@ and integrations never resolve credential values. Every request requires a servi
 token and is filtered by its current effective policy: additive object grants
 plus an explicit `catalog_owner` or `catalog_viewer` role when present. A
 `catalog_viewer` contributes exactly `discover` and `read` over all current and
-future objects; token possession and platform admin alone contribute nothing.
+future objects; a `project_creator` contributes no read authority at all,
+because its only authority is creating root Projects on the command surfaces;
+token possession and platform admin alone contribute nothing.
 Catalog changes are
 restricted to the authenticated `/api/v1`, MCP, and UI command surfaces.
 

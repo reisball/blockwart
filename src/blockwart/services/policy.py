@@ -17,9 +17,11 @@ from blockwart.domain.auth import (
     Role,
     permissions_for_catalog_role,
     permissions_for_role,
+    root_kinds_for_catalog_role,
 )
 from blockwart.domain.placement import CANONICAL_PLACEMENT_RELATION_TYPE
 from blockwart.models import CatalogObject, ObjectGrant, Principal, Relationship
+from blockwart.schemas.catalog import OBJECT_KINDS
 
 
 class AuthorizationDenied(PermissionError):
@@ -40,14 +42,23 @@ class GlobalPolicySource(StrEnum):
 
     CATALOG_OWNER = "catalog_owner"
     CATALOG_VIEWER = "catalog_viewer"
+    PROJECT_CREATOR = "project_creator"
 
 
 @dataclass(frozen=True)
 class GlobalAuthority:
-    """One catalog-wide permission set held by the principal itself."""
+    """One catalog-level authority the principal holds through a catalog role.
+
+    ``permissions`` are catalog-wide object permissions and may be empty:
+    creating a top-level root is not an object permission, because a root has
+    no object to hold one, so it is carried by ``root_kinds`` instead. A
+    project creator therefore appears here with no permission and exactly one
+    creatable root kind.
+    """
 
     source: GlobalPolicySource
     permissions: frozenset[Permission]
+    root_kinds: frozenset[str] = frozenset()
 
 
 @dataclass(frozen=True)
@@ -73,6 +84,14 @@ class PolicySnapshot:
         return any(
             authority.source == resolved
             for authority in self._global_authorities
+        )
+
+    def creatable_root_kinds(self) -> frozenset[str]:
+        """Root kinds this snapshot's catalog role authorizes, if any."""
+        return frozenset(
+            kind
+            for authority in self._global_authorities
+            for kind in authority.root_kinds
         )
 
     def can(
@@ -118,6 +137,7 @@ class PolicySnapshot:
                     "permissions": sorted(
                         permission.value for permission in authority.permissions
                     ),
+                    "root_kinds": sorted(authority.root_kinds),
                 }
                 for authority in sorted(
                     self._global_authorities,
@@ -231,14 +251,17 @@ def policy_for_principal(
 
     permissions_by_object: dict[str, set[Permission]] = defaultdict(set)
     grants_by_object: dict[str, list[EffectiveGrant]] = defaultdict(list)
-    if global_authorities:
+    global_permissions = frozenset(
+        permission
+        for authority in global_authorities
+        for permission in authority.permissions
+    )
+    if global_permissions:
         # Global authority is computed per request over the current catalog
-        # instead of being materialized as wildcard or per-object grants.
-        global_permissions = frozenset(
-            permission
-            for authority in global_authorities
-            for permission in authority.permissions
-        )
+        # instead of being materialized as wildcard or per-object grants. A
+        # catalog role that carries no object permission — the project creator
+        # — must not touch this projection at all, so an object it has no
+        # access to never gains an empty entry here.
         for object_id in session.scalars(select(CatalogObject.id)).all():
             permissions_by_object[str(object_id)].update(global_permissions)
     for row in rows:
@@ -280,9 +303,14 @@ def _global_authorities_for_principal(
     ).first()
     if row is None or not row.active or row.catalog_role is None:
         return ()
+    role = CatalogRole(row.catalog_role)
+    root_kinds = root_kinds_for_catalog_role(role)
     return (
         GlobalAuthority(
-            source=GlobalPolicySource(CatalogRole(row.catalog_role).value),
-            permissions=permissions_for_catalog_role(CatalogRole(row.catalog_role)),
+            source=GlobalPolicySource(role.value),
+            permissions=permissions_for_catalog_role(role),
+            root_kinds=(
+                frozenset(OBJECT_KINDS) if root_kinds is None else root_kinds
+            ),
         ),
     )
