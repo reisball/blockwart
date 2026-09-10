@@ -51,8 +51,10 @@ BLOCKWART_DATABASE_URL=sqlite:////tmp/blockwart.sqlite3 \
 ```
 
 `blockwart-db owners` is a read-only report of legacy objects that no active
-Owner grant reaches; repair them only through the audited adoption flow
-described in `auth-rbac.md`.
+Owner grant reaches. Repair them before the first start with the protected
+`blockwart-db adopt-owners` sequence in
+[Legacy Upgrade: Adopt Ownerless Objects Before Start](#legacy-upgrade-adopt-ownerless-objects-before-start),
+or later through the online audited adoption flow described in `auth-rbac.md`.
 
 `bootstrap-owner` makes that protected first human a platform admin while
 scoped catalog access still comes only from the listed Owner anchors.
@@ -136,6 +138,99 @@ downgrade fails closed otherwise.
 The image healthcheck calls `/api/health/ready`. An unhealthy result therefore means the process
 may still be alive but must not receive normal traffic.
 
+## Legacy Upgrade: Adopt Ownerless Objects Before Start
+
+A database written by a release before the ownership invariant can contain
+catalog objects that no active Owner grant reaches. It upgrades normally, but
+readiness and `blockwart-start` keep failing with `owner_coverage_incomplete`,
+so the online adoption command is unreachable. `blockwart-db adopt-owners` is the
+supported protected repair for exactly that state. It works on the stopped
+database directly and leaves readiness unchanged: there is no bypass flag, and
+the application starts only once every object is owned.
+
+Run the complete sequence with the new release's package or image:
+
+1. Stop the service and take a verified backup of the database.
+2. Upgrade and verify the schema: `blockwart-db upgrade`, then `blockwart-db check`.
+3. Inventory: `blockwart-db owners` prints one line per ownerless object and exits
+   `1` while any exist.
+4. Choose the explicit target: any existing active principal. It needs no catalog
+   role. Readiness separately requires an active catalog owner. A database without
+   one also selects it once with
+   `blockwart-auth bootstrap-catalog-owner --login CATALOG_OWNER_LOGIN`.
+5. Preview, which writes nothing:
+
+   ```bash
+   blockwart-db adopt-owners \
+     --owner-login OWNER_LOGIN \
+     --reason "Adopt legacy ownerless objects for the owner-enforcing upgrade"
+   ```
+
+   It prints one `owner_adoption_candidate` line per object (ref, ID, kind,
+   revision), then `database_adopt_owners_ok ... mode=dry-run` with
+   `ownerless=N`, `by_kind={...}`, and a `plan_digest=sha256:...`.
+6. Review the exact list, then apply that reviewed plan:
+
+   ```bash
+   blockwart-db --apply adopt-owners \
+     --owner-login OWNER_LOGIN \
+     --reason "Adopt legacy ownerless objects for the owner-enforcing upgrade" \
+     --request-id CHANGE-ID \
+     --expect-plan-digest sha256:PLAN_DIGEST_FROM_PREVIEW
+   ```
+
+   It prints one `owner_adopted` line per object (with the new grant ID and
+   old/new revision) and `mode=apply adopted=N remaining=0`.
+7. Verify: the same apply command now reports `adopted=0 remaining=0` and writes
+   nothing, `blockwart-db owners` exits `0`, and `blockwart-db integrity` passes.
+8. Start normally with `blockwart-start` or the container, and require readiness to
+   report `authorization=ok`.
+
+With the example compose file, prefix each command with
+`docker compose -f compose.example.yaml run --rm blockwart`, for example
+`docker compose -f compose.example.yaml run --rm blockwart blockwart-db adopt-owners ...`.
+The atomic release workflow never adopts anything: a legacy catalog's candidate
+fails its readiness gate and the release stops before cutover. Repair the
+stopped database with this sequence first.
+
+The command's rules:
+
+- The target is never inferred. A missing, blank, or malformed login fails with
+  `owner_principal_required` or `owner_principal_malformed`; an unknown or
+  inactive principal with `owner_principal_inactive`. Any existing active human
+  or service-account principal is accepted without a catalog role. The trusted
+  operator running this protected CLI is the administrative authority, as the
+  catalog owner is for the online command. The target's actual `catalog_role`
+  (possibly none) is recorded in the evidence. Hand individual objects to other
+  principals after start through ordinary Owner grant management.
+- `--reason` is required (`adoption_reason_required`) and must be one printable
+  line of at most 500 characters without secret-shaped content
+  (`adoption_reason_invalid`). `--request-id` is optional, must match
+  `[A-Za-z0-9._-]{1,64}` (`adoption_request_id_invalid`), and is generated and
+  printed when absent.
+- The plan digest binds the target principal ID and every object's ID, kind, and
+  revision. Apply without it fails with `adoption_plan_digest_required`. Apply
+  takes SQLite's writer lock, or on PostgreSQL the shared Owner-coverage row
+  locks (principals, Owner grants, canonical placements) followed by the object
+  rows in ID order, then recomputes the ownerless set. Any difference from the
+  reviewed digest, or any concurrent change to a planned object, fails with
+  `adoption_plan_drift` and writes nothing; preview again.
+- One transaction writes exactly one direct `Owner/self` grant per object through
+  the same primitive every creation path uses and advances each object's revision
+  (its access ETag). IDs, kinds, labels, data, placement, relationships, and all
+  other grants, including inactive historical Owner grants, are unchanged. Any
+  failure rolls the whole repair back.
+- When nothing is ownerless, apply is a no-op that writes nothing and exits `0`
+  with `adopted=0`. Given the same `--request-id`, the rerun output is identical.
+- Evidence: one `owner_adopt` audit event per object (actor `protected_cli`,
+  channel `cli`, target principal ID and login, reason, request ID, plan digest,
+  old/new revision, and the grant), one catalog-level `legacy_owner_adoption`
+  audit event (object IDs, grant IDs, counts by kind), and one
+  `legacy_owner_adoption` security event carrying the request ID.
+- Failures print `database_adopt_owners_error=<code>` and exit `1`. Database and
+  schema errors are redacted as `failed`. The database must already be at the
+  packaged Alembic head.
+
 ## Liveness And Readiness
 
 The health endpoints have separate operational meanings:
@@ -200,7 +295,8 @@ Perform the authorization transition against a restored candidate before changin
    `BLOCKWART_AUTH_COOKIE_SECURE` settings from the deployment environment and secret injection.
 2. Upgrade the candidate, inventory every disconnected catalog component privately, and run one
    atomic `bootstrap-owner` invocation with all required anchors and the explicit `--catalog-owner`
-   choice, or select the existing owner once with `bootstrap-catalog-owner`. Require readiness to
+   choice, or select the existing owner once with `bootstrap-catalog-owner` and repair any legacy
+   ownerless objects with the `blockwart-db adopt-owners` sequence above. Require readiness to
    report `authorization=ok` without exposing object identifiers.
 3. Verify the public HTTPS certificate, HSTS response, localhost-only application bind, and
    `Secure`, `HttpOnly`, and `SameSite=Strict` attributes on identity responses.

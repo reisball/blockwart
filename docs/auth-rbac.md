@@ -486,7 +486,7 @@ read-only by:
   only to principals that may manage the object's access;
 - `owner_coverage` on the object access resource and in the UI access panel.
 
-The only repair is the audited adoption command (REST `POST
+Online, the only repair is the audited adoption command (REST `POST
 /api/v1/objects/{object_id}/access/adoption`, MCP
 `blockwart.adopt_ownerless_object`, and the **Adopt ownerless object** form in
 the UI access panel). It requires an active catalog owner on a trusted channel
@@ -494,6 +494,17 @@ and the current strong ETag, assigns exactly one direct `Owner/self` grant to
 one active principal, and refuses as soon as any active direct or inherited
 Owner grant exists. Its compare-and-set revision claim gives concurrent
 adoptions exactly one winner. See `api-v1.md` for the full contract.
+
+An upgraded legacy catalog that still contains ownerless objects cannot become
+ready, so it cannot reach that command. For this state, the protected pre-start
+form is `blockwart-db adopt-owners` against the stopped database. The trusted
+operator running that protected CLI is the administrative authority. It requires
+an explicit existing active target principal, which needs no catalog role, and
+an audit reason, previews the exact
+set with a plan digest, and applies only that reviewed set in one transaction.
+It fails closed on drift, reruns as a no-op, and leaves the same `owner_adopt`
+audit evidence (channel `cli`, actor `protected_cli`). It never changes
+readiness. See `deployment.md` for the full upgrade sequence.
 
 ACL-shaped keys such as `acl`, `access_grants`, or `permissions` are rejected
 recursively from catalog write and import data. Object grants can be changed

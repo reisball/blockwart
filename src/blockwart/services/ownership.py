@@ -18,7 +18,9 @@ This module is the one place that
   from unrelated effective permissions.
 
 The audited recovery command for legacy objects lives in grant management,
-because it is an access-management write with its own authority rules.
+because it is an access-management write with its own authority rules. Its
+protected pre-start form, for an upgraded catalog that cannot become ready yet,
+lives in :mod:`blockwart.services.legacy_owner_adoption`.
 """
 
 from __future__ import annotations

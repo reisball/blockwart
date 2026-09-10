@@ -13,7 +13,12 @@ from blockwart.db.migrations import (
     check_database_revision,
     upgrade_database,
 )
-from blockwart.db.session import build_engine, build_read_only_engine, transaction
+from blockwart.db.session import (
+    build_engine,
+    build_read_only_engine,
+    read_only_transaction,
+    transaction,
+)
 from blockwart.services.catalog import relationship_diagnostics
 from blockwart.services.decision_migration import (
     apply_decision_migration_plan,
@@ -23,6 +28,13 @@ from blockwart.services.decision_migration import (
 from blockwart.services.interface_migration import (
     apply_interface_migration_plan,
     build_interface_migration_plan,
+)
+from blockwart.services.legacy_owner_adoption import (
+    AdoptedObject,
+    LegacyOwnerAdoptionError,
+    apply_legacy_owner_adoption,
+    preview_legacy_owner_adoption,
+    validate_adoption_request,
 )
 from blockwart.services.monitoring import (
     build_monitoring_plan,
@@ -72,12 +84,32 @@ def build_parser() -> argparse.ArgumentParser:
         help="Reviewed YAML mapping for the networks, decisions, projects, or runbooks action.",
     )
     parser.add_argument(
+        "--owner-login",
+        help=(
+            "adopt-owners: explicit existing active principal login that receives "
+            "Owner/self on every ownerless object. Never inferred."
+        ),
+    )
+    parser.add_argument(
+        "--reason",
+        help="adopt-owners: required audit reason, one printable line.",
+    )
+    parser.add_argument(
+        "--request-id",
+        help="adopt-owners: optional correlation ID recorded in the audit evidence.",
+    )
+    parser.add_argument(
+        "--expect-plan-digest",
+        help="adopt-owners --apply: the plan_digest printed by the reviewed preview.",
+    )
+    parser.add_argument(
         "action",
         choices=(
             "upgrade",
             "check",
             "integrity",
             "owners",
+            "adopt-owners",
             "interfaces",
             "placements",
             "monitoring",
@@ -139,6 +171,8 @@ def main(argv: Sequence[str] | None = None) -> int:
                 f"ownerless={len(reports)} adoptable={adoptable}"
             )
             return 1 if reports else 0
+        elif args.action == "adopt-owners":
+            return _adopt_owners(args)
         elif args.action == "interfaces":
             revision = check_database_revision(args.database_url)
             plan = _interface_plan(args.database_url, apply=args.apply)
@@ -327,7 +361,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         else:
             revision = check_database_revision(args.database_url)
     except Exception:  # noqa: BLE001 - CLI boundary must redact database details
-        print(f"database_{args.action}_error=failed", file=sys.stderr)
+        print(f"database_{args.action.replace('-', '_')}_error=failed", file=sys.stderr)
         return 1
 
     suffix = " diagnostics=0" if args.action == "integrity" else ""
@@ -375,6 +409,89 @@ def _ownerless_payload(report: OwnerlessObjectReport) -> dict[str, object]:
         "adoption_possible": report.adoption_possible,
         "adoption_blocker": report.adoption_blocker,
     }
+
+
+def _adopt_owners(args: argparse.Namespace) -> int:
+    """Preview or apply the protected pre-start legacy Owner adoption."""
+    try:
+        request = validate_adoption_request(
+            owner_login=args.owner_login,
+            reason=args.reason,
+            request_id=args.request_id,
+            expected_plan_digest=args.expect_plan_digest,
+            apply=args.apply,
+        )
+        revision = check_database_revision(args.database_url, read_only=not args.apply)
+        config = build_alembic_config(args.database_url)
+        resolved_url = str(config.attributes["database_url"])
+        engine = (
+            build_engine(resolved_url)
+            if args.apply
+            else build_read_only_engine(resolved_url)
+        )
+        adopted: tuple[AdoptedObject, ...] = ()
+        request_id = None
+        try:
+            with Session(engine) as session:
+                if args.apply:
+                    with transaction(session):
+                        result = apply_legacy_owner_adoption(session, request)
+                    plan, adopted, request_id = (
+                        result.plan,
+                        result.adopted,
+                        result.request_id,
+                    )
+                else:
+                    with read_only_transaction(session):
+                        plan = preview_legacy_owner_adoption(session, request)
+        finally:
+            engine.dispose()
+    except LegacyOwnerAdoptionError as exc:
+        print(f"database_adopt_owners_error={exc.code}", file=sys.stderr)
+        return 1
+
+    if args.apply:
+        for item in adopted:
+            print(
+                "owner_adopted "
+                + _compact_json(
+                    {
+                        "ref": item.ref,
+                        "object_id": item.object_id,
+                        "kind": item.kind,
+                        "grant_id": item.grant_id,
+                        "old_revision": item.old_revision,
+                        "new_revision": item.new_revision,
+                    }
+                )
+            )
+    else:
+        for candidate in plan.candidates:
+            print(
+                "owner_adoption_candidate "
+                + _compact_json(
+                    {
+                        "ref": candidate.ref,
+                        "object_id": candidate.object_id,
+                        "kind": candidate.kind,
+                        "revision": candidate.revision,
+                    }
+                )
+            )
+    print(
+        f"database_adopt_owners_ok revision={revision} "
+        f"mode={'apply' if args.apply else 'dry-run'} "
+        f"target_principal_id={plan.target_principal_id} "
+        f"ownerless={len(plan.candidates)} adopted={len(adopted)} "
+        f"remaining={0 if args.apply else len(plan.candidates)} "
+        f"by_kind={_compact_json(plan.counts_by_kind)} "
+        f"plan_digest={plan.plan_digest} request_id={request_id or 'none'}"
+    )
+    return 0
+
+
+def _compact_json(value: object) -> str:
+    return json.dumps(value, sort_keys=True, separators=(",", ":"))
 
 
 def _interface_plan(database_url: str | None, *, apply: bool):
