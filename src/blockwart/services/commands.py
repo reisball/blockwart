@@ -1462,7 +1462,39 @@ def delete_object_relationship(
         relation_type=relation_type,
     )
     if relation_type == CANONICAL_PLACEMENT_RELATION_TYPE:
-        lock_owner_coverage_state(session)
+        lock_owner_coverage_state(
+            session,
+            extra_principal_ids=(context.principal.id,),
+        )
+        context = WriteContext(
+            principal=context.principal,
+            policy=policy_for_principal(session, context.principal.id),
+            channel=context.channel,
+            request_id=context.request_id,
+        )
+        target, peer, expected_revision = _relationship_command_objects(
+            session,
+            context,
+            object_id=object_id,
+            from_ref=from_ref,
+            to_ref=to_ref,
+            expected_revision=expected_revision,
+        )
+        relationship = session.scalar(
+            select(Relationship)
+            .where(
+                Relationship.from_ref == from_ref,
+                Relationship.relation_type == relation_type,
+                Relationship.to_ref == to_ref,
+            )
+            .execution_options(populate_existing=True)
+        )
+        if relationship is None:
+            raise CommandNotFound("relationship not found")
+        canonical_metadata = relationship_metadata(
+            relationship,
+            relation_type=relation_type,
+        )
     old_revision = target.revision
     new_revision = _claim_object_revision(
         session,
