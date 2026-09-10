@@ -8,9 +8,10 @@ EMPTY_VOLUME="$RUN_ID-empty"
 MIGRATED_VOLUME="$RUN_ID-migrated"
 EMPTY_CONTAINER="$RUN_ID-empty"
 MIGRATED_CONTAINER="$RUN_ID-migrated"
+LEGACY_CONTAINER="$RUN_ID-legacy"
 
 cleanup() {
-  docker rm -f "$EMPTY_CONTAINER" "$MIGRATED_CONTAINER" >/dev/null 2>&1 || true
+  docker rm -f "$EMPTY_CONTAINER" "$MIGRATED_CONTAINER" "$LEGACY_CONTAINER" >/dev/null 2>&1 || true
   docker volume rm "$EMPTY_VOLUME" "$MIGRATED_VOLUME" >/dev/null 2>&1 || true
 }
 trap cleanup EXIT
@@ -162,18 +163,73 @@ docker run --rm \
   -v "$MIGRATED_VOLUME:/data" \
   --entrypoint blockwart-db \
   "$IMAGE" upgrade
+# The upgraded legacy catalog has no Owner grant. Select its catalog owner
+# explicitly, prove the new release still refuses to start, then repair it with
+# the protected pre-start adoption for that explicit principal and reason.
 printf '%s\n' 'container-smoke-owner-password' | docker run --rm -i \
   -e BLOCKWART_DATABASE_URL=sqlite:////data/blockwart.sqlite3 \
   -v "$MIGRATED_VOLUME:/data" \
   --entrypoint blockwart-auth \
-  "$IMAGE" bootstrap-owner \
+  "$IMAGE" create-human \
   --login container.owner \
   --display-name "Container Owner" \
-  --object-id ci-legacy \
-  --object-id ci-legacy-runbook \
-  --scope self \
-  --password-stdin \
-  --catalog-owner
+  --password-stdin
+docker run --rm \
+  -e BLOCKWART_DATABASE_URL=sqlite:////data/blockwart.sqlite3 \
+  -v "$MIGRATED_VOLUME:/data" \
+  --entrypoint blockwart-auth \
+  "$IMAGE" bootstrap-catalog-owner --login container.owner
+if legacy_log=$(
+  timeout 90 docker run \
+    --name "$LEGACY_CONTAINER" \
+    -e BLOCKWART_ENV=production \
+    -e BLOCKWART_DATABASE_URL=sqlite:////data/blockwart.sqlite3 \
+    -v "$MIGRATED_VOLUME:/data" \
+    "$IMAGE" 2>&1
+); then
+  printf '%s\n' "$legacy_log" >&2
+  printf 'ownerless legacy catalog unexpectedly started\n' >&2
+  exit 1
+fi
+docker rm -f "$LEGACY_CONTAINER" >/dev/null 2>&1 || true
+if [[ "$legacy_log" != *"startup_error=owner_coverage_incomplete"* ]]; then
+  printf '%s\n' "$legacy_log" >&2
+  exit 1
+fi
+
+adopt_owners() {
+  docker run --rm \
+    -e BLOCKWART_DATABASE_URL=sqlite:////data/blockwart.sqlite3 \
+    -v "$MIGRATED_VOLUME:/data" \
+    --entrypoint blockwart-db \
+    "$IMAGE" "$@" adopt-owners \
+    --owner-login container.owner \
+    --reason "Container smoke legacy upgrade"
+}
+adoption_preview=$(adopt_owners)
+printf '%s\n' "$adoption_preview"
+if [[ "$adoption_preview" != *'"object_id":"ci-legacy"'* ]] || \
+   [[ "$adoption_preview" != *'"object_id":"ci-legacy-runbook"'* ]] || \
+   [[ "$adoption_preview" != *" ownerless=2 adopted=0 remaining=2 "* ]]; then
+  printf 'unexpected legacy adoption preview\n' >&2
+  exit 1
+fi
+adoption_digest=$(
+  printf '%s\n' "$adoption_preview" |
+    sed -n 's/.* plan_digest=\(sha256:[0-9a-f]\{64\}\) .*/\1/p'
+)
+for expected_adopted in 2 0; do
+  adoption_result=$(
+    adopt_owners --apply \
+      --request-id container-smoke-adoption \
+      --expect-plan-digest "$adoption_digest"
+  )
+  printf '%s\n' "$adoption_result"
+  if [[ "$adoption_result" != *" adopted=$expected_adopted remaining=0 "* ]]; then
+    printf 'unexpected legacy adoption result\n' >&2
+    exit 1
+  fi
+done
 
 docker run -d \
   --name "$MIGRATED_CONTAINER" \
@@ -201,4 +257,4 @@ assert integrity == "ok"
 print("container_migration=preserved integrity=ok")
 PY
 
-echo "container_smoke=passed empty_catalog=fail_closed migrated_database=ok"
+echo "container_smoke=passed empty_catalog=fail_closed legacy_adoption=ok migrated_database=ok"
