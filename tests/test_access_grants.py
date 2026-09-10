@@ -267,6 +267,7 @@ def test_principal_deactivation_requires_replacement_owner_for_every_descendant(
                 login="deactivate.second",
                 display_name="Second Owner",
             )
+            _catalog_owner(session, "deactivate.catalog.owner")
             create_object_grant(
                 session,
                 principal_id=first.id,
@@ -327,6 +328,7 @@ def test_placement_removal_cannot_drop_last_effective_owner(
                 login="placement.replacement",
                 display_name="Replacement Owner",
             )
+            _catalog_owner(session, "placement.catalog.owner")
             create_object_grant(
                 session,
                 principal_id=first.id,
@@ -363,7 +365,7 @@ def _catalog_owner(session, login: str):
     )
 
 
-def test_active_catalog_owner_covers_every_object_without_creating_grants(
+def test_active_catalog_owner_authority_does_not_satisfy_owner_invariant(
     alembic_session_factory,
 ) -> None:
     with alembic_session_factory() as session:
@@ -372,8 +374,11 @@ def test_active_catalog_owner_covers_every_object_without_creating_grants(
             owner = _catalog_owner(session, "coverage.owner")
 
         covered = active_owner_covered_object_ids(session)
-        ensure_complete_owner_coverage(session)
+        with pytest.raises(OwnerCoverageError) as incomplete:
+            ensure_complete_owner_coverage(session)
         grants = session.scalars(select(ObjectGrant)).all()
+
+    assert incomplete.value.code == "owner_coverage_incomplete"
 
     assert covered == {"anchor", "island"}
     assert list(grants) == []
@@ -461,11 +466,11 @@ def test_exclusion_ignores_the_excluded_catalog_owner_but_keeps_other_sources(
             session,
             excluded_principal_ids=(excluded.id,),
         )
-        with pytest.raises(LastOwnerError):
-            ensure_owner_coverage_after_exclusions(
-                session,
-                excluded_principal_ids=(excluded.id, other.id),
-            )
+        # Global authority is guarded separately and is never an Object Owner source.
+        ensure_owner_coverage_after_exclusions(
+            session,
+            excluded_principal_ids=(excluded.id, other.id),
+        )
 
 
 def test_last_active_catalog_owner_cannot_be_deactivated_through_the_service(
@@ -489,6 +494,13 @@ def test_last_active_catalog_owner_cannot_be_deactivated_through_the_service(
 
         with transaction(session):
             standby = _catalog_owner(session, "standby.owner")
+            create_object_grant(
+                session,
+                principal_id=standby.id,
+                object_id="anchor",
+                role=Role.OWNER,
+                scope=GrantScope.SELF,
+            )
         with transaction(session):
             assert deactivate_principal(session, principal_id=owner.id) is True
 

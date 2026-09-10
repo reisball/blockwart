@@ -24,7 +24,9 @@ from blockwart.domain.attention import (
 )
 from blockwart.domain.auth import CatalogRole, GrantScope, PlatformRole, Role
 from blockwart.models import CatalogObject
+from blockwart.schemas.catalog import CatalogObjectIn
 from blockwart.services.access import create_object_grant
+from blockwart.services.catalog import upsert_object
 from blockwart.services.identity import (
     create_human_principal,
     create_service_account,
@@ -34,6 +36,7 @@ from blockwart.services.identity import (
 from blockwart.ui.security import AUTH_SESSION_COOKIE_NAME
 
 BASE_URL = "http://127.0.0.1:8000"
+LEGACY_OWNERLESS_ID = "package-smoke-legacy-ownerless"
 
 
 def fetch_json(path: str, *, token: str | None = None) -> dict:
@@ -128,6 +131,18 @@ def prepare_authorized_readers() -> tuple[str, str, str, str]:
                         role=Role.VIEWER,
                         scope=GrantScope.SELF,
                     )
+                # A legacy object written without the creation commands, like
+                # an old import: no active Owner grant reaches it. The installed
+                # MCP adoption tool must be able to recover it.
+                upsert_object(
+                    session,
+                    CatalogObjectIn(
+                        id=LEGACY_OWNERLESS_ID,
+                        kind="host",
+                        label="Package Smoke Legacy Ownerless",
+                        data={"schema_version": 1},
+                    ),
+                )
                 service_token = issue_service_token(
                     session,
                     principal_id=service_principal.id,
@@ -269,6 +284,7 @@ async def check_mcp(
                 "blockwart.create_grant",
                 "blockwart.update_grant",
                 "blockwart.revoke_grant",
+                "blockwart.adopt_ownerless_object",
             }
             assert all(
                 tool.annotations
@@ -616,6 +632,36 @@ async def check_mcp(
                 },
             )
             assert not grant_revoked.isError
+            legacy_access = _tool_payload(
+                await session.call_tool(
+                    "blockwart.get_object_access",
+                    {"object_id": LEGACY_OWNERLESS_ID},
+                )
+            )
+            assert legacy_access["owner_coverage"]["state"] == "ownerless"
+            assert legacy_access["owner_coverage"]["adoption_available"] is True
+            adopted = _tool_payload(
+                await session.call_tool(
+                    "blockwart.adopt_ownerless_object",
+                    {
+                        "object_id": LEGACY_OWNERLESS_ID,
+                        "principal_id": grant_candidate_id,
+                        "if_match": legacy_access["etag"],
+                    },
+                )
+            )
+            assert adopted["previous_owner_count"] == 0
+            assert adopted["grant"]["role"] == "owner"
+            assert adopted["grant"]["scope"] == "self"
+            adopted_access = _tool_payload(
+                await session.call_tool(
+                    "blockwart.get_object_access",
+                    {"object_id": LEGACY_OWNERLESS_ID},
+                )
+            )
+            assert adopted_access["owner_coverage"]["state"] == "owned"
+            assert adopted_access["owner_coverage"]["direct_active_owner_grants"] == 1
+            assert adopted_access["etag"] == adopted["etag"]
             child_create_args = {
                 "parent_id": "fabrik",
                 "idempotency_key": "package-smoke-create-0001",
@@ -874,7 +920,7 @@ def main() -> None:
     print(
         "installed_package=ok "
         f"cwd={Path.cwd()} revision={readiness['revision']} "
-        f"openapi_paths={len(openapi['paths'])} mcp_protocol={protocol} mcp_calls=38 "
+        f"openapi_paths={len(openapi['paths'])} mcp_protocol={protocol} mcp_calls=41 "
         "mcp_contract=compatible"
     )
 

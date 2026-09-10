@@ -4925,6 +4925,7 @@
           "category": {
             "enum": [
               "record_integrity",
+              "access",
               "monitoring",
               "release",
               "lifecycle",
@@ -4950,12 +4951,14 @@
                 "enum": [
                   "accepted",
                   "active",
+                  "adoption_available",
                   "ambiguous_endpoints",
                   "ambiguous_health_url",
                   "ambiguous_mapping",
                   "approved",
                   "archived",
                   "cancelled",
+                  "catalog_owner_adoption_required",
                   "completed",
                   "connect_failed",
                   "dangling_typed_reference",
@@ -5040,6 +5043,7 @@
           "reason_code": {
             "enum": [
               "record_corrupt",
+              "access_owner_missing",
               "monitoring_observed_down",
               "monitoring_check_error",
               "monitoring_config_invalid",
@@ -5211,6 +5215,7 @@
             "propertyNames": {
               "enum": [
                 "record_integrity",
+                "access",
                 "monitoring",
                 "release",
                 "lifecycle",
@@ -5233,6 +5238,7 @@
             "propertyNames": {
               "enum": [
                 "record_corrupt",
+                "access_owner_missing",
                 "monitoring_observed_down",
                 "monitoring_check_error",
                 "monitoring_config_invalid",
@@ -5295,6 +5301,7 @@
             "propertyNames": {
               "enum": [
                 "record_integrity",
+                "access",
                 "monitoring",
                 "release",
                 "lifecycle",
@@ -6389,6 +6396,9 @@
             "title": "Object Id",
             "type": "string"
           },
+          "owner_coverage": {
+            "$ref": "#/components/schemas/V1OwnerCoverageOut"
+          },
           "revision": {
             "minimum": 1.0,
             "title": "Revision",
@@ -6400,7 +6410,8 @@
           "revision",
           "etag",
           "direct_grants",
-          "effective_access"
+          "effective_access",
+          "owner_coverage"
         ],
         "title": "V1ObjectAccessOut",
         "type": "object"
@@ -6965,6 +6976,112 @@
           "text"
         ],
         "title": "V1ObjectUpdatePreviewValueOut",
+        "type": "object"
+      },
+      "V1OwnerAdoptionIn": {
+        "properties": {
+          "principal_id": {
+            "maxLength": 36,
+            "minLength": 1,
+            "title": "Principal Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "principal_id"
+        ],
+        "title": "V1OwnerAdoptionIn",
+        "type": "object"
+      },
+      "V1OwnerAdoptionOut": {
+        "properties": {
+          "changed": {
+            "title": "Changed",
+            "type": "boolean"
+          },
+          "etag": {
+            "title": "Etag",
+            "type": "string"
+          },
+          "grant": {
+            "$ref": "#/components/schemas/V1DirectGrantOut"
+          },
+          "inactive_direct_owner_grants": {
+            "minimum": 0.0,
+            "title": "Inactive Direct Owner Grants",
+            "type": "integer"
+          },
+          "object_id": {
+            "title": "Object Id",
+            "type": "string"
+          },
+          "previous_owner_count": {
+            "minimum": 0.0,
+            "title": "Previous Owner Count",
+            "type": "integer"
+          },
+          "revision": {
+            "minimum": 1.0,
+            "title": "Revision",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "object_id",
+          "revision",
+          "etag",
+          "changed",
+          "grant",
+          "previous_owner_count",
+          "inactive_direct_owner_grants"
+        ],
+        "title": "V1OwnerAdoptionOut",
+        "type": "object"
+      },
+      "V1OwnerCoverageOut": {
+        "description": "Active object Owner sources; a global catalog role is never counted.",
+        "properties": {
+          "actor_has_owner_source": {
+            "title": "Actor Has Owner Source",
+            "type": "boolean"
+          },
+          "adoption_available": {
+            "title": "Adoption Available",
+            "type": "boolean"
+          },
+          "direct_active_owner_grants": {
+            "minimum": 0.0,
+            "title": "Direct Active Owner Grants",
+            "type": "integer"
+          },
+          "inactive_direct_owner_grants": {
+            "minimum": 0.0,
+            "title": "Inactive Direct Owner Grants",
+            "type": "integer"
+          },
+          "inherited_active_owner_grants": {
+            "minimum": 0.0,
+            "title": "Inherited Active Owner Grants",
+            "type": "integer"
+          },
+          "state": {
+            "enum": [
+              "owned",
+              "ownerless"
+            ],
+            "title": "State",
+            "type": "string"
+          }
+        },
+        "required": [
+          "state",
+          "direct_active_owner_grants",
+          "inherited_active_owner_grants",
+          "inactive_direct_owner_grants",
+          "actor_has_owner_source",
+          "adoption_available"
+        ],
+        "title": "V1OwnerCoverageOut",
         "type": "object"
       },
       "V1PrincipalSearchOut": {
@@ -12242,6 +12359,7 @@
                 {
                   "enum": [
                     "record_integrity",
+                    "access",
                     "monitoring",
                     "release",
                     "lifecycle",
@@ -12292,6 +12410,7 @@
                 {
                   "enum": [
                     "record_corrupt",
+                    "access_owner_missing",
                     "monitoring_observed_down",
                     "monitoring_check_error",
                     "monitoring_config_invalid",
@@ -14998,6 +15117,170 @@
           }
         ],
         "summary": "Get V1 Object Access",
+        "tags": [
+          "api-v1-readonly"
+        ]
+      }
+    },
+    "/api/v1/objects/{object_id}/access/adoption": {
+      "post": {
+        "description": "Assign the first Owner/self grant to an object that has no active Owner.\n\nOnly an active catalog owner may adopt, only with the current strong ETag,\nand only while no active direct or inherited Owner grant reaches the\nobject.",
+        "operationId": "adopt_v1_ownerless_object_api_v1_objects__object_id__access_adoption_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "object_id",
+            "required": true,
+            "schema": {
+              "title": "Object Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "If-Match",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "If-Match"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/V1OwnerAdoptionIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1OwnerAdoptionOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Authentication required"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Permission denied"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Resource not found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "412": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Precondition failed"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Request validation failed"
+          },
+          "428": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Precondition required"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Internal server error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Service unavailable"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Adopt V1 Ownerless Object",
         "tags": [
           "api-v1-readonly"
         ]

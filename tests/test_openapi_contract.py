@@ -39,6 +39,7 @@ EXPECTED_OPERATIONS = {
     "/api/v1/projects": {"get"},
     "/api/v1/projects/{object_id}/chronology": {"get", "post"},
     "/api/v1/objects/{object_id}/access": {"get"},
+    "/api/v1/objects/{object_id}/access/adoption": {"post"},
     "/api/v1/objects/{object_id}/access/grants": {"post"},
     "/api/v1/objects/{object_id}/access/grants/{grant_id}": {"put", "delete"},
     "/api/v1/objects/{object_id}/access/preview": {"get"},

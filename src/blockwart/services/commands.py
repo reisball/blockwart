@@ -23,6 +23,7 @@ from blockwart.domain.auth import (
     permissions_for_role,
 )
 from blockwart.domain.decisions import iter_decision_references
+from blockwart.domain.placement import CANONICAL_PLACEMENT_RELATION_TYPE
 from blockwart.domain.projects import iter_project_references
 from blockwart.domain.references import TypedReference
 from blockwart.domain.relationships import (
@@ -54,6 +55,7 @@ from blockwart.schemas.catalog import (
     CatalogObjectOut,
     ObjectRenameCandidate,
 )
+from blockwart.services.access import lock_owner_coverage_state
 from blockwart.services.audit import add_audit_event
 from blockwart.services.catalog import (
     ObjectUpsertPlan,
@@ -68,6 +70,7 @@ from blockwart.services.catalog import (
     upsert_object,
 )
 from blockwart.services.identity import record_security_event
+from blockwart.services.ownership import InitialOwnerError, assign_initial_owner
 from blockwart.services.policy import PolicySnapshot, policy_for_principal
 from blockwart.services.read_access import ReadAccess
 
@@ -77,7 +80,17 @@ _WRITE_CHANNELS = frozenset({"ui", "api", "mcp"})
 
 
 class CommandError(RuntimeError):
-    """Stable base error for authorized write commands."""
+    """Stable base error for authorized write commands.
+
+    ``code`` is an optional stable machine reason. REST and MCP publish it as
+    the error envelope ``code`` and the UI localizes it, so a caller can tell,
+    for example, a healthy object's Owner-source requirement from the ownerless
+    recovery path instead of retrying a generic denial.
+    """
+
+    def __init__(self, message: str = "", *, code: str | None = None) -> None:
+        super().__init__(message)
+        self.code = code
 
 
 class CommandNotFound(CommandError):
@@ -87,8 +100,15 @@ class CommandNotFound(CommandError):
 class CommandAuthorizationDenied(CommandError):
     """The principal lacks the required object permission."""
 
-    def __init__(self, *, object_id: str, permission: Permission) -> None:
-        super().__init__("object permission denied")
+    def __init__(
+        self,
+        *,
+        object_id: str,
+        permission: Permission,
+        code: str | None = None,
+        message: str = "object permission denied",
+    ) -> None:
+        super().__init__(message, code=code)
         self.object_id = object_id
         self.permission = permission
 
@@ -862,15 +882,7 @@ def create_child_object(
         write_audit=False,
         touch_revisions=False,
     )
-    session.add(
-        ObjectGrant(
-            principal_id=context.principal.id,
-            object_id=created.id,
-            role=Role.OWNER,
-            scope=GrantScope.SELF,
-            created_by_principal_id=context.principal.id,
-        )
-    )
+    _assign_creator_owner(session, context, object_id=created.id)
     parent_revision = _bump_object_revision(session, parent.id)
     session.flush()
     result = get_object(session, created.id)
@@ -970,15 +982,7 @@ def create_catalog_root(
 
     created = upsert_object(session, payload, write_audit=False)
     object_ref = f"{created.kind}:{created.id}"
-    session.add(
-        ObjectGrant(
-            principal_id=context.principal.id,
-            object_id=created.id,
-            role=Role.OWNER,
-            scope=GrantScope.SELF,
-            created_by_principal_id=context.principal.id,
-        )
-    )
+    _assign_creator_owner(session, context, object_id=created.id)
     session.flush()
     result = get_object(session, created.id)
     root_row = session.get(CatalogObject, created.id)
@@ -1100,15 +1104,7 @@ def create_attached_device(
         )
     except RelationshipIntegrityError as exc:
         raise CommandConflict(str(exc)) from exc
-    session.add(
-        ObjectGrant(
-            principal_id=context.principal.id,
-            object_id=created.id,
-            role=Role.OWNER,
-            scope=GrantScope.SELF,
-            created_by_principal_id=context.principal.id,
-        )
-    )
+    _assign_creator_owner(session, context, object_id=created.id)
     parent_revision = _bump_object_revision(session, parent.id)
     session.flush()
     result = get_object(session, created.id)
@@ -1446,6 +1442,8 @@ def delete_object_relationship(
         relationship,
         relation_type=relation_type,
     )
+    if relation_type == CANONICAL_PLACEMENT_RELATION_TYPE:
+        lock_owner_coverage_state(session)
     old_revision = target.revision
     new_revision = _claim_object_revision(
         session,
@@ -1515,6 +1513,7 @@ def record_command_denial(
             "object_id": error.object_id,
             "permission": error.permission,
             "principal_id": context.principal.id,
+            **({"reason": error.code} if error.code is not None else {}),
         },
     )
 
@@ -1551,6 +1550,29 @@ def _require_permission(
             permission=permission,
         )
     return row
+
+
+def _assign_creator_owner(
+    session: Session,
+    context: WriteContext,
+    *,
+    object_id: str,
+) -> None:
+    """Give the authenticated creator the atomic first ``Owner/self`` grant.
+
+    The shared ownership primitive re-reads the creator inside this
+    transaction, so a creator deactivated after authentication aborts the
+    whole create instead of committing an ownerless object.
+    """
+    try:
+        assign_initial_owner(
+            session,
+            object_id=object_id,
+            owner_principal_id=context.principal.id,
+            created_by_principal_id=context.principal.id,
+        )
+    except InitialOwnerError as exc:
+        raise CommandConflict(str(exc), code=exc.code) from exc
 
 
 def _require_root_creation_authority(

@@ -93,6 +93,7 @@ from blockwart.services.commands import (
 from blockwart.services.comments import add_object_comment, query_comment_page
 from blockwart.services.grant_management import (
     actor_can_manage_owner_grants,
+    adopt_ownerless_object,
     create_managed_grant,
     preview_grant_scope,
     query_object_access,
@@ -1989,7 +1990,7 @@ def create_object_grant_from_ui(
             request,
             session,
             object_id,
-            error=str(exc.detail),
+            error=_grant_error_message(request, exc),
             status_code=exc.status_code,
         )
     return RedirectResponse(
@@ -2054,7 +2055,52 @@ def update_object_grant_from_ui(
             request,
             session,
             object_id,
-            error=str(exc.detail),
+            error=_grant_error_message(request, exc),
+            status_code=exc.status_code,
+        )
+    return RedirectResponse(
+        url=f"{_detail_redirect_url(request, object_id)}&edit=permissions",
+        status_code=303,
+    )
+
+
+@router.post(
+    "/objects/{object_id}/permissions/adopt",
+    response_class=HTMLResponse,
+    dependencies=[Depends(require_browser_write_csrf)],
+)
+def adopt_ownerless_object_from_ui(
+    request: Request,
+    object_id: str,
+    session: Annotated[Session, Depends(get_session)],
+    principal_id: Annotated[str, Form(max_length=36)],
+    if_match: Annotated[str, Form()],
+):
+    """Browser form for the audited ownerless-object adoption command.
+
+    The shared command resolves the catalog-owner authority first, so no
+    separate object pre-authorization is needed or wanted here.
+    """
+    access = read_access_from_request(request)
+    context = ui_write_context(request, access)
+    try:
+        execute_ui_command(
+            session,
+            context,
+            lambda: adopt_ownerless_object(
+                session,
+                context,
+                object_id=object_id,
+                principal_id=principal_id,
+                expected_revision=if_match,
+            ),
+        )
+    except HTTPException as exc:
+        return _grant_form_error_response(
+            request,
+            session,
+            object_id,
+            error=_grant_error_message(request, exc),
             status_code=exc.status_code,
         )
     return RedirectResponse(
@@ -2104,7 +2150,7 @@ def revoke_object_grant_from_ui(
             request,
             session,
             object_id,
-            error=str(exc.detail),
+            error=_grant_error_message(request, exc),
             status_code=exc.status_code,
         )
     return RedirectResponse(
@@ -3923,6 +3969,21 @@ def _detail_form_error_response(
         form_rows=form_rows,
         status_code=status_code,
     )
+
+
+def _grant_error_message(request: Request, exc: HTTPException) -> str:
+    """Localize a structured grant-command reason; other errors keep their detail.
+
+    The reason is the same stable ``error_code`` REST and MCP publish, so the
+    browser, API, and agent surfaces stay semantically identical.
+    """
+    code = getattr(exc, "error_code", None)
+    if code is None:
+        return str(exc.detail)
+    translate = translation_context(request)["t"]
+    key = f"grant.error.{code}"
+    message = translate(key)
+    return str(exc.detail) if message == key else message
 
 
 def _grant_form_error_response(

@@ -36,6 +36,7 @@ from blockwart.services.network_classification import (
     classification_entry_payload,
     load_network_classification_evidence,
 )
+from blockwart.services.ownership import OwnerlessObjectReport, find_ownerless_objects
 from blockwart.services.placement_migration import (
     apply_placement_migration_plan,
     build_placement_migration_plan,
@@ -76,6 +77,7 @@ def build_parser() -> argparse.ArgumentParser:
             "upgrade",
             "check",
             "integrity",
+            "owners",
             "interfaces",
             "placements",
             "monitoring",
@@ -105,6 +107,38 @@ def main(argv: Sequence[str] | None = None) -> int:
                         file=sys.stderr,
                     )
                 return 1
+            # Legacy ownerless objects are reported, not failed: an upgraded
+            # catalog may contain them, and they are repaired only through the
+            # audited adoption command, never by this check.
+            for report in _ownerless_report(args.database_url):
+                print(
+                    "owner_integrity_warning code=access_owner_missing "
+                    f"ref={report.ref} placement={report.placement} "
+                    f"adoption_possible={int(report.adoption_possible)}",
+                    file=sys.stderr,
+                )
+        elif args.action == "owners":
+            if args.apply:
+                print("owner_report_error=apply_not_available", file=sys.stderr)
+                return 1
+            revision = check_database_revision(args.database_url, read_only=True)
+            reports = _ownerless_report(args.database_url)
+            for report in reports:
+                print(
+                    "ownerless_object "
+                    + json.dumps(
+                        _ownerless_payload(report),
+                        sort_keys=True,
+                        separators=(",", ":"),
+                    )
+                )
+            adoptable = sum(1 for report in reports if report.adoption_possible)
+            result = "database_owners_attention" if reports else "database_owners_ok"
+            print(
+                f"{result} revision={revision} mode=dry-run "
+                f"ownerless={len(reports)} adoptable={adoptable}"
+            )
+            return 1 if reports else 0
         elif args.action == "interfaces":
             revision = check_database_revision(args.database_url)
             plan = _interface_plan(args.database_url, apply=args.apply)
@@ -309,6 +343,38 @@ def _relationship_diagnostics(database_url: str | None):
             return relationship_diagnostics(session)
     finally:
         engine.dispose()
+
+
+def _ownerless_report(database_url: str | None) -> tuple[OwnerlessObjectReport, ...]:
+    """Read-only legacy ownership report; it never guesses or assigns an owner."""
+    config = build_alembic_config(database_url)
+    engine = build_read_only_engine(str(config.attributes["database_url"]))
+    try:
+        with Session(engine) as session:
+            return find_ownerless_objects(session)
+    finally:
+        engine.dispose()
+
+
+def _ownerless_payload(report: OwnerlessObjectReport) -> dict[str, object]:
+    return {
+        "ref": report.ref,
+        "object_id": report.object_id,
+        "kind": report.kind,
+        "label": report.label,
+        "revision": report.revision,
+        "etag": f'"rev-{report.revision}"',
+        "placement": report.placement,
+        "direct_active_owner_grants": report.direct_active_owner_grants,
+        "inherited_active_owner_grants": report.inherited_active_owner_grants,
+        "inactive_direct_owner_grants": report.inactive_direct_owner_grants,
+        "provenance": {
+            "source_type": report.provenance_source_type,
+            "source_ref": report.provenance_source_ref,
+        },
+        "adoption_possible": report.adoption_possible,
+        "adoption_blocker": report.adoption_blocker,
+    }
 
 
 def _interface_plan(database_url: str | None, *, apply: bool):

@@ -32,6 +32,11 @@ from blockwart.services.catalog import (
     ensure_kind_change_allowed,
     ensure_projected_relationship_endpoints_valid,
 )
+from blockwart.services.ownership import (
+    assign_initial_owner,
+    ensure_objects_directly_owned,
+    resolve_owner_principal,
+)
 
 
 @dataclass(frozen=True)
@@ -40,7 +45,12 @@ class SeedImportResult:
     relationships_imported: int
 
 
-def import_seed_file(session: Session, path: str | Path) -> SeedImportResult:
+def import_seed_file(
+    session: Session,
+    path: str | Path,
+    *,
+    owner_principal_id: str | None,
+) -> SeedImportResult:
     seed_path = Path(path)
     payload = yaml.safe_load(seed_path.read_text(encoding="utf-8"))
     if not isinstance(payload, dict):
@@ -49,6 +59,7 @@ def import_seed_file(session: Session, path: str | Path) -> SeedImportResult:
         session,
         payload,
         source_ref=str(seed_path),
+        owner_principal_id=owner_principal_id,
     )
 
 
@@ -56,8 +67,18 @@ def import_seed_payload(
     session: Session,
     payload: dict[str, Any],
     *,
+    owner_principal_id: str | None,
     source_ref: str | None = None,
 ) -> SeedImportResult:
+    """Import one seed payload; every object it creates is owned by the named owner.
+
+    The owner is an explicit, existing, active principal. It is resolved before
+    any write, and each created object receives its direct ``Owner/self``
+    grant in this same transaction, so a seed can never commit an ownerless
+    object. The seed's own ``owner`` field is descriptive provenance only and
+    is never trusted as an authorization identity.
+    """
+    owner = resolve_owner_principal(session, owner_principal_id)
     if payload.get("schema_version") != 1:
         raise ValueError("Unsupported seed schema_version")
 
@@ -88,6 +109,7 @@ def import_seed_payload(
     validate_relationship_collection(relationships, endpoints)
 
     imported_objects = 0
+    created_ids: list[str] = []
     for obj in objects:
         row = session.get(CatalogObject, obj.id)
         data_json = json.dumps(obj.data, sort_keys=True)
@@ -138,12 +160,23 @@ def import_seed_payload(
                     provenance_json=provenance_json,
                 )
             )
+            session.flush()
+            assign_initial_owner(
+                session,
+                object_id=obj.id,
+                owner_principal_id=owner.id,
+                created_by_principal_id=owner.id,
+            )
             _write_seed_audit(
                 session,
                 obj.id,
                 "seed_create",
-                {"object_ref": f"{obj.kind}:{obj.id}"},
+                {
+                    "object_ref": f"{obj.kind}:{obj.id}",
+                    "initial_owner_principal_id": owner.id,
+                },
             )
+            created_ids.append(obj.id)
             imported_objects += 1
             continue
 
@@ -213,6 +246,7 @@ def import_seed_payload(
             inserted_relationships += 1
 
     session.flush()
+    ensure_objects_directly_owned(session, created_ids)
     return SeedImportResult(
         objects_imported=imported_objects,
         relationships_imported=inserted_relationships,

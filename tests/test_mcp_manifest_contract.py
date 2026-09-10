@@ -16,14 +16,13 @@ from blockwart.mcp.server import TOOLS, local_contract_metadata, validate_runtim
 def test_root_project_creator_tools_have_the_reviewed_manifest_evidence() -> None:
     metadata = contract_metadata(TOOLS, build_revision="issue-237")
 
-    # Delegating root project creation adds no tool; it only restates the
-    # create_root authorization contract, so the count is unchanged and the
-    # digest moves once with the reviewed description.
+    # Ownerless recovery adds one narrowly scoped audited write tool and moves
+    # the reviewed manifest digest with that public contract.
     assert metadata == {
         "build_revision": "issue-237",
         "contract_version": "1",
-        "manifest_digest": "e485f70f0070909cca9f5a81586b46167899607215a67da2b0f855746a6bfd23",
-        "tool_count": 33,
+        "manifest_digest": "94c7e4371b2c1d77d6c6a879d900c8dc5a0946141b75361773e842b495517b08",
+        "tool_count": 34,
     }
 
 
@@ -54,7 +53,7 @@ def test_reduced_catalog_is_incompatible_before_normal_tool_use() -> None:
 
     diagnosis = diagnose_contract(local, api=reduced)
 
-    assert local["tool_count"] == 33
+    assert local["tool_count"] == 34
     assert reduced["tool_count"] == 22
     assert diagnosis["status"] == "incompatible"
     assert diagnosis["classification"] == "wrapper_drift"

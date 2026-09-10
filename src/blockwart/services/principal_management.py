@@ -32,6 +32,7 @@ from blockwart.services.access import (
     LastCatalogOwnerError,
     ensure_active_catalog_owner_remains,
     ensure_principal_deactivation_preserves_owner_coverage,
+    lock_owner_coverage_state,
 )
 from blockwart.services.commands import (
     WriteContext,
@@ -631,6 +632,7 @@ def update_managed_principal(
 ) -> PrincipalMutationResult:
     require_platform_admin(access)
     expected = _expected_revision(expected_revision)
+    lock_owner_coverage_state(session, extra_principal_ids=(principal_id,))
     row = session.get(Principal, principal_id)
     if row is None:
         raise ManagedPrincipalNotFound("principal not found")

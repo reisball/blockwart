@@ -10,6 +10,7 @@ from sqlalchemy.orm import sessionmaker
 from blockwart.db.migrations import DatabaseMigrationError, upgrade_database
 from blockwart.db.session import DatabaseTransactionError, build_engine, transaction
 from blockwart.models import AuditEvent, CatalogObject, Relationship
+from blockwart.services.ownership import InitialOwnerError, resolve_owner_login
 from blockwart.services.seeds import import_seed_file
 
 DEFAULT_SEED_PATH = Path("seeds/pilot_objects.yaml")
@@ -28,6 +29,14 @@ def build_parser() -> argparse.ArgumentParser:
         "--seed",
         default=str(DEFAULT_SEED_PATH),
         help=f"Seed YAML file to import. Default: {DEFAULT_SEED_PATH}",
+    )
+    parser.add_argument(
+        "--owner-login",
+        help=(
+            "Login of the existing active principal that receives a direct "
+            "Owner/self grant on every object this seed creates. Required for "
+            "an import; a seed never creates an ownerless object."
+        ),
     )
     parser.add_argument(
         "--create-schema",
@@ -67,7 +76,15 @@ def main(argv: Sequence[str] | None = None) -> int:
 
         try:
             with transaction(session):
-                result = import_seed_file(session, seed_path)
+                owner = resolve_owner_login(session, args.owner_login)
+                result = import_seed_file(
+                    session,
+                    seed_path,
+                    owner_principal_id=owner.id,
+                )
+        except InitialOwnerError as exc:
+            print(f"seed_error={exc.code}", file=sys.stderr)
+            return 2
         except DatabaseTransactionError:
             print("seed_error=database_transaction_failed", file=sys.stderr)
             return 1

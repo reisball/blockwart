@@ -5,6 +5,7 @@ from collections.abc import Callable
 from fastapi import HTTPException, Request
 from sqlalchemy.orm import Session
 
+from blockwart.api.errors import CodedHTTPException
 from blockwart.db.session import read_only_transaction, transaction
 from blockwart.domain.decisions import DecisionIntegrityError
 from blockwart.domain.placement import PlacementError
@@ -89,7 +90,12 @@ def _command_http_error(
         if record_denial:
             with transaction(session):
                 record_command_denial(session, context, exc)
+        if exc.code is not None:
+            return CodedHTTPException(403, error_code=exc.code, detail=str(exc))
         return HTTPException(status_code=403, detail="Object permission denied")
+    if isinstance(exc, CommandError) and exc.code is not None:
+        status_code = 412 if isinstance(exc, CommandPreconditionFailed) else 409
+        return CodedHTTPException(status_code, error_code=exc.code, detail=str(exc))
     if isinstance(exc, CommandNotFound):
         return HTTPException(status_code=404, detail="Resource not found")
     if isinstance(exc, CommandPreconditionRequired):

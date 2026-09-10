@@ -418,6 +418,7 @@ def test_mcp_client_completes_handshake_and_calls_every_read_only_tool() -> None
         "blockwart.create_grant",
         "blockwart.update_grant",
         "blockwart.revoke_grant",
+        "blockwart.adopt_ownerless_object",
     }
     assert all(
         tools[name].annotations and tools[name].annotations.readOnlyHint
@@ -457,6 +458,7 @@ def test_mcp_client_completes_handshake_and_calls_every_read_only_tool() -> None
             "blockwart.create_grant",
             "blockwart.update_grant",
             "blockwart.revoke_grant",
+            "blockwart.adopt_ownerless_object",
         }
     )
     assert all(not result.isError for result in results.values())
@@ -1278,6 +1280,7 @@ def test_mcp_tools_publish_explicit_read_write_and_delete_hints() -> None:
         "blockwart.create_grant",
         "blockwart.update_grant",
         "blockwart.revoke_grant",
+        "blockwart.adopt_ownerless_object",
     }
     tools = {tool["name"]: tool for tool in TOOLS}
     assert all(

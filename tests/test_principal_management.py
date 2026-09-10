@@ -376,16 +376,18 @@ def test_last_catalog_owner_deactivation_returns_a_safe_conflict(
         assert stored.revision == 1
 
         with transaction(session):
-            session.add(
-                Principal(
-                    id="00000000-0000-0000-0000-0000000000cc",
-                    principal_type="service_account",
-                    login="standby.catalog.owner",
-                    display_name="Standby Catalog Owner",
-                    active=True,
-                    catalog_role=CatalogRole.CATALOG_OWNER,
-                    revision=1,
-                )
+            standby = create_service_account(
+                session,
+                login="standby.catalog.owner",
+                display_name="Standby Catalog Owner",
+                catalog_role=CatalogRole.CATALOG_OWNER,
+            )
+            create_object_grant(
+                session,
+                principal_id=standby.id,
+                object_id="hidden-root",
+                role=Role.OWNER,
+                scope=GrantScope.SELF,
             )
         with transaction(session):
             result = update_managed_principal(

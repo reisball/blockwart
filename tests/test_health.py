@@ -311,7 +311,7 @@ def test_readiness_rejects_an_inactive_catalog_owner(tmp_path: Path) -> None:
     assert response.json()["error_code"] == "catalog_owner_missing"
 
 
-def test_readiness_accepts_a_catalog_owner_without_any_object_grant(
+def test_readiness_rejects_a_catalog_owner_without_any_object_grant(
     tmp_path: Path,
 ) -> None:
     database_url = _database_url(tmp_path / "global-owner-only.sqlite3")
@@ -342,8 +342,9 @@ def test_readiness_accepts_a_catalog_owner_without_any_object_grant(
 
     response = _readiness(database_url)
 
-    assert response.status_code == 200
-    assert response.json()["checks"]["authorization"] == "ok"
+    assert response.status_code == 503
+    assert response.json()["error_code"] == "owner_coverage_incomplete"
+    assert response.json()["checks"]["authorization"] == "error"
 
 
 def test_readiness_rejects_wrong_alembic_revision(tmp_path: Path) -> None:

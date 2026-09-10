@@ -25,7 +25,7 @@ import hashlib
 import json
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any, Literal
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -42,7 +42,7 @@ from blockwart.domain.attention import (
     build_attention_derivation,
     summarize_attention,
 )
-from blockwart.domain.auth import ObjectVisibility
+from blockwart.domain.auth import ObjectVisibility, Permission
 from blockwart.domain.references import TypedReference
 from blockwart.domain.relationships import diagnose_relationship_integrity
 from blockwart.domain.search import SEARCH_LIMIT_MAX, SEARCH_LIMIT_MIN
@@ -50,7 +50,9 @@ from blockwart.domain.timestamps import format_rfc3339_utc
 from blockwart.models import CatalogObject, Relationship
 from blockwart.schemas.catalog import ObjectKind
 from blockwart.services.catalog import catalog_objects_from_snapshot
+from blockwart.services.ownership import ownerless_object_ids
 from blockwart.services.pagination import SortDirection, paginate_items
+from blockwart.services.policy import GlobalPolicySource
 from blockwart.services.queries import (
     build_monitoring_index,
     build_release_monitoring_index,
@@ -294,6 +296,15 @@ def _load_signals(
         relationships=relationship_rows,
         readable_ids=readable_ids,
     )
+    # Ownership is an access-management fact: it is judged only for objects
+    # the viewer may manage access on, so a reader never learns whether an
+    # object it cannot administer has an Owner. The stored grants decide it,
+    # never the viewer's own projection, and a global catalog role never
+    # counts as an Owner source.
+    ownerless_ids = ownerless_object_ids(session)
+    adoption_available = access.policy.has_global_authority(
+        GlobalPolicySource.CATALOG_OWNER
+    )
     objects = tuple(
         _object_input(
             catalog_object,
@@ -301,6 +312,12 @@ def _load_signals(
             monitoring=monitoring_index.get(catalog_object.id),
             release_monitoring=release_monitoring_index.get(catalog_object.id),
             has_suitable_runbook=catalog_object.id in suitable_services,
+            owner_state=(
+                ("ownerless" if catalog_object.id in ownerless_ids else "owned")
+                if access.policy.can(Permission.MANAGE_ACCESS, catalog_object.id)
+                else None
+            ),
+            adoption_available=adoption_available,
         )
         for catalog_object in projected
         if catalog_object.visibility == ObjectVisibility.DETAIL
@@ -335,6 +352,8 @@ def _object_input(
     monitoring: dict[str, Any] | None,
     release_monitoring: dict[str, Any] | None,
     has_suitable_runbook: bool,
+    owner_state: Literal["owned", "ownerless"] | None,
+    adoption_available: bool,
 ) -> AttentionObjectInput:
     provenance = catalog_object.provenance
     return AttentionObjectInput(
@@ -353,6 +372,8 @@ def _object_input(
         monitoring=monitoring,
         release_monitoring=release_monitoring,
         has_suitable_runbook=has_suitable_runbook,
+        owner_state=owner_state,
+        adoption_available=adoption_available and owner_state == "ownerless",
     )
 
 

@@ -3,6 +3,7 @@ from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
+from ownership_support import ensure_seed_owner
 from sqlalchemy.orm import Session
 
 from blockwart.api.deps import get_session
@@ -20,7 +21,7 @@ SEED_PATH = Path(__file__).resolve().parents[1] / "seeds" / "pilot_objects.yaml"
 def session_factory(alembic_session_factory):
     with alembic_session_factory() as session:
         with transaction(session):
-            import_seed_file(session, SEED_PATH)
+            import_seed_file(session, SEED_PATH, owner_principal_id=ensure_seed_owner(session))
     return alembic_session_factory
 
 

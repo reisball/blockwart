@@ -440,6 +440,61 @@ authorized Owner can perform a deliberate transfer. Successful revocation is
 visible to the next request because policy decisions are rebuilt from current
 database state and no authorization cache is used.
 
+An actor that has `manage_access` but no effective Owner grant is refused an
+Owner-grant change with one of two stable reasons, published identically as
+the REST and MCP error `code` and as a localized UI message:
+`owner_required_to_manage_owner_grants` when the object has an active Owner,
+and `object_has_no_owner_use_adoption_flow` when it has none. Both are still
+denials and write the normal redacted denial security event with the reason.
+
+## Ownership invariant and ownerless recovery
+
+Every catalog object must be reached by at least one active object Owner grant,
+directly or through a canonical subtree grant. A global `catalog_owner`
+administers every object but is deliberately not an object Owner source: it
+neither satisfies nor masks this per-object invariant, and it cannot add,
+change, or remove Owner grants through ordinary grant management.
+
+One shared primitive (`blockwart.services.ownership.assign_initial_owner`)
+writes the first direct `Owner/self` grant inside every creation transaction:
+
+| Creation path | First Owner |
+|---|---|
+| REST `POST /api/v1/roots`, `/children`, `/attached-devices`; MCP `create_root`, `create_child`, `create_attached_device`; browser create forms | the authenticated creator |
+| `blockwart-seed` | the explicit `--owner-login` principal |
+| `blockwart-import-markdown --apply` | the explicit `--owner-login` principal |
+| reviewed Knowledge apply | the applying catalog-owner principal |
+
+The owner must be an existing active principal. A missing or inactive owner is
+rejected before commit (`owner_principal_required` or
+`owner_principal_inactive`), and any failure while writing the grant rolls back
+the object with it. Seeds and imports also prove, before commit, that every
+object they created carries its direct Owner. Nothing ever guesses an owner
+from other effective permissions, and a seed's descriptive `owner` field is
+provenance only. Alembic migrations create no catalog objects.
+
+Objects created before this invariant can still be ownerless. They are detected
+read-only by:
+
+- `blockwart-db owners`, which prints one JSON line per ownerless object (ref,
+  label, revision and ETag, top-level or placed, active direct/inherited and
+  inactive direct Owner counts, provenance source type and path, and whether
+  adoption is currently possible) and exits `1` while any exist;
+- `blockwart-db integrity`, which additionally warns with
+  `owner_integrity_warning code=access_owner_missing` without failing;
+- the needs-attention view (`access_owner_missing` in category `access`), shown
+  only to principals that may manage the object's access;
+- `owner_coverage` on the object access resource and in the UI access panel.
+
+The only repair is the audited adoption command (REST `POST
+/api/v1/objects/{object_id}/access/adoption`, MCP
+`blockwart.adopt_ownerless_object`, and the **Adopt ownerless object** form in
+the UI access panel). It requires an active catalog owner on a trusted channel
+and the current strong ETag, assigns exactly one direct `Owner/self` grant to
+one active principal, and refuses as soon as any active direct or inherited
+Owner grant exists. Its compare-and-set revision claim gives concurrent
+adoptions exactly one winner. See `api-v1.md` for the full contract.
+
 ACL-shaped keys such as `acl`, `access_grants`, or `permissions` are rejected
 recursively from catalog write and import data. Object grants can be changed
 only through the dedicated grant-management commands and never through
@@ -539,6 +594,14 @@ Repeat `--object-id` for each disconnected canonical component. Creation of the
 principal, password credential, and all requested Owner grants is one transaction;
 the command rolls everything back unless the complete catalog satisfies the same
 Owner-coverage invariant used by startup and readiness.
+
+On a fresh, still-empty catalog, bootstrap first and seed afterwards. With
+`--catalog-owner`, `--object-id` may then be omitted: the command creates only
+the first identity, and the following `blockwart-seed --owner-login kai` gives
+that principal a direct `Owner/self` grant on every object it creates. An
+anchor-free bootstrap is refused on a non-empty catalog or without
+`--catalog-owner`, and startup still reports `owner_catalog_empty` until the
+catalog has objects.
 
 An existing installation is never promoted implicitly by a migration. Promote
 the exact existing human explicitly through the protected CLI before enabling
