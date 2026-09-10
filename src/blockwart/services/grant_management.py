@@ -20,8 +20,8 @@ from blockwart.services.access import (
     LastOwnerError,
     ensure_owner_coverage_preserved,
     grant_scope_object_ids,
+    lock_grant_command_state,
     lock_owner_coverage_state,
-    lock_principal_rows,
 )
 from blockwart.services.audit import add_audit_event
 from blockwart.services.commands import (
@@ -442,7 +442,7 @@ def create_managed_grant(
     scope: GrantScope | str,
     expected_revision: int | str | None,
 ) -> GrantCommandResult:
-    row = _require_manage_access(
+    _require_manage_access(
         session,
         context,
         object_id=object_id,
@@ -450,18 +450,27 @@ def create_managed_grant(
     )
     resolved_role = Role(role)
     resolved_scope = GrantScope(scope)
-    if resolved_role == Role.OWNER:
-        lock_owner_coverage_state(
-            session,
-            extra_principal_ids=(context.principal.id, principal_id),
-        )
+    locked_principals = lock_grant_command_state(
+        session,
+        actor_principal_id=context.principal.id,
+        object_id=object_id,
+        extra_principal_ids=(principal_id,),
+    )
+    row = _require_manage_access(
+        session,
+        context,
+        object_id=object_id,
+        refresh_policy=True,
+    )
     _require_owner_for_owner_grant(
         session,
         context,
         object_id=object_id,
         roles=(resolved_role,),
     )
-    target = _active_target_principal(session, principal_id)
+    target = locked_principals.get(principal_id)
+    if target is None or not target.active:
+        raise CommandConflict("active principal not found")
     revision = _expected_revision(expected_revision)
     if row.revision != revision:
         raise CommandPreconditionFailed("object revision changed")
@@ -543,6 +552,24 @@ def update_managed_grant(
         raise CommandNotFound("direct grant not found")
     resolved_role = Role(role)
     resolved_scope = GrantScope(scope)
+    locked_principals = lock_grant_command_state(
+        session,
+        actor_principal_id=context.principal.id,
+        object_id=object_id,
+        extra_principal_ids=(grant.principal_id,),
+    )
+    row = _require_manage_access(
+        session,
+        context,
+        object_id=object_id,
+        refresh_policy=True,
+    )
+    grant = _direct_grant(session, object_id=object_id, grant_id=grant_id)
+    if (
+        expected_principal_id is not None
+        and grant.principal_id != expected_principal_id
+    ):
+        raise CommandNotFound("direct grant not found")
     _require_owner_for_owner_grant(
         session,
         context,
@@ -552,12 +579,7 @@ def update_managed_grant(
     revision = _expected_revision(expected_revision)
     if row.revision != revision:
         raise CommandPreconditionFailed("object revision changed")
-    if Role.OWNER in (Role(grant.role), resolved_role):
-        lock_owner_coverage_state(
-            session,
-            extra_principal_ids=(context.principal.id, grant.principal_id),
-        )
-    target = session.get(Principal, grant.principal_id)
+    target = locked_principals.get(grant.principal_id)
     if target is None:
         raise CommandConflict("grant principal does not exist")
     if grant.role == resolved_role and grant.scope == resolved_scope:
@@ -654,6 +676,24 @@ def revoke_managed_grant(
         and grant.principal_id != expected_principal_id
     ):
         raise CommandNotFound("direct grant not found")
+    locked_principals = lock_grant_command_state(
+        session,
+        actor_principal_id=context.principal.id,
+        object_id=object_id,
+        extra_principal_ids=(grant.principal_id,),
+    )
+    row = _require_manage_access(
+        session,
+        context,
+        object_id=object_id,
+        refresh_policy=True,
+    )
+    grant = _direct_grant(session, object_id=object_id, grant_id=grant_id)
+    if (
+        expected_principal_id is not None
+        and grant.principal_id != expected_principal_id
+    ):
+        raise CommandNotFound("direct grant not found")
     _require_owner_for_owner_grant(
         session,
         context,
@@ -663,12 +703,7 @@ def revoke_managed_grant(
     revision = _expected_revision(expected_revision)
     if row.revision != revision:
         raise CommandPreconditionFailed("object revision changed")
-    if grant.role == Role.OWNER:
-        lock_owner_coverage_state(
-            session,
-            extra_principal_ids=(context.principal.id, grant.principal_id),
-        )
-    target = session.get(Principal, grant.principal_id)
+    target = locked_principals.get(grant.principal_id)
     if target is None:
         raise CommandConflict("grant principal does not exist")
     before = _grant_snapshot(grant)
@@ -744,7 +779,10 @@ def _require_manage_access(
         if refresh_policy
         else context.policy
     )
-    row = session.get(CatalogObject, object_id)
+    statement = select(CatalogObject).where(CatalogObject.id == object_id)
+    if refresh_policy:
+        statement = statement.execution_options(populate_existing=True)
+    row = session.scalar(statement)
     if row is None or not policy.can(Permission.DISCOVER, object_id):
         raise CommandNotFound("catalog object not found")
     if not policy.can(Permission.MANAGE_ACCESS, object_id):
@@ -846,13 +884,6 @@ def _require_ownerless(coverage: ObjectOwnerCoverage) -> None:
         )
 
 
-def _active_target_principal(session: Session, principal_id: str) -> Principal:
-    principal = lock_principal_rows(session, (principal_id,)).get(principal_id)
-    if principal is None or not principal.active:
-        raise CommandConflict("active principal not found")
-    return principal
-
-
 def _direct_grant(
     session: Session,
     *,
@@ -860,10 +891,12 @@ def _direct_grant(
     grant_id: int,
 ) -> ObjectGrant:
     grant = session.scalar(
-        select(ObjectGrant).where(
+        select(ObjectGrant)
+        .where(
             ObjectGrant.id == grant_id,
             ObjectGrant.object_id == object_id,
         )
+        .execution_options(populate_existing=True)
     )
     if grant is None:
         raise CommandNotFound("direct grant not found")

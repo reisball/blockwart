@@ -53,6 +53,7 @@ from blockwart.services.access import (
     OwnerCoverageError,
     create_object_grant,
     ensure_complete_owner_coverage,
+    revoke_object_grant,
 )
 from blockwart.services.audit import load_audit_details
 from blockwart.services.catalog import create_relationship, upsert_object
@@ -67,6 +68,7 @@ from blockwart.services.commands import (
 from blockwart.services.grant_management import (
     adopt_ownerless_object,
     create_managed_grant,
+    revoke_managed_grant,
     update_managed_grant,
 )
 from blockwart.services.identity import (
@@ -2401,34 +2403,52 @@ def test_postgresql_adoption_and_owner_grant_create_share_coverage_lock(
 
         adoption_locked = threading.Event()
         grant_create_started = threading.Event()
-        original_lock = grant_management_module.lock_owner_coverage_state
+        original_owner_lock = grant_management_module.lock_owner_coverage_state
+        original_grant_lock = grant_management_module.lock_grant_command_state
 
-        def coordinate_lock(
+        def coordinate_adoption_lock(
             session: Session,
             *,
             extra_principal_ids: Iterable[str] = (),
         ) -> None:
             principal_ids = tuple(extra_principal_ids)
-            if adoption_target_id in principal_ids:
-                original_lock(
-                    session,
-                    extra_principal_ids=principal_ids,
-                )
-                adoption_locked.set()
-                assert grant_create_started.wait(timeout=10)
-                return
+            assert adoption_target_id in principal_ids
+            original_owner_lock(
+                session,
+                extra_principal_ids=principal_ids,
+            )
+            adoption_locked.set()
+            assert grant_create_started.wait(timeout=10)
+
+        def coordinate_grant_lock(
+            session: Session,
+            *,
+            actor_principal_id: str | None,
+            object_id: str,
+            extra_principal_ids: Iterable[str] = (),
+        ) -> dict[str, Principal]:
+            principal_ids = tuple(extra_principal_ids)
+            assert actor_principal_id == actor_id
+            assert object_id == "adopt-grant-parent"
             assert grant_target_id in principal_ids
             assert adoption_locked.wait(timeout=10)
             grant_create_started.set()
-            original_lock(
+            return original_grant_lock(
                 session,
+                actor_principal_id=actor_principal_id,
+                object_id=object_id,
                 extra_principal_ids=principal_ids,
             )
 
         monkeypatch.setattr(
             grant_management_module,
             "lock_owner_coverage_state",
-            coordinate_lock,
+            coordinate_adoption_lock,
+        )
+        monkeypatch.setattr(
+            grant_management_module,
+            "lock_grant_command_state",
+            coordinate_grant_lock,
         )
 
         def adopt() -> int:
@@ -2880,6 +2900,211 @@ def test_postgresql_placement_delete_reauthorizes_after_actor_deactivation(
                 select(func.count(AuditEvent.id)).where(
                     AuditEvent.object_id == parent_id,
                     AuditEvent.action == "relationship_delete",
+                )
+            ) == 0
+    finally:
+        if engine is not None:
+            engine.dispose()
+        with admin.connect() as connection:
+            connection.execute(
+                text(
+                    "SELECT pg_terminate_backend(pid) FROM pg_stat_activity "
+                    "WHERE datname = :name AND pid <> pg_backend_pid()"
+                ),
+                {"name": name},
+            )
+            connection.execute(text(f'DROP DATABASE IF EXISTS "{name}"'))
+        admin.dispose()
+
+
+@pytest.mark.parametrize("operation", ["create", "update", "revoke"])
+@pytest.mark.skipif(not _pg_available(), reason="PostgreSQL test database unreachable")
+def test_postgresql_grant_commands_reauthorize_after_actor_grant_revocation(
+    operation: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    name = f"bw_grant_reauth_{operation}_{uuid.uuid4().hex[:8]}"
+    admin = create_engine(_pg_url("postgres"), isolation_level="AUTOCOMMIT")
+    with admin.connect() as connection:
+        connection.execute(text(f'CREATE DATABASE "{name}"'))
+    engine = None
+    try:
+        url = _pg_url(name)
+        upgrade_database(url)
+        engine = build_engine(url)
+        factory = sessionmaker(bind=engine, autoflush=False, autocommit=False)
+        parent_id = f"grant-reauth-{operation}-parent"
+        child_id = f"grant-reauth-{operation}-child"
+        with factory() as session:
+            with transaction(session):
+                actor_id = create_service_account(
+                    session,
+                    login=f"pg.grant.reauth.{operation}.actor",
+                    display_name="PG Grant Reauth Actor",
+                ).id
+                standby_id = create_service_account(
+                    session,
+                    login=f"pg.grant.reauth.{operation}.standby",
+                    display_name="PG Grant Reauth Standby",
+                ).id
+                target_id = create_service_account(
+                    session,
+                    login=f"pg.grant.reauth.{operation}.target",
+                    display_name="PG Grant Reauth Target",
+                ).id
+                upsert_object(session, _asset(parent_id))
+                upsert_object(session, _asset(child_id, kind="service"))
+                create_relationship(
+                    session,
+                    from_ref=f"host:{parent_id}",
+                    relation_type="hosts",
+                    to_ref=f"service:{child_id}",
+                )
+                actor_grant = create_object_grant(
+                    session,
+                    principal_id=actor_id,
+                    object_id=parent_id,
+                    role=Role.OWNER,
+                    scope=GrantScope.SUBTREE,
+                )
+                create_object_grant(
+                    session,
+                    principal_id=standby_id,
+                    object_id=parent_id,
+                    role=Role.OWNER,
+                    scope=GrantScope.SUBTREE,
+                )
+                target_grant = (
+                    create_object_grant(
+                        session,
+                        principal_id=target_id,
+                        object_id=child_id,
+                        role=Role.VIEWER,
+                        scope=GrantScope.SELF,
+                    )
+                    if operation != "create"
+                    else None
+                )
+                actor_grant_id = actor_grant.id
+                target_grant_id = (
+                    target_grant.id if target_grant is not None else None
+                )
+                child_revision = _revision(session, child_id)
+
+        authorization_checked = threading.Event()
+        actor_grant_revoked = threading.Event()
+        original_require = grant_management_module._require_manage_access
+        first_actor_check = True
+
+        def pause_after_initial_authorization(
+            session: Session,
+            context: WriteContext,
+            *,
+            object_id: str,
+            refresh_policy: bool = False,
+        ) -> CatalogObject:
+            nonlocal first_actor_check
+            row = original_require(
+                session,
+                context,
+                object_id=object_id,
+                refresh_policy=refresh_policy,
+            )
+            if context.principal.id == actor_id and first_actor_check:
+                first_actor_check = False
+                authorization_checked.set()
+                assert actor_grant_revoked.wait(timeout=10)
+            return row
+
+        monkeypatch.setattr(
+            grant_management_module,
+            "_require_manage_access",
+            pause_after_initial_authorization,
+        )
+
+        def mutate_grant() -> str:
+            try:
+                with factory() as session:
+                    with transaction(session):
+                        context = _write_context(session, actor_id)
+                        if operation == "create":
+                            create_managed_grant(
+                                session,
+                                context,
+                                object_id=child_id,
+                                principal_id=target_id,
+                                role=Role.VIEWER,
+                                scope=GrantScope.SELF,
+                                expected_revision=child_revision,
+                            )
+                        elif operation == "update":
+                            assert target_grant_id is not None
+                            update_managed_grant(
+                                session,
+                                context,
+                                object_id=child_id,
+                                grant_id=target_grant_id,
+                                role=Role.EDITOR,
+                                scope=GrantScope.SELF,
+                                expected_revision=child_revision,
+                            )
+                        else:
+                            assert target_grant_id is not None
+                            revoke_managed_grant(
+                                session,
+                                context,
+                                object_id=child_id,
+                                grant_id=target_grant_id,
+                                expected_revision=child_revision,
+                            )
+            except (CommandAuthorizationDenied, commands_module.CommandNotFound):
+                return "denied"
+            return "unexpected_success"
+
+        def revoke_actor_authority() -> str:
+            assert authorization_checked.wait(timeout=10)
+            with factory() as session:
+                with transaction(session):
+                    assert revoke_object_grant(
+                        session,
+                        grant_id=actor_grant_id,
+                    )
+            actor_grant_revoked.set()
+            return "revoked"
+
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            mutated = pool.submit(mutate_grant)
+            revoked = pool.submit(revoke_actor_authority)
+            assert revoked.result(timeout=20) == "revoked"
+            assert mutated.result(timeout=20) == "denied"
+
+        with factory() as session:
+            assert session.get(ObjectGrant, actor_grant_id) is None
+            stored_target_grants = list(
+                session.scalars(
+                    select(ObjectGrant).where(
+                        ObjectGrant.object_id == child_id,
+                        ObjectGrant.principal_id == target_id,
+                    )
+                )
+            )
+            if operation == "create":
+                assert stored_target_grants == []
+            else:
+                assert len(stored_target_grants) == 1
+                assert stored_target_grants[0].id == target_grant_id
+                assert stored_target_grants[0].role == Role.VIEWER
+            assert _revision(session, child_id) == child_revision
+            assert session.scalar(
+                select(func.count(AuditEvent.id)).where(
+                    AuditEvent.object_id == child_id,
+                    AuditEvent.actor == actor_id,
+                    AuditEvent.action
+                    == {
+                        "create": "grant_create",
+                        "update": "grant_update",
+                        "revoke": "grant_revoke",
+                    }[operation],
                 )
             ) == 0
     finally:

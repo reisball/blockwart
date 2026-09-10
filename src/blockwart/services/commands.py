@@ -55,7 +55,10 @@ from blockwart.schemas.catalog import (
     CatalogObjectOut,
     ObjectRenameCandidate,
 )
-from blockwart.services.access import lock_owner_coverage_state
+from blockwart.services.access import (
+    lock_grant_command_state,
+    lock_owner_coverage_state,
+)
 from blockwart.services.audit import add_audit_event
 from blockwart.services.catalog import (
     ObjectUpsertPlan,
@@ -1173,6 +1176,26 @@ def delete_catalog_object(
         permission=Permission.DELETE,
     )
     expected_revision = _resolve_expected_revision(expected_revision)
+    if row.revision != expected_revision:
+        raise CommandPreconditionFailed("object revision changed")
+    lock_grant_command_state(
+        session,
+        actor_principal_id=context.principal.id,
+        object_id=object_id,
+    )
+    session.expire_all()
+    context = WriteContext(
+        principal=context.principal,
+        policy=policy_for_principal(session, context.principal.id),
+        channel=context.channel,
+        request_id=context.request_id,
+    )
+    row = _require_permission(
+        session,
+        context,
+        object_id=object_id,
+        permission=Permission.DELETE,
+    )
     if row.revision != expected_revision:
         raise CommandPreconditionFailed("object revision changed")
     before = _object_snapshot(row)

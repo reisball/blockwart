@@ -138,6 +138,19 @@ def revoke_object_grant(
     grant = session.get(ObjectGrant, grant_id)
     if grant is None:
         return False
+    lock_grant_command_state(
+        session,
+        actor_principal_id=actor_principal_id,
+        object_id=grant.object_id,
+        extra_principal_ids=(grant.principal_id,),
+    )
+    grant = session.scalar(
+        select(ObjectGrant)
+        .where(ObjectGrant.id == grant_id)
+        .execution_options(populate_existing=True)
+    )
+    if grant is None:
+        return False
     ensure_owner_coverage_after_exclusions(
         session,
         excluded_grant_ids=(grant.id,),
@@ -371,6 +384,63 @@ def lock_owner_coverage_state(
     )
     _locked_active_owner_grants(session)
     _lock_placement_relationships(session)
+
+
+def lock_grant_command_state(
+    session: Session,
+    *,
+    actor_principal_id: str | None,
+    object_id: str,
+    extra_principal_ids: Iterable[str] = (),
+) -> dict[str, Principal]:
+    """Stabilize grant-command authorization in the shared lock order.
+
+    Grant management can depend on a catalog role, a direct grant, or an
+    inherited grant whose reach follows canonical placements. Lock principals
+    first, active Owner grants second, placements third, then the actor's
+    authority grants and every direct grant on the command object by grant ID.
+    The object revision is claimed only after this helper returns.
+    """
+    principal_ids = set(extra_principal_ids)
+    if actor_principal_id is not None:
+        principal_ids.add(actor_principal_id)
+    principals = lock_principal_rows(
+        session,
+        principal_ids,
+        include_active_catalog_owners=True,
+        include_owner_grant_principals=True,
+    )
+    _locked_active_owner_grants(session)
+    _lock_placement_relationships(session)
+    _lock_command_grants(
+        session,
+        actor_principal_id=actor_principal_id,
+        object_id=object_id,
+    )
+    return principals
+
+
+def _lock_command_grants(
+    session: Session,
+    *,
+    actor_principal_id: str | None,
+    object_id: str,
+) -> None:
+    predicate = ObjectGrant.object_id == object_id
+    if actor_principal_id is not None:
+        predicate = or_(
+            predicate,
+            ObjectGrant.principal_id == actor_principal_id,
+        )
+    list(
+        session.scalars(
+            select(ObjectGrant)
+            .where(predicate)
+            .order_by(ObjectGrant.id)
+            .with_for_update(of=ObjectGrant)
+            .execution_options(populate_existing=True)
+        ).all()
+    )
 
 
 def _lock_placement_relationships(session: Session) -> None:
