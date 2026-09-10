@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 
-from sqlalchemy import and_, literal, select
+from sqlalchemy import and_, literal, or_, select
 from sqlalchemy.orm import Session, aliased
 
 from blockwart.domain.auth import CatalogRole, GrantScope, Role
@@ -24,11 +24,45 @@ class LastCatalogOwnerError(AccessGrantError):
 
 
 class OwnerCoverageError(AccessGrantError):
-    """The catalog is empty or lacks active effective Owner coverage."""
+    """The catalog is empty or lacks active per-object Owner-grant coverage."""
 
     def __init__(self, code: str) -> None:
         super().__init__("catalog Owner coverage invariant failed")
         self.code = code
+
+
+def lock_principal_rows(
+    session: Session,
+    principal_ids: Iterable[str],
+    *,
+    include_active_catalog_owners: bool = False,
+    include_owner_grant_principals: bool = False,
+) -> dict[str, Principal]:
+    """Lock and refresh principal state in deterministic principal-ID order."""
+    predicate = Principal.id.in_(sorted(frozenset(principal_ids)))
+    if include_active_catalog_owners:
+        predicate = or_(
+            predicate,
+            (
+                Principal.active.is_(True)
+                & (Principal.catalog_role == CatalogRole.CATALOG_OWNER)
+            ),
+        )
+    if include_owner_grant_principals:
+        predicate = or_(
+            predicate,
+            Principal.id.in_(
+                select(ObjectGrant.principal_id).where(ObjectGrant.role == Role.OWNER)
+            ),
+        )
+    rows = session.scalars(
+        select(Principal)
+        .where(predicate)
+        .order_by(Principal.id)
+        .with_for_update(of=Principal)
+        .execution_options(populate_existing=True)
+    ).all()
+    return {row.id: row for row in rows}
 
 
 def create_object_grant(
@@ -104,6 +138,19 @@ def revoke_object_grant(
     grant = session.get(ObjectGrant, grant_id)
     if grant is None:
         return False
+    lock_grant_command_state(
+        session,
+        actor_principal_id=actor_principal_id,
+        object_id=grant.object_id,
+        extra_principal_ids=(grant.principal_id,),
+    )
+    grant = session.scalar(
+        select(ObjectGrant)
+        .where(ObjectGrant.id == grant_id)
+        .execution_options(populate_existing=True)
+    )
+    if grant is None:
+        return False
     ensure_owner_coverage_after_exclusions(
         session,
         excluded_grant_ids=(grant.id,),
@@ -140,6 +187,7 @@ def ensure_principal_deactivation_preserves_owner_coverage(
     *,
     principal_id: str,
 ) -> None:
+    lock_owner_coverage_state(session, extra_principal_ids=(principal_id,))
     ensure_active_catalog_owner_remains(
         session,
         excluded_principal_ids=(principal_id,),
@@ -192,6 +240,10 @@ def ensure_owner_coverage_after_exclusions(
 ) -> None:
     excluded_grants = frozenset(excluded_grant_ids)
     excluded_principals = frozenset(excluded_principal_ids)
+    lock_owner_coverage_state(
+        session,
+        extra_principal_ids=excluded_principals,
+    )
     active_owner_grants = _locked_active_owner_grants(session)
     affected_grants = [
         grant
@@ -206,13 +258,11 @@ def ensure_owner_coverage_after_exclusions(
         for grant in affected_grants
         for object_id in _grant_affected_object_ids(session, grant)
     }
-    if active_catalog_owner_ids(session) & excluded_principals:
-        # An excluded global owner currently covers the whole catalog.
-        affected_ids.update(session.scalars(select(CatalogObject.id)).all())
     if not affected_ids:
         return
-    covered_ids = active_owner_covered_object_ids(
+    covered_ids = owner_grant_covered_object_ids(
         session,
+        lock=False,
         excluded_grant_ids=excluded_grants,
         excluded_principal_ids=excluded_principals,
     )
@@ -228,13 +278,172 @@ def active_owner_covered_object_ids(
 ) -> set[str]:
     excluded_grants = frozenset(excluded_grant_ids)
     excluded_principals = frozenset(excluded_principal_ids)
-    _locked_active_owner_grants(session)
+    lock_owner_coverage_state(
+        session,
+        extra_principal_ids=excluded_principals,
+    )
     if active_catalog_owner_ids(
         session,
         excluded_principal_ids=excluded_principals,
     ):
         # An active catalog owner covers every current object without a grant.
         return set(session.scalars(select(CatalogObject.id)).all())
+    return _owner_grant_reach(
+        session,
+        excluded_grant_ids=excluded_grants,
+        excluded_principal_ids=excluded_principals,
+    )
+
+
+def owner_grant_covered_object_ids(
+    session: Session,
+    *,
+    lock: bool = True,
+    excluded_grant_ids: Iterable[int] = (),
+    excluded_principal_ids: Iterable[str] = (),
+) -> set[str]:
+    """Return every object reached by an active direct or inherited Owner *grant*.
+
+    Unlike :func:`active_owner_covered_object_ids`, global ``catalog_owner``
+    authority never counts here: it administers the catalog but is not an
+    object Owner source, so it can neither satisfy nor mask the per-object
+    ownership invariant. Read paths pass ``lock=False``.
+    """
+    excluded_grants = frozenset(excluded_grant_ids)
+    excluded_principals = frozenset(excluded_principal_ids)
+    if lock:
+        lock_owner_coverage_state(
+            session,
+            extra_principal_ids=excluded_principals,
+        )
+    return _owner_grant_reach(
+        session,
+        excluded_grant_ids=excluded_grants,
+        excluded_principal_ids=excluded_principals,
+    )
+
+
+def inherited_owner_grant_ids(
+    session: Session,
+    *,
+    object_id: str,
+) -> set[int]:
+    """Return active Owner subtree grants on canonical ancestors reaching ``object_id``.
+
+    A subtree Owner grant anchored on the object itself is a direct source and
+    is deliberately not counted here.
+    """
+    roots = (
+        select(
+            CatalogObject.id.label("object_id"),
+            (CatalogObject.kind + literal(":") + CatalogObject.id).label("object_ref"),
+            CatalogObject.kind.label("object_kind"),
+            ObjectGrant.scope.label("scope"),
+            ObjectGrant.id.label("grant_id"),
+        )
+        .join(ObjectGrant, ObjectGrant.object_id == CatalogObject.id)
+        .join(Principal, Principal.id == ObjectGrant.principal_id)
+        .where(
+            ObjectGrant.role == Role.OWNER,
+            ObjectGrant.scope == GrantScope.SUBTREE,
+            ObjectGrant.object_id != object_id,
+            Principal.active.is_(True),
+        )
+    )
+    reach = _subtree_cte(
+        roots,
+        name="inherited_owner_reach",
+        scope_column=True,
+        grant_column=True,
+    )
+    return {
+        int(value)
+        for value in session.scalars(
+            select(reach.c.grant_id).where(reach.c.object_id == object_id).distinct()
+        ).all()
+    }
+
+
+def lock_owner_coverage_state(
+    session: Session,
+    *,
+    extra_principal_ids: Iterable[str] = (),
+) -> None:
+    """Serialize every Owner-coverage decision in one global row order.
+
+    Principal rows are locked first in principal-ID order, then only Owner
+    grant rows in grant-ID order, then canonical placement rows. Callers may
+    include actors or targets that are not yet referenced by an Owner grant.
+    SQLite ignores ``FOR UPDATE``; its single writer serializes the transaction.
+    """
+    lock_principal_rows(
+        session,
+        extra_principal_ids,
+        include_active_catalog_owners=True,
+        include_owner_grant_principals=True,
+    )
+    _locked_active_owner_grants(session)
+    _lock_placement_relationships(session)
+
+
+def lock_grant_command_state(
+    session: Session,
+    *,
+    actor_principal_id: str | None,
+    object_id: str,
+    extra_principal_ids: Iterable[str] = (),
+) -> dict[str, Principal]:
+    """Stabilize grant-command authorization in the shared lock order.
+
+    Grant management can depend on a catalog role, a direct grant, or an
+    inherited grant whose reach follows canonical placements. Lock principals
+    first, active Owner grants second, placements third, then the actor's
+    authority grants and every direct grant on the command object by grant ID.
+    The object revision is claimed only after this helper returns.
+    """
+    principal_ids = set(extra_principal_ids)
+    if actor_principal_id is not None:
+        principal_ids.add(actor_principal_id)
+    principals = lock_principal_rows(
+        session,
+        principal_ids,
+        include_active_catalog_owners=True,
+        include_owner_grant_principals=True,
+    )
+    _locked_active_owner_grants(session)
+    _lock_placement_relationships(session)
+    _lock_command_grants(
+        session,
+        actor_principal_id=actor_principal_id,
+        object_id=object_id,
+    )
+    return principals
+
+
+def _lock_command_grants(
+    session: Session,
+    *,
+    actor_principal_id: str | None,
+    object_id: str,
+) -> None:
+    predicate = ObjectGrant.object_id == object_id
+    if actor_principal_id is not None:
+        predicate = or_(
+            predicate,
+            ObjectGrant.principal_id == actor_principal_id,
+        )
+    list(
+        session.scalars(
+            select(ObjectGrant)
+            .where(predicate)
+            .order_by(ObjectGrant.id)
+            .with_for_update(of=ObjectGrant)
+            .execution_options(populate_existing=True)
+        ).all()
+    )
+
+
+def _lock_placement_relationships(session: Session) -> None:
     list(
         session.scalars(
             select(Relationship)
@@ -243,9 +452,18 @@ def active_owner_covered_object_ids(
                 == CANONICAL_PLACEMENT_RELATION_TYPE
             )
             .order_by(Relationship.id)
-            .with_for_update()
+            .with_for_update(of=Relationship)
+            .execution_options(populate_existing=True)
         ).all()
     )
+
+
+def _owner_grant_reach(
+    session: Session,
+    *,
+    excluded_grant_ids: frozenset[int] = frozenset(),
+    excluded_principal_ids: frozenset[str] = frozenset(),
+) -> set[str]:
     roots = (
         select(
             CatalogObject.id.label("object_id"),
@@ -260,10 +478,10 @@ def active_owner_covered_object_ids(
             Principal.active.is_(True),
         )
     )
-    if excluded_grants:
-        roots = roots.where(ObjectGrant.id.not_in(excluded_grants))
-    if excluded_principals:
-        roots = roots.where(ObjectGrant.principal_id.not_in(excluded_principals))
+    if excluded_grant_ids:
+        roots = roots.where(ObjectGrant.id.not_in(excluded_grant_ids))
+    if excluded_principal_ids:
+        roots = roots.where(ObjectGrant.principal_id.not_in(excluded_principal_ids))
     reach = _subtree_cte(
         roots,
         name="active_owner_reach",
@@ -287,7 +505,7 @@ def ensure_complete_owner_coverage(
     catalog_ids = set(session.scalars(select(CatalogObject.id)).all())
     if not catalog_ids:
         raise OwnerCoverageError("owner_catalog_empty")
-    if catalog_ids != active_owner_covered_object_ids(session):
+    if catalog_ids != owner_grant_covered_object_ids(session):
         raise OwnerCoverageError("owner_coverage_incomplete")
     if require_catalog_owner and not active_catalog_owner_ids(session):
         raise OwnerCoverageError("catalog_owner_missing")
@@ -306,7 +524,7 @@ def ensure_owner_coverage_preserved(
             select(CatalogObject.id).where(CatalogObject.id.in_(previous))
         ).all()
     )
-    lost_ids = existing_ids - active_owner_covered_object_ids(session)
+    lost_ids = existing_ids - owner_grant_covered_object_ids(session)
     if lost_ids:
         raise LastOwnerError("placement change would orphan object access")
 
@@ -346,7 +564,8 @@ def _locked_active_owner_grants(
             Principal.active.is_(True),
         )
         .order_by(ObjectGrant.id)
-        .with_for_update()
+        .with_for_update(of=ObjectGrant)
+        .execution_options(populate_existing=True)
     )
     return list(session.scalars(statement).all())
 
@@ -370,6 +589,7 @@ def _subtree_cte(
     *,
     name: str,
     scope_column: bool = False,
+    grant_column: bool = False,
 ):
     child = aliased(CatalogObject)
     child_ref = child.kind + literal(":") + child.id
@@ -381,6 +601,8 @@ def _subtree_cte(
     ]
     if scope_column:
         columns.append(reach.c.scope)
+    if grant_column:
+        columns.append(reach.c.grant_id)
     join_conditions = [
         Relationship.relation_type == CANONICAL_PLACEMENT_RELATION_TYPE,
         Relationship.from_ref == reach.c.object_ref,

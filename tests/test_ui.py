@@ -7,6 +7,7 @@ from string import Formatter
 
 import pytest
 from fastapi.testclient import TestClient
+from ownership_support import ensure_seed_owner
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -75,7 +76,7 @@ class BrowserFormTestClient(TestClient):
 def session_factory(alembic_session_factory):
     with alembic_session_factory() as session:
         with transaction(session):
-            import_seed_file(session, SEED_PATH)
+            import_seed_file(session, SEED_PATH, owner_principal_id=ensure_seed_owner(session))
     return alembic_session_factory
 
 

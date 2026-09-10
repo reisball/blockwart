@@ -38,36 +38,24 @@ mkdir "$TEMP_DIR/outside-repository"
 cd "$TEMP_DIR/outside-repository"
 export BLOCKWART_DATABASE_URL="sqlite:///$TEMP_DIR/package-smoke.sqlite3"
 "$TEMP_DIR/venv/bin/blockwart-db" upgrade
-"$TEMP_DIR/venv/bin/blockwart-seed" --seed "$SOURCE_DIR/seeds/pilot_objects.yaml"
-mapfile -t OWNER_ANCHORS < <(
-  "$VENV_PYTHON" - <<'PY'
-import os
-from sqlalchemy import select
-from sqlalchemy.orm import Session
-from blockwart.db.session import build_engine
-from blockwart.models import CatalogObject
-
-engine = build_engine(os.environ["BLOCKWART_DATABASE_URL"])
-with Session(engine) as session:
-    for object_id in session.scalars(select(CatalogObject.id).order_by(CatalogObject.id)):
-        print(object_id)
-engine.dispose()
-PY
-)
-BOOTSTRAP_ARGS=(
-  --database-url "$BLOCKWART_DATABASE_URL"
-  bootstrap-owner
-  --login package.owner
-  --display-name "Package Owner"
-  --scope self
-  --password-stdin
-  --catalog-owner
-)
-for anchor in "${OWNER_ANCHORS[@]}"; do
-  BOOTSTRAP_ARGS+=(--object-id "$anchor")
-done
+# A seed never creates an ownerless object, so the first identity is
+# bootstrapped before the seed and named as the explicit first Owner.
 printf '%s\n' 'package-smoke-owner-password' | \
-  "$TEMP_DIR/venv/bin/blockwart-auth" "${BOOTSTRAP_ARGS[@]}"
+  "$TEMP_DIR/venv/bin/blockwart-auth" \
+    --database-url "$BLOCKWART_DATABASE_URL" \
+    bootstrap-owner \
+    --login package.owner \
+    --display-name "Package Owner" \
+    --password-stdin \
+    --catalog-owner
+if "$TEMP_DIR/venv/bin/blockwart-seed" --seed "$SOURCE_DIR/seeds/pilot_objects.yaml"; then
+  echo "package_smoke_error=seed_accepted_without_owner" >&2
+  exit 1
+fi
+"$TEMP_DIR/venv/bin/blockwart-seed" \
+  --seed "$SOURCE_DIR/seeds/pilot_objects.yaml" \
+  --owner-login package.owner
+"$TEMP_DIR/venv/bin/blockwart-db" owners
 "$TEMP_DIR/venv/bin/blockwart-start" >"$TEMP_DIR/server.log" 2>&1 &
 SERVER_PID=$!
 

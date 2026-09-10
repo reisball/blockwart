@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from typing import Literal
 
 from fastapi import HTTPException, Request
 from sqlalchemy.orm import Session
 
+from blockwart.api.errors import CodedHTTPException
 from blockwart.db.session import read_only_transaction, transaction
 from blockwart.domain.decisions import DecisionIntegrityError
 from blockwart.domain.placement import PlacementError
@@ -34,15 +36,18 @@ _MAPPED_COMMAND_ERRORS = (
 )
 
 
-def api_write_context(request: Request, access: ReadAccess) -> WriteContext:
-    channel = (
+def api_request_channel(request: Request) -> Literal["api", "mcp"]:
+    return (
         "mcp"
         if request.headers.get("X-Blockwart-Channel", "").casefold() == "mcp"
         else "api"
     )
+
+
+def api_write_context(request: Request, access: ReadAccess) -> WriteContext:
     return WriteContext.from_read_access(
         access,
-        channel=channel,
+        channel=api_request_channel(request),
         request_id=getattr(request.state, "correlation_id", None),
     )
 
@@ -89,7 +94,12 @@ def _command_http_error(
         if record_denial:
             with transaction(session):
                 record_command_denial(session, context, exc)
+        if exc.code is not None:
+            return CodedHTTPException(403, error_code=exc.code, detail=str(exc))
         return HTTPException(status_code=403, detail="Object permission denied")
+    if isinstance(exc, CommandError) and exc.code is not None:
+        status_code = 412 if isinstance(exc, CommandPreconditionFailed) else 409
+        return CodedHTTPException(status_code, error_code=exc.code, detail=str(exc))
     if isinstance(exc, CommandNotFound):
         return HTTPException(status_code=404, detail="Resource not found")
     if isinstance(exc, CommandPreconditionRequired):

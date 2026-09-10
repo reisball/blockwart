@@ -703,7 +703,11 @@ revision and ETag plus two explicitly separate projections:
   principals so stale assignments remain administratively visible;
 - `effective_access`: active principals that currently receive permissions on
   this object, with additive permissions and every direct or inherited grant
-  source.
+  source;
+- `owner_coverage`: `state` (`owned` or `ownerless`), the counts of active
+  direct and inherited Owner grants and of inactive direct Owner grants,
+  `actor_has_owner_source`, and `adoption_available`. A global catalog role is
+  never counted as an Owner source here.
 
 Principal fields are limited to ID, login, display name, principal type, and
 active state. Credential, session, token, password, and hash fields are never
@@ -735,6 +739,44 @@ accepts `principal_id`, `role`, and `scope`; update accepts `role` and `scope`.
 Only an effective Owner may create, change, or revoke an Owner grant. The
 last-effective-owner and actor-self-lockout guards cover role changes, scope
 shrinks, and revocation over the canonical placement graph.
+
+An actor with `manage_access` but no effective Owner grant receives `403` with
+one of two stable error codes instead of the generic `forbidden`:
+
+- `owner_required_to_manage_owner_grants`: the object has an active Owner, so
+  ask an Owner to make the change;
+- `object_has_no_owner_use_adoption_flow`: no active direct or inherited Owner
+  grant reaches the object, so a catalog owner must use the adoption command
+  below. Ordinary grant management never mints that first Owner.
+
+### Ownerless-object adoption
+
+```text
+POST /api/v1/objects/{object_id}/access/adoption
+```
+
+The narrow, audited recovery for a legacy object that no active direct or
+inherited Owner grant reaches. The body is `{"principal_id": "..."}` and the
+current strong ETag is required in `If-Match`. The command:
+
+- requires an active `catalog_owner` on a trusted channel (the token audience
+  must match the `api` or `mcp` channel); anyone else receives `403
+  adoption_requires_catalog_owner` before the object is inspected;
+- requires an existing active target principal (`409 owner_principal_inactive`);
+- refuses with `409 object_has_owner_coverage` as soon as any active direct or
+  inherited Owner grant exists, so it can never add a second Owner or bypass the
+  Owner-only rules of a healthy object;
+- assigns exactly one direct `Owner/self` grant, advances the object revision,
+  and returns `201` with the new ETag, the grant, and `previous_owner_count`;
+- writes one immutable `owner_adopt` object audit event (actor, catalog
+  authority, target principal, channel, request ID, old/new revision, previous
+  direct/inherited Owner counts, inactive direct Owner grants, and the grant)
+  plus one `ownerless_object_adoption` security event.
+
+Two concurrent adoptions with the same ETag have exactly one winner; the other
+receives `412 precondition_failed`, and a retry with the fresh ETag receives
+`409 object_has_owner_coverage`. The last-owner and self-lockout guards apply
+unchanged to the adopted grant afterwards.
 
 An actual change returns the new revision and ETag and writes one immutable
 object audit event. An exact duplicate create or unchanged update returns

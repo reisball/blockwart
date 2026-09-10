@@ -3,7 +3,7 @@ import re
 from http import HTTPStatus
 from uuid import uuid4
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.exception_handlers import (
     http_exception_handler,
     request_validation_exception_handler,
@@ -44,6 +44,7 @@ API_ERROR_RESPONSES = {
 }
 
 _CORRELATION_ID_PATTERN = re.compile(r"^[A-Za-z0-9._-]{1,64}$")
+_ERROR_CODE_PATTERN = re.compile(r"^[a-z][a-z0-9_]{1,63}$")
 _BATCH_OBJECT_CONTEXTS_PATH = "/api/v1/object-contexts"
 # The closed set of search resources whose rejected page size publishes the
 # narrowly scoped field-accurate detail, with the exact range each route
@@ -57,6 +58,28 @@ _SEARCH_LIMIT_RANGES: dict[str, tuple[int, int]] = {
 }
 _SEARCH_LIMIT_LOCATION = ("query", "limit")
 logger = logging.getLogger(__name__)
+
+
+class CodedHTTPException(HTTPException):
+    """An HTTP error that publishes one stable machine reason as its ``code``.
+
+    Only closed, reviewed command reasons use it; every other HTTP error keeps
+    the generic status-derived code. The UI reads the same ``error_code`` to
+    localize the reason, so REST, MCP, and UI publish identical semantics.
+    """
+
+    def __init__(
+        self,
+        status_code: int,
+        *,
+        error_code: str,
+        detail: str,
+        headers: dict[str, str] | None = None,
+    ) -> None:
+        if not _ERROR_CODE_PATTERN.fullmatch(error_code):
+            raise ValueError("invalid API error code")
+        super().__init__(status_code=status_code, detail=detail, headers=headers)
+        self.error_code = error_code
 
 
 def install_batch_request_bound(app: FastAPI) -> None:
@@ -229,7 +252,7 @@ def install_api_error_contract(app: FastAPI) -> None:
     ):
         if not _is_api_request(request):
             return await http_exception_handler(request, exc)
-        code = {
+        code = getattr(exc, "error_code", None) or {
             400: "invalid_request",
             401: "unauthorized",
             403: "forbidden",

@@ -840,6 +840,19 @@ class V1EffectivePrincipalAccessOut(BaseModel):
     sources: list[V1EffectiveGrantSourceOut]
 
 
+class V1OwnerCoverageOut(BaseModel):
+    """Active object Owner sources; a global catalog role is never counted."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    state: Literal["owned", "ownerless"]
+    direct_active_owner_grants: int = Field(ge=0)
+    inherited_active_owner_grants: int = Field(ge=0)
+    inactive_direct_owner_grants: int = Field(ge=0)
+    actor_has_owner_source: bool
+    adoption_available: bool
+
+
 class V1ObjectAccessOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -848,6 +861,7 @@ class V1ObjectAccessOut(BaseModel):
     etag: str
     direct_grants: list[V1DirectGrantOut]
     effective_access: list[V1EffectivePrincipalAccessOut]
+    owner_coverage: V1OwnerCoverageOut
 
 
 class V1PrincipalSearchOut(BaseModel):
@@ -891,3 +905,19 @@ class V1GrantCommandOut(BaseModel):
     changed: bool
     grant: V1DirectGrantOut | None = None
     revoked_grant_id: int | None = None
+
+
+class V1OwnerAdoptionIn(BaseModel):
+    principal_id: str = Field(min_length=1, max_length=36)
+
+
+class V1OwnerAdoptionOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    object_id: str
+    revision: int = Field(ge=1)
+    etag: str
+    changed: bool
+    grant: V1DirectGrantOut
+    previous_owner_count: int = Field(ge=0)
+    inactive_direct_owner_grants: int = Field(ge=0)

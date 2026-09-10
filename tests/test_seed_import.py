@@ -2,6 +2,7 @@ import json
 from pathlib import Path
 
 import pytest
+from ownership_support import ensure_seed_owner
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
@@ -22,7 +23,7 @@ def session(alembic_session_factory) -> Session:
 
 
 def test_import_pilot_seed_into_fresh_db(session: Session) -> None:
-    result = import_seed_file(session, SEED_PATH)
+    result = import_seed_file(session, SEED_PATH, owner_principal_id=ensure_seed_owner(session))
 
     assert result.objects_imported >= 8
     object_count = session.scalar(select(func.count()).select_from(CatalogObject))
@@ -96,7 +97,11 @@ def test_seed_does_not_silently_overwrite_manual_override(session: Session) -> N
         ],
         "relationships": [],
     }
-    assert import_seed_payload(session, payload).objects_imported == 1
+    assert import_seed_payload(
+        session,
+        payload,
+        owner_principal_id=ensure_seed_owner(session),
+    ).objects_imported == 1
     upsert_object(
         session,
         CatalogObjectIn(
@@ -107,7 +112,7 @@ def test_seed_does_not_silently_overwrite_manual_override(session: Session) -> N
         ),
     )
 
-    result = import_seed_payload(session, payload)
+    result = import_seed_payload(session, payload, owner_principal_id=ensure_seed_owner(session))
     row = session.get(CatalogObject, "protected")
 
     assert result.objects_imported == 0
@@ -139,6 +144,7 @@ def test_seed_accepts_explicit_asset_state_and_derives_compatibility_status(
             ],
             "relationships": [],
         },
+        owner_principal_id=ensure_seed_owner(session),
     )
     row = session.get(CatalogObject, "maintenance-api")
 
@@ -174,7 +180,12 @@ def test_seed_object_and_relationship_mutations_advance_revisions(
         ],
     }
 
-    import_seed_payload(session, payload, source_ref="revision-seed")
+    import_seed_payload(
+        session,
+        payload,
+        source_ref="revision-seed",
+        owner_principal_id=ensure_seed_owner(session),
+    )
     host = session.get(CatalogObject, "seed-host")
     service = session.get(CatalogObject, "seed-service")
     assert host is not None
@@ -182,10 +193,20 @@ def test_seed_object_and_relationship_mutations_advance_revisions(
     assert (host.revision, service.revision) == (2, 2)
 
     payload["objects"][0]["label"] = "Updated Seed Host"
-    import_seed_payload(session, payload, source_ref="revision-seed")
+    import_seed_payload(
+        session,
+        payload,
+        source_ref="revision-seed",
+        owner_principal_id=ensure_seed_owner(session),
+    )
     assert (host.revision, service.revision) == (3, 2)
 
-    import_seed_payload(session, payload, source_ref="revision-seed")
+    import_seed_payload(
+        session,
+        payload,
+        source_ref="revision-seed",
+        owner_principal_id=ensure_seed_owner(session),
+    )
     assert (host.revision, service.revision) == (3, 2)
 
 
@@ -252,6 +273,7 @@ def test_partial_seed_update_rejects_projected_invalid_relationship_endpoint(
             "relationships": [relationship],
         },
         source_ref="endpoint-seed",
+        owner_principal_id=ensure_seed_owner(session),
     )
     row = session.get(CatalogObject, updated_object_id)
     assert row is not None
@@ -275,6 +297,7 @@ def test_partial_seed_update_rejects_projected_invalid_relationship_endpoint(
                 "relationships": [],
             },
             source_ref="endpoint-seed",
+            owner_principal_id=ensure_seed_owner(session),
         )
 
     assert error.value.code == "invalid_relationship_endpoint"
@@ -314,7 +337,7 @@ def test_seed_import_validates_and_canonicalizes_relationship_metadata(session: 
         ],
     }
 
-    result = import_seed_payload(session, payload)
+    result = import_seed_payload(session, payload, owner_principal_id=ensure_seed_owner(session))
     relationship = session.scalar(select(Relationship))
 
     assert result == SeedImportResult(objects_imported=2, relationships_imported=1)
@@ -326,7 +349,7 @@ def test_seed_import_validates_and_canonicalizes_relationship_metadata(session: 
     }
 
 def test_pilot_seed_imports_core_ids_and_kinds(session: Session) -> None:
-    import_seed_file(session, SEED_PATH)
+    import_seed_file(session, SEED_PATH, owner_principal_id=ensure_seed_owner(session))
 
     expected = {
         "fabrik": "system",
@@ -340,7 +363,7 @@ def test_pilot_seed_imports_core_ids_and_kinds(session: Session) -> None:
 
 
 def test_pilot_seed_relationship_references_existing_objects(session: Session) -> None:
-    import_seed_file(session, SEED_PATH)
+    import_seed_file(session, SEED_PATH, owner_principal_id=ensure_seed_owner(session))
 
     object_refs = {
         f"{kind}:{object_id}"
@@ -372,7 +395,7 @@ relationships: []
     )
 
     with pytest.raises(ValueError):
-        import_seed_file(session, forbidden_seed)
+        import_seed_file(session, forbidden_seed, owner_principal_id=ensure_seed_owner(session))
 
 
 def test_pilot_seed_rejects_unsafe_credential_reference_rules(
@@ -408,7 +431,7 @@ relationships: []
     )
 
     with pytest.raises(ValueError):
-        import_seed_file(session, forbidden_seed)
+        import_seed_file(session, forbidden_seed, owner_principal_id=ensure_seed_owner(session))
 
 
 def test_pilot_seed_rejects_missing_relationship_targets(session: Session, tmp_path: Path) -> None:
@@ -431,7 +454,7 @@ relationships:
     )
 
     with pytest.raises(ValueError):
-        import_seed_file(session, forbidden_seed)
+        import_seed_file(session, forbidden_seed, owner_principal_id=ensure_seed_owner(session))
 
 
 def test_seed_object_ids_are_globally_unique_across_kinds(session: Session) -> None:
@@ -458,4 +481,4 @@ def test_seed_object_ids_are_globally_unique_across_kinds(session: Session) -> N
         ValueError,
         match="Seed object ids must be globally unique across kinds",
     ):
-        import_seed_payload(session, payload)
+        import_seed_payload(session, payload, owner_principal_id=ensure_seed_owner(session))

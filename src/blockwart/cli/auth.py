@@ -67,8 +67,12 @@ def build_parser() -> argparse.ArgumentParser:
         "--object-id",
         dest="object_ids",
         action="append",
-        required=True,
-        help="Owner anchor object ID; repeat for disconnected catalog components.",
+        default=[],
+        help=(
+            "Owner anchor object ID; repeat for disconnected catalog components. "
+            "May be omitted only with --catalog-owner on an empty catalog, which "
+            "is then seeded with --owner-login."
+        ),
     )
     bootstrap.add_argument(
         "--scope",
@@ -349,6 +353,10 @@ def _bootstrap_owner(session: Session, args: argparse.Namespace) -> str:
         raise IdentityConflict("bootstrap state conflicts with existing identities or grants")
     if any(session.get(CatalogObject, object_id) is None for object_id in object_ids):
         raise IdentityError("bootstrap object not found")
+    if not object_ids and (not catalog_owner or _catalog_object_count(session)):
+        # An anchor-free bootstrap only creates the identity that a following
+        # seed or import names as the first Owner of every object it creates.
+        raise IdentityError("bootstrap without an Owner anchor needs an empty catalog")
 
     password = _read_password(args.password_stdin)
     with transaction(session):
@@ -372,10 +380,7 @@ def _bootstrap_owner(session: Session, args: argparse.Namespace) -> str:
             )
             for object_id in object_ids
         )
-        ensure_complete_owner_coverage(
-            session,
-            require_catalog_owner=catalog_owner,
-        )
+        _ensure_bootstrap_coverage(session, catalog_owner=catalog_owner)
     return _bootstrap_result(
         mode="created",
         principal_id=principal_context.id,
@@ -448,12 +453,28 @@ def _bootstrap_state(
         and credential is not None
         and {grant.object_id for grant in grants} == set(object_ids)
     ):
-        ensure_complete_owner_coverage(
-            session,
-            require_catalog_owner=catalog_owner,
-        )
+        _ensure_bootstrap_coverage(session, catalog_owner=catalog_owner)
         return principal, grants
     raise IdentityConflict("bootstrap state is incomplete or conflicting")
+
+
+def _catalog_object_count(session: Session) -> int:
+    return int(session.scalar(select(func.count()).select_from(CatalogObject)) or 0)
+
+
+def _ensure_bootstrap_coverage(session: Session, *, catalog_owner: bool) -> None:
+    """Apply the startup Owner invariant, except to a still-empty catalog.
+
+    An empty catalog is only reachable through the anchor-free bootstrap, which
+    creates the identity a following owner-bearing seed or import needs.
+    Startup still fails with ``owner_catalog_empty`` until objects exist.
+    """
+    if not _catalog_object_count(session):
+        return
+    ensure_complete_owner_coverage(
+        session,
+        require_catalog_owner=catalog_owner,
+    )
 
 
 def _bootstrap_result(
@@ -465,6 +486,11 @@ def _bootstrap_result(
 ) -> str:
     ordered = tuple(sorted(grants, key=lambda grant: grant.object_id))
     suffix = f" catalog_owner={int(catalog_owner)}"
+    if not ordered:
+        return (
+            f"auth_bootstrap_owner_ok mode={mode} principal_id={principal_id} "
+            f"grants=0{suffix}"
+        )
     if len(ordered) == 1:
         grant = ordered[0]
         return (

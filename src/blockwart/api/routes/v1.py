@@ -8,6 +8,7 @@ from blockwart.api.deps import get_session
 from blockwart.api.errors import API_ERROR_RESPONSES
 from blockwart.api.security import require_api_read_access, require_api_read_only_access
 from blockwart.api.write_commands import (
+    api_request_channel,
     api_write_context,
     execute_api_command,
     execute_api_read_only_command,
@@ -95,6 +96,8 @@ from blockwart.schemas.v1 import (
     V1ObjectRenamePreviewOut,
     V1ObjectUpdatePreviewDiffEntryOut,
     V1ObjectUpdatePreviewOut,
+    V1OwnerAdoptionIn,
+    V1OwnerAdoptionOut,
     V1PrincipalSearchOut,
     V1PrincipalSummaryOut,
     V1ProjectedObjectContextBatchOut,
@@ -133,6 +136,7 @@ from blockwart.services.commands import (
 )
 from blockwart.services.comments import add_object_comment, query_comment_page
 from blockwart.services.grant_management import (
+    adopt_ownerless_object,
     create_managed_grant,
     preview_grant_scope,
     query_object_access,
@@ -280,6 +284,7 @@ IncludeRecentComments = Annotated[
     summary="Read the authorized catalog-wide attention view",
 )
 def get_v1_attention(
+    request: Request,
     session: Annotated[Session, Depends(get_session)],
     access: Annotated[ReadAccess, Depends(require_api_read_access)],
     category: AttentionCategoryValue | None = None,
@@ -300,6 +305,7 @@ def get_v1_attention(
         page = query_attention_page(
             session,
             access,
+            channel=api_request_channel(request),
             category=category,
             severity=severity,
             reason_code=reason_code,
@@ -1562,6 +1568,42 @@ def revoke_v1_object_grant(
     )
     response.headers["ETag"] = result.etag
     return V1GrantCommandOut.model_validate(result)
+
+
+@router.post(
+    "/objects/{object_id}/access/adoption",
+    response_model=V1OwnerAdoptionOut,
+    status_code=201,
+)
+def adopt_v1_ownerless_object(
+    object_id: str,
+    payload: V1OwnerAdoptionIn,
+    request: Request,
+    response: Response,
+    session: Annotated[Session, Depends(get_session)],
+    access: Annotated[ReadAccess, Depends(require_api_read_access)],
+    if_match: Annotated[str | None, Header(alias="If-Match")] = None,
+) -> V1OwnerAdoptionOut:
+    """Assign the first Owner/self grant to an object that has no active Owner.
+
+    Only an active catalog owner may adopt, only with the current strong ETag,
+    and only while no active direct or inherited Owner grant reaches the
+    object.
+    """
+    context = api_write_context(request, access)
+    result = execute_api_command(
+        session,
+        context,
+        lambda: adopt_ownerless_object(
+            session,
+            context,
+            object_id=object_id,
+            principal_id=payload.principal_id,
+            expected_revision=if_match,
+        ),
+    )
+    response.headers["ETag"] = result.etag
+    return V1OwnerAdoptionOut.model_validate(result)
 
 
 @router.get(

@@ -27,22 +27,32 @@ python3 -m venv .venv
 python -m pip install .
 ```
 
-Initialize a database and import the pilot seed:
+Initialize a database, bootstrap the first identity, and import the pilot seed
+with that identity as the explicit first Owner of every seeded object. Supply the
+password through a TTY or `--password-stdin`:
 
 ```bash
+BLOCKWART_DATABASE_URL=sqlite:////tmp/blockwart.sqlite3 blockwart-db upgrade
 BLOCKWART_DATABASE_URL=sqlite:////tmp/blockwart.sqlite3 \
-  blockwart-seed --create-schema --seed seeds/pilot_objects.yaml
+  blockwart-auth bootstrap-owner --login kai --display-name Kai --catalog-owner
+BLOCKWART_DATABASE_URL=sqlite:////tmp/blockwart.sqlite3 \
+  blockwart-seed --seed seeds/pilot_objects.yaml --owner-login kai
 ```
 
-Bootstrap one or more Owner anchors before the first start. Repeat `--object-id`
-for every disconnected canonical component and supply the password through a TTY
-or `--password-stdin`:
+A seed or Markdown import never creates an ownerless object: without a valid
+active `--owner-login` it fails before writing anything. For a catalog that
+already contains objects, bootstrap Owner anchors instead: repeat `--object-id`
+for every disconnected canonical component:
 
 ```bash
 BLOCKWART_DATABASE_URL=sqlite:////tmp/blockwart.sqlite3 \
   blockwart-auth bootstrap-owner --login kai --display-name Kai \
   --object-id COMPONENT_ROOT_ID --scope subtree --catalog-owner
 ```
+
+`blockwart-db owners` is a read-only report of legacy objects that no active
+Owner grant reaches; repair them only through the audited adoption flow
+described in `auth-rbac.md`.
 
 `bootstrap-owner` makes that protected first human a platform admin while
 scoped catalog access still comes only from the listed Owner anchors.
@@ -73,10 +83,11 @@ The example compose file binds only to localhost:
 BLOCKWART_BUILD_REVISION="$(git rev-parse HEAD)" \
   docker compose -f compose.example.yaml build
 docker compose -f compose.example.yaml run --rm blockwart \
-  blockwart-seed --create-schema --seed seeds/pilot_objects.yaml
+  blockwart-db upgrade
 docker compose -f compose.example.yaml run --rm blockwart \
-  blockwart-auth bootstrap-owner --login kai --display-name Kai \
-  --object-id COMPONENT_ROOT_ID --scope subtree --catalog-owner
+  blockwart-auth bootstrap-owner --login kai --display-name Kai --catalog-owner
+docker compose -f compose.example.yaml run --rm blockwart \
+  blockwart-seed --seed seeds/pilot_objects.yaml --owner-login kai
 docker compose -f compose.example.yaml up
 ```
 

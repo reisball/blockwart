@@ -8,6 +8,7 @@ from pathlib import Path
 
 import pytest
 from click.testing import CliRunner
+from ownership_support import prepare_cli_owner
 from sqlalchemy import create_engine, text
 
 from blockwart.cli import database as database_cli
@@ -207,6 +208,7 @@ def test_markdown_create_schema_uses_alembic(
         encoding="utf-8",
     )
     database_url = f"sqlite:///{tmp_path / 'markdown.sqlite3'}"
+    owner_login = prepare_cli_owner(database_url)
 
     assert (
         import_markdown_cli.main(
@@ -219,6 +221,8 @@ def test_markdown_create_schema_uses_alembic(
                 str(tmp_path),
                 "--create-schema",
                 "--apply",
+                "--owner-login",
+                owner_login,
             ]
         )
         == 0
@@ -286,9 +290,16 @@ def test_markdown_network_mapping_fails_before_schema_write_then_applies(
     ) in captured.err
     assert "markdown_import_error=network_classification_failed" in captured.err
 
+    owner_login = prepare_cli_owner(database_url)
     assert (
         import_markdown_cli.main(
-            [*base_args, "--network-mapping", str(mapping_path)]
+            [
+                *base_args,
+                "--network-mapping",
+                str(mapping_path),
+                "--owner-login",
+                owner_login,
+            ]
         )
         == 0
     )

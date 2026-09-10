@@ -30,8 +30,10 @@ from blockwart.models import (
 )
 from blockwart.services.access import (
     LastCatalogOwnerError,
+    LastOwnerError,
     ensure_active_catalog_owner_remains,
     ensure_principal_deactivation_preserves_owner_coverage,
+    lock_owner_coverage_state,
 )
 from blockwart.services.commands import (
     WriteContext,
@@ -631,6 +633,7 @@ def update_managed_principal(
 ) -> PrincipalMutationResult:
     require_platform_admin(access)
     expected = _expected_revision(expected_revision)
+    lock_owner_coverage_state(session, extra_principal_ids=(principal_id,))
     row = session.get(Principal, principal_id)
     if row is None:
         raise ManagedPrincipalNotFound("principal not found")
@@ -673,6 +676,10 @@ def update_managed_principal(
         except LastCatalogOwnerError as exc:
             raise ManagedPrincipalConflict(
                 "at least one active catalog owner is required"
+            ) from exc
+        except LastOwnerError as exc:
+            raise ManagedPrincipalConflict(
+                "deactivating the principal would orphan object access"
             ) from exc
     if (
         row.active

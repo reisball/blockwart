@@ -98,6 +98,7 @@ It wraps the object-authorized v1 API:
 - blockwart.create_grant -> POST /api/v1/objects/{object_id}/access/grants
 - blockwart.update_grant -> PUT /api/v1/objects/{object_id}/access/grants/{grant_id}
 - blockwart.revoke_grant -> DELETE /api/v1/objects/{object_id}/access/grants/{grant_id}
+- blockwart.adopt_ownerless_object -> POST /api/v1/objects/{object_id}/access/adoption
 
 All read tools consume the API's current shared policy. An explicit active
 `catalog_viewer` service principal therefore receives exactly `discover` and
@@ -183,6 +184,13 @@ Choose the smallest tool that directly answers the intent:
   relationship metadata or resolved paths are the requested detail.
 - Use `blockwart.get_object_access` only for grants and effective permissions;
   access data is deliberately separate from catalog details.
+- Before any Owner-grant change, read `owner_coverage` from
+  `blockwart.get_object_access`. When `state` is `ownerless`, stop: ordinary
+  grant tools return `object_has_no_owner_use_adoption_flow` and retrying does
+  not help. Only when `adoption_available` is true may the caller use
+  `blockwart.adopt_ownerless_object` with the access ETag; afterwards read the
+  access resource again and verify the target principal's effective Owner
+  source. `get_attention` lists such objects as `access_owner_missing`.
 - Use `blockwart.list_comments` for the complete newest-first operational
   comment timeline and `blockwart.add_comment` to append a Markdown work note.
   Use `blockwart.list_audit_events` for the separate immutable system audit
@@ -296,6 +304,7 @@ means it deliberately bundles lower-level API concerns behind one agent call.
 | `create_grant` | Add object access | `directly sufficient` | Principal selection and the access-resource ETag stay explicit. |
 | `update_grant` | Change object access | `directly sufficient` | No hidden create/update branching or automatic CAS retry is introduced. |
 | `revoke_grant` | Remove object access | `directly sufficient` | Destructive intent, grant ID, and current ETag stay explicit. |
+| `adopt_ownerless_object` | Recover an ownerless object | `directly sufficient` | Catalog-owner only; refuses once any Owner exists, so it never bypasses Owner-only grant rules. |
 
 `blockwart.search` and `blockwart.get_context` accept every catalog kind, including `runbook`,
 `decision`, and `project`.
@@ -465,7 +474,12 @@ grants and effective access, and safe canonical-scope previews. Grant write
 tools use the same `manage_access`, Owner-only, last-owner, self-lockout,
 revision, and audit rules as REST and UI. Their `if_match` argument carries the
 last access-resource ETag. The service token remains runtime transport
-configuration and is never accepted as a tool argument.
+configuration and is never accepted as a tool argument. Structured REST error
+codes such as `owner_required_to_manage_owner_grants`,
+`object_has_no_owner_use_adoption_flow`, `adoption_requires_catalog_owner`, and
+`object_has_owner_coverage` pass through unchanged as the MCP error `code`.
+`blockwart.adopt_ownerless_object` is the MCP form of the audited adoption
+command and carries exactly its REST authority, ETag, and refusal rules.
 
 The two platform-admin MCP tools are read-only. They require the calling
 service account to have the explicit `admin` platform role, and assignment

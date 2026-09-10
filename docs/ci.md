@@ -80,10 +80,14 @@ docker build \
 
 The package smoke builds a wheel, installs it into a clean virtual environment, changes to a
 directory outside the repository, starts `blockwart-start`, loads packaged templates and static
-assets, runs the relationship-integrity diagnostic, and exercises all 31
-tools through 38 read/write, preview, Project-workspace, coverage, attention, comment,
-audit, and grant-management calls to the installed `blockwart-mcp` console
-command. It additionally proves the delegated root-Project authority over REST:
+assets, runs the relationship-integrity diagnostic, and exercises all 34
+tools through 41 read/write, preview, Project-workspace, coverage, attention, comment,
+audit, grant-management, and ownerless-adoption calls to the installed `blockwart-mcp`
+console command. Before seeding it bootstraps the first catalog owner without an
+anchor, proves that `blockwart-seed` refuses to run without `--owner-login`, seeds
+with that explicit first Owner, and runs the read-only `blockwart-db owners` report.
+The MCP proof then recovers one planted legacy ownerless object through
+`blockwart.adopt_ownerless_object` and verifies its resulting Owner coverage. It additionally proves the delegated root-Project authority over REST:
 a principal holding only `catalog_role = project_creator` creates one root
 Project with Owner/self, is refused a root host, and sees no other object. It also runs the read-only service-interface
 normalization, placement-state, network-classification, and canonical-Project plans from outside

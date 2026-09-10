@@ -170,6 +170,7 @@ printf '%s\n' 'container-smoke-owner-password' | docker run --rm -i \
   --login container.owner \
   --display-name "Container Owner" \
   --object-id ci-legacy \
+  --object-id ci-legacy-runbook \
   --scope self \
   --password-stdin \
   --catalog-owner

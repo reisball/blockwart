@@ -1,5 +1,6 @@
 from pathlib import Path
 
+from ownership_support import prepare_cli_owner
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker
 
@@ -11,13 +12,17 @@ SEED_PATH = Path("seeds/pilot_objects.yaml")
 
 def test_seed_cli_creates_schema_and_imports_seed(tmp_path, capsys):
     db_path = tmp_path / "blockwart.sqlite3"
+    database_url = f"sqlite:///{db_path}"
+    owner_login = prepare_cli_owner(database_url)
     exit_code = main(
         [
             "--database-url",
-            f"sqlite:///{db_path}",
+            database_url,
             "--seed",
             str(SEED_PATH),
             "--create-schema",
+            "--owner-login",
+            owner_login,
         ]
     )
 
@@ -40,7 +45,18 @@ def test_seed_cli_creates_schema_and_imports_seed(tmp_path, capsys):
 def test_seed_cli_summary_only_reads_existing_database(tmp_path, capsys):
     db_path = tmp_path / "blockwart.sqlite3"
     database_url = f"sqlite:///{db_path}"
-    assert main(["--database-url", database_url, "--seed", str(SEED_PATH), "--create-schema"]) == 0
+    owner_login = prepare_cli_owner(database_url)
+    assert main(
+        [
+            "--database-url",
+            database_url,
+            "--seed",
+            str(SEED_PATH),
+            "--create-schema",
+            "--owner-login",
+            owner_login,
+        ]
+    ) == 0
     capsys.readouterr()
 
     assert main(["--database-url", database_url, "--summary-only"]) == 0

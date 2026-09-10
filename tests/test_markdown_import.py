@@ -1,6 +1,7 @@
 from pathlib import Path
 
 import pytest
+from ownership_support import ensure_seed_owner
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -130,7 +131,12 @@ def test_import_tools_markdown_writes_valid_objects(
     )
 
     with _session(alembic_session_factory) as session:
-        result = import_tools_markdown(session, tools_path, references_root=tmp_path)
+        result = import_tools_markdown(
+            session,
+            tools_path,
+            references_root=tmp_path,
+            owner_principal_id=ensure_seed_owner(session),
+        )
         rows = session.scalars(select(CatalogObject)).all()
 
     assert result.objects_imported == 1
@@ -187,7 +193,12 @@ def test_import_tools_markdown_creates_hosted_service_relationship(
     )
 
     with _session(alembic_session_factory) as session:
-        result = import_tools_markdown(session, tools_path, references_root=tmp_path)
+        result = import_tools_markdown(
+            session,
+            tools_path,
+            references_root=tmp_path,
+            owner_principal_id=ensure_seed_owner(session),
+        )
         objects = {row.id: row for row in session.scalars(select(CatalogObject)).all()}
         relationships = session.scalars(select(Relationship)).all()
 
@@ -257,7 +268,12 @@ def test_import_tools_markdown_updates_previous_workspace_import_shape(
             )
         )
         session.flush()
-        import_tools_markdown(session, tools_path, references_root=tmp_path)
+        import_tools_markdown(
+            session,
+            tools_path,
+            references_root=tmp_path,
+            owner_principal_id=ensure_seed_owner(session),
+        )
         row = session.get(CatalogObject, "ct-121_agent-zero")
 
     assert row is not None
@@ -327,7 +343,12 @@ def test_import_tools_markdown_removes_stale_workspace_host_relationship(
         )
         session.commit()
 
-        import_tools_markdown(session, tools_path, references_root=tmp_path)
+        import_tools_markdown(
+            session,
+            tools_path,
+            references_root=tmp_path,
+            owner_principal_id=ensure_seed_owner(session),
+        )
         relationships = session.scalars(select(Relationship)).all()
 
     assert [
@@ -378,7 +399,12 @@ def test_import_tools_markdown_merges_canonical_existing_objects(
                 data={"schema_version": 1, "related_services": ["service:fabrik-proxmox"]},
             ),
         )
-        result = import_tools_markdown(session, tools_path, references_root=tmp_path)
+        result = import_tools_markdown(
+            session,
+            tools_path,
+            references_root=tmp_path,
+            owner_principal_id=ensure_seed_owner(session),
+        )
         row = session.get(CatalogObject, "fabrik")
 
     assert result.objects_imported == 0

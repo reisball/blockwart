@@ -1256,6 +1256,26 @@ TOOLS: list[JSON] = [
         },
         "annotations": DELETE_ANNOTATIONS,
     },
+    {
+        "name": "blockwart.adopt_ownerless_object",
+        "description": (
+            "Assign the first direct Owner/self grant to an object that no active "
+            "direct or inherited Owner reaches, using the current ETag. Only an "
+            "active catalog owner may call it; it refuses once any Owner coverage "
+            "exists. Read owner_coverage via blockwart.get_object_access first."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "object_id": {"type": "string", "minLength": 1, "maxLength": 128},
+                "principal_id": {"type": "string", "minLength": 1, "maxLength": 36},
+                "if_match": ETAG_SCHEMA,
+            },
+            "required": ["object_id", "principal_id", "if_match"],
+            "additionalProperties": False,
+        },
+        "annotations": WRITE_ANNOTATIONS,
+    },
 ]
 TOOL_DEFINITIONS: dict[str, JSON] = {tool["name"]: tool for tool in TOOLS}
 
@@ -2041,6 +2061,17 @@ def call_tool(
                 f"{_required_integer(args, 'grant_id')}"
             ),
             {},
+            {
+                "If-Match": _required_string(args, "if_match"),
+                "X-Blockwart-Channel": "mcp",
+            },
+        )
+    elif name == "blockwart.adopt_ownerless_object":
+        object_id = _required_string(args, "object_id")
+        payload = request(
+            "POST",
+            f"/api/v1/objects/{quote(object_id, safe='')}/access/adoption",
+            {"principal_id": _required_string(args, "principal_id")},
             {
                 "If-Match": _required_string(args, "if_match"),
                 "X-Blockwart-Channel": "mcp",
