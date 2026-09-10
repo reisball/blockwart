@@ -54,6 +54,53 @@ BLOCKWART_DATABASE_URL=sqlite:////tmp/blockwart.sqlite3 \
 Owner grant reaches; repair them only through the audited adoption flow
 described in `auth-rbac.md`.
 
+For a pre-Owner-invariant database that cannot pass readiness, use the
+dedicated package entry point while the application and every other writer are
+stopped:
+
+1. Take and verify the normal pre-upgrade database backup.
+2. Run `blockwart-db upgrade`.
+3. Ensure the explicitly named actor is an active `catalog_owner` and the
+   explicitly named target principal is active. The command never creates,
+   promotes, or infers either identity.
+4. Preview the exact repair set and retain the reported `plan_digest`:
+
+   ```bash
+   blockwart-owner-repair --actor-login REPAIR_ACTOR --target-login NEW_OWNER \
+     --reason "Legacy owner adoption before startup" \
+     --request-id CHANGE_REQUEST_ID
+   ```
+
+5. Review every `legacy_owner_repair_object` line and the counts by kind, then
+   apply that exact digest with the same actor, target, reason, and request ID:
+
+   ```bash
+   blockwart-owner-repair --actor-login REPAIR_ACTOR --target-login NEW_OWNER \
+     --reason "Legacy owner adoption before startup" \
+     --request-id CHANGE_REQUEST_ID --apply \
+     --expected-plan-digest REVIEWED_SHA256
+   ```
+
+6. Run the preview again and require `ownerless=0`, then require
+   `blockwart-db check`, `blockwart-db integrity`, and normal readiness
+   before starting the application.
+
+Preview opens a mutation-free snapshot. Apply revalidates the actor and target,
+locks Owner-coverage, grant, and catalog rows in the shared deterministic
+order, and compares a fingerprint of principals, catalog objects,
+relationships, grants, and the exact ownerless set. SQLite takes its writer
+reservation before planning; PostgreSQL applies in a serializable transaction.
+Any reviewed-plan or concurrent drift rolls back the whole operation. A
+successful apply creates one direct `Owner/self` grant per still-ownerless
+object, advances only those object revisions, preserves all unrelated state,
+and records one durable audit and security event containing the actor, target,
+reason, request ID, object IDs, and counts. Re-previewing and applying an empty
+plan reports zero repairs and writes no duplicate grant or audit event.
+
+`blockwart-owner-repair` is not a readiness bypass. Until the catalog has
+complete active Owner coverage, `blockwart-start` and
+`/api/health/ready` continue to fail closed.
+
 `bootstrap-owner` makes that protected first human a platform admin while
 scoped catalog access still comes only from the listed Owner anchors.
 `--catalog-owner` additionally assigns the independent global catalog-owner

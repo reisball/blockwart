@@ -84,8 +84,11 @@ assets, runs the relationship-integrity diagnostic, and exercises all 34
 tools through 41 read/write, preview, Project-workspace, coverage, attention, comment,
 audit, grant-management, and ownerless-adoption calls to the installed `blockwart-mcp`
 console command. Before seeding it bootstraps the first catalog owner without an
-anchor, proves that `blockwart-seed` refuses to run without `--owner-login`, seeds
-with that explicit first Owner, and runs the read-only `blockwart-db owners` report.
+anchor, proves that `blockwart-seed` refuses to run without `--owner-login`, and seeds
+with that explicit first Owner. It then plants one ownerless legacy object, previews and
+applies the installed `blockwart-owner-repair` entry point with an explicit actor,
+target, reason, request ID, and reviewed digest, and requires the read-only
+`blockwart-db owners` report to be clean before startup.
 The MCP proof then recovers one planted legacy ownerless object through
 `blockwart.adopt_ownerless_object` and verifies its resulting Owner coverage. It additionally proves the delegated root-Project authority over REST:
 a principal holding only `catalog_role = project_creator` creates one root
