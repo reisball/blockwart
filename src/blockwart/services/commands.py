@@ -1227,6 +1227,20 @@ def create_object_relationship(
             session,
             extra_principal_ids=(context.principal.id,),
         )
+        context = WriteContext(
+            principal=context.principal,
+            policy=policy_for_principal(session, context.principal.id),
+            channel=context.channel,
+            request_id=context.request_id,
+        )
+        target, peer, expected_revision = _relationship_command_objects(
+            session,
+            context,
+            object_id=object_id,
+            from_ref=from_ref,
+            to_ref=to_ref,
+            expected_revision=expected_revision,
+        )
     existing = session.scalar(
         select(Relationship).where(
             Relationship.from_ref == from_ref,

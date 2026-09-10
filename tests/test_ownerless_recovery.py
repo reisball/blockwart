@@ -2632,6 +2632,136 @@ def test_postgresql_adoption_and_placement_create_share_coverage_lock(
 
 
 @pytest.mark.skipif(not _pg_available(), reason="PostgreSQL test database unreachable")
+def test_postgresql_placement_create_reauthorizes_after_actor_deactivation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    name = f"bw_place_actor_{uuid.uuid4().hex[:12]}"
+    admin = create_engine(_pg_url("postgres"), isolation_level="AUTOCOMMIT")
+    with admin.connect() as connection:
+        connection.execute(text(f'CREATE DATABASE "{name}"'))
+    engine = None
+    try:
+        url = _pg_url(name)
+        upgrade_database(url)
+        engine = build_engine(url)
+        factory = sessionmaker(bind=engine, autoflush=False, autocommit=False)
+        parent_id = "placement-reauth-parent"
+        child_id = "placement-reauth-child"
+        with factory() as session:
+            with transaction(session):
+                actor_id = create_service_account(
+                    session,
+                    login="pg.placement.reauth.actor",
+                    display_name="PG Placement Reauth Actor",
+                    catalog_role=CatalogRole.CATALOG_OWNER,
+                ).id
+                standby_id = create_service_account(
+                    session,
+                    login="pg.placement.reauth.standby",
+                    display_name="PG Placement Reauth Standby",
+                    catalog_role=CatalogRole.CATALOG_OWNER,
+                ).id
+                upsert_object(session, _asset(parent_id))
+                upsert_object(session, _asset(child_id, kind="service"))
+                for object_id in (parent_id, child_id):
+                    create_object_grant(
+                        session,
+                        principal_id=standby_id,
+                        object_id=object_id,
+                        role=Role.OWNER,
+                        scope=GrantScope.SELF,
+                    )
+                parent_revision = _revision(session, parent_id)
+                child_revision = _revision(session, child_id)
+
+        placement_preflight_complete = threading.Event()
+        actor_deactivated = threading.Event()
+        original_lock = commands_module.lock_owner_coverage_state
+
+        def pause_before_placement_lock(
+            session: Session,
+            *,
+            extra_principal_ids: Iterable[str] = (),
+        ) -> None:
+            placement_preflight_complete.set()
+            assert actor_deactivated.wait(timeout=10)
+            original_lock(
+                session,
+                extra_principal_ids=extra_principal_ids,
+            )
+
+        monkeypatch.setattr(
+            commands_module,
+            "lock_owner_coverage_state",
+            pause_before_placement_lock,
+        )
+
+        def create_placement() -> str:
+            try:
+                with factory() as session:
+                    with transaction(session):
+                        commands_module.create_object_relationship(
+                            session,
+                            _write_context(session, actor_id),
+                            object_id=parent_id,
+                            from_ref=f"host:{parent_id}",
+                            relation_type="hosts",
+                            to_ref=f"service:{child_id}",
+                            expected_revision=parent_revision,
+                        )
+            except (CommandAuthorizationDenied, commands_module.CommandNotFound):
+                return "denied"
+            return "unexpected_success"
+
+        def deactivate_actor() -> str:
+            assert placement_preflight_complete.wait(timeout=10)
+            with factory() as session:
+                with transaction(session):
+                    assert deactivate_principal(session, principal_id=actor_id)
+            actor_deactivated.set()
+            return "deactivated"
+
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            created = pool.submit(create_placement)
+            deactivated = pool.submit(deactivate_actor)
+            assert deactivated.result(timeout=20) == "deactivated"
+            assert created.result(timeout=20) == "denied"
+
+        with factory() as session:
+            actor = session.get(Principal, actor_id)
+            assert actor is not None
+            assert actor.active is False
+            assert session.scalar(
+                select(func.count(Relationship.id)).where(
+                    Relationship.from_ref == f"host:{parent_id}",
+                    Relationship.relation_type == "hosts",
+                    Relationship.to_ref == f"service:{child_id}",
+                )
+            ) == 0
+            assert _revision(session, parent_id) == parent_revision
+            assert _revision(session, child_id) == child_revision
+            assert session.scalar(
+                select(func.count(AuditEvent.id)).where(
+                    AuditEvent.object_id == parent_id,
+                    AuditEvent.action == "relationship_create",
+                )
+            ) == 0
+    finally:
+        if engine is not None:
+            engine.dispose()
+        with admin.connect() as connection:
+            connection.execute(
+                text(
+                    "SELECT pg_terminate_backend(pid) FROM pg_stat_activity "
+                    "WHERE datname = :name AND pid <> pg_backend_pid()"
+                ),
+                {"name": name},
+            )
+            connection.execute(text(f'DROP DATABASE IF EXISTS "{name}"'))
+        admin.dispose()
+
+
+@pytest.mark.skipif(not _pg_available(), reason="PostgreSQL test database unreachable")
 def test_postgresql_markdown_cli_and_deactivation_share_coverage_lock_order(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
