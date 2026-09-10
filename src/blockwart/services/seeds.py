@@ -78,7 +78,11 @@ def import_seed_payload(
     object. The seed's own ``owner`` field is descriptive provenance only and
     is never trusted as an authorization identity.
     """
-    owner = resolve_owner_principal(session, owner_principal_id)
+    owner = resolve_owner_principal(
+        session,
+        owner_principal_id,
+        include_owner_coverage_locks=True,
+    )
     if payload.get("schema_version") != 1:
         raise ValueError("Unsupported seed schema_version")
 

@@ -216,7 +216,11 @@ def main(argv: Sequence[str] | None = None) -> int:
     try:
         with session_factory() as session:
             with transaction(session):
-                owner = resolve_owner_login(session, args.owner_login)
+                owner = resolve_owner_login(
+                    session,
+                    args.owner_login,
+                    include_owner_coverage_locks=True,
+                )
                 previous_revisions: dict[str, int] = {}
                 if args.replace:
                     previous_revisions = dict(

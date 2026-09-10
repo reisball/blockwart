@@ -1222,6 +1222,11 @@ def create_object_relationship(
         expected_revision=expected_revision,
     )
     canonical_metadata = _canonical_relationship_metadata(relation_type, metadata)
+    if relation_type == CANONICAL_PLACEMENT_RELATION_TYPE:
+        lock_owner_coverage_state(
+            session,
+            extra_principal_ids=(context.principal.id,),
+        )
     existing = session.scalar(
         select(Relationship).where(
             Relationship.from_ref == from_ref,

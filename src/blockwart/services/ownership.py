@@ -135,7 +135,12 @@ def resolve_owner_principal(
     return principal
 
 
-def resolve_owner_login(session: Session, login: str | None) -> Principal:
+def resolve_owner_login(
+    session: Session,
+    login: str | None,
+    *,
+    include_owner_coverage_locks: bool = False,
+) -> Principal:
     """Resolve an operator-supplied owner login for a protected import command."""
     if login is None or not login.strip():
         raise InitialOwnerError(
@@ -151,7 +156,11 @@ def resolve_owner_login(session: Session, login: str | None) -> Principal:
             OWNER_PRINCIPAL_INACTIVE,
             "the owner principal must exist and be active",
         )
-    return resolve_owner_principal(session, principal.id)
+    return resolve_owner_principal(
+        session,
+        principal.id,
+        include_owner_coverage_locks=include_owner_coverage_locks,
+    )
 
 
 def assign_initial_owner(

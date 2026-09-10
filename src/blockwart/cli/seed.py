@@ -76,7 +76,11 @@ def main(argv: Sequence[str] | None = None) -> int:
 
         try:
             with transaction(session):
-                owner = resolve_owner_login(session, args.owner_login)
+                owner = resolve_owner_login(
+                    session,
+                    args.owner_login,
+                    include_owner_coverage_locks=True,
+                )
                 result = import_seed_file(
                     session,
                     seed_path,

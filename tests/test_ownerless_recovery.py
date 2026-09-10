@@ -2357,6 +2357,424 @@ def test_postgresql_placement_delete_and_owner_update_share_coverage_lock_order(
 
 
 @pytest.mark.skipif(not _pg_available(), reason="PostgreSQL test database unreachable")
+def test_postgresql_adoption_and_owner_grant_create_share_coverage_lock(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    name = f"bw_adopt_grant_{uuid.uuid4().hex[:12]}"
+    admin = create_engine(_pg_url("postgres"), isolation_level="AUTOCOMMIT")
+    with admin.connect() as connection:
+        connection.execute(text(f'CREATE DATABASE "{name}"'))
+    engine = None
+    try:
+        url = _pg_url(name)
+        upgrade_database(url)
+        engine = build_engine(url)
+        factory = sessionmaker(bind=engine, autoflush=False, autocommit=False)
+        with factory() as session:
+            with transaction(session):
+                actor_id = create_service_account(
+                    session,
+                    login="pg.adopt.grant.actor",
+                    display_name="PG Adoption Grant Actor",
+                    catalog_role=CatalogRole.CATALOG_OWNER,
+                ).id
+                adoption_target_id = create_service_account(
+                    session,
+                    login="pg.adopt.grant.target",
+                    display_name="PG Adoption Target",
+                ).id
+                grant_target_id = create_service_account(
+                    session,
+                    login="pg.concurrent.grant.target",
+                    display_name="PG Concurrent Grant Target",
+                ).id
+                upsert_object(session, _asset("adopt-grant-parent"))
+                upsert_object(session, _legacy_project())
+                create_object_grant(
+                    session,
+                    principal_id=actor_id,
+                    object_id="adopt-grant-parent",
+                    role=Role.OWNER,
+                    scope=GrantScope.SELF,
+                )
+                parent_revision = _revision(session, "adopt-grant-parent")
+
+        adoption_locked = threading.Event()
+        grant_create_started = threading.Event()
+        original_lock = grant_management_module.lock_owner_coverage_state
+
+        def coordinate_lock(
+            session: Session,
+            *,
+            extra_principal_ids: Iterable[str] = (),
+        ) -> None:
+            principal_ids = tuple(extra_principal_ids)
+            if adoption_target_id in principal_ids:
+                original_lock(
+                    session,
+                    extra_principal_ids=principal_ids,
+                )
+                adoption_locked.set()
+                assert grant_create_started.wait(timeout=10)
+                return
+            assert grant_target_id in principal_ids
+            assert adoption_locked.wait(timeout=10)
+            grant_create_started.set()
+            original_lock(
+                session,
+                extra_principal_ids=principal_ids,
+            )
+
+        monkeypatch.setattr(
+            grant_management_module,
+            "lock_owner_coverage_state",
+            coordinate_lock,
+        )
+
+        def adopt() -> int:
+            with factory() as session:
+                with transaction(session):
+                    result = adopt_ownerless_object(
+                        session,
+                        _write_context(session, actor_id),
+                        object_id=LEGACY_ID,
+                        principal_id=adoption_target_id,
+                        expected_revision='"rev-1"',
+                    )
+                    return result.previous_owner_count
+
+        def create_owner_grant() -> str:
+            with factory() as session:
+                with transaction(session):
+                    result = create_managed_grant(
+                        session,
+                        _write_context(session, actor_id),
+                        object_id="adopt-grant-parent",
+                        principal_id=grant_target_id,
+                        role=Role.OWNER,
+                        scope=GrantScope.SUBTREE,
+                        expected_revision=parent_revision,
+                    )
+                    assert result.changed
+            return "created"
+
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            adopted = pool.submit(adopt)
+            created = pool.submit(create_owner_grant)
+            assert adopted.result(timeout=20) == 0
+            assert created.result(timeout=20) == "created"
+
+        with factory() as session:
+            assert [grant.principal_id for grant in _owner_grants(session, LEGACY_ID)] == [
+                adoption_target_id
+            ]
+            assert session.scalar(
+                select(func.count(ObjectGrant.id)).where(
+                    ObjectGrant.object_id == "adopt-grant-parent",
+                    ObjectGrant.principal_id == grant_target_id,
+                    ObjectGrant.role == Role.OWNER,
+                    ObjectGrant.scope == GrantScope.SUBTREE,
+                )
+            ) == 1
+            assert len(_adoption_audits(session, LEGACY_ID)) == 1
+    finally:
+        if engine is not None:
+            engine.dispose()
+        with admin.connect() as connection:
+            connection.execute(
+                text(
+                    "SELECT pg_terminate_backend(pid) FROM pg_stat_activity "
+                    "WHERE datname = :name AND pid <> pg_backend_pid()"
+                ),
+                {"name": name},
+            )
+            connection.execute(text(f'DROP DATABASE IF EXISTS "{name}"'))
+        admin.dispose()
+
+
+@pytest.mark.skipif(not _pg_available(), reason="PostgreSQL test database unreachable")
+def test_postgresql_adoption_and_placement_create_share_coverage_lock(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    name = f"bw_adopt_place_{uuid.uuid4().hex[:12]}"
+    admin = create_engine(_pg_url("postgres"), isolation_level="AUTOCOMMIT")
+    with admin.connect() as connection:
+        connection.execute(text(f'CREATE DATABASE "{name}"'))
+    engine = None
+    try:
+        url = _pg_url(name)
+        upgrade_database(url)
+        engine = build_engine(url)
+        factory = sessionmaker(bind=engine, autoflush=False, autocommit=False)
+        parent_id = "adopt-placement-parent"
+        child_id = "adopt-placement-child"
+        with factory() as session:
+            with transaction(session):
+                actor_id = create_service_account(
+                    session,
+                    login="pg.adopt.placement.actor",
+                    display_name="PG Adoption Placement Actor",
+                    catalog_role=CatalogRole.CATALOG_OWNER,
+                ).id
+                adoption_target_id = create_service_account(
+                    session,
+                    login="pg.adopt.placement.target",
+                    display_name="PG Adoption Placement Target",
+                ).id
+                upsert_object(session, _asset(parent_id))
+                upsert_object(session, _asset(child_id, kind="service"))
+                create_object_grant(
+                    session,
+                    principal_id=actor_id,
+                    object_id=parent_id,
+                    role=Role.OWNER,
+                    scope=GrantScope.SUBTREE,
+                )
+                parent_revision = _revision(session, parent_id)
+
+        adoption_locked = threading.Event()
+        placement_create_started = threading.Event()
+        original_lock = grant_management_module.lock_owner_coverage_state
+
+        def pause_adoption(
+            session: Session,
+            *,
+            extra_principal_ids: Iterable[str] = (),
+        ) -> None:
+            original_lock(
+                session,
+                extra_principal_ids=extra_principal_ids,
+            )
+            adoption_locked.set()
+            assert placement_create_started.wait(timeout=10)
+
+        def coordinate_placement(
+            session: Session,
+            *,
+            extra_principal_ids: Iterable[str] = (),
+        ) -> None:
+            assert adoption_locked.wait(timeout=10)
+            placement_create_started.set()
+            original_lock(
+                session,
+                extra_principal_ids=extra_principal_ids,
+            )
+
+        monkeypatch.setattr(
+            grant_management_module,
+            "lock_owner_coverage_state",
+            pause_adoption,
+        )
+        monkeypatch.setattr(
+            commands_module,
+            "lock_owner_coverage_state",
+            coordinate_placement,
+        )
+
+        def adopt() -> int:
+            with factory() as session:
+                with transaction(session):
+                    result = adopt_ownerless_object(
+                        session,
+                        _write_context(session, actor_id),
+                        object_id=child_id,
+                        principal_id=adoption_target_id,
+                        expected_revision='"rev-1"',
+                    )
+                    return result.previous_owner_count
+
+        def create_placement() -> str:
+            with factory() as session:
+                with transaction(session):
+                    result = commands_module.create_object_relationship(
+                        session,
+                        _write_context(session, actor_id),
+                        object_id=parent_id,
+                        from_ref=f"host:{parent_id}",
+                        relation_type="hosts",
+                        to_ref=f"service:{child_id}",
+                        expected_revision=parent_revision,
+                    )
+                    assert result.changed
+            return "created"
+
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            adopted = pool.submit(adopt)
+            placed = pool.submit(create_placement)
+            assert adopted.result(timeout=20) == 0
+            assert placed.result(timeout=20) == "created"
+
+        with factory() as session:
+            assert [grant.principal_id for grant in _owner_grants(session, child_id)] == [
+                adoption_target_id
+            ]
+            assert session.scalar(
+                select(func.count(Relationship.id)).where(
+                    Relationship.from_ref == f"host:{parent_id}",
+                    Relationship.relation_type == "hosts",
+                    Relationship.to_ref == f"service:{child_id}",
+                )
+            ) == 1
+            assert len(_adoption_audits(session, child_id)) == 1
+    finally:
+        if engine is not None:
+            engine.dispose()
+        with admin.connect() as connection:
+            connection.execute(
+                text(
+                    "SELECT pg_terminate_backend(pid) FROM pg_stat_activity "
+                    "WHERE datname = :name AND pid <> pg_backend_pid()"
+                ),
+                {"name": name},
+            )
+            connection.execute(text(f'DROP DATABASE IF EXISTS "{name}"'))
+        admin.dispose()
+
+
+@pytest.mark.skipif(not _pg_available(), reason="PostgreSQL test database unreachable")
+def test_postgresql_markdown_cli_and_deactivation_share_coverage_lock_order(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    name = f"bw_cli_order_{uuid.uuid4().hex[:12]}"
+    admin = create_engine(_pg_url("postgres"), isolation_level="AUTOCOMMIT")
+    with admin.connect() as connection:
+        connection.execute(text(f'CREATE DATABASE "{name}"'))
+    engine = None
+    try:
+        url = _pg_url(name)
+        upgrade_database(url)
+        engine = build_engine(url)
+        factory = sessionmaker(bind=engine, autoflush=False, autocommit=False)
+        catalog_owner_id = "00000000-0000-0000-0000-000000000001"
+        import_owner_id = "ffffffff-ffff-ffff-ffff-ffffffffffff"
+        import_owner_login = "pg.cli.import.owner"
+        with factory() as session:
+            with transaction(session):
+                session.add_all(
+                    [
+                        Principal(
+                            id=catalog_owner_id,
+                            principal_type="service_account",
+                            login="pg.cli.catalog.owner",
+                            display_name="PG CLI Catalog Owner",
+                            active=True,
+                            catalog_role=CatalogRole.CATALOG_OWNER,
+                        ),
+                        Principal(
+                            id=import_owner_id,
+                            principal_type="service_account",
+                            login=import_owner_login,
+                            display_name="PG CLI Import Owner",
+                            active=True,
+                        ),
+                    ]
+                )
+
+        tools_path = tmp_path / "TOOLS.md"
+        tools_path.write_text(TOOLS_MARKDOWN, encoding="utf-8")
+        owner_locked = threading.Event()
+        deactivation_lock_started = threading.Event()
+        original_resolve = import_markdown_cli.resolve_owner_login
+        original_lock = identity_module.lock_owner_coverage_state
+
+        def pause_after_cli_locks(
+            session: Session,
+            login: str | None,
+            *,
+            include_owner_coverage_locks: bool = False,
+        ) -> Principal:
+            principal = original_resolve(
+                session,
+                login,
+                include_owner_coverage_locks=include_owner_coverage_locks,
+            )
+            owner_locked.set()
+            assert deactivation_lock_started.wait(timeout=10)
+            return principal
+
+        def observe_deactivation_lock(
+            session: Session,
+            *,
+            extra_principal_ids: Iterable[str] = (),
+        ) -> None:
+            deactivation_lock_started.set()
+            original_lock(
+                session,
+                extra_principal_ids=extra_principal_ids,
+            )
+
+        monkeypatch.setattr(
+            import_markdown_cli,
+            "resolve_owner_login",
+            pause_after_cli_locks,
+        )
+        monkeypatch.setattr(
+            identity_module,
+            "lock_owner_coverage_state",
+            observe_deactivation_lock,
+        )
+
+        def run_import() -> int:
+            return import_markdown_cli.main(
+                [
+                    "--database-url",
+                    url,
+                    "--tools",
+                    str(tools_path),
+                    "--references-root",
+                    str(tmp_path),
+                    "--apply",
+                    "--owner-login",
+                    import_owner_login,
+                ]
+            )
+
+        def deactivate_target() -> str:
+            assert owner_locked.wait(timeout=10)
+            try:
+                with factory() as session:
+                    with transaction(session):
+                        deactivate_principal(
+                            session,
+                            principal_id=import_owner_id,
+                        )
+            except LastOwnerError:
+                return "blocked"
+            return "deactivated"
+
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            imported = pool.submit(run_import)
+            deactivated = pool.submit(deactivate_target)
+            assert imported.result(timeout=20) == 0
+            assert deactivated.result(timeout=20) == "blocked"
+
+        with factory() as session:
+            owner = session.get(Principal, import_owner_id)
+            assert owner is not None
+            assert owner.active is True
+            imported_objects = session.scalars(select(CatalogObject)).all()
+            assert len(imported_objects) == 1
+            assert [
+                grant.principal_id
+                for grant in _owner_grants(session, imported_objects[0].id)
+            ] == [import_owner_id]
+    finally:
+        if engine is not None:
+            engine.dispose()
+        with admin.connect() as connection:
+            connection.execute(
+                text(
+                    "SELECT pg_terminate_backend(pid) FROM pg_stat_activity "
+                    "WHERE datname = :name AND pid <> pg_backend_pid()"
+                ),
+                {"name": name},
+            )
+            connection.execute(text(f'DROP DATABASE IF EXISTS "{name}"'))
+        admin.dispose()
+
+
+@pytest.mark.skipif(not _pg_available(), reason="PostgreSQL test database unreachable")
 def test_postgresql_concurrent_adoptions_have_exactly_one_winner() -> None:
     name = f"bw_ownerless_{uuid.uuid4().hex[:12]}"
     admin = create_engine(_pg_url("postgres"), isolation_level="AUTOCOMMIT")

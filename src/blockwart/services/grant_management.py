@@ -450,6 +450,11 @@ def create_managed_grant(
     )
     resolved_role = Role(role)
     resolved_scope = GrantScope(scope)
+    if resolved_role == Role.OWNER:
+        lock_owner_coverage_state(
+            session,
+            extra_principal_ids=(context.principal.id, principal_id),
+        )
     _require_owner_for_owner_grant(
         session,
         context,
