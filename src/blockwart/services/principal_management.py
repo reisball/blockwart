@@ -30,6 +30,7 @@ from blockwart.models import (
 )
 from blockwart.services.access import (
     LastCatalogOwnerError,
+    LastOwnerError,
     ensure_active_catalog_owner_remains,
     ensure_principal_deactivation_preserves_owner_coverage,
     lock_owner_coverage_state,
@@ -675,6 +676,10 @@ def update_managed_principal(
         except LastCatalogOwnerError as exc:
             raise ManagedPrincipalConflict(
                 "at least one active catalog owner is required"
+            ) from exc
+        except LastOwnerError as exc:
+            raise ManagedPrincipalConflict(
+                "deactivating the principal would orphan object access"
             ) from exc
     if (
         row.active

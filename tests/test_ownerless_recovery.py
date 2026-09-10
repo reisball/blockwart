@@ -571,6 +571,33 @@ def test_attention_lists_ownerless_objects_only_for_access_managers(
     }
 
 
+def test_attention_adoption_availability_matches_token_audience(
+    client: TestClient,
+    ownerless_state,
+) -> None:
+    token = ownerless_state["tokens"]["zoe_mcp"]
+
+    api_response = client.get(
+        "/api/v1/attention",
+        params={"reason_code": "access_owner_missing", "limit": 100},
+        headers=_auth(token),
+    )
+    mcp_response = client.get(
+        "/api/v1/attention",
+        params={"reason_code": "access_owner_missing", "limit": 100},
+        headers=_auth(token, **{"X-Blockwart-Channel": "mcp"}),
+    )
+
+    assert api_response.status_code == 200, api_response.text
+    assert mcp_response.status_code == 200, mcp_response.text
+    assert {item["detail_code"] for item in api_response.json()["items"]} == {
+        "catalog_owner_adoption_required"
+    }
+    assert {item["detail_code"] for item in mcp_response.json()["items"]} == {
+        "adoption_available"
+    }
+
+
 # --- the deadlock and its structured reasons -----------------------------------
 
 

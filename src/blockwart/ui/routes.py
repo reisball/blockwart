@@ -812,6 +812,7 @@ def attention_overview(
         page = query_attention_page(
             session,
             access,
+            channel="ui",
             category=category or None,
             severity=severity or None,
             signal_state=signal_state or None,

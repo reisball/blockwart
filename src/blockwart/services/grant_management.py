@@ -7,7 +7,13 @@ from typing import Literal
 from sqlalchemy import func, or_, select, update
 from sqlalchemy.orm import Session
 
-from blockwart.domain.auth import CatalogRole, GrantScope, Permission, Role
+from blockwart.domain.auth import (
+    CatalogRole,
+    GrantScope,
+    Permission,
+    PrincipalContext,
+    Role,
+)
 from blockwart.domain.timestamps import format_rfc3339_utc
 from blockwart.models import CatalogObject, ObjectGrant, Principal
 from blockwart.services.access import (
@@ -783,6 +789,16 @@ def _require_owner_for_owner_grant(
     )
 
 
+def adoption_channel_matches(principal: PrincipalContext, channel: str) -> bool:
+    """Whether this authenticated principal may adopt through ``channel``."""
+    if channel == "ui":
+        return principal.service_token_audience is None
+    return (
+        channel in {"api", "mcp"}
+        and principal.service_token_audience == channel
+    )
+
+
 def _holds_adoption_authority(session: Session, context: WriteContext) -> bool:
     """Whether the actor may adopt ownerless objects, re-read from the database.
 
@@ -792,13 +808,9 @@ def _holds_adoption_authority(session: Session, context: WriteContext) -> bool:
     creation: browser actors carry no service-token audience, while api/mcp
     actors must hold the matching one.
     """
-    if context.channel == "ui":
-        trusted_origin = context.principal.service_token_audience is None
-    else:
-        trusted_origin = context.principal.service_token_audience == context.channel
     actor = session.get(Principal, context.principal.id)
     return (
-        trusted_origin
+        adoption_channel_matches(context.principal, context.channel)
         and actor is not None
         and actor.active
         and actor.catalog_role == CatalogRole.CATALOG_OWNER

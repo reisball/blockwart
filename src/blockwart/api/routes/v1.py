@@ -8,6 +8,7 @@ from blockwart.api.deps import get_session
 from blockwart.api.errors import API_ERROR_RESPONSES
 from blockwart.api.security import require_api_read_access, require_api_read_only_access
 from blockwart.api.write_commands import (
+    api_request_channel,
     api_write_context,
     execute_api_command,
     execute_api_read_only_command,
@@ -283,6 +284,7 @@ IncludeRecentComments = Annotated[
     summary="Read the authorized catalog-wide attention view",
 )
 def get_v1_attention(
+    request: Request,
     session: Annotated[Session, Depends(get_session)],
     access: Annotated[ReadAccess, Depends(require_api_read_access)],
     category: AttentionCategoryValue | None = None,
@@ -303,6 +305,7 @@ def get_v1_attention(
         page = query_attention_page(
             session,
             access,
+            channel=api_request_channel(request),
             category=category,
             severity=severity,
             reason_code=reason_code,

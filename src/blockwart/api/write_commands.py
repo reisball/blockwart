@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from typing import Literal
 
 from fastapi import HTTPException, Request
 from sqlalchemy.orm import Session
@@ -35,15 +36,18 @@ _MAPPED_COMMAND_ERRORS = (
 )
 
 
-def api_write_context(request: Request, access: ReadAccess) -> WriteContext:
-    channel = (
+def api_request_channel(request: Request) -> Literal["api", "mcp"]:
+    return (
         "mcp"
         if request.headers.get("X-Blockwart-Channel", "").casefold() == "mcp"
         else "api"
     )
+
+
+def api_write_context(request: Request, access: ReadAccess) -> WriteContext:
     return WriteContext.from_read_access(
         access,
-        channel=channel,
+        channel=api_request_channel(request),
         request_id=getattr(request.state, "correlation_id", None),
     )
 

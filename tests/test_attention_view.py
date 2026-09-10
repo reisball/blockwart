@@ -191,6 +191,7 @@ def _endpoint(endpoint_id: str = "web") -> dict:
 
 
 def _page(session: Session, access: ReadAccess, **kwargs):
+    kwargs.setdefault("channel", "ui")
     kwargs.setdefault("include_total", True)
     kwargs.setdefault("now", NOW)
     return query_attention_page(session, access, **kwargs)

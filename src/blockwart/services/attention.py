@@ -50,6 +50,7 @@ from blockwart.domain.timestamps import format_rfc3339_utc
 from blockwart.models import CatalogObject, Relationship
 from blockwart.schemas.catalog import ObjectKind
 from blockwart.services.catalog import catalog_objects_from_snapshot
+from blockwart.services.grant_management import adoption_channel_matches
 from blockwart.services.ownership import ownerless_object_ids
 from blockwart.services.pagination import SortDirection, paginate_items
 from blockwart.services.policy import GlobalPolicySource
@@ -97,6 +98,7 @@ def query_attention_page(
     session: Session,
     access: ReadAccess,
     *,
+    channel: Literal["api", "mcp", "ui"],
     category: str | None = None,
     severity: str | None = None,
     reason_code: str | None = None,
@@ -130,7 +132,7 @@ def query_attention_page(
         raise AttentionQueryError("unknown object kind")
 
     reference = _aware(now) if now is not None else datetime.now(UTC)
-    signals = _load_signals(session, access, now=reference)
+    signals = _load_signals(session, access, channel=channel, now=reference)
     scoped_objects = (
         signals.objects
         if kind is None
@@ -172,6 +174,7 @@ def query_attention_page(
         query={
             "access": access.cursor_scope,
             "authorized_view": authorized_digest,
+            "channel": channel,
             "category": category or "",
             "kind": kind or "",
             "limit": limit,
@@ -224,6 +227,7 @@ def _load_signals(
     session: Session,
     access: ReadAccess,
     *,
+    channel: Literal["api", "mcp", "ui"],
     now: datetime,
 ) -> _AttentionSignals:
     """Load every canonical signal in a bounded, constant number of reads.
@@ -302,8 +306,9 @@ def _load_signals(
     # never the viewer's own projection, and a global catalog role never
     # counts as an Owner source.
     ownerless_ids = ownerless_object_ids(session)
-    adoption_available = access.policy.has_global_authority(
-        GlobalPolicySource.CATALOG_OWNER
+    adoption_available = (
+        access.policy.has_global_authority(GlobalPolicySource.CATALOG_OWNER)
+        and adoption_channel_matches(access.principal, channel)
     )
     objects = tuple(
         _object_input(
