@@ -1589,7 +1589,10 @@ def test_mcp_get_object_context_calls_read_only_agent_object_endpoint() -> None:
     ]
 
 
-def test_mcp_full_read_etag_is_reused_unchanged_for_update() -> None:
+@pytest.mark.parametrize("revision", [10, 19])
+def test_mcp_full_read_etag_is_reused_unchanged_for_preview_and_update(
+    revision: int,
+) -> None:
     requests = []
     object_payload = {
         "id": "n8n",
@@ -1605,8 +1608,8 @@ def test_mcp_full_read_etag_is_reused_unchanged_for_update() -> None:
         return {
             **object_payload,
             "visibility": "detail",
-            "revision": 7,
-            "etag": '"rev-7"',
+            "revision": revision,
+            "etag": f'"rev-{revision}"',
         }
 
     def fake_request(method, path, body, headers):
@@ -1620,6 +1623,15 @@ def test_mcp_full_read_etag_is_reused_unchanged_for_update() -> None:
     )
     current = json.loads(read["content"][0]["text"])["objects"][0]
     call_tool(
+        "blockwart.preview_object_update",
+        {
+            "object_id": current["id"],
+            "if_match": current["etag"],
+            "object": object_payload,
+        },
+        requester=fake_request,
+    )
+    call_tool(
         "blockwart.update_object",
         {
             "object_id": current["id"],
@@ -1629,12 +1641,49 @@ def test_mcp_full_read_etag_is_reused_unchanged_for_update() -> None:
         requester=fake_request,
     )
 
-    assert requests[0][0:3] == (
-        "PUT",
-        "/api/v1/objects/n8n",
-        object_payload,
-    )
-    assert requests[0][3]["If-Match"] == current["etag"] == '"rev-7"'
+    assert [request[0:3] for request in requests] == [
+        (
+            "POST",
+            "/api/v1/objects/n8n/update-preview",
+            object_payload,
+        ),
+        (
+            "PUT",
+            "/api/v1/objects/n8n",
+            object_payload,
+        ),
+    ]
+    assert all(request[3]["If-Match"] == current["etag"] for request in requests)
+    assert current["etag"] == f'"rev-{revision}"'
+
+
+@pytest.mark.parametrize(
+    "if_match",
+    ['"rev-', 'rev-19', '"rev-0"', 'W/"rev-19"'],
+)
+def test_mcp_preview_rejects_malformed_etag_before_request(if_match: str) -> None:
+    proposed = {
+        "id": "preview-service",
+        "kind": "service",
+        "label": "Preview service",
+        "data": {"schema_version": 1},
+    }
+
+    def unexpected_request(method, path, body, headers):
+        raise AssertionError("malformed ETags must be rejected before any request")
+
+    with pytest.raises(ToolInputError) as exc_info:
+        call_tool(
+            "blockwart.preview_object_update",
+            {
+                "object_id": proposed["id"],
+                "if_match": if_match,
+                "object": proposed,
+            },
+            requester=unexpected_request,
+        )
+
+    assert {detail["location"] for detail in exc_info.value.details} == {"if_match"}
 
 
 def test_mcp_list_audit_events_projects_the_v1_page_without_comment_content() -> None:
