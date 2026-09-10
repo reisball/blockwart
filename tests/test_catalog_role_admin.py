@@ -14,7 +14,7 @@ from blockwart.db.session import DatabaseTransactionError, transaction
 from blockwart.domain.auth import CatalogRole, GrantScope, PlatformRole, Role
 from blockwart.main import create_app
 from blockwart.models import Principal, SecurityEvent
-from blockwart.schemas.catalog import CatalogObjectIn
+from blockwart.schemas.catalog import OBJECT_KINDS, CatalogObjectIn
 from blockwart.services.access import active_catalog_owner_ids, create_object_grant
 from blockwart.services.catalog import upsert_object
 from blockwart.services.identity import (
@@ -792,6 +792,8 @@ def test_rest_catalog_viewer_assignment_and_projection_are_unambiguous(
         {
             "source": "catalog_viewer",
             "permissions": ["discover", "read"],
+            # The viewer reads everything and creates no root at all.
+            "root_kinds": [],
         }
     ]
 
@@ -1138,6 +1140,8 @@ def test_rest_principal_projection_exposes_catalog_role_and_global_authority(
                 "rename",
                 "write",
             ],
+            # The catalog owner keeps creating every root kind.
+            "root_kinds": sorted(OBJECT_KINDS),
         }
     ]
 

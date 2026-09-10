@@ -371,12 +371,25 @@ def _index_template_context(
         str(i18n["locale"]),
         translator,
     )
-    is_catalog_owner = read_access_from_request(request).principal.is_catalog_owner
+    acting_principal = read_access_from_request(request).principal
+    # Root creation is delegated per kind: a catalog owner may create every
+    # root, the narrow project creator exactly one. Offer only what the actor
+    # may actually create, so the form never opens on a denied kind.
+    root_kind_options = tuple(
+        kind for kind in OBJECT_KINDS if acting_principal.may_create_root_kind(kind)
+    )
+    can_create_root = bool(root_kind_options)
+    show_create_root_form = show_create_root_form and can_create_root
     selected_form_kind = (
         form_kind if form_kind in OBJECT_KINDS else str(form.get("kind") or OBJECT_KINDS[0])
     )
     if selected_form_kind not in OBJECT_KINDS:
         selected_form_kind = OBJECT_KINDS[0]
+    if show_create_root_form and selected_form_kind not in root_kind_options:
+        # Keep the submitted form state on the kind the form actually renders,
+        # so the control, its fields, and its selected option agree.
+        selected_form_kind = root_kind_options[0]
+        form = {**form, "kind": selected_form_kind}
     explorer = read_model.explorer
     normalized_query = q.strip().casefold()
     selected_asset_ref = selected_asset_ref_override or next(
@@ -526,8 +539,9 @@ def _index_template_context(
         ),
         "can_write": can_write_enabled,
         "can_create": bool(create_parent_options),
-        "can_create_root": is_catalog_owner,
-        "show_create_root_form": show_create_root_form and is_catalog_owner,
+        "can_create_root": can_create_root,
+        "root_kind_options": root_kind_options,
+        "show_create_root_form": show_create_root_form,
         "csrf_token": request.cookies.get(AUTH_CSRF_COOKIE_NAME, ""),
         **i18n,
     }
@@ -950,7 +964,7 @@ def project_overview(
             "project_categories": PROJECT_CATEGORY_OPTIONS,
             "project_statuses": PROJECT_STATUS_OPTIONS,
             "next_url": next_url,
-            "can_create_root": access.principal.is_catalog_owner,
+            "can_create_root": access.principal.may_create_root_kind(PROJECT_KIND),
             **i18n,
         },
     )
@@ -2330,7 +2344,10 @@ def save_root(
 ):
     access = read_access_from_request(request)
     context = ui_write_context(request, access)
-    if not access.principal.is_catalog_owner:
+    # Fail closed before any kind-specific form field is parsed. The command
+    # re-resolves the same rule from current database state and stays the
+    # authoritative gate.
+    if not access.principal.may_create_root_kind(kind):
         execute_ui_command(
             session,
             context,

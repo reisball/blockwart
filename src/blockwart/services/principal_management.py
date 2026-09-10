@@ -149,6 +149,9 @@ class PrincipalAdminSummary:
 class GlobalAuthorityView:
     source: str
     permissions: tuple[Permission, ...]
+    # Root creation is not an object permission, so a catalog role that only
+    # delegates it is explained here instead of by an empty permission list.
+    root_kinds: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -480,6 +483,7 @@ def query_principal_detail(
                     key=lambda permission: permission.value,
                 )
             ),
+            root_kinds=tuple(sorted(authority.root_kinds)),
         )
         for authority in target_policy.global_authorities
     )

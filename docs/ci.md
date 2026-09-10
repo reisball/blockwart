@@ -83,7 +83,9 @@ directory outside the repository, starts `blockwart-start`, loads packaged templ
 assets, runs the relationship-integrity diagnostic, and exercises all 31
 tools through 38 read/write, preview, Project-workspace, coverage, attention, comment,
 audit, and grant-management calls to the installed `blockwart-mcp` console
-command. It also runs the read-only service-interface
+command. It additionally proves the delegated root-Project authority over REST:
+a principal holding only `catalog_role = project_creator` creates one root
+Project with Owner/self, is refused a root host, and sees no other object. It also runs the read-only service-interface
 normalization, placement-state, network-classification, and canonical-Project plans from outside
 the source tree, plus the canonical-Runbook classification plan, the write-free synthetic
 Knowledge plan, and the installed reviewed-apply machine schemas. Productive Knowledge apply is

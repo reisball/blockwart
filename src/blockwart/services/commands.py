@@ -19,6 +19,7 @@ from blockwart.domain.auth import (
     Permission,
     PrincipalContext,
     Role,
+    catalog_role_creates_root_kind,
     permissions_for_role,
 )
 from blockwart.domain.decisions import iter_decision_references
@@ -934,16 +935,17 @@ def create_catalog_root(
     """Atomically create one disconnected top-level catalog root.
 
     Authorization is resolved from current database state inside the
-    transaction: the actor must be active and hold the ``catalog_owner`` role.
-    Platform-admin alone is not sufficient, and an active catalog owner needs
-    no platform-admin role for this catalog operation. The root and exactly
-    one real direct Owner/self grant for the creating principal commit
-    together; no placement parent, synthetic relationship, subtree grant,
-    wildcard, or sentinel grant is ever created. Catalog-role membership is
-    never changed by this catalog write.
+    transaction: the actor must be active and hold a catalog role that covers
+    the requested kind — ``catalog_owner`` for every kind, or the narrow
+    ``project_creator`` for ``project`` only. Platform-admin alone is not
+    sufficient, and neither catalog role needs a platform-admin role for this
+    catalog operation. The root and exactly one real direct Owner/self grant
+    for the creating principal commit together; no placement parent, synthetic
+    relationship, subtree grant, wildcard, or sentinel grant is ever created.
+    Catalog-role membership is never changed by this catalog write.
     """
     timestamp = now or _now()
-    _require_active_catalog_owner(session, context)
+    authority = _require_root_creation_authority(session, context, kind=payload.kind)
     request_payload = {"payload": payload.model_dump(mode="json")}
     record, replay = reserve_idempotency_record(
         session,
@@ -1003,6 +1005,9 @@ def create_catalog_root(
         extra={
             "object_ref": object_ref,
             "parent_ref": None,
+            # Which delegable catalog authority was actually used, so the audit
+            # trail distinguishes a narrow project creator from a catalog owner.
+            "catalog_authority": authority.value,
             "creator_owner_grant": {
                 "principal_id": context.principal.id,
                 "role": Role.OWNER,
@@ -1548,16 +1553,25 @@ def _require_permission(
     return row
 
 
-def _require_active_catalog_owner(session: Session, context: WriteContext) -> None:
-    """Require the actor to be an active catalog owner from current DB state.
+def _require_root_creation_authority(
+    session: Session,
+    context: WriteContext,
+    *,
+    kind: str,
+) -> CatalogRole:
+    """Require a catalog role that authorizes creating a root of ``kind``.
 
     The check re-reads the principal row inside the command transaction so a
     stale access snapshot cannot satisfy the gate after a concurrent role or
-    activation change. Platform-admin alone is denied; the catalog-owner axis
-    is independent. The trusted channel must also match the token audience:
-    browser UI actors carry no service-token audience, while api/mcp channel
-    actors must hold the matching audience. One indistinguishable denial is
-    raised for every missing property.
+    activation change. Platform-admin alone is denied; the catalog axis is
+    independent. ``catalog_owner`` authorizes every kind, while the narrow
+    ``project_creator`` role authorizes exactly ``project`` and nothing else —
+    it is not consulted for any other command, so it confers no catalog-wide
+    write, delete, or access-management authority anywhere. The trusted channel
+    must also match the token audience: browser UI actors carry no
+    service-token audience, while api/mcp channel actors must hold the matching
+    audience. One indistinguishable denial is raised for every missing
+    property, so a caller cannot probe which one it lacks.
     """
     if context.channel == "ui":
         trusted_origin = context.principal.service_token_audience is None
@@ -1568,12 +1582,14 @@ def _require_active_catalog_owner(session: Session, context: WriteContext) -> No
         not trusted_origin
         or actor is None
         or not actor.active
-        or actor.catalog_role != CatalogRole.CATALOG_OWNER
+        or actor.catalog_role is None
+        or not catalog_role_creates_root_kind(actor.catalog_role, kind)
     ):
         raise CommandAuthorizationDenied(
             object_id="<catalog-root>",
             permission=Permission.CREATE_CHILD,
         )
+    return CatalogRole(actor.catalog_role)
 
 
 def _relationship_command_objects(

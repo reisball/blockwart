@@ -62,7 +62,8 @@
   {% if key == "kind" %}
     <label data-create-field="kind"><span data-field-label="kind">{{ field.label }}</span>
       <select name="kind" data-kind-select data-field-input="kind" {% if field.required %}required{% endif %}>
-        {% for object_kind in object_kinds %}
+        {#- Only the root kinds this principal may actually create (#237). -#}
+        {% for object_kind in root_kind_options %}
           <option value="{{ object_kind }}" {% if object_kind == form.kind %}selected{% endif %}>{{ t("kind." ~ object_kind) }}</option>
         {% endfor %}
       </select>

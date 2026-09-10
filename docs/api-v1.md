@@ -433,12 +433,16 @@ operation, or payload returns `409 conflict`. Expired records may be replaced.
 ### `POST /api/v1/roots`
 
 Creates one disconnected top-level catalog root without a placement parent.
-Requires an active catalog-owner principal and an `Idempotency-Key` header
-containing 16..128 visible ASCII characters; platform-admin alone is not
-sufficient. API writes require an `api`-audience service token, matching the
-trusted-channel rule of the shared `create_root` command. The validated root and
-exactly one direct self-scoped owner grant for the creating principal are
-committed atomically. The response is `201`, includes `Location` and `ETag`,
+Requires an `Idempotency-Key` header containing 16..128 visible ASCII characters
+and an active principal whose catalog role covers the requested `kind`: an active
+catalog owner may create every kind, while the narrow `project_creator` role may
+create `kind = project` and nothing else. Platform-admin alone is not sufficient,
+and a denial for a kind the role does not cover is the same `403` as a denial for
+no catalog role at all. API writes require an `api`-audience service token,
+matching the trusted-channel rule of the shared `create_root` command. The
+validated root and exactly one direct self-scoped owner grant for the creating
+principal are committed atomically, for a project creator exactly as for a
+catalog owner. The response is `201`, includes `Location` and `ETag`,
 and contains the created object; the idempotent replay, duplicate-ID conflict,
 and changed-payload `409 conflict` semantics match child creation.
 

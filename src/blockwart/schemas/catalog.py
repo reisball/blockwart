@@ -1,4 +1,4 @@
-from typing import Any, ClassVar, Literal
+from typing import Any, ClassVar, Literal, get_args
 
 from pydantic import BaseModel, Field, model_validator
 
@@ -27,6 +27,9 @@ ObjectKind = Literal[
 ]
 PublicObjectKind = Literal["host", "system", "network", "device", "service"]
 ObjectStatus = Literal["active", "inactive", "deleted"]
+# The single canonical kind vocabulary, derived from the schema type so it
+# cannot drift from it.
+OBJECT_KINDS: tuple[ObjectKind, ...] = get_args(ObjectKind)
 PUBLIC_OBJECT_KINDS: tuple[PublicObjectKind, ...] = (
     "host",
     "system",

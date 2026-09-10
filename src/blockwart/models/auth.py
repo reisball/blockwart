@@ -37,7 +37,7 @@ class Principal(Base):
         ),
         CheckConstraint(
             "catalog_role IS NULL OR "
-            "catalog_role IN ('catalog_owner','catalog_viewer')",
+            "catalog_role IN ('catalog_owner','catalog_viewer','project_creator')",
             name="ck_principals_catalog_role",
         ),
         CheckConstraint(

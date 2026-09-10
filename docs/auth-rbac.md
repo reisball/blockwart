@@ -70,14 +70,17 @@ Blockwart stores three independent authorization axes on a principal:
 | identity administration | `platform_role = admin` | identity and credential administration |
 | global catalog authority | `catalog_role = catalog_owner` | all seven permissions on every object |
 | global catalog read-only | `catalog_role = catalog_viewer` | exactly `discover` and `read` on every object |
+| global root-project creation | `catalog_role = project_creator` | create a top-level root of `kind = project` and nothing else |
 | scoped catalog access | `object_grants` rows | one role at one object, `self` or `subtree` |
 
 The axes never imply each other. A platform admin has no catalog permission
-unless it also holds grants or a catalog role, and a catalog owner or viewer
-cannot administer identities or credentials. Both role columns are nullable and
-constrained to their closed allowed values. The last-active-holder service and
-database guards remain specific to platform admins and catalog owners; viewers
-are freely revocable through the protected catalog-role command.
+unless it also holds grants or a catalog role, and a catalog owner, viewer, or
+project creator cannot administer identities or credentials. Both role columns
+are nullable and constrained to their closed allowed values, and `catalog_role`
+holds exactly one of the three values or none. The last-active-holder service
+and database guards remain specific to platform admins and catalog owners;
+viewers and project creators are freely revocable through the protected
+catalog-role command.
 
 ## Platform administration
 
@@ -185,6 +188,41 @@ alone likewise never imply catalog viewing. The viewer is a distinct typed
 global policy source; it is not an object grant and is never materialized into
 per-object rows.
 
+An active human or service-account principal with
+`catalog_role = project_creator` holds **no** catalog-wide object permission at
+all: not `discover`, `read`, `write`, `rename`, `create_child`, `manage_access`,
+or `delete`, on any object, current or future. Its entire authority is the
+right to create one kind of disconnected top-level root — `kind = project` —
+through the `create_root` command described below.
+
+That authority exists as its own catalog role because a top-level root has no
+placement parent, so no object grant, including `creator/subtree`, can delegate
+its creation. Delegating root-project creation through `catalog_owner` instead
+would hand out catalog-wide write, delete, and access-management authority for
+an agent that only needs to open its own projects.
+
+The role is deliberately narrow in every direction:
+
+- it authorizes `create_root` only, and only for `kind = project`; `host`,
+  `system`, `network`, `device`, `service`, `credential_reference`, `runbook`,
+  and `decision` roots stay denied with the same indistinguishable `403` as no
+  catalog role at all;
+- it is consulted by no other command, so it grants nothing on the generic
+  object create, update, rename, delete, relationship, grant-management,
+  comment, import, or reviewed-Knowledge-apply paths, which continue to require
+  their existing object permissions or `catalog_owner`;
+- it never implies platform administration, credential administration, token
+  administration, or catalog reading; and
+- it is assigned and revoked independently of `catalog_owner`, through the same
+  protected catalog-role command, and carries no last-active-holder invariant.
+
+Each root it creates receives the same atomic direct `Owner/self` grant for the
+creating principal as a catalog owner's, so the creator can then read and manage
+exactly the projects it opened — and nothing else — through ordinary object
+grants. A project creator that is later revoked keeps those object grants,
+because they are real, independently revocable grants; it simply cannot open new
+roots.
+
 Object grants remain additive. A catalog viewer with an explicit `owner/subtree`
 grant has the normal Owner permissions only within that canonical subtree and
 remains globally read-only everywhere else. All UI, REST v1, Agent API, MCP,
@@ -210,10 +248,10 @@ first-owner and recovery path.
 ## Catalog-role administration
 
 The dedicated catalog-role command assigns, replaces, or removes
-`catalog_owner` and `catalog_viewer` on an existing active principal. It is
-separate from generic principal create/update, which never touches
-`catalog_role`; migration, upgrade, startup, and bootstrap never assign a
-viewer.
+`catalog_owner`, `catalog_viewer`, and `project_creator` on an existing active
+principal. It is separate from generic principal create/update, which never
+touches `catalog_role`; migration, upgrade, startup, and bootstrap never assign
+a viewer or a project creator.
 
 Authorization requires the actor to be simultaneously active and both a platform
 admin and a catalog owner; neither axis alone is sufficient. Human actors must
@@ -275,8 +313,12 @@ shows the current catalog role in the principal list and detail views without
 implying platform-admin equivalence. The canonical principal, admin summary, and
 API schemas carry the nullable `catalog_role`, and the admin principal detail
 exposes the typed `global_authorities` effective-permission explanation for an
-active catalog owner or viewer. REST schemas and the EN/DE UI represent
-`catalog_owner`, `catalog_viewer`, and no role as three distinct states.
+active catalog owner, viewer, or project creator. Because creating a root is not
+an object permission — a root has no object to hold one — each authority also
+reports its creatable `root_kinds`, so a project creator is explained as no
+permission plus exactly `["project"]`, and a viewer as read permissions plus no
+root kind. REST schemas and the EN/DE UI represent `catalog_owner`,
+`catalog_viewer`, `project_creator`, and no role as four distinct states.
 
 MCP may only read/display the catalog role and its effective authority through the
 existing read-only `list_admin_principals` and `get_admin_principal` projections.
@@ -306,24 +348,44 @@ leaves credentials, revisions, idempotency records, sessions, and the audit trai
 untouched apart from the denial event. Targets without the catalog-owner role
 keep the established platform-admin contract, including one-time secret
 disclosure, ETag preconditions, idempotent replay, and stable error envelopes.
-That includes catalog-viewer targets: the viewer role adds no credential or
-token administration authority and does not broaden the established
-platform-admin credential workflow.
+That includes catalog-viewer and project-creator targets: neither role adds
+credential or token administration authority, and neither broadens the
+established platform-admin credential workflow. Taking over a project creator's
+token yields exactly that principal's root-project creation, never catalog-wide
+authority, so it stays on the ordinary platform-admin contract.
 
-## Catalog-owner root creation
+## Catalog-role root creation
 
-An active catalog owner may create a new disconnected top-level catalog root
-through the dedicated `create_root` application command, exposed on REST
-(`POST /api/v1/roots`), the browser UI (typed **Create root** form), and MCP
-(`blockwart.create_root`). This is a catalog write, not a role mutation, and it
-is the only creation path that does not require a placement parent.
+An active principal holding a catalog role that covers the requested kind may
+create a new disconnected top-level catalog root through the dedicated
+`create_root` application command, exposed on REST (`POST /api/v1/roots`), the
+browser UI (typed **Create root** form), and MCP (`blockwart.create_root`). This
+is a catalog write, not a role mutation, and it is the only creation path that
+does not require a placement parent.
+
+| Catalog role | Creatable root kinds |
+|---|---|
+| `catalog_owner` | every kind the object schema accepts |
+| `project_creator` | `project` only |
+| `catalog_viewer` | none |
+| no catalog role | none |
 
 Authorization is resolved from current database state inside the command
-transaction: the actor must be active and hold `catalog_owner`. Platform-admin
-alone is denied, and the catalog owner needs no platform-admin role for this
-operation. The trusted channel must also match the credential: browser UI actors
-use their browser session, REST writes require an `api`-audience service token,
+transaction: the actor must be active and hold a catalog role whose creatable
+kinds contain the requested `kind`. Platform-admin alone is denied, and neither
+catalog role needs a platform-admin role for this operation. Every missing
+property — inactive principal, absent role, uncovered kind, or wrong channel —
+raises one indistinguishable denial, so a caller cannot probe which one it
+lacks. The trusted channel must also match the credential: browser UI actors use
+their browser session, REST writes require an `api`-audience service token,
 and MCP writes require an `mcp`-audience service token.
+
+The browser **Create root** form narrows its own kind control to the kinds the
+acting principal may create, so a project creator sees a project-only form
+rather than a control that fails on submit, and the entry point disappears for
+a principal that may create no root at all. That projection is a convenience;
+the command re-resolves the same rule from current database state and remains
+the authoritative gate.
 
 The command reuses the canonical object schema, reference, provenance,
 ACL-shaped-key rejection, secret scanning, normalization, idempotency, and
@@ -336,8 +398,10 @@ is still never represented by a wildcard, sentinel, or subtree grant. The
 generic object create/update/import paths expose no root-creation bypass.
 
 Every creation emits the normal immutable `create_root` audit event with the
-trusted actor, channel, request ID, and revisions, and never includes secrets
-or raw credentials.
+trusted actor, channel, request ID, revisions, and the `catalog_authority` that
+was actually used (`catalog_owner` or `project_creator`), so the audit trail
+distinguishes a narrow delegated creation from a global one. It never includes
+secrets or raw credentials.
 
 ## Grant management
 
@@ -522,6 +586,16 @@ platform-admin and catalog-owner guard/counter triggers verbatim. Downgrade to
 any principal still carries `catalog_viewer`; operators must explicitly remove
 those roles through the protected lifecycle before retrying. No grant is ever
 removed or rewritten.
+
+Alembic revision `20260909_0023` expands the same catalog-role check constraint
+once more, to accept `project_creator`. It changes no existing role, principal,
+credential, grant, or owner counter and assigns nobody. Because the role carries
+no last-active-holder invariant, it adds no counter row and no trigger; SQLite
+rebuilds `principals` and recreates the established platform-admin and
+catalog-owner guard/counter triggers verbatim, while PostgreSQL replaces the
+constraint in place. Downgrade to `20260909_0022` is data-preserving when no
+project creator remains and fails closed while any principal still carries
+`project_creator`.
 
 Service-account tokens use a protected output file:
 

@@ -3220,7 +3220,8 @@
         "description": "Global catalog authority, independent of the platform-admin axis.",
         "enum": [
           "catalog_owner",
-          "catalog_viewer"
+          "catalog_viewer",
+          "project_creator"
         ],
         "title": "CatalogRole",
         "type": "string"
@@ -3548,10 +3549,29 @@
             "title": "Permissions",
             "type": "array"
           },
+          "root_kinds": {
+            "items": {
+              "enum": [
+                "host",
+                "system",
+                "network",
+                "device",
+                "service",
+                "credential_reference",
+                "runbook",
+                "decision",
+                "project"
+              ],
+              "type": "string"
+            },
+            "title": "Root Kinds",
+            "type": "array"
+          },
           "source": {
             "enum": [
               "catalog_owner",
-              "catalog_viewer"
+              "catalog_viewer",
+              "project_creator"
             ],
             "title": "Source",
             "type": "string"

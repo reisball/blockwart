@@ -13,13 +13,16 @@ from blockwart.mcp.manifest import (
 from blockwart.mcp.server import TOOLS, local_contract_metadata, validate_runtime_catalog
 
 
-def test_rename_tools_have_the_reviewed_manifest_evidence() -> None:
-    metadata = contract_metadata(TOOLS, build_revision="issue-233")
+def test_root_project_creator_tools_have_the_reviewed_manifest_evidence() -> None:
+    metadata = contract_metadata(TOOLS, build_revision="issue-237")
 
+    # Delegating root project creation adds no tool; it only restates the
+    # create_root authorization contract, so the count is unchanged and the
+    # digest moves once with the reviewed description.
     assert metadata == {
-        "build_revision": "issue-233",
+        "build_revision": "issue-237",
         "contract_version": "1",
-        "manifest_digest": "008dbad4f1727134e72ffa8fc5ba12a671dc23a553ad9428d18fa4731132949b",
+        "manifest_digest": "e485f70f0070909cca9f5a81586b46167899607215a67da2b0f855746a6bfd23",
         "tool_count": 33,
     }
 
