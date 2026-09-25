@@ -135,6 +135,7 @@ class PrincipalContext:
     revision: int = 1
     service_token_audience: str | None = field(default=None, compare=False)
     catalog_role: CatalogRole | None = None
+    project_creator: bool = False
 
     @property
     def is_admin(self) -> bool:
@@ -150,11 +151,13 @@ class PrincipalContext:
 
     @property
     def is_project_creator(self) -> bool:
-        return self.catalog_role == CatalogRole.PROJECT_CREATOR
+        return self.project_creator or self.catalog_role == CatalogRole.PROJECT_CREATOR
 
     def may_create_root_kind(self, kind: str) -> bool:
         """Answer the projection question only; commands re-resolve from the DB."""
-        return catalog_role_creates_root_kind(self.catalog_role, kind)
+        return (
+            kind == ROOT_PROJECT_KIND and self.project_creator
+        ) or catalog_role_creates_root_kind(self.catalog_role, kind)
 
 
 def permissions_for_role(role: Role | str) -> frozenset[Permission]:
@@ -196,7 +199,5 @@ def catalog_role_creates_root_kind(
 def roles_for_permission(permission: Permission | str) -> frozenset[Role]:
     resolved = Permission(permission)
     return frozenset(
-        role
-        for role, permissions in ROLE_PERMISSIONS.items()
-        if resolved in permissions
+        role for role, permissions in ROLE_PERMISSIONS.items() if resolved in permissions
     )

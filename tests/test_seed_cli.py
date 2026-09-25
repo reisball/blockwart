@@ -38,7 +38,7 @@ def test_seed_cli_creates_schema_and_imports_seed(tmp_path, capsys):
         assert session.query(Relationship).count() == 63
         assert session.query(AuditEvent).count() == 115
         assert session.execute(text("SELECT version_num FROM alembic_version")).scalar_one() == (
-            "20260909_0023"
+            "20260925_0024"
         )
 
 

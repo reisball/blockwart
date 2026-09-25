@@ -146,7 +146,7 @@ def test_readiness_checks_database_revision_and_sqlite_runtime(tmp_path: Path) -
             "writable": "ok",
             "sqlite": "ok",
         },
-        "revision": "20260909_0023",
+        "revision": "20260925_0024",
         "error_code": None,
     }
     assert after == before

@@ -135,6 +135,15 @@ unchanged. Before a downgrade to `20260909_0022`, remove every
 `project_creator` role through the protected catalog-role UI/REST lifecycle;
 downgrade fails closed otherwise.
 
+Revision `20260925_0024` adds `principals.project_creator` as an independent
+boolean capability. Existing `catalog_role = project_creator` rows are backfilled
+to true; catalog owner/viewer roles and object grants are untouched. Downgrade
+refuses to discard a capability that is not represented by the legacy role.
+Assign the capability to agent accounts through the protected admin API/UI
+after deployment, then verify each agent can create a root Project and receives
+only its own direct Owner/self grant. New-agent onboarding must request the same
+capability; this migration does not automatically grant it to human users.
+
 The image healthcheck calls `/api/health/ready`. An unhealthy result therefore means the process
 may still be alive but must not receive normal traffic.
 

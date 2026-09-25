@@ -75,6 +75,9 @@ class Principal(Base):
         nullable=True,
         index=True,
     )
+    project_creator: Mapped[bool] = mapped_column(
+        Boolean, default=False, server_default=text("false")
+    )
     revision: Mapped[int] = mapped_column(
         Integer,
         default=1,

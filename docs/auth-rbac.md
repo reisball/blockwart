@@ -63,24 +63,27 @@ to `/auth` clears stale identity and CSRF cookies with the same security flags.
 
 ## Role axes
 
-Blockwart stores three independent authorization axes on a principal:
+Blockwart stores independent authorization axes on a principal:
 
 | Axis | Stored as | Meaning |
 |---|---|---|
 | identity administration | `platform_role = admin` | identity and credential administration |
 | global catalog authority | `catalog_role = catalog_owner` | all seven permissions on every object |
 | global catalog read-only | `catalog_role = catalog_viewer` | exactly `discover` and `read` on every object |
-| global root-project creation | `catalog_role = project_creator` | create a top-level root of `kind = project` and nothing else |
+| global root-project creation | `project_creator = true` | create a top-level root of `kind = project` and nothing else, additively to the catalog role |
+| legacy root-project creation | `catalog_role = project_creator` | still recognized for existing principals; use the independent capability for new assignments |
 | scoped catalog access | `object_grants` rows | one role at one object, `self` or `subtree` |
 
 The axes never imply each other. A platform admin has no catalog permission
 unless it also holds grants or a catalog role, and a catalog owner, viewer, or
 project creator cannot administer identities or credentials. Both role columns
 are nullable and constrained to their closed allowed values, and `catalog_role`
-holds exactly one of the three values or none. The last-active-holder service
+holds exactly one of the three values or none. `project_creator` is a separate
+boolean capability, so a viewer can also create its own Projects without losing
+read access. The last-active-holder service
 and database guards remain specific to platform admins and catalog owners;
-viewers and project creators are freely revocable through the protected
-catalog-role command.
+viewers and project creators are freely revocable through their protected
+admin commands.
 
 ## Platform administration
 
@@ -195,9 +198,10 @@ or `delete`, on any object, current or future. Its entire authority is the
 right to create one kind of disconnected top-level root — `kind = project` —
 through the `create_root` command described below.
 
-That authority exists as its own catalog role because a top-level root has no
+That authority is now independently assignable because a top-level root has no
 placement parent, so no object grant, including `creator/subtree`, can delegate
-its creation. Delegating root-project creation through `catalog_owner` instead
+its creation. The earlier exclusive catalog-role value remains accepted for
+backward compatibility, but new assignments use the separate boolean capability. Delegating root-project creation through `catalog_owner` instead
 would hand out catalog-wide write, delete, and access-management authority for
 an agent that only needs to open its own projects.
 
@@ -367,12 +371,13 @@ does not require a placement parent.
 |---|---|
 | `catalog_owner` | every kind the object schema accepts |
 | `project_creator` | `project` only |
-| `catalog_viewer` | none |
-| no catalog role | none |
+| `catalog_viewer` | none unless `project_creator = true` |
+| no catalog role | none unless `project_creator = true` |
 
 Authorization is resolved from current database state inside the command
-transaction: the actor must be active and hold a catalog role whose creatable
-kinds contain the requested `kind`. Platform-admin alone is denied, and neither
+transaction: the actor must be active and hold either a catalog role whose
+creatable kinds contain the requested `kind`, or the independent creator
+capability for `kind = project`. Platform-admin alone is denied, and neither
 catalog role needs a platform-admin role for this operation. Every missing
 property — inactive principal, absent role, uncovered kind, or wrong channel —
 raises one indistinguishable denial, so a caller cannot probe which one it
@@ -670,6 +675,14 @@ catalog-owner guard/counter triggers verbatim, while PostgreSQL replaces the
 constraint in place. Downgrade to `20260909_0022` is data-preserving when no
 project creator remains and fails closed while any principal still carries
 `project_creator`.
+
+Alembic revision `20260925_0024` adds the independent non-null boolean
+`principals.project_creator`, defaulting to false. Existing principals whose
+exclusive catalog role was `project_creator` are backfilled to true; owner and
+viewer roles, principal revisions, and all object grants are unchanged. A
+viewer can then receive the independent capability without surrendering global
+read access. Downgrade fails closed while any independent capability cannot be
+represented by the legacy exclusive role.
 
 Service-account tokens use a protected output file:
 
