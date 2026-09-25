@@ -332,6 +332,10 @@ def test_postgresql_project_creator_migration_upgrade_and_safe_downgrade(
                 catalog_role="catalog_viewer",
             )
         before = _table_rows(engine, {"principals", "principal_invariant_counts"})
+        existing_columns = {
+            table: [column["name"] for column in inspect(engine).get_columns(table)]
+            for table in ("principals", "principal_invariant_counts")
+        }
     finally:
         engine.dispose()
 
@@ -339,7 +343,7 @@ def test_postgresql_project_creator_migration_upgrade_and_safe_downgrade(
     engine = build_engine(database_url)
     try:
         # Widening the constraint rewrites no row and adds no counter row.
-        assert _table_rows(engine, {"principals", "principal_invariant_counts"}) == before
+        assert _table_rows_for_columns(engine, existing_columns) == before
         with engine.begin() as connection:
             _insert_principal(
                 connection,
@@ -411,13 +415,17 @@ def test_postgresql_catalog_viewer_migration_upgrade_and_safe_downgrade(
                 catalog_role="catalog_owner",
             )
         before = _table_rows(engine, {"principals", "principal_invariant_counts"})
+        existing_columns = {
+            table: [column["name"] for column in inspect(engine).get_columns(table)]
+            for table in ("principals", "principal_invariant_counts")
+        }
     finally:
         engine.dispose()
 
     _upgrade_to(database_url, HEAD_REVISION)
     engine = build_engine(database_url)
     try:
-        assert _table_rows(engine, {"principals", "principal_invariant_counts"}) == before
+        assert _table_rows_for_columns(engine, existing_columns) == before
         with engine.begin() as connection:
             _insert_principal(
                 connection,
