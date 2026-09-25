@@ -297,20 +297,25 @@ def _global_authorities_for_principal(
     principal_id: str,
 ) -> tuple[GlobalAuthority, ...]:
     row = session.execute(
-        select(Principal.active, Principal.catalog_role).where(
+        select(Principal.active, Principal.catalog_role, Principal.project_creator).where(
             Principal.id == principal_id
         )
     ).first()
-    if row is None or not row.active or row.catalog_role is None:
+    if row is None or not row.active:
         return ()
-    role = CatalogRole(row.catalog_role)
-    root_kinds = root_kinds_for_catalog_role(role)
-    return (
-        GlobalAuthority(
+    authorities = []
+    if row.catalog_role is not None:
+        role = CatalogRole(row.catalog_role)
+        root_kinds = root_kinds_for_catalog_role(role)
+        authorities.append(GlobalAuthority(
             source=GlobalPolicySource(role.value),
             permissions=permissions_for_catalog_role(role),
-            root_kinds=(
-                frozenset(OBJECT_KINDS) if root_kinds is None else root_kinds
-            ),
-        ),
-    )
+            root_kinds=frozenset(OBJECT_KINDS) if root_kinds is None else root_kinds,
+        ))
+    if row.project_creator and row.catalog_role != CatalogRole.PROJECT_CREATOR:
+        authorities.append(GlobalAuthority(
+            source=GlobalPolicySource.PROJECT_CREATOR,
+            permissions=frozenset(),
+            root_kinds=frozenset({"project"}),
+        ))
+    return tuple(authorities)

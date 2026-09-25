@@ -27,6 +27,7 @@ from blockwart.schemas.admin import (
     PrincipalGrantUpdateIn,
     PrincipalMutationOut,
     PrincipalUpdateIn,
+    ProjectCreatorMutationIn,
     ServiceTokenIssueIn,
     ServiceTokenRotateIn,
 )
@@ -53,6 +54,7 @@ from blockwart.services.principal_management import (
     revoke_managed_principal_grant,
     revoke_managed_service_token,
     set_managed_catalog_role,
+    set_managed_project_creator,
     update_managed_principal,
     update_managed_principal_grant,
 )
@@ -334,6 +336,36 @@ def set_admin_principal_catalog_role(
     return PrincipalMutationOut.model_validate(result)
 
 
+@router.post(
+    "/{principal_id}/project-creator",
+    response_model=PrincipalMutationOut,
+)
+def set_admin_principal_project_creator(
+    principal_id: str,
+    payload: ProjectCreatorMutationIn,
+    request: Request,
+    response: Response,
+    session: Annotated[Session, Depends(get_session)],
+    access: Annotated[ReadAccess, Depends(require_browser_api_write_access)],
+    if_match: Annotated[str | None, Header(alias="If-Match")] = None,
+) -> PrincipalMutationOut:
+    result = _execute_admin(
+        session,
+        lambda: set_managed_project_creator(
+            session,
+            access,
+            principal_id=principal_id,
+            expected_revision=if_match,
+            project_creator=payload.project_creator,
+            actor_password=payload.current_admin_password,
+            channel="api",
+            request_id=_request_id(request),
+        ),
+    )
+    response.headers["ETag"] = result.principal.etag
+    return PrincipalMutationOut.model_validate(result)
+
+
 @router.post("/{principal_id}/tokens", response_model=PrincipalCredentialOut)
 def issue_admin_principal_token(
     principal_id: str,
@@ -495,8 +527,7 @@ def _execute_admin[T](
         raise HTTPException(
             status_code=403,
             detail=(
-                "Catalog owner administration requires dual "
-                "platform-admin and catalog-owner role"
+                "Catalog owner administration requires dual platform-admin and catalog-owner role"
             ),
         ) from exc
     except ManagedPrincipalNotFound as exc:

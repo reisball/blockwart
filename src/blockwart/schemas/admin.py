@@ -28,6 +28,7 @@ class PrincipalAdminSummaryOut(BaseModel):
     active: bool
     platform_role: PlatformRole | None = None
     catalog_role: CatalogRole | None = None
+    project_creator: bool = False
     revision: int = Field(ge=1)
     etag: str
     created_at: str
@@ -148,6 +149,11 @@ class CatalogRoleMutationIn(BaseModel):
     """Dedicated catalog-role command body, separate from generic principal update."""
 
     catalog_role: CatalogRole | None
+    current_admin_password: str | None = Field(default=None, min_length=1, max_length=1024)
+
+
+class ProjectCreatorMutationIn(BaseModel):
+    project_creator: bool
     current_admin_password: str | None = Field(default=None, min_length=1, max_length=1024)
 
 

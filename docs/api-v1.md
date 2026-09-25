@@ -435,8 +435,9 @@ operation, or payload returns `409 conflict`. Expired records may be replaced.
 Creates one disconnected top-level catalog root without a placement parent.
 Requires an `Idempotency-Key` header containing 16..128 visible ASCII characters
 and an active principal whose catalog role covers the requested `kind`: an active
-catalog owner may create every kind, while the narrow `project_creator` role may
-create `kind = project` and nothing else. Platform-admin alone is not sufficient,
+catalog owner may create every kind, while the independent
+`project_creator = true` capability (or the legacy exclusive role) may create
+`kind = project` and nothing else. Platform-admin alone is not sufficient,
 and a denial for a kind the role does not cover is the same `403` as a denial for
 no catalog role at all. API writes require an `api`-audience service token,
 matching the trusted-channel rule of the shared `create_root` command. The
@@ -666,6 +667,7 @@ POST     /api/v1/admin/principals/{principal_id}/tokens
 POST     /api/v1/admin/principals/{principal_id}/tokens/rotate
 DELETE   /api/v1/admin/principals/{principal_id}/tokens/{token_name}
 POST     /api/v1/admin/principals/{principal_id}/catalog-role
+POST     /api/v1/admin/principals/{principal_id}/project-creator
 ```
 
 Lifecycle and credential mutations advance the principal revision. Token
@@ -677,7 +679,7 @@ The last-active-admin and independent last-effective-owner invariants fail
 atomically.
 
 The dedicated catalog-role route accepts the closed nullable values
-`catalog_owner`, `catalog_viewer`, and `null`. It alone uses an active human
+`catalog_owner`, `catalog_viewer`, legacy `project_creator`, and `null`. It uses an active human
 browser session, double-submit CSRF, current-password reauthentication, the
 target principal `If-Match` ETag, and a current-state dual platform-admin plus
 catalog-owner authorization check. Real changes advance the principal revision
@@ -685,6 +687,13 @@ once and emit redacted `catalog_role_changed` security evidence; no-ops preserve
 the revision and emit no success event. Replacing or removing the last active
 catalog owner remains forbidden. Viewer targets receive no special credential
 authority or token behavior.
+
+The separate `project-creator` route accepts `project_creator: true|false` plus
+`current_admin_password`. It uses the same browser-CSRF, current-password,
+dual-admin, target ETag, no-op, and audit protections as the catalog-role route.
+It changes no catalog role or object grant, so `catalog_viewer` read access
+remains intact. An active principal with the capability may create only root
+Projects and receives a direct Owner/self grant on each created Project.
 
 The principal-targeted grant routes are administrative aliases for the shared
 object grant command layer. They require both the platform `admin` role and the

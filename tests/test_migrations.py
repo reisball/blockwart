@@ -48,7 +48,8 @@ GATUS_SOURCE_REVISION = "20260824_0020"
 RELEASE_MONITORING_REVISION = "20260825_0021"
 OBJECT_RENAME_REVISION = "20260909_0022"
 PROJECT_CREATOR_REVISION = "20260909_0023"
-HEAD_REVISION = PROJECT_CREATOR_REVISION
+ADDITIVE_PROJECT_CREATOR_REVISION = "20260925_0024"
+HEAD_REVISION = ADDITIVE_PROJECT_CREATOR_REVISION
 _GUARD_TRIGGER_NAMES = (
     "ck_principals_last_active_admin_update",
     "ck_principals_last_active_admin_delete",
@@ -3268,3 +3269,51 @@ def test_revision_check_rejects_database_before_head(tmp_path: Path) -> None:
         match="revision does not match the application",
     ):
         check_database_revision(database_url)
+
+def test_additive_project_creator_migration_preserves_roles_and_grants(
+    tmp_path: Path,
+) -> None:
+    database_url = _database_url(tmp_path / "additive-creator.sqlite3")
+    config = build_alembic_config(database_url)
+    command.upgrade(config, PROJECT_CREATOR_REVISION)
+    connection = sqlite3.connect(tmp_path / "additive-creator.sqlite3")
+    try:
+        connection.execute(
+            "INSERT INTO principals (id, principal_type, login, display_name, "
+            "active, platform_role, catalog_role, revision) VALUES "
+            "('owner', 'human', 'owner', 'Owner', 1, 'admin', 'catalog_owner', 1), "
+            "('viewer', 'service_account', 'viewer', 'Viewer', 1, NULL, 'catalog_viewer', 4), "
+            "('creator', 'service_account', 'creator', 'Creator', 1, NULL, 'project_creator', 2)"
+        )
+        connection.execute(
+            "INSERT INTO catalog_objects (id, kind, label, status, lifecycle, health, "
+            "data_json, provenance_json, revision) VALUES "
+            "('root', 'host', 'Root', 'active', 'active', 'healthy', "
+            "'{\"schema_version\":1}', '{}', 1)"
+        )
+        connection.execute(
+            "INSERT INTO object_grants (principal_id, object_id, role, scope, "
+            "created_by_principal_id) VALUES ('viewer', 'root', 'viewer', 'self', 'owner')"
+        )
+        connection.commit()
+    finally:
+        connection.close()
+    command.upgrade(config, ADDITIVE_PROJECT_CREATOR_REVISION)
+    connection = sqlite3.connect(tmp_path / "additive-creator.sqlite3")
+    try:
+        assert connection.execute(
+            "SELECT id, catalog_role, project_creator, revision FROM principals ORDER BY id"
+        ).fetchall() == [
+            ("creator", "project_creator", 1, 2),
+            ("owner", "catalog_owner", 0, 1),
+            ("viewer", "catalog_viewer", 0, 4),
+        ]
+        assert connection.execute(
+            "SELECT principal_id, object_id, role, scope FROM object_grants"
+        ).fetchall() == [("viewer", "root", "viewer", "self")]
+        connection.execute("UPDATE principals SET project_creator = 1 WHERE id = 'viewer'")
+        connection.commit()
+    finally:
+        connection.close()
+    with pytest.raises(RuntimeError, match="independent project_creator"):
+        command.downgrade(config, PROJECT_CREATOR_REVISION)

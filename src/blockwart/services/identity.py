@@ -1003,6 +1003,7 @@ def principal_context(
             if principal.catalog_role is not None
             else None
         ),
+        project_creator=principal.project_creator,
         revision=principal.revision,
         service_token_audience=service_token_audience,
     )

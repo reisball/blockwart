@@ -1678,14 +1678,18 @@ def _require_root_creation_authority(
         not trusted_origin
         or actor is None
         or not actor.active
-        or actor.catalog_role is None
-        or not catalog_role_creates_root_kind(actor.catalog_role, kind)
+        or not (
+            catalog_role_creates_root_kind(actor.catalog_role, kind)
+            or (actor.project_creator and kind == "project")
+        )
     ):
         raise CommandAuthorizationDenied(
             object_id="<catalog-root>",
             permission=Permission.CREATE_CHILD,
         )
-    return CatalogRole(actor.catalog_role)
+    if actor.catalog_role == CatalogRole.CATALOG_OWNER:
+        return CatalogRole.CATALOG_OWNER
+    return CatalogRole.PROJECT_CREATOR
 
 
 def _relationship_command_objects(

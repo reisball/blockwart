@@ -456,9 +456,9 @@ failed concurrency precondition.
 
 `blockwart.create_root` executes the same shared `create_root` command as REST
 and the browser UI. It requires an already active service principal with an
-`mcp`-audience token, an `idempotency_key`, and a catalog role that covers the
-requested kind: `catalog_owner` for every kind, or the narrow `project_creator`
-for `object.kind = project` only. A `project_creator` agent creating any other
+`mcp`-audience token, an `idempotency_key`, and authority covering the requested kind:
+`catalog_owner` for every kind, or the independent `project_creator = true`
+capability (or legacy role) for `object.kind = project` only. A `project_creator` agent creating any other
 root kind receives the same denial as a principal with no catalog role, and the
 role adds no catalog-wide read, write, delete, or access-management authority to
 any other tool. The tool never assigns or removes any catalog role. Its additive

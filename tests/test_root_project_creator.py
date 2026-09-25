@@ -1262,3 +1262,155 @@ def test_project_creator_carries_no_last_active_holder_invariant(
         with transaction(session):
             session.delete(session.get(Principal, target.id))
         assert session.get(Principal, target.id) is None
+
+def test_additive_viewer_creator_keeps_read_access_and_owns_only_new_project(
+    creator_client: TestClient,
+    creator_state,
+) -> None:
+    sessions = creator_state["session_factory"]
+    viewer_id = creator_state["viewer_id"]
+    with sessions() as session:
+        with transaction(session):
+            viewer = session.get(Principal, viewer_id)
+            assert viewer is not None
+            viewer.project_creator = True
+        policy = policy_for_principal(session, viewer_id)
+        assert {authority.source for authority in policy.global_authorities} == {
+            GlobalPolicySource.CATALOG_VIEWER,
+            GlobalPolicySource.PROJECT_CREATOR,
+        }
+        assert policy.can(Permission.READ, "existing-host")
+        assert not policy.can(Permission.WRITE, "existing-host")
+
+    headers = _authorization(creator_state["viewer_token"])
+    assert creator_client.get("/api/v1/objects/existing-host", headers=headers).status_code == 200
+    assert (
+        creator_client.put(
+            "/api/v1/objects/existing-project",
+            headers={**headers, "If-Match": '"rev-1"'},
+            json=_project("existing-project", label="Hijacked").model_dump(mode="json"),
+        ).status_code
+        == 403
+    )
+    created = creator_client.post(
+        "/api/v1/roots",
+        headers={**headers, "Idempotency-Key": "viewer-additive-project-01"},
+        json=_project("viewer-own-project").model_dump(mode="json"),
+    )
+    assert created.status_code == 201
+    with sessions() as session:
+        _root_facts(session, "viewer-own-project", viewer_id)
+        assert _grants_for(session, "existing-project") == []
+
+    collaborator_headers = _authorization(creator_state["plain_token"])
+    assert (
+        creator_client.get(
+            "/api/v1/objects/viewer-own-project", headers=collaborator_headers
+        ).status_code
+        == 404
+    )
+    invited = creator_client.post(
+        "/api/v1/objects/viewer-own-project/access/grants",
+        headers={**headers, "If-Match": '"rev-1"'},
+        json={
+            "principal_id": creator_state["plain_id"],
+            "role": "editor",
+            "scope": "self",
+        },
+    )
+    assert invited.status_code == 201
+    collaborator = creator_client.get(
+        "/api/v1/objects/viewer-own-project", headers=collaborator_headers
+    )
+    assert collaborator.status_code == 200
+    assert "write" in collaborator.json()["capabilities"]
+    assert (
+        creator_client.get(
+            "/api/v1/objects/existing-project", headers=collaborator_headers
+        ).status_code
+        == 404
+    )
+
+    # Revoking the independent capability does not remove the viewer role or
+    # the ordinary Owner/self grant already earned on the new project.
+    with sessions() as session:
+        with transaction(session):
+            viewer = session.get(Principal, viewer_id)
+            assert viewer is not None
+            viewer.project_creator = False
+    assert creator_client.get("/api/v1/objects/existing-host", headers=headers).status_code == 200
+    assert (
+        creator_client.get("/api/v1/objects/viewer-own-project", headers=headers).status_code == 200
+    )
+    denied = creator_client.post(
+        "/api/v1/roots",
+        headers={**headers, "Idempotency-Key": "viewer-additive-revoked-01"},
+        json=_project("viewer-second-project").model_dump(mode="json"),
+    )
+    assert denied.status_code == 403
+
+
+def test_additive_creator_without_viewer_has_no_foreign_read(
+    creator_client: TestClient,
+    creator_state,
+) -> None:
+    sessions = creator_state["session_factory"]
+    plain_id = creator_state["plain_id"]
+    with sessions() as session:
+        with transaction(session):
+            plain = session.get(Principal, plain_id)
+            assert plain is not None
+            plain.project_creator = True
+        policy = policy_for_principal(session, plain_id)
+        assert [authority.source for authority in policy.global_authorities] == [
+            GlobalPolicySource.PROJECT_CREATOR
+        ]
+        assert not policy.can(Permission.READ, "existing-project")
+
+    headers = _authorization(creator_state["plain_token"])
+    assert (
+        creator_client.get("/api/v1/objects/existing-project", headers=headers).status_code == 404
+    )
+    created = creator_client.post(
+        "/api/v1/roots",
+        headers={**headers, "Idempotency-Key": "plain-additive-project-01"},
+        json=_project("plain-own-project").model_dump(mode="json"),
+    )
+    assert created.status_code == 201
+    with sessions() as session:
+        _root_facts(session, "plain-own-project", plain_id)
+
+
+def test_mcp_additive_creator_with_viewer_role_creates_project(
+    creator_client: TestClient,
+    creator_state,
+) -> None:
+    sessions = creator_state["session_factory"]
+    with sessions() as session:
+        with transaction(session):
+            viewer = session.get(Principal, creator_state["viewer_id"])
+            assert viewer is not None
+            viewer.project_creator = True
+            token = issue_service_token(
+                session,
+                principal_id=viewer.id,
+                name="additive-mcp",
+                audience="mcp",
+            ).value
+    result = call_tool(
+        "blockwart.create_root",
+        {
+            "idempotency_key": "additive-mcp-project-01",
+            "object": {
+                "id": "additive-mcp-project",
+                "kind": "project",
+                "label": "Additive MCP Project",
+                "data": dict(PROJECT_DATA),
+            },
+        },
+        requester=_mcp_requester(creator_client, token),
+    )
+    payload = json.loads(result["content"][0]["text"])
+    assert payload["catalog_object"]["id"] == "additive-mcp-project"
+    with sessions() as session:
+        _root_facts(session, "additive-mcp-project", creator_state["viewer_id"])
