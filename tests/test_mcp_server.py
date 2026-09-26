@@ -615,7 +615,7 @@ def test_mcp_client_completes_handshake_and_calls_every_read_only_tool() -> None
         "GET",
         "GET",
         "POST",
-        *["GET"] * 16,
+        *["GET"] * 17,
     ]
     assert [request["path"] for request in requests] == [
         "/api/v1/objects",
