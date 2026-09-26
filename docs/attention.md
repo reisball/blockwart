@@ -44,6 +44,7 @@ The closed reason codes are:
 | Reason | Category | Severity | Signal state |
 |---|---|---|---|
 | `record_corrupt` | `record_integrity` | `critical` | `current` |
+| `access_owner_missing` | `access` | `warning` | `current` |
 | `monitoring_observed_down` | `monitoring` | `critical` | `current` |
 | `monitoring_check_error` | `monitoring` | `warning` | `current` |
 | `monitoring_config_invalid` | `monitoring` | `warning` | `unknown` |

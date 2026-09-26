@@ -320,9 +320,9 @@ def _readable_objects(session: Session, access: ReadAccess) -> _ReadableCatalog:
     """Load only the currently DETAIL-visible catalog rows.
 
     The visibility decision comes from the already-built policy snapshot
-    (``authorized_ids(READ)``), never from a full-catalog scan. Only the rows
-    for those ids are loaded, so the feed stays bounded by the authorized set
-    instead of the whole catalog.
+    (``authorized_ids(READ)``). This function loads only those object rows;
+    building the policy snapshot itself still reads every catalog ID per
+    request for catalog-wide roles.
     """
     readable_ids = access.policy.authorized_ids(Permission.READ)
     readable = _ReadableCatalog()

@@ -37,7 +37,7 @@ class Principal(Base):
         ),
         CheckConstraint(
             "catalog_role IS NULL OR "
-            "catalog_role IN ('catalog_owner','catalog_viewer')",
+            "catalog_role IN ('catalog_owner','catalog_viewer','project_creator')",
             name="ck_principals_catalog_role",
         ),
         CheckConstraint(
@@ -74,6 +74,9 @@ class Principal(Base):
         String(32),
         nullable=True,
         index=True,
+    )
+    project_creator: Mapped[bool] = mapped_column(
+        Boolean, default=False, server_default=text("false")
     )
     revision: Mapped[int] = mapped_column(
         Integer,

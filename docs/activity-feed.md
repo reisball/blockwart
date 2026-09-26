@@ -92,10 +92,12 @@ event is skipped or duplicated. The exact total is a separate, optional cost:
 - `ACTIVITY_MAX_SCAN_EVENTS = 5000` is a documented size budget, not a hard
   scan cap: when an exact total is requested and exceeds it the response sets
   `total_exceeds_budget: true` (and `null` when no exact count was requested);
-- one bounded catalog + relationship snapshot powers the visibility decision,
-  as in #176;
-- no full-catalog scan grows per readable object, and no catalog database
-  rewrite (event sourcing) happens or is required.
+- each request builds the current policy snapshot, as in #176, then loads only
+  the authorized object rows for attribution; for catalog-wide roles, building
+  that snapshot reads every catalog ID on each request and remains a
+  scalability concern;
+- no additional full-catalog scan grows per readable object, and no catalog
+  database rewrite (event sourcing) happens or is required.
 
 Activity older than the first page stays reachable through cursor walking or
 narrower filters (`since`, `event_type`, `object_id`), not through unbounded

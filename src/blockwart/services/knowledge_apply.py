@@ -24,7 +24,7 @@ from blockwart.domain.relationships import canonical_relationship_metadata_json
 from blockwart.domain.security import find_acl_data_violations, find_secret_violations
 from blockwart.models import AuditEvent, CatalogObject, ObjectComment, Principal, Relationship
 from blockwart.schemas.catalog import CatalogObjectIn
-from blockwart.services.access import active_owner_covered_object_ids
+from blockwart.services.access import owner_grant_covered_object_ids
 from blockwart.services.audit import add_audit_event, load_audit_details
 from blockwart.services.catalog import create_relationship, relationship_diagnostics, upsert_object
 from blockwart.services.knowledge_planning import (
@@ -40,6 +40,7 @@ from blockwart.services.knowledge_planning import (
     load_manifest,
     load_target_snapshot,
 )
+from blockwart.services.ownership import InitialOwnerError, assign_initial_owner
 from blockwart.services.policy import policy_for_principal
 
 APPLY_SCHEMA_VERSION = 1
@@ -234,6 +235,19 @@ def apply_knowledge(
                         expected_revision=target.expected_revision,
                         write_audit=False,
                     )
+                    if target.expected_revision is None:
+                        # A reviewed new object commits with the applying
+                        # catalog owner as its first Owner, exactly like every
+                        # other creation path.
+                        try:
+                            assign_initial_owner(
+                                session,
+                                object_id=result.id,
+                                owner_principal_id=principal_id,
+                                created_by_principal_id=principal_id,
+                            )
+                        except InitialOwnerError as exc:
+                            raise KnowledgeApplyError("integrity_failure") from exc
                     if target.action != "unchanged":
                         changed_object_ids.append(result.id)
                 for relation in contract.relations:
@@ -731,7 +745,7 @@ def _boundary_evidence(session: Session, contract: ApplyContract) -> dict[str, A
         "audits": int(session.scalar(select(func.count(AuditEvent.id))) or 0),
         "objects": int(session.scalar(select(func.count(CatalogObject.id))) or 0),
         "relationships": int(session.scalar(select(func.count(Relationship.id))) or 0),
-        "owner_covered": len(active_owner_covered_object_ids(session)),
+        "owner_covered": len(owner_grant_covered_object_ids(session)),
         "affected": _post_state(session, contract),
         "relationship_diagnostics": len(relationship_diagnostics(session)),
     }
