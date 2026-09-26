@@ -312,6 +312,19 @@ RELATIONSHIP_PROPERTIES: JSON = {
     },
 }
 RELATIONSHIP_METADATA_CONDITIONS: list[JSON] = relationship_metadata_conditions()
+# Top-level allOf/if/then collapses the consumer's argument signature to
+# `unknown & ...`. Keep the published shape flat for agents and apply the
+# registry-derived conditions in Blockwart's own validator before any write.
+RELATIONSHIP_AGENT_INPUT_SCHEMA: JSON = {
+    "type": "object",
+    "properties": RELATIONSHIP_PROPERTIES,
+    "required": ["object_id", "if_match", "from_ref", "relation_type", "to_ref"],
+    "additionalProperties": False,
+}
+RELATIONSHIP_VALIDATION_SCHEMA: JSON = {
+    **RELATIONSHIP_AGENT_INPUT_SCHEMA,
+    "allOf": RELATIONSHIP_METADATA_CONDITIONS,
+}
 ATTACHED_DEVICE_METADATA_SCHEMA: JSON = {
     **metadata_json_schema("attached_to"),
     "default": {},
@@ -1038,19 +1051,7 @@ TOOLS: list[JSON] = [
             f"{SCHEMA_TOOL_NAME} for the accepted relationship types, their directed "
             "endpoint kinds, endpoint predicates, and type-dependent metadata."
         ),
-        "inputSchema": {
-            "type": "object",
-            "properties": RELATIONSHIP_PROPERTIES,
-            "required": [
-                "object_id",
-                "if_match",
-                "from_ref",
-                "relation_type",
-                "to_ref",
-            ],
-            "additionalProperties": False,
-            "allOf": RELATIONSHIP_METADATA_CONDITIONS,
-        },
+        "inputSchema": RELATIONSHIP_AGENT_INPUT_SCHEMA,
         "annotations": WRITE_ANNOTATIONS,
     },
     {
@@ -1061,19 +1062,7 @@ TOOLS: list[JSON] = [
             f"depends on stored metadata. Call {SCHEMA_TOOL_NAME} for the accepted "
             "relationship types."
         ),
-        "inputSchema": {
-            "type": "object",
-            "properties": RELATIONSHIP_PROPERTIES,
-            "required": [
-                "object_id",
-                "if_match",
-                "from_ref",
-                "relation_type",
-                "to_ref",
-            ],
-            "additionalProperties": False,
-            "allOf": RELATIONSHIP_METADATA_CONDITIONS,
-        },
+        "inputSchema": RELATIONSHIP_AGENT_INPUT_SCHEMA,
         "annotations": DELETE_ANNOTATIONS,
     },
     {
@@ -1631,7 +1620,10 @@ def _compile_input_validator(schema: JSON) -> Validator:
 
 
 TOOL_INPUT_VALIDATORS: dict[str, Validator] = {
-    name: _compile_input_validator(tool["inputSchema"]) for name, tool in TOOL_DEFINITIONS.items()
+    name: _compile_input_validator(
+        RELATIONSHIP_VALIDATION_SCHEMA if name in RELATIONSHIP_TOOLS else tool["inputSchema"]
+    )
+    for name, tool in TOOL_DEFINITIONS.items()
 }
 
 

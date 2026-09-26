@@ -291,7 +291,7 @@ means it deliberately bundles lower-level API concerns behind one agent call.
 | `rename_object` | Change only one object's display name | `directly sufficient` | Carries the resource, the proposed label, and the precondition only, so a display-name change needs neither a reconstructed object document nor general write authority. |
 | `preview_object_rename` | Review one proposed rename | `directly sufficient` | Uses the exact rename arguments and shared plan, and its single `/label` diff entry is also the published evidence that no other path changes. |
 | `delete_object` | Delete one known object | `directly sufficient` | The destructive action and current ETag remain explicit. |
-| `create_relationship` | Link existing objects | `directly sufficient` | Its published schema carries the closed relationship vocabulary and the type-dependent metadata; its response contains the exact relationship, metadata, revision, and ETag. |
+| `create_relationship` | Link existing objects | `directly sufficient` | Its flat agent schema carries the closed relationship vocabulary and metadata fields; `describe_schema` exposes the type-dependent rules. Its response contains the exact relationship, metadata, revision, and ETag. |
 | `delete_relationship` | Unlink existing objects | `directly sufficient` | The exact edge and current ETag remain explicit; the same closed vocabulary applies. |
 | `create_attached_device` | Create and attach one device | `intent tool`, `response improved` | Resolves the parent internally and proves the attachment, metadata, ownership, revision, and idempotency. |
 | `get_device_graph` | Inspect device attachments | `directly sufficient` | Returns the authorized `attached_to` graph with link metadata. |
@@ -416,17 +416,21 @@ The result and `blockwart.list_comments` return source plus format, not rendered
 HTML. Markdown safety and migration behavior are specified in
 `object-comments.md`.
 
-`blockwart.create_relationship` and `blockwart.delete_relationship` publish the
-relationship contract in their input schemas, generated from the same domain
-registry the commands enforce: `relation_type` is a closed enum, `metadata`
-carries the union of every published field, and one JSON Schema condition per
-relationship type narrows the accepted metadata document to that exact type.
-`depends_on` and the other non-link types therefore accept no link metadata,
-`attached_to` exactly its five link fields, and `uplinks_to` those plus `mode`.
-`blockwart.create_attached_device` publishes exactly the `attached_to` metadata
-fields. Creating an existing triplet replaces its canonical metadata and an
-identical document is a no-op with `changed: false`; delete matches the triplet
-only. Endpoint predicates, duplicates, primary conflicts, and cycles depend on
+`blockwart.create_relationship` and `blockwart.delete_relationship` publish
+flat, agent-readable input schemas with the five required arguments:
+`object_id`, `if_match` (the current ETag), `from_ref`, `relation_type`, and
+`to_ref`. The closed `relation_type` enum and union of published `metadata`
+fields come from the domain registry. Type-dependent metadata rules remain in
+`blockwart.describe_schema` and in the server's registry-derived validation
+schema; they are enforced before any upstream request. The public input schema
+omits top-level `allOf` conditions because the agent-tool projection renders
+them as `unknown` intersections. `depends_on` and the other non-link types
+therefore still accept no link metadata, `attached_to` exactly its five link
+fields, and `uplinks_to` those plus `mode`. `blockwart.create_attached_device`
+publishes exactly the `attached_to` metadata fields. Creating an existing
+triplet replaces its canonical metadata and an identical document is a no-op
+with `changed: false`; delete matches the triplet only, independent of metadata.
+Endpoint predicates, duplicates, primary conflicts, and cycles depend on
 stored state and remain upstream conflicts.
 
 `blockwart.list_audit_events` carries `object_id`, `limit`, the opaque
