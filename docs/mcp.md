@@ -154,6 +154,18 @@ Choose the smallest tool that directly answers the intent:
   stays complete. For one small write, request exactly one `kind`, one
   `write_intent`, and `sections: ["object_fields", "minimal_example"]`; add
   `relationships` or `errors` only when that write needs them.
+  The optional `relation_type` (enum generated from the relationship registry)
+  narrows only the `relationships` section to that one type: its `types` entry
+  plus just the endpoint predicate and graph rules it uses; the closed
+  `relation_types` vocabulary, `metadata_policy`, and `command_semantics` stay
+  intact and `errors` stays independent and unfiltered. An unknown value, a
+  type that does not accept `kind`, or a `sections` list without
+  `relationships` is rejected as `invalid_arguments` with one detail located at
+  `relation_type` (`value_not_allowed` or `field_not_allowed`); the request is
+  never broadened. Omitting it keeps the existing payload byte-for-byte.
+  Synthetic sizes (compact JSON): complete contract 158167 bytes;
+  `kind=device` + `sections=["relationships"]` 17997 bytes; adding
+  `relation_type=attached_to` 4830 bytes (~4 bytes/token: ~39.5k, ~4.5k, ~1.2k).
 - Use `blockwart.get_object_context` when the exact object ID is already known.
 - Use `blockwart.get_object_contexts` when several exact object IDs are already
   known and their authorized contexts must be retrieved in one bounded
