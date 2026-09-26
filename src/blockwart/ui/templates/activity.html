@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="{{ locale }}">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>{{ title }}</title>
+    <link rel="stylesheet" href="/static/app.css" />
+  </head>
+  <body>
+    <main class="page stack">
+      <header class="integrated-detail-heading">
+        <a class="detail-back-button" href="/">← {{ t("nav.catalog") }}</a>
+        <div>
+          <p class="eyebrow">{{ t("activity.eyebrow") }}</p>
+          <h1>{{ t("activity.title") }}</h1>
+          <span>{{ t("activity.help") }}</span>
+        </div>
+      </header>
+
+      <section class="panel">
+        <form class="form-grid" method="get" action="/activity">
+          <div class="project-filter-grid">
+            <label>{{ t("activity.type_label") }}
+              <select name="event_type">
+                <option value="">{{ t("activity.all_types") }}</option>
+                {% for option in event_types %}<option value="{{ option }}"{% if selected_event_type == option %} selected{% endif %}>{{ t("activity.type." ~ option) }}</option>{% endfor %}
+              </select>
+            </label>
+            <label>{{ t("activity.since_label") }}
+              <input type="text" name="since" value="{{ selected_since }}" placeholder="2026-01-01T00:00:00Z" />
+            </label>
+          </div>
+          <div class="button-row"><button type="submit">{{ t("activity.filter") }}</button><a class="button button-muted" href="/activity">{{ t("activity.clear") }}</a></div>
+        </form>
+      </section>
+
+      <section class="panel">
+        {% if items %}
+          <div class="table-wrap"><table class="table attention-table">
+            <thead><tr><th>{{ t("activity.occurred_at") }}</th><th>{{ t("activity.type_label") }}</th><th>{{ t("attention.target_label") }}</th><th>{{ t("audit.field.summary") }}</th><th>{{ t("project.column.author") }}</th></tr></thead>
+            <tbody>
+              {% for item in items %}
+                <tr class="attention-row">
+                  <td><time>{{ item.occurred_at }}</time></td>
+                  <td><span class="badge">{{ t("activity.type." ~ item.event_type) }}</span></td>
+                  <td><a href="{{ item.detail_path }}"><strong>{{ item.object.label or item.object.object_id }}</strong></a><br /><code>{{ item.object.ref }}</code></td>
+                  <td>{{ item.summary }}</td>
+                  <td>{% if item.actor %}<code>{{ item.actor }}</code>{% else %}{{ t("asset.no_value") }}{% endif %}</td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table></div>
+        {% else %}
+          <p class="meta">{{ t("activity.empty") }}</p>
+        {% endif %}
+        {% if next_url %}<div class="button-row"><a class="button button-muted" href="{{ next_url }}">{{ t("attention.next_page") }}</a></div>{% endif %}
+        <p class="meta">{{ t("attention.generated_at") }} <time>{{ generated_at }}</time></p>
+      </section>
+    </main>
+  </body>
+</html>

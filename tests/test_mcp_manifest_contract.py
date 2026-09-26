@@ -15,14 +15,14 @@ from blockwart.mcp.server import TOOLS, local_contract_metadata, validate_runtim
 
 
 def test_integrated_mcp_contract_has_reviewed_manifest_evidence() -> None:
-    metadata = contract_metadata(TOOLS, build_revision="issue-236-245-248-249-250-251")
+    metadata = contract_metadata(TOOLS, build_revision="issue-188-236-245-248-249-250-251")
 
-    # Credential-reference and grant tools join the relationship/schema/read contract changes.
+    # The activity read joins the reviewed credential, grant, relationship and schema tools.
     assert metadata == {
-        "build_revision": "issue-236-245-248-249-250-251",
+        "build_revision": "issue-188-236-245-248-249-250-251",
         "contract_version": "1",
-        "manifest_digest": "25ba1398d876ec753cfa8693b2303b3e09627232b820e67643bf916c26712126",
-        "tool_count": 37,
+        "manifest_digest": "da326b838ad775dc02fc90bd8524ffcf8f99b8f386ec3775e9598a63badccd1e",
+        "tool_count": 38,
     }
 
 
@@ -53,7 +53,7 @@ def test_reduced_catalog_is_incompatible_before_normal_tool_use() -> None:
 
     diagnosis = diagnose_contract(local, api=reduced)
 
-    assert local["tool_count"] == 37
+    assert local["tool_count"] == 38
     assert reduced["tool_count"] == 22
     assert diagnosis["status"] == "incompatible"
     assert diagnosis["classification"] == "wrapper_drift"

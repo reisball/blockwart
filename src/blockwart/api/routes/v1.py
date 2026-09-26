@@ -65,6 +65,7 @@ from blockwart.schemas.projects import (
 )
 from blockwart.schemas.v1 import (
     MAX_BATCH_RESPONSE_BYTES,
+    ActivityEventTypeValue,
     AttentionCategoryValue,
     AttentionItemSignalStateValue,
     AttentionReasonValue,
@@ -75,6 +76,7 @@ from blockwart.schemas.v1 import (
     ObjectSortField,
     SortDirection,
     SourceClassificationValue,
+    V1ActivityPageOut,
     V1AttachedDeviceCreateIn,
     V1AttentionPageOut,
     V1AuditPageOut,
@@ -111,6 +113,10 @@ from blockwart.schemas.v1 import (
     V1ServiceCredentialReferenceOut,
     V1SourceCoveragePageOut,
     V1TopologyOut,
+)
+from blockwart.services.activity import (
+    ActivityQueryError,
+    query_activity_page,
 )
 from blockwart.services.agent import (
     get_agent_object_context,
@@ -331,6 +337,73 @@ def get_v1_attention(
             "total": page.total,
             "generated_at": page.generated_at,
             "direction": direction,
+        }
+    )
+
+
+@router.get(
+    "/activity",
+    response_model=V1ActivityPageOut,
+    summary="Read the authorized catalog-wide agent activity feed",
+)
+def get_v1_activity(
+    session: Annotated[Session, Depends(get_session)],
+    access: Annotated[ReadAccess, Depends(require_api_read_access)],
+    since: Annotated[
+        str | None,
+        Query(description="Only events at or after this RFC3339 timestamp"),
+    ] = None,
+    event_type: ActivityEventTypeValue | None = None,
+    kind: ObjectKind | None = None,
+    parent: Annotated[
+        str | None,
+        Query(description="Include only the placement subtree of this object id"),
+    ] = None,
+    object_id: Annotated[
+        str | None,
+        Query(description="Include only events of this exact object id"),
+    ] = None,
+    limit: PageLimit = 50,
+    cursor: CursorParameter = None,
+    direction: SortDirection = "desc",
+    include_total: Annotated[
+        bool,
+        Query(
+            description=(
+                "Attempt an exact authorized total within the activity scan budget. "
+                "When the budget is exhausted, total is null and total_status "
+                "is budget_exhausted."
+            )
+        ),
+    ] = False,
+) -> V1ActivityPageOut:
+    """Read one classified audit-activity page; strictly pull and read-only."""
+    try:
+        page = query_activity_page(
+            session,
+            access,
+            since=since,
+            event_type=event_type,
+            kind=kind,
+            parent=parent,
+            object_id=object_id,
+            limit=limit,
+            cursor=cursor,
+            direction=direction,
+            include_total=include_total,
+        )
+    except InvalidCursor as exc:
+        raise _invalid_cursor() from exc
+    except ActivityQueryError as exc:
+        raise HTTPException(status_code=400, detail="Invalid activity request") from exc
+    return V1ActivityPageOut.model_validate(
+        {
+            "items": page.items,
+            "next_cursor": page.next_cursor,
+            "total": page.total,
+            "generated_at": page.generated_at,
+            "direction": direction,
+            "total_status": page.total_status,
         }
     )
 

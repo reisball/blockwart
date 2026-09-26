@@ -291,6 +291,10 @@ def test_mcp_client_completes_handshake_and_calls_every_read_only_tool() -> None
                             "blockwart.get_attention",
                             {"category": "monitoring", "limit": 2},
                         ),
+                        "blockwart.get_activity": await session.call_tool(
+                            "blockwart.get_activity",
+                            {"limit": 2},
+                        ),
                         "blockwart.get_object_access": await session.call_tool(
                             "blockwart.get_object_access",
                             {"object_id": "host/fabrik"},
@@ -410,6 +414,7 @@ def test_mcp_client_completes_handshake_and_calls_every_read_only_tool() -> None
         "blockwart.append_project_chronology",
         "blockwart.get_context",
         "blockwart.get_attention",
+        "blockwart.get_activity",
         "blockwart.get_source_coverage",
         "blockwart.create_child",
         "blockwart.create_root",
@@ -449,6 +454,7 @@ def test_mcp_client_completes_handshake_and_calls_every_read_only_tool() -> None
             "blockwart.list_audit_events",
             "blockwart.get_context",
             "blockwart.get_attention",
+            "blockwart.get_activity",
             "blockwart.get_source_coverage",
             "blockwart.get_object_access",
             "blockwart.search_principals",
@@ -513,6 +519,7 @@ def test_mcp_client_completes_handshake_and_calls_every_read_only_tool() -> None
     assert result_payloads["blockwart.get_context"]["objects"][0]["path"] == ("/api/v1/context")
     assert result_payloads["blockwart.get_source_coverage"]["path"] == ("/api/v1/source-coverage")
     assert result_payloads["blockwart.get_attention"]["path"] == ("/api/v1/attention")
+    assert result_payloads["blockwart.get_activity"]["path"] == ("/api/v1/activity")
     assert result_payloads["blockwart.get_object_access"]["path"] == (
         "/api/v1/objects/host%2Ffabrik/access"
     )
@@ -615,7 +622,7 @@ def test_mcp_client_completes_handshake_and_calls_every_read_only_tool() -> None
         "GET",
         "GET",
         "POST",
-        *["GET"] * 17,
+        *["GET"] * 18,
     ]
     assert [request["path"] for request in requests] == [
         "/api/v1/objects",
@@ -628,6 +635,7 @@ def test_mcp_client_completes_handshake_and_calls_every_read_only_tool() -> None
         "/api/v1/context",
         "/api/v1/source-coverage",
         "/api/v1/attention",
+        "/api/v1/activity",
         "/api/v1/objects/host%2Ffabrik/access",
         "/api/v1/objects/host%2Ffabrik/access/principals",
         "/api/v1/admin/principals",
@@ -1295,6 +1303,7 @@ def test_mcp_tools_publish_explicit_read_write_and_delete_hints() -> None:
         "blockwart.append_project_chronology",
         "blockwart.get_context",
         "blockwart.get_attention",
+        "blockwart.get_activity",
         "blockwart.get_source_coverage",
         "blockwart.create_child",
         "blockwart.create_root",
@@ -1335,6 +1344,7 @@ def test_mcp_tools_publish_explicit_read_write_and_delete_hints() -> None:
             "blockwart.list_audit_events",
             "blockwart.get_context",
             "blockwart.get_attention",
+            "blockwart.get_activity",
             "blockwart.get_source_coverage",
             "blockwart.get_object_access",
             "blockwart.search_principals",

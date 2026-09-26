@@ -80,24 +80,26 @@ docker build \
 
 The package smoke builds a wheel, installs it into a clean virtual environment, changes to a
 directory outside the repository, starts `blockwart-start`, loads packaged templates and static
-assets, runs the relationship-integrity diagnostic, and exercises all 34
-tools through 41 read/write, preview, Project-workspace, coverage, attention, comment,
-audit, grant-management, and ownerless-adoption calls to the installed `blockwart-mcp`
-console command. It also proves identical same-commit wrapper/API metadata and
-a fail-fast incompatible diagnosis for a deliberately reduced materialized tool
-catalog through both installed CLI paths. Before seeding it bootstraps the first
-catalog owner without an anchor, proves that `blockwart-seed` refuses to run
-without `--owner-login`, seeds with that explicit first Owner, and runs the
-read-only `blockwart-db owners` report.
+assets, runs the relationship-integrity diagnostic, and exercises all 38
+tools through 43 read/write, preview, Project-workspace, coverage, attention,
+activity, comment, audit, grant-management, and ownerless-adoption calls to the
+installed `blockwart-mcp` console command. It also proves identical same-commit
+wrapper/API metadata and a fail-fast incompatible diagnosis for a deliberately
+reduced materialized tool catalog through both installed CLI paths. Before
+seeding it bootstraps the first catalog owner without an anchor, proves that
+`blockwart-seed` refuses to run without `--owner-login`, seeds with that
+explicit first Owner, and runs the read-only `blockwart-db owners` report.
 Before starting, it plants one legacy ownerless object and proves three
 things: `blockwart-db owners` reports it, and `blockwart-start` refuses with
 `startup_error=owner_coverage_incomplete`. Then the installed
 `blockwart-db adopt-owners` previews it for the explicit catalog owner, applies
 it with the preview's plan digest, and a rerun adopts nothing.
 The MCP proof then recovers a second, post-start legacy ownerless object through
-`blockwart.adopt_ownerless_object` and verifies its resulting Owner coverage. It additionally proves the delegated root-Project authority over REST:
+`blockwart.adopt_ownerless_object` and verifies its resulting Owner coverage.
+It additionally proves the delegated root-Project authority over REST:
 a principal holding only `catalog_role = project_creator` creates one root
-Project with Owner/self, is refused a root host, and sees no other object. It also runs the read-only service-interface
+Project with Owner/self, is refused a root host, and sees no other object. It
+also runs the read-only service-interface
 normalization, placement-state, network-classification, and canonical-Project plans from outside
 the source tree, plus the canonical-Runbook classification plan, the write-free synthetic
 Knowledge plan, and the installed reviewed-apply machine schemas. Productive Knowledge apply is

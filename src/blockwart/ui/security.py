@@ -33,7 +33,11 @@ def require_browser_read_access(
             detail="Authentication required",
             headers={"Location": "/auth"},
         )
-    access = read_access_for_principal(session, principal)
+    access = read_access_for_principal(
+        session,
+        principal,
+        materialize_global_permissions=request.url.path != "/activity",
+    )
     request.state.read_access = access
     return access
 

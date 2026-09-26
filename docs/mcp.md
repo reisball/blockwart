@@ -395,6 +395,11 @@ from an existing closed domain vocabulary, an optional evidence timestamp, and
 one authorized `kind:id` navigation reference. No message, exception text,
 endpoint, path, credential, or source excerpt is part of the contract.
 
+`blockwart.get_activity` forwards REST's authorized activity page and its
+`total_status`: `not_requested`, `exact`, or `budget_exhausted`. When the
+bounded exact count cannot finish, `total` is `null`; pagination remains
+available through `next_cursor`.
+
 The call is a read. It triggers no probe, no source file access, no network
 lookup, and no catalog, audit, comment, coverage, or observation write, and it
 has no remediation mode: correcting a signal uses the ordinary authorized write

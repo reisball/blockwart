@@ -267,6 +267,7 @@ async def check_mcp(
                 "blockwart.get_context",
                 "blockwart.get_source_coverage",
                 "blockwart.get_attention",
+                "blockwart.get_activity",
                 "blockwart.create_child",
                 "blockwart.create_root",
                 "blockwart.update_object",
@@ -309,6 +310,7 @@ async def check_mcp(
                         "blockwart.get_context",
                         "blockwart.get_source_coverage",
                         "blockwart.get_attention",
+                        "blockwart.get_activity",
                         "blockwart.get_object_access",
                         "blockwart.search_principals",
                         "blockwart.list_admin_principals",
@@ -497,6 +499,7 @@ async def check_mcp(
                     "blockwart.get_admin_principal",
                     {"principal_id": grant_candidate_id},
                 ),
+                await session.call_tool("blockwart.get_activity", {"limit": 1}),
                 await session.call_tool(
                     "blockwart.list_admin_principal_assignments",
                     {"principal_id": grant_candidate_id, "limit": 1},
@@ -525,6 +528,16 @@ async def check_mcp(
             batch_payload = _tool_payload(read_results[2])
             assert batch_payload["count"] == 1
             assert batch_payload["objects"][0]["id"] == object_id
+            activity_payload = _tool_payload(read_results[9])
+            assert activity_payload["sort"] == "occurred_at"
+            assert set(activity_payload["items"][0]) >= {
+                "event_id",
+                "event_type",
+                "occurred_at",
+                "object",
+                "summary",
+                "detail_path",
+            }
             standalone_project = await session.call_tool(
                 "blockwart.create_root",
                 {
@@ -946,7 +959,7 @@ def main() -> None:
         token=api_token,
     )["objects"][0]
 
-    assert readiness["revision"] == "20260926_0025"
+    assert readiness["revision"] == "20260926_0026"
     assert "Blockwart" in index
     assert static_content_type == "text/css"
     assert not any(
@@ -975,7 +988,7 @@ def main() -> None:
     print(
         "installed_package=ok "
         f"cwd={Path.cwd()} revision={readiness['revision']} "
-        f"openapi_paths={len(openapi['paths'])} mcp_protocol={protocol} mcp_calls=42 "
+        f"openapi_paths={len(openapi['paths'])} mcp_protocol={protocol} mcp_calls=43 "
         "mcp_contract=compatible mcp_contract_drift=fail_fast"
     )
 

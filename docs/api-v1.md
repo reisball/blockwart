@@ -44,6 +44,12 @@ skipped equal-sort rows.
 count. Set `include_total=true` when an exact authorized matching count is
 needed.
 
+For `/api/v1/activity`, an exact total is attempted within 5000 authorized
+filtered events plus one probe. Its `total_status` is `not_requested`, `exact`,
+or `budget_exhausted`. In the last case `total` is `null`; narrow the filters
+or continue paging. This status does not assert that the authorized total is
+5000 or provide an estimate.
+
 ## Agent read projections
 
 `GET /objects`, `GET /context`, and `POST /object-contexts` add an opt-in,
