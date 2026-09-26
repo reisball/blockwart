@@ -1382,17 +1382,44 @@ def test_project_chronology_tools_publish_the_closed_rest_contract() -> None:
 def test_mcp_descriptions_route_fresh_agent_read_and_create_intents() -> None:
     tools = {tool["name"]: tool for tool in TOOLS}
 
-    assert "compact summaries" in tools["blockwart.search"]["description"]
+    assert "search summaries" in tools["blockwart.search"]["description"]
     assert "when its id is known" in tools["blockwart.get_object_context"]["description"]
     assert "newest-first" in tools["blockwart.list_audit_events"]["description"]
     assert "comment content stays separate" in tools["blockwart.list_audit_events"]["description"]
-    assert "full sanitized details in one call" in tools["blockwart.get_context"]["description"]
+    assert "sanitized details in one call" in tools["blockwart.get_context"]["description"]
     assert "single agent call" in tools["blockwart.create_child"]["description"]
     assert "single agent call" in tools["blockwart.create_attached_device"]["description"]
     assert not {
         "blockwart.get_asset_details",
         "blockwart.get_service_details",
     } & set(tools)
+
+
+def test_mcp_read_descriptions_match_published_projection_defaults() -> None:
+    tools = {tool["name"]: tool for tool in TOOLS}
+    read_names = (
+        "blockwart.search",
+        "blockwart.get_context",
+        "blockwart.get_object_contexts",
+    )
+
+    for name in read_names:
+        tool = tools[name]
+        description = tool["description"]
+        properties = tool["inputSchema"]["properties"]
+        default = properties["projection"]["default"]
+        assert default == "full"
+        assert f"projection defaults to {default}" in description.lower()
+        assert "projection=compact" in description
+        assert "projection=context" in description
+
+    search = tools["blockwart.search"]
+    assert "not full object details" in search["description"]
+    assert "include_recent_comments" not in search["inputSchema"]["properties"]
+    for name in ("blockwart.get_context", "blockwart.get_object_contexts"):
+        tool = tools[name]
+        assert "include_recent_comments" in tool["inputSchema"]["properties"]
+        assert "include_recent_comments" in tool["description"]
 
 
 def test_mcp_search_and_context_support_host_and_structured_filters() -> None:
