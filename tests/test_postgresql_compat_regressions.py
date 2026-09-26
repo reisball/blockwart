@@ -29,12 +29,14 @@ from sqlalchemy.dialects import postgresql, sqlite
 from sqlalchemy.engine import Engine
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
+from sqlalchemy.schema import CreateIndex
 
 from blockwart.db.base import Base
 from blockwart.db.migrations import build_alembic_config
 from blockwart.db.session import build_engine
 from blockwart.domain.search import SearchQuery
 from blockwart.models import (
+    AccessRequest,
     CatalogObject,
     IdempotencyRecord,
     ServiceTokenFailureBucket,
@@ -56,6 +58,17 @@ from blockwart.services.project_migration import (
 # Constants and helpers
 # ---------------------------------------------------------------------------
 
+
+def test_open_access_request_index_is_partial_on_both_dialects() -> None:
+    index = next(
+        index
+        for index in AccessRequest.__table__.indexes
+        if index.name == "uq_access_requests_open"
+    )
+    for dialect in (sqlite.dialect(), postgresql.dialect()):
+        statement = str(CreateIndex(index).compile(dialect=dialect))
+        assert "WHERE status IN ('pending', 'approved')" in statement
+
 PG_TEST_URL = os.environ.get(
     "BLOCKWART_TEST_PG_URL",
     "postgresql+psycopg2://postgres:test@127.0.0.1:5432/blockwart_test",
@@ -66,7 +79,7 @@ SOURCE_COVERAGE_REVISION = "20260811_0016"
 PROJECT_CHRONOLOGY_REVISION = "20260818_0018"
 CATALOG_VIEWER_REVISION = "20260822_0019"
 OBJECT_RENAME_REVISION = "20260909_0022"
-HEAD_REVISION = "20260925_0024"
+HEAD_REVISION = "20260926_0026"
 
 
 def _pg_url(database: str) -> str:

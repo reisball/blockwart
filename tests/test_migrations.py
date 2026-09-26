@@ -46,10 +46,11 @@ PROJECT_CHRONOLOGY_REVISION = "20260818_0018"
 CATALOG_VIEWER_REVISION = "20260822_0019"
 GATUS_SOURCE_REVISION = "20260824_0020"
 RELEASE_MONITORING_REVISION = "20260825_0021"
+ACCESS_REQUESTS_REVISION = "20260926_0026"
 OBJECT_RENAME_REVISION = "20260909_0022"
 PROJECT_CREATOR_REVISION = "20260909_0023"
 ADDITIVE_PROJECT_CREATOR_REVISION = "20260925_0024"
-HEAD_REVISION = ADDITIVE_PROJECT_CREATOR_REVISION
+HEAD_REVISION = ACCESS_REQUESTS_REVISION
 _GUARD_TRIGGER_NAMES = (
     "ck_principals_last_active_admin_update",
     "ck_principals_last_active_admin_delete",
@@ -265,6 +266,7 @@ def test_real_alembic_upgrade_creates_fresh_database_and_has_no_drift(
     engine = create_engine(database_url)
     try:
         assert set(inspect(engine).get_table_names()) == {
+            "access_requests",
             "alembic_version",
             "audit_events",
             "browser_sessions",
@@ -291,6 +293,7 @@ def test_real_alembic_upgrade_creates_fresh_database_and_has_no_drift(
     finally:
         engine.dispose()
     assert set(Base.metadata.tables) == {
+        "access_requests",
         "audit_events",
         "browser_sessions",
         "catalog_objects",
@@ -1973,6 +1976,7 @@ def downgrade() -> None:
     try:
         assert upgrade_database(database_url) == future_revision
         assert set(inspect(engine).get_table_names()) == {
+            "access_requests",
             "alembic_version",
             "audit_events",
             "browser_sessions",
@@ -3317,3 +3321,61 @@ def test_additive_project_creator_migration_preserves_roles_and_grants(
         connection.close()
     with pytest.raises(RuntimeError, match="independent project_creator"):
         command.downgrade(config, PROJECT_CREATOR_REVISION)
+
+
+def test_access_request_migration_preserves_populated_main_schema(tmp_path: Path) -> None:
+    database_path = tmp_path / "access-requests.sqlite3"
+    database_url = _database_url(database_path)
+    config = build_alembic_config(database_url)
+    command.upgrade(config, ADDITIVE_PROJECT_CREATOR_REVISION)
+    connection = sqlite3.connect(database_path)
+    try:
+        connection.execute(
+            "INSERT INTO principals (id, principal_type, login, display_name, "
+            "active, platform_role, catalog_role, revision) VALUES "
+            "('request-owner', 'human', 'request-owner', 'Owner', 1, 'admin', "
+            "'catalog_owner', 3)"
+        )
+        connection.execute(
+            "INSERT INTO catalog_objects (id, kind, label, status, lifecycle, health, "
+            "data_json, provenance_json, revision) VALUES "
+            "('request-root', 'host', 'Root', 'active', 'active', 'healthy', "
+            "'{\"schema_version\":1}', '{}', 5)"
+        )
+        connection.execute(
+            "INSERT INTO object_grants (principal_id, object_id, role, scope, "
+            "created_by_principal_id) VALUES "
+            "('request-owner', 'request-root', 'owner', 'self', 'request-owner')"
+        )
+        connection.commit()
+        before = connection.execute(
+            "SELECT principal_id, object_id, role, scope FROM object_grants"
+        ).fetchall()
+    finally:
+        connection.close()
+
+    command.upgrade(config, ACCESS_REQUESTS_REVISION)
+    connection = sqlite3.connect(database_path)
+    try:
+        assert connection.execute(
+            "SELECT principal_id, object_id, role, scope FROM object_grants"
+        ).fetchall() == before
+        assert connection.execute("SELECT expires_at FROM object_grants").fetchall() == [(None,)]
+        assert connection.execute("SELECT COUNT(*) FROM access_requests").fetchone() == (0,)
+    finally:
+        connection.close()
+
+    command.downgrade(config, ADDITIVE_PROJECT_CREATOR_REVISION)
+    connection = sqlite3.connect(database_path)
+    try:
+        assert connection.execute(
+            "SELECT principal_id, object_id, role, scope FROM object_grants"
+        ).fetchall() == before
+        assert "expires_at" not in {
+            row[1] for row in connection.execute("PRAGMA table_info(object_grants)")
+        }
+        assert connection.execute(
+            "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'access_requests'"
+        ).fetchone() is None
+    finally:
+        connection.close()

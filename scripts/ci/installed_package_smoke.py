@@ -285,6 +285,11 @@ async def check_mcp(
                 "blockwart.update_grant",
                 "blockwart.revoke_grant",
                 "blockwart.adopt_ownerless_object",
+                "blockwart.create_access_request",
+                "blockwart.list_my_access_requests",
+                "blockwart.list_pending_access_requests",
+                "blockwart.cancel_access_request",
+                "blockwart.decide_access_request",
             }
             assert all(
                 tool.annotations
@@ -312,6 +317,8 @@ async def check_mcp(
                         "blockwart.get_network_topology",
                         "blockwart.preview_object_update",
                         "blockwart.preview_object_rename",
+                        "blockwart.list_my_access_requests",
+                        "blockwart.list_pending_access_requests",
                     }
                     else not tool.annotations.readOnlyHint
                 )
@@ -892,7 +899,7 @@ def main() -> None:
         token=api_token,
     )["objects"][0]
 
-    assert readiness["revision"] == "20260925_0024"
+    assert readiness["revision"] == "20260926_0026"
     assert "Blockwart" in index
     assert static_content_type == "text/css"
     assert not any(

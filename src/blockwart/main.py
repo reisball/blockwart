@@ -16,6 +16,7 @@ from blockwart.domain.schema_projection import object_schema_projection
 from blockwart.services.login_protection import LoginProtector
 from blockwart.services.monitoring import run_monitoring_poller
 from blockwart.services.release_monitoring import run_release_monitoring_poller
+from blockwart.ui.access_requests import router as access_requests_ui_router
 from blockwart.ui.admin import router as admin_ui_router
 from blockwart.ui.auth import router as auth_router
 from blockwart.ui.i18n import persist_locale_cookie, validate_locale_catalogs
@@ -55,6 +56,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(auth.router, prefix="/api")
     app.include_router(auth_router)
     app.include_router(admin_ui_router)
+    app.include_router(access_requests_ui_router)
     app.include_router(ui_router)
     install_request_context(app)
     default_openapi = app.openapi

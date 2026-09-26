@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterable
+from datetime import datetime
 
 from sqlalchemy import and_, literal, or_, select
 from sqlalchemy.orm import Session, aliased
@@ -75,6 +76,7 @@ def create_object_grant(
     actor_principal_id: str | None = None,
     channel: str = "system",
     request_id: str | None = None,
+    expires_at: datetime | None = None,
 ) -> ObjectGrant:
     resolved_role = Role(role)
     resolved_scope = GrantScope(scope)
@@ -105,6 +107,7 @@ def create_object_grant(
         role=resolved_role,
         scope=resolved_scope,
         created_by_principal_id=actor_principal_id,
+        expires_at=expires_at,
     )
     session.add(grant)
     session.flush()
@@ -119,6 +122,7 @@ def create_object_grant(
             "scope": resolved_scope,
             "channel": channel,
             "request_id": request_id,
+            "expires_at": expires_at.isoformat() if expires_at else None,
             "old_revision": old_revision,
             "new_revision": catalog_object.revision,
         },

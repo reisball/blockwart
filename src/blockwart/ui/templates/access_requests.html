@@ -1,0 +1,122 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <link rel="icon" href="data:," />
+    <title>{{ title }}</title>
+    <script>
+      if (localStorage.getItem("blockwart-theme") === "light") {
+        document.documentElement.dataset.theme = "light";
+      }
+    </script>
+    <link rel="stylesheet" href="/static/app.css?v=062" />
+    <script src="/static/theme.js?v=054" defer></script>
+  </head>
+  <body>
+    <header class="topbar">
+      <div class="topbar-inner">
+        <a class="breadcrumb" href="/">Blockwart</a>
+        <div class="title-row">
+          <div>
+            <h1>Access requests</h1>
+            <div class="subtle">Request Viewer access and decide open requests.</div>
+          </div>
+        </div>
+      </div>
+    </header>
+
+    <main class="page detail-grid">
+      {% if form_error %}<p class="error" role="alert">{{ form_error }}</p>{% endif %}
+      {% if notice %}<p class="success" role="status">{{ notice }}</p>{% endif %}
+
+      <section aria-labelledby="new-request-heading">
+        <h2 id="new-request-heading">New request</h2>
+        <form method="post" action="/access-requests">
+          <label>
+            Object ID
+            <input name="object_id" required maxlength="128" />
+          </label>
+          <label>
+            Duration
+            <select name="duration">
+              {% for duration in durations %}
+                <option value="{{ duration }}">{{ duration }}</option>
+              {% endfor %}
+            </select>
+          </label>
+          <label>
+            ttl_seconds (temporary only)
+            <input name="ttl_seconds" inputmode="numeric" maxlength="10" />
+          </label>
+          <label>
+            Reason (optional, max 500 characters)
+            <textarea name="reason" maxlength="500" rows="3"></textarea>
+          </label>
+          <button type="submit">Submit request</button>
+        </form>
+      </section>
+
+      <section aria-labelledby="pending-heading">
+        <h2 id="pending-heading">Open requests awaiting decision</h2>
+        {% if pending_requests %}
+          <table>
+            <thead>
+              <tr><th>Object</th><th>Requester</th><th>Duration</th><th>Requested until</th><th>Reason</th><th>Decision</th></tr>
+            </thead>
+            <tbody>
+              {% for item in pending_requests %}
+                <tr>
+                  <td><code>{{ item.object_id }}</code> ({{ item.object_label }})</td>
+                  <td>{{ item.requester_login }}</td>
+                  <td>{{ item.duration }}</td>
+                  <td>{{ item.requested_expires_at or "permanent" }}</td>
+                  <td>{{ item.reason or "-" }}</td>
+                  <td>
+                    <form method="post" action="/access-requests/{{ item.id }}/decision">
+                      <label>ttl_seconds (shorten only) <input name="ttl_seconds" inputmode="numeric" maxlength="10" /></label>
+                      <button type="submit" name="decision" value="approve">Approve</button>
+                      <button type="submit" name="decision" value="deny">Deny</button>
+                    </form>
+                  </td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        {% else %}
+          <p>No open requests are visible to you.</p>
+        {% endif %}
+      </section>
+
+      <section aria-labelledby="mine-heading">
+        <h2 id="mine-heading">My requests</h2>
+        {% if my_requests %}
+          <table>
+            <thead>
+              <tr><th>Object</th><th>Status</th><th>Duration</th><th>Expires at</th><th>Action</th></tr>
+            </thead>
+            <tbody>
+              {% for item in my_requests %}
+                <tr>
+                  <td><code>{{ item.object_id }}</code></td>
+                  <td>{{ item.status }}</td>
+                  <td>{{ item.duration }}</td>
+                  <td>{{ item.approved_expires_at or item.requested_expires_at or "-" }}</td>
+                  <td>
+                    {% if item.status == "pending" %}
+                      <form method="post" action="/access-requests/{{ item.id }}/cancellation">
+                        <button type="submit">Cancel</button>
+                      </form>
+                    {% else %}-{% endif %}
+                  </td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        {% else %}
+          <p>You have not requested any access yet.</p>
+        {% endif %}
+      </section>
+    </main>
+  </body>
+</html>

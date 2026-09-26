@@ -1,4 +1,4 @@
-from blockwart.models.access import ObjectGrant
+from blockwart.models.access import AccessRequest, ObjectGrant
 from blockwart.models.auth import (
     BrowserSession,
     IdempotencyRecord,
@@ -22,6 +22,7 @@ from blockwart.models.source_coverage import (
 )
 
 __all__ = [
+    "AccessRequest",
     "AuditEvent",
     "BrowserSession",
     "CatalogObject",
