@@ -49,7 +49,8 @@ RELEASE_MONITORING_REVISION = "20260825_0021"
 OBJECT_RENAME_REVISION = "20260909_0022"
 PROJECT_CREATOR_REVISION = "20260909_0023"
 ADDITIVE_PROJECT_CREATOR_REVISION = "20260925_0024"
-HEAD_REVISION = ADDITIVE_PROJECT_CREATOR_REVISION
+AGENT_NOTICES_REVISION = "20260926_0025"
+HEAD_REVISION = AGENT_NOTICES_REVISION
 _GUARD_TRIGGER_NAMES = (
     "ck_principals_last_active_admin_update",
     "ck_principals_last_active_admin_delete",
@@ -266,6 +267,11 @@ def test_real_alembic_upgrade_creates_fresh_database_and_has_no_drift(
     try:
         assert set(inspect(engine).get_table_names()) == {
             "alembic_version",
+            "agent_delivery_attempts",
+            "agent_delivery_jobs",
+            "agent_delivery_targets",
+            "agent_notice_events",
+            "agent_notice_subscriptions",
             "audit_events",
             "browser_sessions",
             "catalog_objects",
@@ -291,6 +297,11 @@ def test_real_alembic_upgrade_creates_fresh_database_and_has_no_drift(
     finally:
         engine.dispose()
     assert set(Base.metadata.tables) == {
+        "agent_delivery_attempts",
+        "agent_delivery_jobs",
+        "agent_delivery_targets",
+        "agent_notice_events",
+        "agent_notice_subscriptions",
         "audit_events",
         "browser_sessions",
         "catalog_objects",
@@ -1974,6 +1985,11 @@ def downgrade() -> None:
         assert upgrade_database(database_url) == future_revision
         assert set(inspect(engine).get_table_names()) == {
             "alembic_version",
+            "agent_delivery_attempts",
+            "agent_delivery_jobs",
+            "agent_delivery_targets",
+            "agent_notice_events",
+            "agent_notice_subscriptions",
             "audit_events",
             "browser_sessions",
             "catalog_objects",
@@ -3269,6 +3285,50 @@ def test_revision_check_rejects_database_before_head(tmp_path: Path) -> None:
         match="revision does not match the application",
     ):
         check_database_revision(database_url)
+
+
+def test_agent_notice_migration_extends_current_main_without_changing_existing_data(
+    tmp_path: Path,
+) -> None:
+    database_url = _database_url(tmp_path / "agent-notices-upgrade.sqlite3")
+    config = build_alembic_config(database_url)
+    command.upgrade(config, ADDITIVE_PROJECT_CREATOR_REVISION)
+    engine = create_engine(database_url)
+    try:
+        with engine.begin() as connection:
+            connection.execute(
+                text(
+                    "INSERT INTO principals (id, principal_type, login, display_name, "
+                    "active, platform_role, catalog_role, revision) VALUES "
+                    "('existing', 'human', 'existing', 'Existing', 1, 'admin', "
+                    "'catalog_owner', 1)"
+                )
+            )
+        command.upgrade(config, AGENT_NOTICES_REVISION)
+        with engine.connect() as connection:
+            assert connection.execute(
+                text(
+                    "SELECT login, catalog_role, project_creator "
+                    "FROM principals WHERE id='existing'"
+                )
+            ).one() == ("existing", "catalog_owner", False)
+            assert connection.execute(
+                text("SELECT COUNT(*) FROM agent_delivery_targets")
+            ).scalar_one() == 0
+            assert connection.execute(
+                text("SELECT COUNT(*) FROM agent_notice_subscriptions")
+            ).scalar_one() == 0
+        assert _revision(database_url) == AGENT_NOTICES_REVISION
+
+        command.downgrade(config, ADDITIVE_PROJECT_CREATOR_REVISION)
+        assert _revision(database_url) == ADDITIVE_PROJECT_CREATOR_REVISION
+        assert "agent_delivery_targets" not in inspect(engine).get_table_names()
+        with engine.connect() as connection:
+            assert connection.execute(
+                text("SELECT login FROM principals WHERE id='existing'")
+            ).scalar_one() == "existing"
+    finally:
+        engine.dispose()
 
 def test_additive_project_creator_migration_preserves_roles_and_grants(
     tmp_path: Path,
