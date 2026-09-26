@@ -312,6 +312,19 @@ RELATIONSHIP_PROPERTIES: JSON = {
     },
 }
 RELATIONSHIP_METADATA_CONDITIONS: list[JSON] = relationship_metadata_conditions()
+# Top-level allOf/if/then collapses the consumer's argument signature to
+# `unknown & ...`. Keep the published shape flat for agents and apply the
+# registry-derived conditions in Blockwart's own validator before any write.
+RELATIONSHIP_AGENT_INPUT_SCHEMA: JSON = {
+    "type": "object",
+    "properties": RELATIONSHIP_PROPERTIES,
+    "required": ["object_id", "if_match", "from_ref", "relation_type", "to_ref"],
+    "additionalProperties": False,
+}
+RELATIONSHIP_VALIDATION_SCHEMA: JSON = {
+    **RELATIONSHIP_AGENT_INPUT_SCHEMA,
+    "allOf": RELATIONSHIP_METADATA_CONDITIONS,
+}
 ATTACHED_DEVICE_METADATA_SCHEMA: JSON = {
     **metadata_json_schema("attached_to"),
     "default": {},
@@ -1042,19 +1055,7 @@ TOOLS: list[JSON] = [
             f"{SCHEMA_TOOL_NAME} for the accepted relationship types, their directed "
             "endpoint kinds, endpoint predicates, and type-dependent metadata."
         ),
-        "inputSchema": {
-            "type": "object",
-            "properties": RELATIONSHIP_PROPERTIES,
-            "required": [
-                "object_id",
-                "if_match",
-                "from_ref",
-                "relation_type",
-                "to_ref",
-            ],
-            "additionalProperties": False,
-            "allOf": RELATIONSHIP_METADATA_CONDITIONS,
-        },
+        "inputSchema": RELATIONSHIP_AGENT_INPUT_SCHEMA,
         "annotations": WRITE_ANNOTATIONS,
     },
     {
@@ -1065,19 +1066,7 @@ TOOLS: list[JSON] = [
             f"depends on stored metadata. Call {SCHEMA_TOOL_NAME} for the accepted "
             "relationship types."
         ),
-        "inputSchema": {
-            "type": "object",
-            "properties": RELATIONSHIP_PROPERTIES,
-            "required": [
-                "object_id",
-                "if_match",
-                "from_ref",
-                "relation_type",
-                "to_ref",
-            ],
-            "additionalProperties": False,
-            "allOf": RELATIONSHIP_METADATA_CONDITIONS,
-        },
+        "inputSchema": RELATIONSHIP_AGENT_INPUT_SCHEMA,
         "annotations": DELETE_ANNOTATIONS,
     },
     {
@@ -1192,6 +1181,31 @@ TOOLS: list[JSON] = [
             "type": "object",
             "properties": {
                 "principal_id": {"type": "string", "minLength": 1, "maxLength": 36},
+            },
+            "required": ["principal_id"],
+            "additionalProperties": False,
+        },
+        "annotations": READ_ONLY_ANNOTATIONS,
+    },
+    {
+        "name": "blockwart.list_admin_principal_assignments",
+        "description": (
+            "Page one admin-authorized principal's actor-manageable direct grants "
+            "or individual effective grant sources. An object can repeat across "
+            "pages; use next_cursor until null. "
+            "get_admin_principal remains available for existing callers."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "principal_id": {"type": "string", "minLength": 1, "maxLength": 36},
+                "assignment_type": {
+                    "type": "string",
+                    "enum": ["direct", "effective"],
+                    "default": "effective",
+                },
+                "limit": {"type": "integer", "minimum": 1, "maximum": 50, "default": 20},
+                "cursor": {"type": "string", "maxLength": 2048},
             },
             "required": ["principal_id"],
             "additionalProperties": False,
@@ -1635,7 +1649,10 @@ def _compile_input_validator(schema: JSON) -> Validator:
 
 
 TOOL_INPUT_VALIDATORS: dict[str, Validator] = {
-    name: _compile_input_validator(tool["inputSchema"]) for name, tool in TOOL_DEFINITIONS.items()
+    name: _compile_input_validator(
+        RELATIONSHIP_VALIDATION_SCHEMA if name in RELATIONSHIP_TOOLS else tool["inputSchema"]
+    )
+    for name, tool in TOOL_DEFINITIONS.items()
 }
 
 
@@ -2014,6 +2031,16 @@ def call_tool(
         payload = fetch(
             f"/api/v1/admin/principals/{quote(principal_id, safe='')}",
             {},
+        )
+    elif name == "blockwart.list_admin_principal_assignments":
+        principal_id = _required_string(args, "principal_id")
+        payload = fetch(
+            f"/api/v1/admin/principals/{quote(principal_id, safe='')}/assignments",
+            {
+                "assignment_type": args.get("assignment_type", "effective"),
+                "limit": args.get("limit", 20),
+                "cursor": args.get("cursor"),
+            },
         )
     elif name == "blockwart.preview_grant_scope":
         object_id = _required_string(args, "object_id")
