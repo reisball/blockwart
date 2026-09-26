@@ -8,6 +8,7 @@ from blockwart.api.deps import get_session
 from blockwart.api.errors import API_ERROR_RESPONSES
 from blockwart.api.security import require_api_read_access, require_api_read_only_access
 from blockwart.api.write_commands import (
+    api_request_channel,
     api_write_context,
     execute_api_command,
     execute_api_read_only_command,
@@ -90,8 +91,13 @@ from blockwart.schemas.v1 import (
     V1ObjectContextBatchIn,
     V1ObjectContextBatchOut,
     V1ObjectPageOut,
+    V1ObjectRenameIn,
+    V1ObjectRenameOut,
+    V1ObjectRenamePreviewOut,
     V1ObjectUpdatePreviewDiffEntryOut,
     V1ObjectUpdatePreviewOut,
+    V1OwnerAdoptionIn,
+    V1OwnerAdoptionOut,
     V1PrincipalSearchOut,
     V1PrincipalSummaryOut,
     V1ProjectedObjectContextBatchOut,
@@ -123,11 +129,14 @@ from blockwart.services.commands import (
     delete_catalog_object,
     delete_object_relationship,
     preview_catalog_object_update,
+    preview_object_rename,
+    rename_catalog_object,
     revision_etag,
     update_catalog_object,
 )
 from blockwart.services.comments import add_object_comment, query_comment_page
 from blockwart.services.grant_management import (
+    adopt_ownerless_object,
     create_managed_grant,
     preview_grant_scope,
     query_object_access,
@@ -275,6 +284,7 @@ IncludeRecentComments = Annotated[
     summary="Read the authorized catalog-wide attention view",
 )
 def get_v1_attention(
+    request: Request,
     session: Annotated[Session, Depends(get_session)],
     access: Annotated[ReadAccess, Depends(require_api_read_access)],
     category: AttentionCategoryValue | None = None,
@@ -295,6 +305,7 @@ def get_v1_attention(
         page = query_attention_page(
             session,
             access,
+            channel=api_request_channel(request),
             category=category,
             severity=severity,
             reason_code=reason_code,
@@ -1173,6 +1184,110 @@ def preview_v1_object_update(
     )
 
 
+@router.post(
+    "/objects/{object_id}/rename-preview",
+    response_model=V1ObjectRenamePreviewOut,
+    summary="Preview one ETag-bound object rename without writing",
+)
+def preview_v1_object_rename(
+    object_id: str,
+    payload: V1ObjectRenameIn,
+    request: Request,
+    response: Response,
+    session: Annotated[Session, Depends(get_session)],
+    access: Annotated[ReadAccess, Depends(require_api_read_only_access)],
+    if_match: Annotated[str | None, Header(alias="If-Match")] = None,
+) -> V1ObjectRenamePreviewOut:
+    """Resolve the proposed rename read-only and publish its exact diff.
+
+    The request is exactly the request of
+    `POST /api/v1/objects/{object_id}/rename`: the exact object ID, the current
+    strong `If-Match` ETag, and the proposed label. Effective `rename` on that
+    exact object is required even though nothing is written, and the shared
+    plan applies the same kind-specific label validation as the apply. The
+    preview creates no lock, reservation, or later-apply guarantee.
+    """
+    context = api_write_context(request, access)
+    result = execute_api_read_only_command(
+        session,
+        context,
+        lambda: preview_object_rename(
+            session,
+            context,
+            object_id=object_id,
+            new_label=payload.new_label,
+            expected_revision=if_match,
+            refresh_policy=True,
+        ),
+    )
+    response.headers["ETag"] = result.base_etag
+    return V1ObjectRenamePreviewOut(
+        preview_contract_version=result.contract_version,
+        object_id=result.object_id,
+        object_kind=result.object_kind,
+        changed=result.changed,
+        base_revision=result.base_revision,
+        base_etag=result.base_etag,
+        expected_result_revision=result.expected_result_revision,
+        expected_result_etag=result.expected_result_etag,
+        diff=[
+            V1ObjectUpdatePreviewDiffEntryOut.model_validate(entry.as_json())
+            for entry in result.diff
+        ],
+        diff_digest=result.diff_digest,
+        diff_truncated=result.diff_truncated,
+        preview_digest=result.preview_digest,
+    )
+
+
+@router.post(
+    "/objects/{object_id}/rename",
+    response_model=V1ObjectRenameOut,
+    summary="Change only the label of one object under its current ETag",
+)
+def rename_v1_object(
+    object_id: str,
+    payload: V1ObjectRenameIn,
+    request: Request,
+    response: Response,
+    session: Annotated[Session, Depends(get_session)],
+    access: Annotated[ReadAccess, Depends(require_api_read_access)],
+    if_match: Annotated[str | None, Header(alias="If-Match")] = None,
+) -> V1ObjectRenameOut:
+    """Apply the same validated rename contract the preview resolved.
+
+    The command requires the dedicated `rename` capability on that exact
+    object; general `write` is not a substitute. It changes the common
+    top-level label only, so object ID, kind, references, relationships,
+    placement, status, lifecycle, health, summary, kind-specific data, and
+    grants are untouched. A no-op rename reports `changed = false` and
+    deliberately does not advance the revision.
+    """
+    context = api_write_context(request, access)
+    result = execute_api_command(
+        session,
+        context,
+        lambda: rename_catalog_object(
+            session,
+            context,
+            object_id=object_id,
+            new_label=payload.new_label,
+            expected_revision=if_match,
+            refresh_policy=True,
+        ),
+    )
+    response.headers["ETag"] = result.etag
+    return V1ObjectRenameOut(
+        object_id=result.object_id,
+        object_kind=result.object_kind,
+        old_label=result.old_label,
+        new_label=result.new_label,
+        revision=result.revision,
+        etag=result.etag,
+        changed=result.changed,
+    )
+
+
 @router.delete(
     "/objects/{object_id}",
     response_model=V1DeleteCommandOut,
@@ -1453,6 +1568,42 @@ def revoke_v1_object_grant(
     )
     response.headers["ETag"] = result.etag
     return V1GrantCommandOut.model_validate(result)
+
+
+@router.post(
+    "/objects/{object_id}/access/adoption",
+    response_model=V1OwnerAdoptionOut,
+    status_code=201,
+)
+def adopt_v1_ownerless_object(
+    object_id: str,
+    payload: V1OwnerAdoptionIn,
+    request: Request,
+    response: Response,
+    session: Annotated[Session, Depends(get_session)],
+    access: Annotated[ReadAccess, Depends(require_api_read_access)],
+    if_match: Annotated[str | None, Header(alias="If-Match")] = None,
+) -> V1OwnerAdoptionOut:
+    """Assign the first Owner/self grant to an object that has no active Owner.
+
+    Only an active catalog owner may adopt, only with the current strong ETag,
+    and only while no active direct or inherited Owner grant reaches the
+    object.
+    """
+    context = api_write_context(request, access)
+    result = execute_api_command(
+        session,
+        context,
+        lambda: adopt_ownerless_object(
+            session,
+            context,
+            object_id=object_id,
+            principal_id=payload.principal_id,
+            expected_revision=if_match,
+        ),
+    )
+    response.headers["ETag"] = result.etag
+    return V1OwnerAdoptionOut.model_validate(result)
 
 
 @router.get(

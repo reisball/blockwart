@@ -1,6 +1,7 @@
 import json
 
 import pytest
+from ownership_support import ensure_seed_owner
 from pydantic import ValidationError
 from sqlalchemy import select
 
@@ -290,7 +291,12 @@ def test_seed_import_uses_canonical_component_validation_and_order(
         "relationships": [],
     }
     with alembic_session_factory() as session:
-        result = import_seed_payload(session, payload, source_ref="component-seed")
+        result = import_seed_payload(
+            session,
+            payload,
+            source_ref="component-seed",
+            owner_principal_id=ensure_seed_owner(session),
+        )
         row = session.get(CatalogObject, "seed-components")
         stored_data = json.loads(row.data_json) if row is not None else {}
     assert result.objects_imported == 1

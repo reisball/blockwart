@@ -364,6 +364,50 @@ def test_principal_update_requires_current_etag(
     assert stale.status_code == 412
 
 
+def test_admin_api_maps_last_owner_deactivation_to_conflict(
+    principal_admin_api_client: TestClient,
+    principal_admin_api_state,
+) -> None:
+    state = principal_admin_api_state
+    target_id = state["target_id"]
+    with state["session_factory"]() as session:
+        with transaction(session):
+            protected = upsert_object(session, _object("api-target-owner"))
+            create_object_grant(
+                session,
+                principal_id=target_id,
+                object_id=protected.id,
+                role=Role.OWNER,
+                scope=GrantScope.SELF,
+            )
+    before = _api_principal_snapshot(state, target_id)
+
+    response = principal_admin_api_client.put(
+        f"/api/v1/admin/principals/{target_id}",
+        headers={**_auth(state["tokens"]["admin"]), "If-Match": '"rev-1"'},
+        json={
+            "display_name": "API Target",
+            "active": False,
+            "platform_role": None,
+        },
+    )
+
+    assert response.status_code == 409
+    assert response.json()["error"]["message"] == (
+        "deactivating the principal would orphan object access"
+    )
+    assert _api_principal_snapshot(state, target_id) == before
+    with state["session_factory"]() as session:
+        assert session.get(Principal, target_id).active is True
+        assert session.scalar(
+            select(ObjectGrant).where(
+                ObjectGrant.principal_id == target_id,
+                ObjectGrant.object_id == "api-target-owner",
+                ObjectGrant.role == Role.OWNER,
+            )
+        ) is not None
+
+
 def test_principal_update_requires_explicit_nullable_platform_role(
     principal_admin_api_client: TestClient,
     principal_admin_api_state,

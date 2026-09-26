@@ -1,7 +1,7 @@
 """add the agent notice delivery tables
 
-Revision ID: 20260826_0022
-Revises: 20260825_0021
+Revision ID: 20260926_0025
+Revises: 20260925_0024
 
 The revision is purely additive. It creates four new tables (agent delivery
 targets, notice subscriptions, notice events, delivery jobs) plus one redacted
@@ -26,8 +26,8 @@ from collections.abc import Sequence
 import sqlalchemy as sa
 from alembic import op
 
-revision: str = "20260826_0022"
-down_revision: str | Sequence[str] | None = "20260825_0021"
+revision: str = "20260926_0025"
+down_revision: str | Sequence[str] | None = "20260925_0024"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 

@@ -1558,6 +1558,18 @@
               <div class="error" role="alert">{{ error }}</div>
             {% endif %}
 
+            {% if grant_access.owner_coverage.state == "ownerless" %}
+              <div class="error" role="status" data-owner-state="ownerless">
+                <strong>{{ t("grant.ownerless_title") }}</strong>
+                <div>{{ t("grant.ownerless_help") }}</div>
+                {% if not grant_access.owner_coverage.adoption_available %}
+                  <div class="meta">{{ t("grant.adopt_unavailable") }}</div>
+                {% endif %}
+              </div>
+            {% else %}
+              <p class="meta" data-owner-state="owned">{{ t("grant.owner_sources", direct=grant_access.owner_coverage.direct_active_owner_grants, inherited=grant_access.owner_coverage.inherited_active_owner_grants) }}</p>
+            {% endif %}
+
             <h3>{{ t("grant.direct") }}</h3>
             {% if grant_access.direct_grants %}
               <div class="table-wrap">
@@ -1673,6 +1685,29 @@
                 </form>
               {% elif grant_principal_query %}
                 <div class="meta">{{ t("grant.no_results") }}</div>
+              {% endif %}
+
+              {% if grant_access.owner_coverage.state == "ownerless" and grant_access.owner_coverage.adoption_available %}
+                <h3>{{ t("grant.adopt") }}</h3>
+                <p class="meta">{{ t("grant.adopt_help") }}</p>
+                {% if grant_principal_results %}
+                  <form class="form-grid" method="post" action="/objects/{{ object.id }}/permissions/adopt?{{ detail_query_string }}" data-owner-adoption>
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+                    <input type="hidden" name="if_match" value="{{ object_etag }}" />
+                    <label>{{ t("grant.principal") }}
+                      <select name="principal_id" required>
+                        {% for principal in grant_principal_results %}
+                          <option value="{{ principal.id }}">{{ principal.display_name }} · {{ principal.login }} · {{ principal.principal_type }}</option>
+                        {% endfor %}
+                      </select>
+                    </label>
+                    <div class="button-row">
+                      <button type="submit">{{ t("grant.adopt_submit") }}</button>
+                    </div>
+                  </form>
+                {% else %}
+                  <p class="meta">{{ t("grant.adopt_search_first") }}</p>
+                {% endif %}
               {% endif %}
 
               <h3>{{ t("grant.preview") }}</h3>

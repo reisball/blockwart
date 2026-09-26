@@ -2,17 +2,26 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from typing import Literal
 
 from sqlalchemy import func, or_, select, update
 from sqlalchemy.orm import Session
 
-from blockwart.domain.auth import GrantScope, Permission, Role
+from blockwart.domain.auth import (
+    CatalogRole,
+    GrantScope,
+    Permission,
+    PrincipalContext,
+    Role,
+)
 from blockwart.domain.timestamps import format_rfc3339_utc
 from blockwart.models import CatalogObject, ObjectGrant, Principal
 from blockwart.services.access import (
     LastOwnerError,
     ensure_owner_coverage_preserved,
     grant_scope_object_ids,
+    lock_grant_command_state,
+    lock_owner_coverage_state,
 )
 from blockwart.services.audit import add_audit_event
 from blockwart.services.commands import (
@@ -24,7 +33,25 @@ from blockwart.services.commands import (
     parse_if_match,
     revision_etag,
 )
+from blockwart.services.identity import record_security_event
+from blockwart.services.ownership import (
+    InitialOwnerError,
+    ObjectOwnerCoverage,
+    assign_initial_owner,
+    object_owner_coverage,
+    resolve_owner_principal,
+)
 from blockwart.services.policy import policy_for_principal
+
+# Stable structured reasons published through REST, MCP, and the UI. A healthy
+# object's Owner-source requirement and the ownerless recovery path are
+# deliberately different codes, so a caller never has to guess from a generic
+# denial whether to ask an Owner or a catalog owner.
+OWNER_REQUIRED_TO_MANAGE_OWNER_GRANTS = "owner_required_to_manage_owner_grants"
+OBJECT_HAS_NO_OWNER_USE_ADOPTION_FLOW = "object_has_no_owner_use_adoption_flow"
+ADOPTION_REQUIRES_CATALOG_OWNER = "adoption_requires_catalog_owner"
+OBJECT_HAS_OWNER_COVERAGE = "object_has_owner_coverage"
+OWNER_ADOPTION_ACTION = "owner_adopt"
 
 
 @dataclass(frozen=True, slots=True)
@@ -65,12 +92,29 @@ class EffectivePrincipalAccess:
 
 
 @dataclass(frozen=True, slots=True)
+class OwnerCoverageView:
+    """The object's Owner sources as the ownerless recovery flow needs them.
+
+    Counts cover active object Owner grants only; a global catalog role is
+    never an Owner source and never appears here.
+    """
+
+    state: Literal["owned", "ownerless"]
+    direct_active_owner_grants: int
+    inherited_active_owner_grants: int
+    inactive_direct_owner_grants: int
+    actor_has_owner_source: bool
+    adoption_available: bool
+
+
+@dataclass(frozen=True, slots=True)
 class ObjectAccessView:
     object_id: str
     revision: int
     etag: str
     direct_grants: tuple[DirectGrantView, ...]
     effective_access: tuple[EffectivePrincipalAccess, ...]
+    owner_coverage: OwnerCoverageView
 
 
 @dataclass(frozen=True, slots=True)
@@ -96,6 +140,17 @@ class GrantCommandResult:
     changed: bool
     grant: DirectGrantView | None = None
     revoked_grant_id: int | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class OwnerAdoptionResult:
+    object_id: str
+    revision: int
+    etag: str
+    changed: bool
+    grant: DirectGrantView
+    previous_owner_count: int
+    inactive_direct_owner_grants: int
 
 
 def query_object_access(
@@ -169,12 +224,26 @@ def query_object_access(
                 ),
             )
         )
+    coverage = object_owner_coverage(session, object_id, lock=False)
     return ObjectAccessView(
         object_id=row.id,
         revision=row.revision,
         etag=revision_etag(row.revision),
         direct_grants=direct_grants,
         effective_access=tuple(effective_access),
+        owner_coverage=OwnerCoverageView(
+            state="ownerless" if coverage.ownerless else "owned",
+            direct_active_owner_grants=coverage.direct_active_owner_grants,
+            inherited_active_owner_grants=coverage.inherited_active_owner_grants,
+            inactive_direct_owner_grants=coverage.inactive_direct_owner_grants,
+            actor_has_owner_source=actor_can_manage_owner_grants(
+                context,
+                object_id=object_id,
+            ),
+            adoption_available=(
+                coverage.ownerless and _holds_adoption_authority(session, context)
+            ),
+        ),
     )
 
 
@@ -245,6 +314,124 @@ def preview_grant_scope(
     )
 
 
+def adopt_ownerless_object(
+    session: Session,
+    context: WriteContext,
+    *,
+    object_id: str,
+    principal_id: str,
+    expected_revision: int | str | None,
+) -> OwnerAdoptionResult:
+    """Assign the first Owner to one legacy object that has none.
+
+    This is the narrow, audited recovery for an object that no active direct
+    or inherited Owner grant reaches, where ordinary grant management
+    deadlocks because only an Owner may add an Owner. It is deliberately not
+    a general administrative bypass:
+
+    - only an active ``catalog_owner`` on a trusted channel may call it;
+    - it requires the object's current strong ETag;
+    - it assigns exactly one direct ``Owner/self`` grant to one active target
+      principal and advances the object revision;
+    - it refuses as soon as any active direct or inherited Owner grant exists,
+      so a healthy object's Owner-only rules are never weakened.
+
+    The revision claim is a compare-and-set on the object row, so of two
+    concurrent adoptions exactly one succeeds and the other fails the ETag
+    precondition; a later retry with the fresh ETag deterministically receives
+    ``object_has_owner_coverage``.
+    """
+    lock_owner_coverage_state(
+        session,
+        extra_principal_ids=(context.principal.id, principal_id),
+    )
+    _require_adoption_authority(session, context, object_id=object_id)
+    row = session.get(CatalogObject, object_id)
+    if row is None:
+        raise CommandNotFound("catalog object not found")
+    revision = _expected_revision(expected_revision)
+    if row.revision != revision:
+        raise CommandPreconditionFailed("object revision changed")
+    try:
+        resolve_owner_principal(session, principal_id)
+    except InitialOwnerError as exc:
+        raise CommandConflict(str(exc), code=exc.code) from exc
+    object_ref = f"{row.kind}:{row.id}"
+
+    # Claim the revision before judging coverage. A concurrent adoption with
+    # the same ETag therefore always loses at this compare-and-set with the
+    # ETag precondition, never at a lock-timing-dependent later check, and the
+    # coverage below is read while this transaction holds the object row.
+    new_revision = _claim_object_revision(
+        session,
+        object_id=object_id,
+        expected_revision=revision,
+    )
+    coverage = object_owner_coverage(session, object_id, lock=True)
+    _require_ownerless(coverage)
+    try:
+        grant = assign_initial_owner(
+            session,
+            object_id=object_id,
+            owner_principal_id=principal_id,
+            created_by_principal_id=context.principal.id,
+        )
+    except InitialOwnerError as exc:
+        raise CommandConflict(str(exc), code=exc.code) from exc
+    target = session.get(Principal, principal_id)
+    if target is None:
+        raise CommandConflict("grant principal does not exist")
+    add_audit_event(
+        session,
+        object_id=object_id,
+        action=OWNER_ADOPTION_ACTION,
+        actor=context.principal.id,
+        details={
+            "actor_principal_id": context.principal.id,
+            "actor_login": context.principal.login,
+            "catalog_authority": CatalogRole.CATALOG_OWNER.value,
+            "target_principal_id": target.id,
+            "target_login": target.login,
+            "channel": context.channel,
+            "request_id": context.request_id,
+            "object_ref": object_ref,
+            "old_revision": revision,
+            "new_revision": new_revision,
+            "previous_owner_count": coverage.active_owner_grants,
+            "previous_direct_owner_count": coverage.direct_active_owner_grants,
+            "previous_inherited_owner_count": coverage.inherited_active_owner_grants,
+            "inactive_direct_owner_grants": coverage.inactive_direct_owner_grants,
+            "before": None,
+            "after": _grant_snapshot(grant),
+        },
+    )
+    record_security_event(
+        session,
+        event_type="ownerless_object_adoption",
+        outcome="success",
+        channel=context.channel,
+        principal_id=context.principal.id,
+        request_id=context.request_id,
+        details={
+            "object_id": object_id,
+            "target_principal_id": target.id,
+            "grant_id": grant.id,
+            "new_revision": new_revision,
+        },
+    )
+    session.flush()
+    session.refresh(grant)
+    return OwnerAdoptionResult(
+        object_id=object_id,
+        revision=new_revision,
+        etag=revision_etag(new_revision),
+        changed=True,
+        grant=_direct_grant_view(grant, target),
+        previous_owner_count=coverage.active_owner_grants,
+        inactive_direct_owner_grants=coverage.inactive_direct_owner_grants,
+    )
+
+
 def create_managed_grant(
     session: Session,
     context: WriteContext,
@@ -255,7 +442,7 @@ def create_managed_grant(
     scope: GrantScope | str,
     expected_revision: int | str | None,
 ) -> GrantCommandResult:
-    row = _require_manage_access(
+    _require_manage_access(
         session,
         context,
         object_id=object_id,
@@ -263,13 +450,27 @@ def create_managed_grant(
     )
     resolved_role = Role(role)
     resolved_scope = GrantScope(scope)
+    locked_principals = lock_grant_command_state(
+        session,
+        actor_principal_id=context.principal.id,
+        object_id=object_id,
+        extra_principal_ids=(principal_id,),
+    )
+    row = _require_manage_access(
+        session,
+        context,
+        object_id=object_id,
+        refresh_policy=True,
+    )
     _require_owner_for_owner_grant(
         session,
         context,
         object_id=object_id,
         roles=(resolved_role,),
     )
-    target = _active_target_principal(session, principal_id)
+    target = locked_principals.get(principal_id)
+    if target is None or not target.active:
+        raise CommandConflict("active principal not found")
     revision = _expected_revision(expected_revision)
     if row.revision != revision:
         raise CommandPreconditionFailed("object revision changed")
@@ -351,6 +552,24 @@ def update_managed_grant(
         raise CommandNotFound("direct grant not found")
     resolved_role = Role(role)
     resolved_scope = GrantScope(scope)
+    locked_principals = lock_grant_command_state(
+        session,
+        actor_principal_id=context.principal.id,
+        object_id=object_id,
+        extra_principal_ids=(grant.principal_id,),
+    )
+    row = _require_manage_access(
+        session,
+        context,
+        object_id=object_id,
+        refresh_policy=True,
+    )
+    grant = _direct_grant(session, object_id=object_id, grant_id=grant_id)
+    if (
+        expected_principal_id is not None
+        and grant.principal_id != expected_principal_id
+    ):
+        raise CommandNotFound("direct grant not found")
     _require_owner_for_owner_grant(
         session,
         context,
@@ -360,7 +579,7 @@ def update_managed_grant(
     revision = _expected_revision(expected_revision)
     if row.revision != revision:
         raise CommandPreconditionFailed("object revision changed")
-    target = session.get(Principal, grant.principal_id)
+    target = locked_principals.get(grant.principal_id)
     if target is None:
         raise CommandConflict("grant principal does not exist")
     if grant.role == resolved_role and grant.scope == resolved_scope:
@@ -457,6 +676,24 @@ def revoke_managed_grant(
         and grant.principal_id != expected_principal_id
     ):
         raise CommandNotFound("direct grant not found")
+    locked_principals = lock_grant_command_state(
+        session,
+        actor_principal_id=context.principal.id,
+        object_id=object_id,
+        extra_principal_ids=(grant.principal_id,),
+    )
+    row = _require_manage_access(
+        session,
+        context,
+        object_id=object_id,
+        refresh_policy=True,
+    )
+    grant = _direct_grant(session, object_id=object_id, grant_id=grant_id)
+    if (
+        expected_principal_id is not None
+        and grant.principal_id != expected_principal_id
+    ):
+        raise CommandNotFound("direct grant not found")
     _require_owner_for_owner_grant(
         session,
         context,
@@ -466,7 +703,7 @@ def revoke_managed_grant(
     revision = _expected_revision(expected_revision)
     if row.revision != revision:
         raise CommandPreconditionFailed("object revision changed")
-    target = session.get(Principal, grant.principal_id)
+    target = locked_principals.get(grant.principal_id)
     if target is None:
         raise CommandConflict("grant principal does not exist")
     before = _grant_snapshot(grant)
@@ -542,7 +779,10 @@ def _require_manage_access(
         if refresh_policy
         else context.policy
     )
-    row = session.get(CatalogObject, object_id)
+    statement = select(CatalogObject).where(CatalogObject.id == object_id)
+    if refresh_policy:
+        statement = statement.execution_options(populate_existing=True)
+    row = session.scalar(statement)
     if row is None or not policy.can(Permission.DISCOVER, object_id):
         raise CommandNotFound("catalog object not found")
     if not policy.can(Permission.MANAGE_ACCESS, object_id):
@@ -560,23 +800,88 @@ def _require_owner_for_owner_grant(
     object_id: str,
     roles: tuple[Role, ...],
 ) -> None:
+    if Role.OWNER not in roles:
+        return
     policy = policy_for_principal(session, context.principal.id)
-    is_owner = any(
+    if any(
         grant.role == Role.OWNER
         for grant in policy.grants_for(object_id)
-    )
-    if Role.OWNER in roles and not is_owner:
+    ):
+        return
+    # Both outcomes stay denials; only the published reason differs. The
+    # actor already holds manage_access here, so it may learn whether the
+    # object has any Owner at all.
+    if object_owner_coverage(session, object_id, lock=False).ownerless:
         raise CommandAuthorizationDenied(
             object_id=object_id,
             permission=Permission.MANAGE_ACCESS,
+            code=OBJECT_HAS_NO_OWNER_USE_ADOPTION_FLOW,
+            message=(
+                "the object has no active Owner; a catalog owner must use the "
+                "ownerless-object adoption flow"
+            ),
+        )
+    raise CommandAuthorizationDenied(
+        object_id=object_id,
+        permission=Permission.MANAGE_ACCESS,
+        code=OWNER_REQUIRED_TO_MANAGE_OWNER_GRANTS,
+        message=(
+            "an effective Owner grant on this object is required to add, "
+            "change, or remove Owner grants"
+        ),
+    )
+
+
+def adoption_channel_matches(principal: PrincipalContext, channel: str) -> bool:
+    """Whether this authenticated principal may adopt through ``channel``."""
+    if channel == "ui":
+        return principal.service_token_audience is None
+    return (
+        channel in {"api", "mcp"}
+        and principal.service_token_audience == channel
+    )
+
+
+def _holds_adoption_authority(session: Session, context: WriteContext) -> bool:
+    """Whether the actor may adopt ownerless objects, re-read from the database.
+
+    Adoption is catalog administration, so it needs the global catalog-owner
+    role, not an object grant and not the separate platform-admin axis. The
+    trusted channel must also match the token audience, exactly like root
+    creation: browser actors carry no service-token audience, while api/mcp
+    actors must hold the matching one.
+    """
+    actor = session.get(Principal, context.principal.id)
+    return (
+        adoption_channel_matches(context.principal, context.channel)
+        and actor is not None
+        and actor.active
+        and actor.catalog_role == CatalogRole.CATALOG_OWNER
+    )
+
+
+def _require_adoption_authority(
+    session: Session,
+    context: WriteContext,
+    *,
+    object_id: str,
+) -> None:
+    if not _holds_adoption_authority(session, context):
+        raise CommandAuthorizationDenied(
+            object_id=object_id,
+            permission=Permission.MANAGE_ACCESS,
+            code=ADOPTION_REQUIRES_CATALOG_OWNER,
+            message="only an active catalog owner may adopt an ownerless object",
         )
 
 
-def _active_target_principal(session: Session, principal_id: str) -> Principal:
-    principal = session.get(Principal, principal_id)
-    if principal is None or not principal.active:
-        raise CommandConflict("active principal not found")
-    return principal
+def _require_ownerless(coverage: ObjectOwnerCoverage) -> None:
+    if not coverage.ownerless:
+        raise CommandConflict(
+            "the object already has active Owner coverage; use ordinary Owner "
+            "grant management",
+            code=OBJECT_HAS_OWNER_COVERAGE,
+        )
 
 
 def _direct_grant(
@@ -586,10 +891,12 @@ def _direct_grant(
     grant_id: int,
 ) -> ObjectGrant:
     grant = session.scalar(
-        select(ObjectGrant).where(
+        select(ObjectGrant)
+        .where(
             ObjectGrant.id == grant_id,
             ObjectGrant.object_id == object_id,
         )
+        .execution_options(populate_existing=True)
     )
     if grant is None:
         raise CommandNotFound("direct grant not found")

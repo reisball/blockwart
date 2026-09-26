@@ -138,6 +138,7 @@ The MCP wrapper keeps its local `invalid_arguments`, `tool_not_found`, and
 copies only its public code, message, and validated correlation ID into the MCP tool
 error. For object-write and relationship tools (`blockwart.create_root`,
 `blockwart.create_child`, `blockwart.update_object`, `blockwart.preview_object_update`,
+`blockwart.rename_object`, `blockwart.preview_object_rename`,
 `blockwart.create_attached_device`,
 `blockwart.create_relationship`, and `blockwart.delete_relationship`) and for forwarded
 upstream HTTP 422 validation failures, MCP also forwards sanitized `details` carrying

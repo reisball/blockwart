@@ -30,8 +30,10 @@ from blockwart.models import (
 )
 from blockwart.services.access import (
     LastCatalogOwnerError,
+    LastOwnerError,
     ensure_active_catalog_owner_remains,
     ensure_principal_deactivation_preserves_owner_coverage,
+    lock_owner_coverage_state,
 )
 from blockwart.services.commands import (
     WriteContext,
@@ -138,6 +140,7 @@ class PrincipalAdminSummary:
     active: bool
     platform_role: PlatformRole | None
     catalog_role: CatalogRole | None
+    project_creator: bool
     revision: int
     etag: str
     created_at: str
@@ -149,6 +152,9 @@ class PrincipalAdminSummary:
 class GlobalAuthorityView:
     source: str
     permissions: tuple[Permission, ...]
+    # Root creation is not an object permission, so a catalog role that only
+    # delegates it is explained here instead of by an empty permission list.
+    root_kinds: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -480,6 +486,7 @@ def query_principal_detail(
                     key=lambda permission: permission.value,
                 )
             ),
+            root_kinds=tuple(sorted(authority.root_kinds)),
         )
         for authority in target_policy.global_authorities
     )
@@ -627,6 +634,7 @@ def update_managed_principal(
 ) -> PrincipalMutationResult:
     require_platform_admin(access)
     expected = _expected_revision(expected_revision)
+    lock_owner_coverage_state(session, extra_principal_ids=(principal_id,))
     row = session.get(Principal, principal_id)
     if row is None:
         raise ManagedPrincipalNotFound("principal not found")
@@ -669,6 +677,10 @@ def update_managed_principal(
         except LastCatalogOwnerError as exc:
             raise ManagedPrincipalConflict(
                 "at least one active catalog owner is required"
+            ) from exc
+        except LastOwnerError as exc:
+            raise ManagedPrincipalConflict(
+                "deactivating the principal would orphan object access"
             ) from exc
     if (
         row.active
@@ -729,6 +741,76 @@ def update_managed_principal(
         principal=_summary(
             row,
             last_used_at=_last_used_by_principal(session, {row.id}).get(row.id),
+        ),
+        changed=True,
+    )
+
+
+def set_managed_project_creator(
+    session: Session,
+    access: ReadAccess,
+    *,
+    principal_id: str,
+    expected_revision: int | str | None,
+    project_creator: bool,
+    actor_password: str | None,
+    channel: str,
+    request_id: str | None = None,
+) -> PrincipalMutationResult:
+    """Change only the independent root-project creation capability."""
+    require_catalog_owner_admin(session, access, channel=channel, request_id=request_id)
+    _reauthenticate_catalog_owner_admin(
+        session, access, password=actor_password, channel=channel, request_id=request_id
+    )
+    expected = _expected_revision(expected_revision)
+    row = session.get(Principal, principal_id)
+    if row is None:
+        raise ManagedPrincipalNotFound("principal not found")
+    if row.revision != expected:
+        raise ManagedPrincipalPreconditionFailed("principal revision changed")
+    if project_creator and not row.active:
+        raise ManagedPrincipalConflict(
+            "project creation cannot be assigned to an inactive principal"
+        )
+    if row.project_creator == project_creator:
+        return PrincipalMutationResult(
+            principal=_summary(
+                row, last_used_at=_last_used_by_principal(session, {row.id}).get(row.id)
+            ),
+            changed=False,
+        )
+    before = row.project_creator
+    result = session.execute(
+        update(Principal)
+        .where(Principal.id == row.id, Principal.revision == expected)
+        .values(
+            project_creator=project_creator,
+            revision=expected + 1,
+            updated_at=utc_now(),
+        )
+    )
+    if result.rowcount != 1:
+        raise ManagedPrincipalPreconditionFailed("principal revision changed")
+    session.flush()
+    session.expire(row)
+    session.refresh(row)
+    record_security_event(
+        session,
+        event_type="project_creator_changed",
+        outcome="success",
+        channel=channel,
+        principal_id=row.id,
+        request_id=request_id,
+        details={
+            "actor_principal_id": access.principal.id,
+            "before_project_creator": before,
+            "after_project_creator": project_creator,
+            "revision": row.revision,
+        },
+    )
+    return PrincipalMutationResult(
+        principal=_summary(
+            row, last_used_at=_last_used_by_principal(session, {row.id}).get(row.id)
         ),
         changed=True,
     )
@@ -1422,6 +1504,7 @@ def _summary(
         catalog_role=(
             CatalogRole(row.catalog_role) if row.catalog_role is not None else None
         ),
+        project_creator=row.project_creator,
         revision=row.revision,
         etag=revision_etag(row.revision),
         created_at=format_rfc3339_utc(row.created_at),

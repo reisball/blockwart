@@ -45,6 +45,17 @@
       </section>
 
       <section class="panel">
+        <h2 class="section-title">{{ t("admin.project_creator.title") }}</h2>
+        <p class="meta">{{ t("admin.project_creator.hint") }}</p>
+        <form class="form-grid" method="post" action="/admin/principals/{{ detail.principal.id }}/project-creator" autocomplete="off">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}" /><input type="hidden" name="if_match" value="{{ detail.principal.etag }}" />
+          <label>{{ t("admin.project_creator.title") }}<select name="project_creator"><option value="0" {% if not detail.principal.project_creator %}selected{% endif %}>{{ t("admin.project_creator.disabled") }}</option><option value="1" {% if detail.principal.project_creator %}selected{% endif %}>{{ t("admin.project_creator.enabled") }}</option></select></label>
+          <label>{{ t("admin.reauthenticate") }}<input name="current_admin_password" type="password" maxlength="1024" autocomplete="current-password" required /></label>
+          <div class="button-row"><button type="submit">{{ t("asset.save") }}</button></div>
+        </form>
+      </section>
+
+      <section class="panel">
         <h2 class="section-title">{{ t("admin.assignments.direct_title") }}</h2>
         <div class="table-wrap"><table><thead><tr><th>{{ t("admin.assignments.object") }}</th><th>{{ t("admin.assignments.role") }}</th><th>{{ t("admin.assignments.scope") }}</th><th>{{ t("admin.assignments.actions") }}</th></tr></thead><tbody>
           {% for grant in detail.direct_grants %}<tr><td><a href="/objects/{{ grant.object_id }}">{{ grant.object_label }}</a><br /><code>{{ grant.object_kind }}:{{ grant.object_id }}</code></td><td colspan="3"><form class="form-grid" method="post" action="/admin/principals/{{ detail.principal.id }}/grants/{{ grant.grant_id }}"><input type="hidden" name="csrf_token" value="{{ csrf_token }}" /><input type="hidden" name="object_id" value="{{ grant.object_id }}" /><input type="hidden" name="if_match" value="{{ grant.object_etag }}" /><label><span class="visually-hidden">{{ t("admin.assignments.role") }}</span><select name="role">{% for item in roles %}<option value="{{ item.value }}" {% if item == grant.role %}selected{% endif %}>{{ item.value }}</option>{% endfor %}</select></label><label><span class="visually-hidden">{{ t("admin.assignments.scope") }}</span><select name="scope">{% for item in scopes %}<option value="{{ item.value }}" {% if item == grant.scope %}selected{% endif %}>{{ item.value }}</option>{% endfor %}</select></label><button type="submit">{{ t("asset.save") }}</button></form><form method="post" action="/admin/principals/{{ detail.principal.id }}/grants/{{ grant.grant_id }}/revoke"><input type="hidden" name="csrf_token" value="{{ csrf_token }}" /><input type="hidden" name="object_id" value="{{ grant.object_id }}" /><input type="hidden" name="if_match" value="{{ grant.object_etag }}" /><button class="button-muted" type="submit">{{ t("admin.assignments.revoke") }}</button></form></td></tr>{% else %}<tr><td colspan="4" class="muted">{{ t("admin.assignments.empty") }}</td></tr>{% endfor %}
