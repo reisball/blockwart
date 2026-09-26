@@ -14,17 +14,16 @@ from blockwart.mcp.manifest import (
 from blockwart.mcp.server import TOOLS, local_contract_metadata, validate_runtime_catalog
 
 
-def test_relationship_signature_and_assignment_pagination_have_reviewed_manifest_evidence() -> None:
-    metadata = contract_metadata(TOOLS, build_revision="issue-245-248")
+def test_integrated_mcp_contract_has_reviewed_manifest_evidence() -> None:
+    metadata = contract_metadata(TOOLS, build_revision="issue-245-248-249")
 
-    # Both public MCP contract changes are present in the integrated manifest.
+    # The pagination, relationship signature, and read descriptions are integrated.
     assert metadata == {
-        "build_revision": "issue-245-248",
+        "build_revision": "issue-245-248-249",
         "contract_version": "1",
-        "manifest_digest": "9845d50998e81f32520b4357e10ea66b210a9cff43201a0d3f7d59d8e70822a6",
+        "manifest_digest": "c248f8beeabdf3ab2e7686ae22e2f79038d019c0fe082e7c7bcf8d8fbe88ac57",
         "tool_count": 35,
     }
-
 
 def test_manifest_bytes_and_digest_ignore_registered_tool_order() -> None:
     original = copy.deepcopy(TOOLS)
