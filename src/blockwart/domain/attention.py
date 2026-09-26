@@ -44,6 +44,7 @@ from blockwart.domain.source_coverage import COVERAGE_STATES
 
 AttentionCategory = Literal[
     "record_integrity",
+    "access",
     "monitoring",
     "release",
     "lifecycle",
@@ -82,6 +83,7 @@ CATALOG_COVERAGE_REF = "catalog:source-coverage"
 
 AttentionReason = Literal[
     "record_corrupt",
+    "access_owner_missing",
     "monitoring_observed_down",
     "monitoring_check_error",
     "monitoring_config_invalid",
@@ -156,6 +158,14 @@ ATTENTION_REASON_SPECS: tuple[AttentionReasonSpec, ...] = (
         "critical",
         "current",
         "The stored record does not satisfy the canonical catalog schema.",
+    ),
+    _spec(
+        "access_owner_missing",
+        "access",
+        "warning",
+        "current",
+        "No active direct or inherited Owner grant reaches this object; "
+        "a catalog owner must adopt it.",
     ),
     _spec(
         "monitoring_observed_down",
@@ -368,12 +378,20 @@ _REASON_RANK: Mapping[str, int] = {
     spec.reason_code: index for index, spec in enumerate(ATTENTION_REASON_SPECS)
 }
 
+# Whether the viewing principal can itself recover an ownerless object through
+# the audited adoption flow, or must hand it to a catalog owner.
+OWNER_ADOPTION_DETAIL_VALUES: tuple[str, ...] = (
+    "adoption_available",
+    "catalog_owner_adoption_required",
+)
+
 # Every supporting code an item may carry comes from a vocabulary another
 # reviewed domain already publishes.  Free text can therefore never reach the
 # `detail_code` field.
 ATTENTION_DETAIL_CODE_VALUES: tuple[str, ...] = tuple(
     sorted(
         {
+            *OWNER_ADOPTION_DETAIL_VALUES,
             *MONITORING_DIAGNOSTIC_VALUES,
             *MONITORING_ERROR_CODE_VALUES,
             *COVERAGE_STATES,
@@ -489,6 +507,10 @@ class AttentionObjectInput:
     monitoring: Mapping[str, Any] | None = None
     release_monitoring: Mapping[str, Any] | None = None
     has_suitable_runbook: bool = False
+    # `None` means the viewer may not manage this object's access, so its
+    # ownership is not judged for them at all; "owned" or "ownerless" otherwise.
+    owner_state: Literal["owned", "ownerless"] | None = None
+    adoption_available: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -572,6 +594,10 @@ def build_attention_derivation(
 
     for candidate in objects:
         labels[candidate.object_id] = candidate
+        # Ownership is judged before record integrity and liveness: an object
+        # nobody owns stays unrecoverable through ordinary grants whatever its
+        # document or lifecycle declares.
+        _derive_access(candidate, evaluated, emit)
         evaluated["record_integrity"] += 1
         if candidate.record_state != "valid":
             emit(candidate, "record_corrupt")
@@ -753,6 +779,22 @@ def _status(
     if not isinstance(value, str):
         return True
     return value in allowed
+
+
+def _derive_access(candidate, evaluated, emit) -> None:
+    if candidate.owner_state is None:
+        return
+    evaluated["access"] += 1
+    if candidate.owner_state == "ownerless":
+        emit(
+            candidate,
+            "access_owner_missing",
+            detail_code=(
+                "adoption_available"
+                if candidate.adoption_available
+                else "catalog_owner_adoption_required"
+            ),
+        )
 
 
 def _derive_placement(candidate, evaluated, emit) -> None:

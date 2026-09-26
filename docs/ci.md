@@ -80,12 +80,24 @@ docker build \
 
 The package smoke builds a wheel, installs it into a clean virtual environment, changes to a
 directory outside the repository, starts `blockwart-start`, loads packaged templates and static
-assets, runs the relationship-integrity diagnostic, and exercises all 31
-tools through 38 read/write, preview, Project-workspace, coverage, attention, comment,
-audit, and grant-management calls to the installed `blockwart-mcp` console
-command. It also proves the wrapper/API contract in both directions: identical
-same-commit metadata and a fail-fast incompatible diagnosis for a deliberately
-reduced materialized tool catalog. It also runs the read-only service-interface
+assets, runs the relationship-integrity diagnostic, and exercises all 34
+tools through 41 read/write, preview, Project-workspace, coverage, attention, comment,
+audit, grant-management, and ownerless-adoption calls to the installed `blockwart-mcp`
+console command. It also proves identical same-commit wrapper/API metadata and
+a fail-fast incompatible diagnosis for a deliberately reduced materialized tool
+catalog through both installed CLI paths. Before seeding it bootstraps the first
+catalog owner without an anchor, proves that `blockwart-seed` refuses to run
+without `--owner-login`, seeds with that explicit first Owner, and runs the
+read-only `blockwart-db owners` report.
+Before starting, it plants one legacy ownerless object and proves three
+things: `blockwart-db owners` reports it, and `blockwart-start` refuses with
+`startup_error=owner_coverage_incomplete`. Then the installed
+`blockwart-db adopt-owners` previews it for the explicit catalog owner, applies
+it with the preview's plan digest, and a rerun adopts nothing.
+The MCP proof then recovers a second, post-start legacy ownerless object through
+`blockwart.adopt_ownerless_object` and verifies its resulting Owner coverage. It additionally proves the delegated root-Project authority over REST:
+a principal holding only `catalog_role = project_creator` creates one root
+Project with Owner/self, is refused a root host, and sees no other object. It also runs the read-only service-interface
 normalization, placement-state, network-classification, and canonical-Project plans from outside
 the source tree, plus the canonical-Runbook classification plan, the write-free synthetic
 Knowledge plan, and the installed reviewed-apply machine schemas. Productive Knowledge apply is
@@ -99,8 +111,11 @@ that the release specification, manifest, report, pointer, status, and error
 JSON Schemas can be printed outside the source tree. CI never invokes its apply
 mode or touches a host service.
 
-The container smoke proves that an empty catalog fails the Owner invariant, then starts an
-explicitly bootstrapped candidate and a database at the historical Alembic baseline. Ready
+The container smoke proves that an empty catalog fails the Owner invariant. It then upgrades a
+database written at the historical Alembic baseline and explicitly selects its catalog owner.
+Next it proves that the image refuses to start with `startup_error=owner_coverage_incomplete`,
+and repairs it with the packaged `blockwart-db adopt-owners` preview, digest-bound apply, and
+no-op rerun before starting that candidate. Ready
 candidates must migrate to Head without losing legacy data. Both ready paths must also pass
 `blockwart-db integrity` plus the read-only `blockwart-db interfaces` and
 `blockwart-db placements` and `blockwart-db monitoring` plans. The monitoring

@@ -49,8 +49,8 @@ from blockwart.schemas.catalog import (
     CatalogRecordDiagnostic,
 )
 from blockwart.services.access import (
-    active_owner_covered_object_ids,
     ensure_owner_coverage_preserved,
+    owner_grant_covered_object_ids,
 )
 from blockwart.services.audit import (
     add_audit_event,
@@ -465,7 +465,7 @@ def delete_relationship(
     if row is None:
         return False
     previously_covered_ids = (
-        active_owner_covered_object_ids(session)
+        owner_grant_covered_object_ids(session)
         if (
             enforce_owner_coverage
             and row.relation_type == CANONICAL_PLACEMENT_RELATION_TYPE

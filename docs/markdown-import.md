@@ -70,8 +70,8 @@ drift until the collector records a newer reviewed state.
 ## Apply
 
 Use blockwart-import-markdown with database-url, apply, tools,
-references-root, and the exact mapping accepted in dry-run. The deployed SQLite
-database is under /opt/blockwart-data/blockwart.sqlite3.
+references-root, owner-login, and the exact mapping accepted in dry-run. The
+deployed SQLite database is under /opt/blockwart-data/blockwart.sqlite3.
 
 ~~~bash
 blockwart-import-markdown \
@@ -79,8 +79,16 @@ blockwart-import-markdown \
   --tools /path/to/workspace/TOOLS.md \
   --references-root /path/to/workspace \
   --network-mapping seeds/pilot_network_mapping.yaml \
+  --owner-login kai \
   --create-schema --apply
 ~~~
+
+`--owner-login` names the existing active principal that receives a direct
+`Owner/self` grant on every object the apply creates, in the same transaction.
+Apply without it, or with an unknown or inactive login, fails with
+`markdown_import_error=owner_principal_required` or
+`markdown_import_error=owner_principal_inactive` before any write. Objects that
+already exist keep their grants unchanged.
 
 The parsed plan and every object schema are validated before database work
 begins. Apply, including `--replace`, uses one database transaction for old-row

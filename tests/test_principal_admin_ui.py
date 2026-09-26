@@ -269,6 +269,62 @@ def test_admin_ui_manages_assignment_from_principal_side(
     assert "viewer" in detail.text
 
 
+def test_admin_ui_maps_last_owner_deactivation_to_conflict(
+    principal_admin_ui_client: TestClient,
+    principal_admin_ui_state,
+) -> None:
+    state = principal_admin_ui_state
+    issued = state["admin_session"]
+    target_id = state["target_id"]
+    with state["session_factory"]() as session:
+        with transaction(session):
+            protected = upsert_object(
+                session,
+                CatalogObjectIn(
+                    id="ui-target-owner",
+                    kind="host",
+                    label="UI Target Owner",
+                    lifecycle="active",
+                    health="healthy",
+                    data={"schema_version": 1},
+                ),
+            )
+            create_object_grant(
+                session,
+                principal_id=target_id,
+                object_id=protected.id,
+                role=Role.OWNER,
+                scope=GrantScope.SELF,
+            )
+    before = _principal_update_snapshot(state)
+    _login(principal_admin_ui_client, issued)
+
+    response = principal_admin_ui_client.post(
+        f"/admin/principals/{target_id}",
+        data={
+            "csrf_token": issued.csrf_token,
+            "if_match": '"rev-1"',
+            "display_name": "Browser Target",
+            "active": "inactive",
+            "platform_role": "",
+        },
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 409
+    assert "deactivating the principal would orphan object access" in response.text
+    assert _principal_update_snapshot(state) == before
+    with state["session_factory"]() as session:
+        assert session.get(Principal, target_id).active is True
+        assert session.scalar(
+            select(ObjectGrant).where(
+                ObjectGrant.principal_id == target_id,
+                ObjectGrant.object_id == "ui-target-owner",
+                ObjectGrant.role == Role.OWNER,
+            )
+        ) is not None
+
+
 @pytest.mark.parametrize(
     ("active", "platform_role"),
     (("bogus", ""), ("active", "bogus")),

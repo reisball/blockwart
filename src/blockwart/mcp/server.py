@@ -93,7 +93,7 @@ from blockwart.mcp.manifest import (
     diagnose_contract,
     runtime_catalog_evidence,
 )
-from blockwart.schemas.catalog import ObjectKind
+from blockwart.schemas.catalog import OBJECT_LABEL_MAX_LENGTH, ObjectKind
 from blockwart.schemas.projects import ProjectChronologyKind
 
 ALL_OBJECT_KINDS: tuple[str, ...] = get_args(ObjectKind)
@@ -262,6 +262,13 @@ WRITE_INTENT_TOOLS: tuple[str, ...] = (
 # rejected arguments use the same field-accurate contract as the update it
 # previews.
 PREVIEW_TOOLS: tuple[str, ...] = ("blockwart.preview_object_update",)
+# The narrow rename contract. Neither tool carries an object document, so
+# neither appears in the describe_schema write-intent projection, but their
+# rejected arguments stay field-accurate like every other command contract.
+RENAME_TOOLS: tuple[str, ...] = (
+    "blockwart.preview_object_rename",
+    "blockwart.rename_object",
+)
 RELATIONSHIP_TOOLS: tuple[str, ...] = (
     "blockwart.create_relationship",
     "blockwart.delete_relationship",
@@ -271,6 +278,7 @@ RELATIONSHIP_TOOLS: tuple[str, ...] = (
 FIELD_ACCURATE_TOOLS: tuple[str, ...] = (
     *WRITE_INTENT_TOOLS,
     *PREVIEW_TOOLS,
+    *RENAME_TOOLS,
     *RELATIONSHIP_TOOLS,
 )
 # The read tools whose rejected page size publishes one narrowly scoped
@@ -318,11 +326,29 @@ DEVICE_GRAPH_PROPERTIES: JSON = {
 NETWORK_TOPOLOGY_PROPERTIES: JSON = {
     "object_id": {"type": "string", "minLength": 1, "maxLength": 128},
 }
+# The narrow rename contract carries the resource, the proposed label, and the
+# precondition only. The label bound is the stored catalog bound, so the
+# published tool schema cannot drift from the column it writes.
+RENAME_PROPERTIES: JSON = {
+    "object_id": {"type": "string", "minLength": 1, "maxLength": 128},
+    "new_label": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": OBJECT_LABEL_MAX_LENGTH,
+        "description": (
+            "Proposed common top-level label. It is validated by the same "
+            "kind-specific contract a full-object update applies, and it is the "
+            "only field a rename changes."
+        ),
+    },
+    "if_match": ETAG_SCHEMA,
+}
 GRANT_ROLE_SCHEMA: JSON = {
     "type": "string",
     "enum": [
         "discoverer",
         "viewer",
+        "renamer",
         "editor",
         "creator",
         "access_manager",
@@ -887,10 +913,15 @@ TOOLS: list[JSON] = [
         "name": "blockwart.create_root",
         "description": (
             "Create one disconnected top-level catalog root without a placement parent "
-            "in a single agent call. Requires an already active catalog-owner principal "
-            "with an MCP-audience service token and an idempotency key; it never assigns "
-            "or removes any catalog role. Returns the object, Owner/self assignment, "
-            f"revision, ETag, and idempotency status. Build object.data from {SCHEMA_TOOL_NAME}."
+            "in a single agent call. Requires an already active principal with an "
+            "MCP-audience service token, an idempotency key, and authority covering "
+            "the requested kind: catalog_owner for every kind, or the independent "
+            "project_creator capability (or legacy role) for object.kind=project only. "
+            "project_creator grants no "
+            "catalog-wide read, write, delete, or access-management authority, and this "
+            "call never assigns or removes any catalog role. Returns the object, "
+            "Owner/self assignment, revision, ETag, and idempotency status. Build "
+            f"object.data from {SCHEMA_TOOL_NAME}."
         ),
         "inputSchema": {
             "type": "object",
@@ -948,6 +979,41 @@ TOOLS: list[JSON] = [
         },
         # Requires effective write on the exact object, but changes nothing.
         "annotations": PREVIEW_WRITE_ANNOTATIONS,
+    },
+    {
+        "name": "blockwart.preview_object_rename",
+        "description": (
+            "Preview one authorized object rename without writing anything. Takes "
+            "exactly the blockwart.rename_object arguments and returns the exact "
+            "rename diff, the canonical no-op answer, the base and expected result "
+            "revisions/ETags, and one stable preview digest. Requires the dedicated "
+            "rename capability on that object; general write is not a substitute."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": RENAME_PROPERTIES,
+            "required": ["object_id", "new_label", "if_match"],
+            "additionalProperties": False,
+        },
+        # Requires effective rename on the exact object, but changes nothing.
+        "annotations": PREVIEW_WRITE_ANNOTATIONS,
+    },
+    {
+        "name": "blockwart.rename_object",
+        "description": (
+            "Change only the common top-level label of one authorized object using "
+            "its current strong ETag. No object document is rebuilt, and object ID, "
+            "kind, references, relationships, placement, status, lifecycle, health, "
+            "summary, kind-specific data, and grants stay untouched. Renaming to the "
+            "current label reports changed = false without advancing the revision."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": RENAME_PROPERTIES,
+            "required": ["object_id", "new_label", "if_match"],
+            "additionalProperties": False,
+        },
+        "annotations": WRITE_ANNOTATIONS,
     },
     {
         "name": "blockwart.delete_object",
@@ -1190,6 +1256,26 @@ TOOLS: list[JSON] = [
             "additionalProperties": False,
         },
         "annotations": DELETE_ANNOTATIONS,
+    },
+    {
+        "name": "blockwart.adopt_ownerless_object",
+        "description": (
+            "Assign the first direct Owner/self grant to an object that no active "
+            "direct or inherited Owner reaches, using the current ETag. Only an "
+            "active catalog owner may call it; it refuses once any Owner coverage "
+            "exists. Read owner_coverage via blockwart.get_object_access first."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "object_id": {"type": "string", "minLength": 1, "maxLength": 128},
+                "principal_id": {"type": "string", "minLength": 1, "maxLength": 36},
+                "if_match": ETAG_SCHEMA,
+            },
+            "required": ["object_id", "principal_id", "if_match"],
+            "additionalProperties": False,
+        },
+        "annotations": WRITE_ANNOTATIONS,
     },
 ]
 TOOL_DEFINITIONS: dict[str, JSON] = {tool["name"]: tool for tool in TOOLS}
@@ -1805,6 +1891,21 @@ def call_tool(
                 "X-Blockwart-Channel": "mcp",
             },
         )
+    elif name in {
+        "blockwart.preview_object_rename",
+        "blockwart.rename_object",
+    }:
+        object_id = _required_string(args, "object_id")
+        suffix = "rename-preview" if name == "blockwart.preview_object_rename" else "rename"
+        payload = request(
+            "POST",
+            f"/api/v1/objects/{quote(object_id, safe='')}/{suffix}",
+            {"new_label": _required_string(args, "new_label")},
+            {
+                "If-Match": _required_string(args, "if_match"),
+                "X-Blockwart-Channel": "mcp",
+            },
+        )
     elif name == "blockwart.delete_object":
         object_id = _required_string(args, "object_id")
         payload = request(
@@ -1957,6 +2058,17 @@ def call_tool(
                 f"{_required_integer(args, 'grant_id')}"
             ),
             {},
+            {
+                "If-Match": _required_string(args, "if_match"),
+                "X-Blockwart-Channel": "mcp",
+            },
+        )
+    elif name == "blockwart.adopt_ownerless_object":
+        object_id = _required_string(args, "object_id")
+        payload = request(
+            "POST",
+            f"/api/v1/objects/{quote(object_id, safe='')}/access/adoption",
+            {"principal_id": _required_string(args, "principal_id")},
             {
                 "If-Match": _required_string(args, "if_match"),
                 "X-Blockwart-Channel": "mcp",

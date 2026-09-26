@@ -14,7 +14,7 @@ from blockwart.db.session import DatabaseTransactionError, transaction
 from blockwart.domain.auth import CatalogRole, GrantScope, PlatformRole, Role
 from blockwart.main import create_app
 from blockwart.models import Principal, SecurityEvent
-from blockwart.schemas.catalog import CatalogObjectIn
+from blockwart.schemas.catalog import OBJECT_KINDS, CatalogObjectIn
 from blockwart.services.access import active_catalog_owner_ids, create_object_grant
 from blockwart.services.catalog import upsert_object
 from blockwart.services.identity import (
@@ -30,6 +30,7 @@ from blockwart.services.principal_management import (
     ManagedPrincipalPreconditionRequired,
     PlatformAdminReauthenticationDenied,
     set_managed_catalog_role,
+    set_managed_project_creator,
 )
 from blockwart.services.read_access import read_access_for_principal
 from blockwart.ui.security import AUTH_CSRF_COOKIE_NAME, AUTH_SESSION_COOKIE_NAME
@@ -792,6 +793,8 @@ def test_rest_catalog_viewer_assignment_and_projection_are_unambiguous(
         {
             "source": "catalog_viewer",
             "permissions": ["discover", "read"],
+            # The viewer reads everything and creates no root at all.
+            "root_kinds": [],
         }
     ]
 
@@ -1135,8 +1138,11 @@ def test_rest_principal_projection_exposes_catalog_role_and_global_authority(
                 "discover",
                 "manage_access",
                 "read",
+                "rename",
                 "write",
             ],
+            # The catalog owner keeps creating every root kind.
+            "root_kinds": sorted(OBJECT_KINDS),
         }
     ]
 
@@ -1531,3 +1537,146 @@ def test_mcp_admin_principal_tools_remain_read_only_get_endpoints() -> None:
         ("/api/v1/admin/principals/principal%2Froot", {}),
     ]
     assert all("catalog-role" not in path for path, _ in calls)
+
+def test_project_creator_capability_preserves_catalog_viewer_role(
+    alembic_session_factory,
+) -> None:
+    with alembic_session_factory() as session:
+        with transaction(session):
+            dual = _make_dual_admin(session, login="additive.admin")
+            admin_only = _make_admin_only(session, login="additive.admin.only")
+            viewer = create_service_account(
+                session,
+                login="additive.viewer",
+                display_name="Additive Viewer",
+                catalog_role=CatalogRole.CATALOG_VIEWER,
+            )
+        access = read_access_for_principal(session, dual)
+        admin_only_access = read_access_for_principal(session, admin_only)
+        with pytest.raises(CatalogOwnerDenied):
+            with transaction(session):
+                set_managed_project_creator(
+                    session, admin_only_access, principal_id=viewer.id,
+                    expected_revision='"rev-1"', project_creator=True,
+                    actor_password=PASSWORD, channel="api",
+                )
+        with pytest.raises(PlatformAdminReauthenticationDenied):
+            with transaction(session):
+                set_managed_project_creator(
+                    session, access, principal_id=viewer.id,
+                    expected_revision='"rev-1"', project_creator=True,
+                    actor_password="wrong-password", channel="api",
+                )
+        with transaction(session):
+            assigned = set_managed_project_creator(
+                session,
+                access,
+                principal_id=viewer.id,
+                expected_revision='"rev-1"',
+                project_creator=True,
+                actor_password=PASSWORD,
+                channel="api",
+            )
+        assert assigned.principal.catalog_role == CatalogRole.CATALOG_VIEWER
+        assert assigned.principal.project_creator is True
+        assert assigned.principal.revision == 2
+        with transaction(session):
+            unchanged = set_managed_project_creator(
+                session, access, principal_id=viewer.id,
+                expected_revision='"rev-2"', project_creator=True,
+                actor_password=PASSWORD, channel="api",
+            )
+        assert unchanged.changed is False
+        assert unchanged.principal.revision == 2
+        with pytest.raises(ManagedPrincipalPreconditionFailed):
+            with transaction(session):
+                set_managed_project_creator(
+                    session,
+                    access,
+                    principal_id=viewer.id,
+                    expected_revision='"rev-1"',
+                    project_creator=False,
+                    actor_password=PASSWORD,
+                    channel="api",
+                )
+        with transaction(session):
+            revoked = set_managed_project_creator(
+                session,
+                access,
+                principal_id=viewer.id,
+                expected_revision='"rev-2"',
+                project_creator=False,
+                actor_password=PASSWORD,
+                channel="api",
+            )
+        assert revoked.principal.catalog_role == CatalogRole.CATALOG_VIEWER
+        assert revoked.principal.project_creator is False
+        assert revoked.principal.revision == 3
+        events = session.scalars(
+            select(SecurityEvent).where(
+                SecurityEvent.event_type == "project_creator_changed",
+                SecurityEvent.principal_id == viewer.id,
+            )
+        ).all()
+        assert len(events) == 2
+        assert all(PASSWORD not in event.details_json for event in events)
+
+
+def test_rest_project_creator_control_is_separate_and_etag_protected(
+    catalog_role_api_client: TestClient,
+    catalog_role_api_state,
+) -> None:
+    target_id = catalog_role_api_state["target_id"]
+    issued = catalog_role_api_state["issued"]
+    _login_browser(catalog_role_api_client, issued)
+    assign = catalog_role_api_client.post(
+        f"/api/v1/admin/principals/{target_id}/project-creator",
+        headers=_browser_headers(issued, if_match='"rev-1"'),
+        json={"project_creator": True, "current_admin_password": PASSWORD},
+    )
+    assert assign.status_code == 200
+    assert assign.headers["etag"] == '"rev-2"'
+    assert assign.json()["principal"]["project_creator"] is True
+    assert assign.json()["principal"]["catalog_role"] is None
+    detail = catalog_role_api_client.get(
+        f"/api/v1/admin/principals/{target_id}",
+        headers={"Authorization": f"Bearer {catalog_role_api_state['admin_token']}"},
+    )
+    assert detail.status_code == 200
+    assert detail.json()["global_authorities"] == [
+        {"source": "project_creator", "permissions": [], "root_kinds": ["project"]}
+    ]
+    stale = catalog_role_api_client.post(
+        f"/api/v1/admin/principals/{target_id}/project-creator",
+        headers=_browser_headers(issued, if_match='"rev-1"'),
+        json={"project_creator": False, "current_admin_password": PASSWORD},
+    )
+    assert stale.status_code == 412
+
+
+def test_ui_project_creator_control_uses_separate_form(
+    catalog_role_api_client: TestClient,
+    catalog_role_api_state,
+) -> None:
+    target_id = catalog_role_api_state["target_id"]
+    issued = catalog_role_api_state["issued"]
+    _login_browser(catalog_role_api_client, issued)
+    page = catalog_role_api_client.get(f"/admin/principals/{target_id}")
+    assert page.status_code == 200
+    assert f'action="/admin/principals/{target_id}/project-creator"' in page.text
+    changed = catalog_role_api_client.post(
+        f"/admin/principals/{target_id}/project-creator",
+        data={
+            "csrf_token": issued.csrf_token,
+            "if_match": '"rev-1"',
+            "project_creator": "1",
+            "current_admin_password": PASSWORD,
+        },
+        follow_redirects=False,
+    )
+    assert changed.status_code == 303
+    with catalog_role_api_state["session_factory"]() as session:
+        target = session.get(Principal, target_id)
+        assert target is not None
+        assert target.project_creator is True
+        assert target.catalog_role is None

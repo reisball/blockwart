@@ -2,6 +2,7 @@ from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 MONITORING_LEASE_SAFETY_MARGIN_MS = 1000
+RELEASE_MONITORING_MAX_RESPONSE_BYTES = 512 * 1024
 
 
 class Settings(BaseSettings):
@@ -267,9 +268,9 @@ class Settings(BaseSettings):
     release_monitoring_connect_timeout_ms: int = Field(default=2000, ge=100, le=15000)
     release_monitoring_total_timeout_ms: int = Field(default=5000, ge=200, le=30000)
     release_monitoring_max_response_bytes: int = Field(
-        default=65536,
+        default=RELEASE_MONITORING_MAX_RESPONSE_BYTES,
         ge=1024,
-        le=262144,
+        le=RELEASE_MONITORING_MAX_RESPONSE_BYTES,
         description="Maximum GitHub latest-release response body accepted.",
     )
     release_monitoring_max_checks_per_run: int = Field(default=10, ge=1, le=100)

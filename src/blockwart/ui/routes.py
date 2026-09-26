@@ -93,6 +93,7 @@ from blockwart.services.commands import (
 from blockwart.services.comments import add_object_comment, query_comment_page
 from blockwart.services.grant_management import (
     actor_can_manage_owner_grants,
+    adopt_ownerless_object,
     create_managed_grant,
     preview_grant_scope,
     query_object_access,
@@ -304,6 +305,7 @@ def _localized_audit_lines(
         "grant_update": "audit.grant_update",
         "grant_revoke": "audit.grant_revoke",
         "comment_create": "audit.comment_create",
+        "object_renamed": "audit.object_renamed",
         "placement_assign": "audit.placement_assign",
         "seed_create": "audit.seed_create",
         "seed_update": "audit.seed_update",
@@ -370,12 +372,25 @@ def _index_template_context(
         str(i18n["locale"]),
         translator,
     )
-    is_catalog_owner = read_access_from_request(request).principal.is_catalog_owner
+    acting_principal = read_access_from_request(request).principal
+    # Root creation is delegated per kind: a catalog owner may create every
+    # root, the narrow project creator exactly one. Offer only what the actor
+    # may actually create, so the form never opens on a denied kind.
+    root_kind_options = tuple(
+        kind for kind in OBJECT_KINDS if acting_principal.may_create_root_kind(kind)
+    )
+    can_create_root = bool(root_kind_options)
+    show_create_root_form = show_create_root_form and can_create_root
     selected_form_kind = (
         form_kind if form_kind in OBJECT_KINDS else str(form.get("kind") or OBJECT_KINDS[0])
     )
     if selected_form_kind not in OBJECT_KINDS:
         selected_form_kind = OBJECT_KINDS[0]
+    if show_create_root_form and selected_form_kind not in root_kind_options:
+        # Keep the submitted form state on the kind the form actually renders,
+        # so the control, its fields, and its selected option agree.
+        selected_form_kind = root_kind_options[0]
+        form = {**form, "kind": selected_form_kind}
     explorer = read_model.explorer
     normalized_query = q.strip().casefold()
     selected_asset_ref = selected_asset_ref_override or next(
@@ -525,8 +540,9 @@ def _index_template_context(
         ),
         "can_write": can_write_enabled,
         "can_create": bool(create_parent_options),
-        "can_create_root": is_catalog_owner,
-        "show_create_root_form": show_create_root_form and is_catalog_owner,
+        "can_create_root": can_create_root,
+        "root_kind_options": root_kind_options,
+        "show_create_root_form": show_create_root_form,
         "csrf_token": request.cookies.get(AUTH_CSRF_COOKIE_NAME, ""),
         **i18n,
     }
@@ -796,6 +812,7 @@ def attention_overview(
         page = query_attention_page(
             session,
             access,
+            channel="ui",
             category=category or None,
             severity=severity or None,
             signal_state=signal_state or None,
@@ -949,7 +966,7 @@ def project_overview(
             "project_categories": PROJECT_CATEGORY_OPTIONS,
             "project_statuses": PROJECT_STATUS_OPTIONS,
             "next_url": next_url,
-            "can_create_root": access.principal.is_catalog_owner,
+            "can_create_root": access.principal.may_create_root_kind(PROJECT_KIND),
             **i18n,
         },
     )
@@ -1974,7 +1991,7 @@ def create_object_grant_from_ui(
             request,
             session,
             object_id,
-            error=str(exc.detail),
+            error=_grant_error_message(request, exc),
             status_code=exc.status_code,
         )
     return RedirectResponse(
@@ -2039,7 +2056,52 @@ def update_object_grant_from_ui(
             request,
             session,
             object_id,
-            error=str(exc.detail),
+            error=_grant_error_message(request, exc),
+            status_code=exc.status_code,
+        )
+    return RedirectResponse(
+        url=f"{_detail_redirect_url(request, object_id)}&edit=permissions",
+        status_code=303,
+    )
+
+
+@router.post(
+    "/objects/{object_id}/permissions/adopt",
+    response_class=HTMLResponse,
+    dependencies=[Depends(require_browser_write_csrf)],
+)
+def adopt_ownerless_object_from_ui(
+    request: Request,
+    object_id: str,
+    session: Annotated[Session, Depends(get_session)],
+    principal_id: Annotated[str, Form(max_length=36)],
+    if_match: Annotated[str, Form()],
+):
+    """Browser form for the audited ownerless-object adoption command.
+
+    The shared command resolves the catalog-owner authority first, so no
+    separate object pre-authorization is needed or wanted here.
+    """
+    access = read_access_from_request(request)
+    context = ui_write_context(request, access)
+    try:
+        execute_ui_command(
+            session,
+            context,
+            lambda: adopt_ownerless_object(
+                session,
+                context,
+                object_id=object_id,
+                principal_id=principal_id,
+                expected_revision=if_match,
+            ),
+        )
+    except HTTPException as exc:
+        return _grant_form_error_response(
+            request,
+            session,
+            object_id,
+            error=_grant_error_message(request, exc),
             status_code=exc.status_code,
         )
     return RedirectResponse(
@@ -2089,7 +2151,7 @@ def revoke_object_grant_from_ui(
             request,
             session,
             object_id,
-            error=str(exc.detail),
+            error=_grant_error_message(request, exc),
             status_code=exc.status_code,
         )
     return RedirectResponse(
@@ -2329,7 +2391,10 @@ def save_root(
 ):
     access = read_access_from_request(request)
     context = ui_write_context(request, access)
-    if not access.principal.is_catalog_owner:
+    # Fail closed before any kind-specific form field is parsed. The command
+    # re-resolves the same rule from current database state and stays the
+    # authoritative gate.
+    if not access.principal.may_create_root_kind(kind):
         execute_ui_command(
             session,
             context,
@@ -3905,6 +3970,21 @@ def _detail_form_error_response(
         form_rows=form_rows,
         status_code=status_code,
     )
+
+
+def _grant_error_message(request: Request, exc: HTTPException) -> str:
+    """Localize a structured grant-command reason; other errors keep their detail.
+
+    The reason is the same stable ``error_code`` REST and MCP publish, so the
+    browser, API, and agent surfaces stay semantically identical.
+    """
+    code = getattr(exc, "error_code", None)
+    if code is None:
+        return str(exc.detail)
+    translate = translation_context(request)["t"]
+    key = f"grant.error.{code}"
+    message = translate(key)
+    return str(exc.detail) if message == key else message
 
 
 def _grant_form_error_response(

@@ -93,6 +93,8 @@ It wraps the object-authorized v1 API:
 - blockwart.create_root -> POST /api/v1/roots
 - blockwart.update_object -> PUT /api/v1/objects/{object_id}
 - blockwart.preview_object_update -> POST /api/v1/objects/{object_id}/update-preview
+- blockwart.rename_object -> POST /api/v1/objects/{object_id}/rename
+- blockwart.preview_object_rename -> POST /api/v1/objects/{object_id}/rename-preview
 - blockwart.delete_object -> DELETE /api/v1/objects/{object_id}
 - blockwart.create_relationship -> POST /api/v1/objects/{object_id}/relationships
 - blockwart.delete_relationship -> DELETE /api/v1/objects/{object_id}/relationships
@@ -107,6 +109,7 @@ It wraps the object-authorized v1 API:
 - blockwart.create_grant -> POST /api/v1/objects/{object_id}/access/grants
 - blockwart.update_grant -> PUT /api/v1/objects/{object_id}/access/grants/{grant_id}
 - blockwart.revoke_grant -> DELETE /api/v1/objects/{object_id}/access/grants/{grant_id}
+- blockwart.adopt_ownerless_object -> POST /api/v1/objects/{object_id}/access/adoption
 
 All read tools consume the API's current shared policy. An explicit active
 `catalog_viewer` service principal therefore receives exactly `discover` and
@@ -192,6 +195,13 @@ Choose the smallest tool that directly answers the intent:
   relationship metadata or resolved paths are the requested detail.
 - Use `blockwart.get_object_access` only for grants and effective permissions;
   access data is deliberately separate from catalog details.
+- Before any Owner-grant change, read `owner_coverage` from
+  `blockwart.get_object_access`. When `state` is `ownerless`, stop: ordinary
+  grant tools return `object_has_no_owner_use_adoption_flow` and retrying does
+  not help. Only when `adoption_available` is true may the caller use
+  `blockwart.adopt_ownerless_object` with the access ETag; afterwards read the
+  access resource again and verify the target principal's effective Owner
+  source. `get_attention` lists such objects as `access_owner_missing`.
 - Use `blockwart.list_comments` for the complete newest-first operational
   comment timeline and `blockwart.add_comment` to append a Markdown work note.
   Use `blockwart.list_audit_events` for the separate immutable system audit
@@ -224,6 +234,18 @@ answer, base and expected result revision/ETag, complete safe-diff digest, and
 versioned preview digest. It creates no lock or reservation; clients still pass
 the original ETag to the real update and receive the ordinary precondition
 failure if anything changed in between.
+
+To change only a display name, `blockwart.rename_object` takes `object_id`,
+`new_label`, and `if_match` and nothing else, for every nameable kind. It
+requires the dedicated `rename` capability rather than general `write`, changes
+only the common top-level `label`, and leaves object ID, kind, references,
+relationships, placement, status, lifecycle, health, summary, kind-specific
+data, and grants untouched. Renaming to the current label reports
+`changed = false` without advancing the revision.
+`blockwart.preview_object_rename` takes the same arguments, is annotated
+read-only, and returns the exact rename diff, the canonical no-op answer, the
+base and expected result revision/ETag, and the same digests as the update
+preview. It creates no lock or reservation either.
 
 For `service`, the same generic context and object write tools carry the
 canonical bounded `data.components` document. `blockwart.describe_schema`
@@ -274,9 +296,11 @@ means it deliberately bundles lower-level API concerns behind one agent call.
 | `get_attention` | Find what currently needs work | `directly sufficient` | Projects the shared application attention resolver: one closed category, severity, reason-code, and signal-state vocabulary over record and relationship integrity, placement, manual lifecycle, monitoring, endpoints, provenance, critical-service Runbook readiness, knowledge review, and source coverage, deduplicated to one item per target and category. |
 | `get_source_coverage` | Inspect source inventory coverage and drift | `directly sufficient` | Projects the authorized REST snapshot with identical filters, state vocabulary, digest-bound cursor, and no workspace access. |
 | `create_child` | Create a placed child | `intent tool`, `response improved` | Resolves the parent internally and proves placement, ownership, revision, and idempotency. |
-| `create_root` | Create a disconnected catalog root | `intent tool`, `response improved` | Requires an already active catalog-owner principal; proves ownership, revision, idempotency, and the absence of a placement parent. Never mutates any catalog role. |
+| `create_root` | Create a disconnected catalog root | `intent tool`, `response improved` | Requires an already active principal whose catalog role covers the kind: `catalog_owner` for every kind, `project_creator` for `project` only. Proves ownership, revision, idempotency, and the absence of a placement parent. Never mutates any catalog role. |
 | `update_object` | Update one known object | `directly sufficient` | The explicit current ETag preserves visible optimistic concurrency. |
 | `preview_object_update` | Review one proposed full-object update | `directly sufficient` | Uses the exact update arguments and shared plan, but returns only the bounded redacted diff and digest without mutating catalog or authentication state. |
+| `rename_object` | Change only one object's display name | `directly sufficient` | Carries the resource, the proposed label, and the precondition only, so a display-name change needs neither a reconstructed object document nor general write authority. |
+| `preview_object_rename` | Review one proposed rename | `directly sufficient` | Uses the exact rename arguments and shared plan, and its single `/label` diff entry is also the published evidence that no other path changes. |
 | `delete_object` | Delete one known object | `directly sufficient` | The destructive action and current ETag remain explicit. |
 | `create_relationship` | Link existing objects | `directly sufficient` | Its published schema carries the closed relationship vocabulary and the type-dependent metadata; its response contains the exact relationship, metadata, revision, and ETag. |
 | `delete_relationship` | Unlink existing objects | `directly sufficient` | The exact edge and current ETag remain explicit; the same closed vocabulary applies. |
@@ -291,6 +315,7 @@ means it deliberately bundles lower-level API concerns behind one agent call.
 | `create_grant` | Add object access | `directly sufficient` | Principal selection and the access-resource ETag stay explicit. |
 | `update_grant` | Change object access | `directly sufficient` | No hidden create/update branching or automatic CAS retry is introduced. |
 | `revoke_grant` | Remove object access | `directly sufficient` | Destructive intent, grant ID, and current ETag stay explicit. |
+| `adopt_ownerless_object` | Recover an ownerless object | `directly sufficient` | Catalog-owner only; refuses once any Owner exists, so it never bypasses Owner-only grant rules. |
 
 `blockwart.search` and `blockwart.get_context` accept every catalog kind, including `runbook`,
 `decision`, and `project`.
@@ -441,21 +466,31 @@ atomic API command; neither tool loads a complete device graph or retries a
 failed concurrency precondition.
 
 `blockwart.create_root` executes the same shared `create_root` command as REST
-and the browser UI. It requires an already active catalog-owner service
-principal with an `mcp`-audience token and an `idempotency_key`, and it never
-assigns or removes any catalog role. Its additive result fields are
-`parent_ref` (always `null`, proving the disconnected root), the same
-`owner_assignment` Owner/self proof, and `revision` alongside `etag`,
-`changed`, and `replayed`. The catalog role (`catalog_owner`, `catalog_viewer`,
-or none) itself remains read-only in MCP
-through the admin principal projections.
+and the browser UI. It requires an already active service principal with an
+`mcp`-audience token, an `idempotency_key`, and authority covering the requested kind:
+`catalog_owner` for every kind, or the independent `project_creator = true`
+capability (or legacy role) for `object.kind = project` only. A `project_creator` agent creating any other
+root kind receives the same denial as a principal with no catalog role, and the
+role adds no catalog-wide read, write, delete, or access-management authority to
+any other tool. The tool never assigns or removes any catalog role. Its additive
+result fields are `parent_ref` (always `null`, proving the disconnected root),
+the same `owner_assignment` Owner/self proof — written for a project creator
+exactly as for a catalog owner — and `revision` alongside `etag`, `changed`, and
+`replayed`. The catalog role (`catalog_owner`, `catalog_viewer`,
+`project_creator`, or none) itself remains read-only in MCP through the admin
+principal projections, which also report the role's creatable root kinds.
 
 Grant read tools expose only minimized principal identity, separated direct
 grants and effective access, and safe canonical-scope previews. Grant write
 tools use the same `manage_access`, Owner-only, last-owner, self-lockout,
 revision, and audit rules as REST and UI. Their `if_match` argument carries the
 last access-resource ETag. The service token remains runtime transport
-configuration and is never accepted as a tool argument.
+configuration and is never accepted as a tool argument. Structured REST error
+codes such as `owner_required_to_manage_owner_grants`,
+`object_has_no_owner_use_adoption_flow`, `adoption_requires_catalog_owner`, and
+`object_has_owner_coverage` pass through unchanged as the MCP error `code`.
+`blockwart.adopt_ownerless_object` is the MCP form of the audited adoption
+command and carries exactly its REST authority, ETag, and refusal rules.
 
 The two platform-admin MCP tools are read-only. They require the calling
 service account to have the explicit `admin` platform role, and assignment
@@ -535,6 +570,7 @@ unchanged. See `api-boundary-contract.md`.
 
 Object-write and relationship tool validation failures (`blockwart.create_root`,
 `blockwart.create_child`, `blockwart.update_object`, `blockwart.preview_object_update`,
+`blockwart.rename_object`, `blockwart.preview_object_rename`,
 `blockwart.create_attached_device`,
 `blockwart.create_relationship`, and `blockwart.delete_relationship`) return field-accurate,
 sanitized `details` on the `invalid_arguments` error. Each detail carries exactly the canonical

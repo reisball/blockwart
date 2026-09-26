@@ -1,4 +1,4 @@
-from typing import Any, ClassVar, Literal
+from typing import Any, ClassVar, Literal, get_args
 
 from pydantic import BaseModel, Field, model_validator
 
@@ -27,6 +27,9 @@ ObjectKind = Literal[
 ]
 PublicObjectKind = Literal["host", "system", "network", "device", "service"]
 ObjectStatus = Literal["active", "inactive", "deleted"]
+# The single canonical kind vocabulary, derived from the schema type so it
+# cannot drift from it.
+OBJECT_KINDS: tuple[ObjectKind, ...] = get_args(ObjectKind)
 PUBLIC_OBJECT_KINDS: tuple[PublicObjectKind, ...] = (
     "host",
     "system",
@@ -35,6 +38,10 @@ PUBLIC_OBJECT_KINDS: tuple[PublicObjectKind, ...] = (
     "service",
 )
 OBJECT_STATUSES: tuple[ObjectStatus, ...] = ("active", "inactive", "deleted")
+
+# The stored width of `catalog_objects.label`. Narrow label contracts publish
+# this bound instead of carrying a second, drifting copy of it.
+OBJECT_LABEL_MAX_LENGTH = 255
 
 ENDPOINT_TYPE_OPTIONS = ("Web", "REST API", "MCP", "HEC", "SSH")
 ENDPOINT_TYPES = set(ENDPOINT_TYPE_OPTIONS)
@@ -112,6 +119,29 @@ class CatalogObjectIn(BaseModel):
         )
         validate_placement_metadata(self.data, kind=self.kind)
         return self
+
+
+class ObjectRenameCandidate(CatalogObjectIn):
+    """One stored record re-validated with only its `label` replaced.
+
+    A rename reuses the kind-specific write contract instead of inventing a
+    second label rule, so the proposed label passes exactly the validation the
+    full-object update applies to that kind, including the shared secret-shaped
+    value rejection. The read-side legacy allowances are kept so a rename never
+    becomes a hidden repair of unrelated kind-specific data and never requires
+    the caller to reconstruct a complete object document.
+    """
+
+    reject_acl_data: ClassVar[bool] = False
+    allow_legacy_network_without_category: ClassVar[bool] = True
+    allow_legacy_decision_without_status: ClassVar[bool] = True
+    allow_legacy_decision_data: ClassVar[bool] = True
+    allow_legacy_project_without_category: ClassVar[bool] = True
+    allow_legacy_project_data: ClassVar[bool] = True
+    allow_legacy_runbook_without_status: ClassVar[bool] = True
+    allow_legacy_runbook_data: ClassVar[bool] = True
+
+    label: str = Field(min_length=1, max_length=OBJECT_LABEL_MAX_LENGTH)
 
 
 class CatalogAssetNode(BaseModel):

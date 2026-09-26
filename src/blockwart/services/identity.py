@@ -33,6 +33,7 @@ from blockwart.models import (
 from blockwart.services.access import (
     LastCatalogOwnerError,
     ensure_principal_deactivation_preserves_owner_coverage,
+    lock_owner_coverage_state,
 )
 
 LOGIN_PATTERN = re.compile(r"^[a-z0-9][a-z0-9._-]{1,126}[a-z0-9]$")
@@ -860,6 +861,7 @@ def deactivate_principal(
     actor_principal_id: str | None = None,
     now: datetime | None = None,
 ) -> bool:
+    lock_owner_coverage_state(session, extra_principal_ids=(principal_id,))
     principal = session.get(Principal, principal_id)
     if principal is None:
         raise IdentityNotFound("principal not found")
@@ -1001,6 +1003,7 @@ def principal_context(
             if principal.catalog_role is not None
             else None
         ),
+        project_creator=principal.project_creator,
         revision=principal.revision,
         service_token_audience=service_token_audience,
     )

@@ -3220,7 +3220,8 @@
         "description": "Global catalog authority, independent of the platform-admin axis.",
         "enum": [
           "catalog_owner",
-          "catalog_viewer"
+          "catalog_viewer",
+          "project_creator"
         ],
         "title": "CatalogRole",
         "type": "string"
@@ -3548,10 +3549,29 @@
             "title": "Permissions",
             "type": "array"
           },
+          "root_kinds": {
+            "items": {
+              "enum": [
+                "host",
+                "system",
+                "network",
+                "device",
+                "service",
+                "credential_reference",
+                "runbook",
+                "decision",
+                "project"
+              ],
+              "type": "string"
+            },
+            "title": "Root Kinds",
+            "type": "array"
+          },
           "source": {
             "enum": [
               "catalog_owner",
-              "catalog_viewer"
+              "catalog_viewer",
+              "project_creator"
             ],
             "title": "Source",
             "type": "string"
@@ -3674,6 +3694,7 @@
           "discover",
           "read",
           "write",
+          "rename",
           "create_child",
           "manage_access",
           "delete"
@@ -3817,6 +3838,11 @@
           },
           "principal_type": {
             "$ref": "#/components/schemas/PrincipalType"
+          },
+          "project_creator": {
+            "default": false,
+            "title": "Project Creator",
+            "type": "boolean"
           },
           "revision": {
             "minimum": 1.0,
@@ -4450,6 +4476,32 @@
         "title": "ProjectChronologyPageOut",
         "type": "object"
       },
+      "ProjectCreatorMutationIn": {
+        "properties": {
+          "current_admin_password": {
+            "anyOf": [
+              {
+                "maxLength": 1024,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Current Admin Password"
+          },
+          "project_creator": {
+            "title": "Project Creator",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "project_creator"
+        ],
+        "title": "ProjectCreatorMutationIn",
+        "type": "object"
+      },
       "ProjectOverviewItemOut": {
         "properties": {
           "capabilities": {
@@ -4728,6 +4780,7 @@
         "enum": [
           "discoverer",
           "viewer",
+          "renamer",
           "editor",
           "creator",
           "access_manager",
@@ -4903,6 +4956,7 @@
           "category": {
             "enum": [
               "record_integrity",
+              "access",
               "monitoring",
               "release",
               "lifecycle",
@@ -4928,12 +4982,14 @@
                 "enum": [
                   "accepted",
                   "active",
+                  "adoption_available",
                   "ambiguous_endpoints",
                   "ambiguous_health_url",
                   "ambiguous_mapping",
                   "approved",
                   "archived",
                   "cancelled",
+                  "catalog_owner_adoption_required",
                   "completed",
                   "connect_failed",
                   "dangling_typed_reference",
@@ -5018,6 +5074,7 @@
           "reason_code": {
             "enum": [
               "record_corrupt",
+              "access_owner_missing",
               "monitoring_observed_down",
               "monitoring_check_error",
               "monitoring_config_invalid",
@@ -5189,6 +5246,7 @@
             "propertyNames": {
               "enum": [
                 "record_integrity",
+                "access",
                 "monitoring",
                 "release",
                 "lifecycle",
@@ -5211,6 +5269,7 @@
             "propertyNames": {
               "enum": [
                 "record_corrupt",
+                "access_owner_missing",
                 "monitoring_observed_down",
                 "monitoring_check_error",
                 "monitoring_config_invalid",
@@ -5273,6 +5332,7 @@
             "propertyNames": {
               "enum": [
                 "record_integrity",
+                "access",
                 "monitoring",
                 "release",
                 "lifecycle",
@@ -6367,6 +6427,9 @@
             "title": "Object Id",
             "type": "string"
           },
+          "owner_coverage": {
+            "$ref": "#/components/schemas/V1OwnerCoverageOut"
+          },
           "revision": {
             "minimum": 1.0,
             "title": "Revision",
@@ -6378,7 +6441,8 @@
           "revision",
           "etag",
           "direct_grants",
-          "effective_access"
+          "effective_access",
+          "owner_coverage"
         ],
         "title": "V1ObjectAccessOut",
         "type": "object"
@@ -6583,6 +6647,177 @@
         "title": "V1ObjectPageOut",
         "type": "object"
       },
+      "V1ObjectRenameIn": {
+        "additionalProperties": false,
+        "description": "The complete request body of one narrow object rename.\n\nThe body carries the proposed label and nothing else: the object is named\nby the path, the base revision by the strong `If-Match` ETag. A caller\ntherefore never reconstructs an object document to change a display name,\nand no other field can be smuggled into the operation.",
+        "properties": {
+          "new_label": {
+            "maxLength": 255,
+            "minLength": 1,
+            "title": "New Label",
+            "type": "string"
+          }
+        },
+        "required": [
+          "new_label"
+        ],
+        "title": "V1ObjectRenameIn",
+        "type": "object"
+      },
+      "V1ObjectRenameOut": {
+        "additionalProperties": false,
+        "description": "The applied result of one narrow object rename.\n\nThe response is deliberately not an object document: a rename publishes the\nresource identity, the two labels, and the resulting revision only.",
+        "properties": {
+          "changed": {
+            "title": "Changed",
+            "type": "boolean"
+          },
+          "etag": {
+            "pattern": "^\"rev-[1-9][0-9]*\"$",
+            "title": "Etag",
+            "type": "string"
+          },
+          "new_label": {
+            "title": "New Label",
+            "type": "string"
+          },
+          "object_id": {
+            "title": "Object Id",
+            "type": "string"
+          },
+          "object_kind": {
+            "enum": [
+              "host",
+              "system",
+              "network",
+              "device",
+              "service",
+              "credential_reference",
+              "runbook",
+              "decision",
+              "project"
+            ],
+            "title": "Object Kind",
+            "type": "string"
+          },
+          "old_label": {
+            "title": "Old Label",
+            "type": "string"
+          },
+          "revision": {
+            "minimum": 1.0,
+            "title": "Revision",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "object_id",
+          "object_kind",
+          "old_label",
+          "new_label",
+          "revision",
+          "etag",
+          "changed"
+        ],
+        "title": "V1ObjectRenameOut",
+        "type": "object"
+      },
+      "V1ObjectRenamePreviewOut": {
+        "additionalProperties": false,
+        "description": "The read-only result of one ETag-bound rename preview.\n\nThe response shares the bounded, redacted, versioned diff contract of the\nfull-object update preview. Because the proposal is the stored record with\nonly `label` replaced, the diff is at once the exact rename diff and the\npublished evidence that the operation touches no other path.",
+        "properties": {
+          "base_etag": {
+            "pattern": "^\"rev-[1-9][0-9]*\"$",
+            "title": "Base Etag",
+            "type": "string"
+          },
+          "base_revision": {
+            "minimum": 1.0,
+            "title": "Base Revision",
+            "type": "integer"
+          },
+          "changed": {
+            "title": "Changed",
+            "type": "boolean"
+          },
+          "diff": {
+            "description": "Canonically ordered, bounded, redacted structured diff of the proposed label against the current record.",
+            "items": {
+              "$ref": "#/components/schemas/V1ObjectUpdatePreviewDiffEntryOut"
+            },
+            "maxItems": 200,
+            "title": "Diff",
+            "type": "array"
+          },
+          "diff_digest": {
+            "pattern": "^sha256:[0-9a-f]{64}$",
+            "title": "Diff Digest",
+            "type": "string"
+          },
+          "diff_truncated": {
+            "title": "Diff Truncated",
+            "type": "boolean"
+          },
+          "expected_result_etag": {
+            "pattern": "^\"rev-[1-9][0-9]*\"$",
+            "title": "Expected Result Etag",
+            "type": "string"
+          },
+          "expected_result_revision": {
+            "minimum": 1.0,
+            "title": "Expected Result Revision",
+            "type": "integer"
+          },
+          "object_id": {
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[a-z0-9][a-z0-9_-]*[a-z0-9]$|^[a-z0-9]$",
+            "title": "Object Id",
+            "type": "string"
+          },
+          "object_kind": {
+            "enum": [
+              "host",
+              "system",
+              "network",
+              "device",
+              "service",
+              "credential_reference",
+              "runbook",
+              "decision",
+              "project"
+            ],
+            "title": "Object Kind",
+            "type": "string"
+          },
+          "preview_contract_version": {
+            "const": "1",
+            "title": "Preview Contract Version",
+            "type": "string"
+          },
+          "preview_digest": {
+            "pattern": "^sha256:[0-9a-f]{64}$",
+            "title": "Preview Digest",
+            "type": "string"
+          }
+        },
+        "required": [
+          "preview_contract_version",
+          "object_id",
+          "object_kind",
+          "changed",
+          "base_revision",
+          "base_etag",
+          "expected_result_revision",
+          "expected_result_etag",
+          "diff",
+          "diff_digest",
+          "diff_truncated",
+          "preview_digest"
+        ],
+        "title": "V1ObjectRenamePreviewOut",
+        "type": "object"
+      },
       "V1ObjectUpdatePreviewDiffEntryOut": {
         "additionalProperties": false,
         "description": "One canonical change the proposed update would make.",
@@ -6772,6 +7007,112 @@
           "text"
         ],
         "title": "V1ObjectUpdatePreviewValueOut",
+        "type": "object"
+      },
+      "V1OwnerAdoptionIn": {
+        "properties": {
+          "principal_id": {
+            "maxLength": 36,
+            "minLength": 1,
+            "title": "Principal Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "principal_id"
+        ],
+        "title": "V1OwnerAdoptionIn",
+        "type": "object"
+      },
+      "V1OwnerAdoptionOut": {
+        "properties": {
+          "changed": {
+            "title": "Changed",
+            "type": "boolean"
+          },
+          "etag": {
+            "title": "Etag",
+            "type": "string"
+          },
+          "grant": {
+            "$ref": "#/components/schemas/V1DirectGrantOut"
+          },
+          "inactive_direct_owner_grants": {
+            "minimum": 0.0,
+            "title": "Inactive Direct Owner Grants",
+            "type": "integer"
+          },
+          "object_id": {
+            "title": "Object Id",
+            "type": "string"
+          },
+          "previous_owner_count": {
+            "minimum": 0.0,
+            "title": "Previous Owner Count",
+            "type": "integer"
+          },
+          "revision": {
+            "minimum": 1.0,
+            "title": "Revision",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "object_id",
+          "revision",
+          "etag",
+          "changed",
+          "grant",
+          "previous_owner_count",
+          "inactive_direct_owner_grants"
+        ],
+        "title": "V1OwnerAdoptionOut",
+        "type": "object"
+      },
+      "V1OwnerCoverageOut": {
+        "description": "Active object Owner sources; a global catalog role is never counted.",
+        "properties": {
+          "actor_has_owner_source": {
+            "title": "Actor Has Owner Source",
+            "type": "boolean"
+          },
+          "adoption_available": {
+            "title": "Adoption Available",
+            "type": "boolean"
+          },
+          "direct_active_owner_grants": {
+            "minimum": 0.0,
+            "title": "Direct Active Owner Grants",
+            "type": "integer"
+          },
+          "inactive_direct_owner_grants": {
+            "minimum": 0.0,
+            "title": "Inactive Direct Owner Grants",
+            "type": "integer"
+          },
+          "inherited_active_owner_grants": {
+            "minimum": 0.0,
+            "title": "Inherited Active Owner Grants",
+            "type": "integer"
+          },
+          "state": {
+            "enum": [
+              "owned",
+              "ownerless"
+            ],
+            "title": "State",
+            "type": "string"
+          }
+        },
+        "required": [
+          "state",
+          "direct_active_owner_grants",
+          "inherited_active_owner_grants",
+          "inactive_direct_owner_grants",
+          "actor_has_owner_source",
+          "adoption_available"
+        ],
+        "title": "V1OwnerCoverageOut",
         "type": "object"
       },
       "V1PrincipalSearchOut": {
@@ -11515,6 +11856,186 @@
         ]
       }
     },
+    "/api/v1/admin/principals/{principal_id}/project-creator": {
+      "post": {
+        "operationId": "set_admin_principal_project_creator_api_v1_admin_principals__principal_id__project_creator_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "principal_id",
+            "required": true,
+            "schema": {
+              "title": "Principal Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "If-Match",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "If-Match"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-CSRF-Token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 256,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Csrf-Token"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProjectCreatorMutationIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PrincipalMutationOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Authentication required"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Permission denied"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Resource not found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "412": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Precondition failed"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Request validation failed"
+          },
+          "428": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Precondition required"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Internal server error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Service unavailable"
+          }
+        },
+        "security": [
+          {
+            "BrowserSessionCookie": []
+          }
+        ],
+        "summary": "Set Admin Principal Project Creator",
+        "tags": [
+          "api-v1-admin"
+        ]
+      }
+    },
     "/api/v1/admin/principals/{principal_id}/tokens": {
       "post": {
         "operationId": "issue_admin_principal_token_api_v1_admin_principals__principal_id__tokens_post",
@@ -12049,6 +12570,7 @@
                 {
                   "enum": [
                     "record_integrity",
+                    "access",
                     "monitoring",
                     "release",
                     "lifecycle",
@@ -12099,6 +12621,7 @@
                 {
                   "enum": [
                     "record_corrupt",
+                    "access_owner_missing",
                     "monitoring_observed_down",
                     "monitoring_check_error",
                     "monitoring_config_invalid",
@@ -14810,6 +15333,170 @@
         ]
       }
     },
+    "/api/v1/objects/{object_id}/access/adoption": {
+      "post": {
+        "description": "Assign the first Owner/self grant to an object that has no active Owner.\n\nOnly an active catalog owner may adopt, only with the current strong ETag,\nand only while no active direct or inherited Owner grant reaches the\nobject.",
+        "operationId": "adopt_v1_ownerless_object_api_v1_objects__object_id__access_adoption_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "object_id",
+            "required": true,
+            "schema": {
+              "title": "Object Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "If-Match",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "If-Match"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/V1OwnerAdoptionIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1OwnerAdoptionOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Authentication required"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Permission denied"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Resource not found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "412": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Precondition failed"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Request validation failed"
+          },
+          "428": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Precondition required"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Internal server error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Service unavailable"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Adopt V1 Ownerless Object",
+        "tags": [
+          "api-v1-readonly"
+        ]
+      }
+    },
     "/api/v1/objects/{object_id}/access/grants": {
       "post": {
         "operationId": "create_v1_object_grant_api_v1_objects__object_id__access_grants_post",
@@ -17066,6 +17753,334 @@
           }
         ],
         "summary": "Run one authorized, leased public GitHub release check",
+        "tags": [
+          "api-v1-readonly"
+        ]
+      }
+    },
+    "/api/v1/objects/{object_id}/rename": {
+      "post": {
+        "description": "Apply the same validated rename contract the preview resolved.\n\nThe command requires the dedicated `rename` capability on that exact\nobject; general `write` is not a substitute. It changes the common\ntop-level label only, so object ID, kind, references, relationships,\nplacement, status, lifecycle, health, summary, kind-specific data, and\ngrants are untouched. A no-op rename reports `changed = false` and\ndeliberately does not advance the revision.",
+        "operationId": "rename_v1_object_api_v1_objects__object_id__rename_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "object_id",
+            "required": true,
+            "schema": {
+              "title": "Object Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "If-Match",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "If-Match"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/V1ObjectRenameIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ObjectRenameOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Authentication required"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Permission denied"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Resource not found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "412": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Precondition failed"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Request validation failed"
+          },
+          "428": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Precondition required"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Internal server error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Service unavailable"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Change only the label of one object under its current ETag",
+        "tags": [
+          "api-v1-readonly"
+        ]
+      }
+    },
+    "/api/v1/objects/{object_id}/rename-preview": {
+      "post": {
+        "description": "Resolve the proposed rename read-only and publish its exact diff.\n\nThe request is exactly the request of\n`POST /api/v1/objects/{object_id}/rename`: the exact object ID, the current\nstrong `If-Match` ETag, and the proposed label. Effective `rename` on that\nexact object is required even though nothing is written, and the shared\nplan applies the same kind-specific label validation as the apply. The\npreview creates no lock, reservation, or later-apply guarantee.",
+        "operationId": "preview_v1_object_rename_api_v1_objects__object_id__rename_preview_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "object_id",
+            "required": true,
+            "schema": {
+              "title": "Object Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "If-Match",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "If-Match"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/V1ObjectRenameIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ObjectRenamePreviewOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Authentication required"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Permission denied"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Resource not found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "412": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Precondition failed"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Request validation failed"
+          },
+          "428": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Precondition required"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Internal server error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Service unavailable"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Preview one ETag-bound object rename without writing",
         "tags": [
           "api-v1-readonly"
         ]
@@ -23436,6 +24451,7 @@
               "enum": [
                 "env_file",
                 "external",
+                "infisical",
                 "local_file",
                 "secrets_json",
                 "vaultwarden"

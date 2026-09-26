@@ -20,7 +20,7 @@ class ObjectGrant(Base):
     __table_args__ = (
         CheckConstraint(
             "role IN "
-            "('discoverer','viewer','editor','creator','access_manager','owner')",
+            "('discoverer','viewer','renamer','editor','creator','access_manager','owner')",
             name="ck_object_grants_role",
         ),
         CheckConstraint(

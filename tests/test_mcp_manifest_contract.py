@@ -14,14 +14,16 @@ from blockwart.mcp.manifest import (
 from blockwart.mcp.server import TOOLS, local_contract_metadata, validate_runtime_catalog
 
 
-def test_update_preview_tool_has_the_reviewed_manifest_evidence() -> None:
-    metadata = contract_metadata(TOOLS, build_revision="issue-189")
+def test_root_project_creator_tools_have_the_reviewed_manifest_evidence() -> None:
+    metadata = contract_metadata(TOOLS, build_revision="issue-237")
 
+    # Ownerless recovery adds one narrowly scoped audited write tool and moves
+    # the reviewed manifest digest with that public contract.
     assert metadata == {
-        "build_revision": "issue-189",
+        "build_revision": "issue-237",
         "contract_version": "1",
-        "manifest_digest": "8363f114876a122a95a2a05ca822058dab788e8d432332aa3a39ae7cd8cf5f6d",
-        "tool_count": 31,
+        "manifest_digest": "3c4d793151c40ab8a728ca47238d085c561a5a5ef4392f7870cc1f676c08c7de",
+        "tool_count": 34,
     }
 
 
@@ -52,7 +54,7 @@ def test_reduced_catalog_is_incompatible_before_normal_tool_use() -> None:
 
     diagnosis = diagnose_contract(local, api=reduced)
 
-    assert local["tool_count"] == 31
+    assert local["tool_count"] == 34
     assert reduced["tool_count"] == 22
     assert diagnosis["status"] == "incompatible"
     assert diagnosis["classification"] == "wrapper_drift"

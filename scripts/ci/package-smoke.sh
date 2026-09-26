@@ -38,36 +38,94 @@ mkdir "$TEMP_DIR/outside-repository"
 cd "$TEMP_DIR/outside-repository"
 export BLOCKWART_DATABASE_URL="sqlite:///$TEMP_DIR/package-smoke.sqlite3"
 "$TEMP_DIR/venv/bin/blockwart-db" upgrade
-"$TEMP_DIR/venv/bin/blockwart-seed" --seed "$SOURCE_DIR/seeds/pilot_objects.yaml"
-mapfile -t OWNER_ANCHORS < <(
-  "$VENV_PYTHON" - <<'PY'
+# A seed never creates an ownerless object, so the first identity is
+# bootstrapped before the seed and named as the explicit first Owner.
+printf '%s\n' 'package-smoke-owner-password' | \
+  "$TEMP_DIR/venv/bin/blockwart-auth" \
+    --database-url "$BLOCKWART_DATABASE_URL" \
+    bootstrap-owner \
+    --login package.owner \
+    --display-name "Package Owner" \
+    --password-stdin \
+    --catalog-owner
+if "$TEMP_DIR/venv/bin/blockwart-seed" --seed "$SOURCE_DIR/seeds/pilot_objects.yaml"; then
+  echo "package_smoke_error=seed_accepted_without_owner" >&2
+  exit 1
+fi
+"$TEMP_DIR/venv/bin/blockwart-seed" \
+  --seed "$SOURCE_DIR/seeds/pilot_objects.yaml" \
+  --owner-login package.owner
+"$TEMP_DIR/venv/bin/blockwart-db" owners
+# A pre-#232 import could write an object without any Owner. Such a legacy
+# catalog must stay non-ready until the protected pre-start adoption repairs it
+# for an explicit catalog owner with an explicit reason.
+"$VENV_PYTHON" - <<'PY'
 import os
-from sqlalchemy import select
+
 from sqlalchemy.orm import Session
-from blockwart.db.session import build_engine
-from blockwart.models import CatalogObject
+
+from blockwart.db.session import build_engine, transaction
+from blockwart.schemas.catalog import CatalogObjectIn
+from blockwart.services.catalog import upsert_object
 
 engine = build_engine(os.environ["BLOCKWART_DATABASE_URL"])
-with Session(engine) as session:
-    for object_id in session.scalars(select(CatalogObject.id).order_by(CatalogObject.id)):
-        print(object_id)
-engine.dispose()
+try:
+    with Session(engine) as session, transaction(session):
+        upsert_object(
+            session,
+            CatalogObjectIn(
+                id="package-smoke-legacy-offline",
+                kind="host",
+                label="Package Smoke Legacy Offline",
+                data={"schema_version": 1},
+            ),
+        )
+finally:
+    engine.dispose()
 PY
+if "$TEMP_DIR/venv/bin/blockwart-db" owners >/dev/null; then
+  echo "package_smoke_error=legacy_ownerless_not_reported" >&2
+  exit 1
+fi
+if timeout 60 "$TEMP_DIR/venv/bin/blockwart-start" >"$TEMP_DIR/legacy-start.log" 2>&1; then
+  echo "package_smoke_error=legacy_ownerless_started" >&2
+  exit 1
+fi
+if ! grep -q 'startup_error=owner_coverage_incomplete' "$TEMP_DIR/legacy-start.log"; then
+  sed -n '1,50p' "$TEMP_DIR/legacy-start.log" >&2
+  exit 1
+fi
+ADOPTION_REASON="Package smoke legacy upgrade"
+adoption_preview=$(
+  "$TEMP_DIR/venv/bin/blockwart-db" adopt-owners \
+    --owner-login package.owner \
+    --reason "$ADOPTION_REASON"
 )
-BOOTSTRAP_ARGS=(
-  --database-url "$BLOCKWART_DATABASE_URL"
-  bootstrap-owner
-  --login package.owner
-  --display-name "Package Owner"
-  --scope self
-  --password-stdin
-  --catalog-owner
+printf '%s\n' "$adoption_preview"
+if [[ "$adoption_preview" != *'"object_id":"package-smoke-legacy-offline"'* ]] || \
+   [[ "$adoption_preview" != *" ownerless=1 adopted=0 remaining=1 "* ]]; then
+  echo "package_smoke_error=adoption_preview_mismatch" >&2
+  exit 1
+fi
+adoption_digest=$(
+  printf '%s\n' "$adoption_preview" |
+    sed -n 's/.* plan_digest=\(sha256:[0-9a-f]\{64\}\) .*/\1/p'
 )
-for anchor in "${OWNER_ANCHORS[@]}"; do
-  BOOTSTRAP_ARGS+=(--object-id "$anchor")
+for expected_adopted in 1 0; do
+  adoption_result=$(
+    "$TEMP_DIR/venv/bin/blockwart-db" --apply adopt-owners \
+      --owner-login package.owner \
+      --reason "$ADOPTION_REASON" \
+      --request-id package-smoke-adoption \
+      --expect-plan-digest "$adoption_digest"
+  )
+  printf '%s\n' "$adoption_result"
+  if [[ "$adoption_result" != *" adopted=$expected_adopted remaining=0 "* ]]; then
+    echo "package_smoke_error=adoption_apply_mismatch" >&2
+    exit 1
+  fi
 done
-printf '%s\n' 'package-smoke-owner-password' | \
-  "$TEMP_DIR/venv/bin/blockwart-auth" "${BOOTSTRAP_ARGS[@]}"
+"$TEMP_DIR/venv/bin/blockwart-db" owners
 "$TEMP_DIR/venv/bin/blockwart-start" >"$TEMP_DIR/server.log" 2>&1 &
 SERVER_PID=$!
 

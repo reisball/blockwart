@@ -57,8 +57,8 @@ Current local keys:
   `100..15000`)
 - `BLOCKWART_RELEASE_MONITORING_TOTAL_TIMEOUT_MS` (default `5000`, allowed
   `200..30000`)
-- `BLOCKWART_RELEASE_MONITORING_MAX_RESPONSE_BYTES` (default `65536`, allowed
-  `1024..262144`)
+- `BLOCKWART_RELEASE_MONITORING_MAX_RESPONSE_BYTES` (default `524288` / 512 KiB,
+  allowed `1024..524288`; bound for public GitHub latest-release responses)
 - `BLOCKWART_RELEASE_MONITORING_MAX_CHECKS_PER_RUN` (default `10`, allowed
   `1..100`)
 - `BLOCKWART_RELEASE_MONITORING_LEASE_SECONDS` (default `60`, allowed
@@ -104,7 +104,7 @@ addresses, identities, and credential references are fictional. Use the
 packaged CLI for local or deployment-prep initialization:
 
 ```bash
-blockwart-seed --create-schema --seed seeds/pilot_objects.yaml
+blockwart-seed --create-schema --seed seeds/pilot_objects.yaml --owner-login kai
 ```
 
 The CLI uses `BLOCKWART_DATABASE_URL` unless `--database-url` is supplied. `--create-schema` runs

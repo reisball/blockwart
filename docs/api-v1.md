@@ -433,12 +433,17 @@ operation, or payload returns `409 conflict`. Expired records may be replaced.
 ### `POST /api/v1/roots`
 
 Creates one disconnected top-level catalog root without a placement parent.
-Requires an active catalog-owner principal and an `Idempotency-Key` header
-containing 16..128 visible ASCII characters; platform-admin alone is not
-sufficient. API writes require an `api`-audience service token, matching the
-trusted-channel rule of the shared `create_root` command. The validated root and
-exactly one direct self-scoped owner grant for the creating principal are
-committed atomically. The response is `201`, includes `Location` and `ETag`,
+Requires an `Idempotency-Key` header containing 16..128 visible ASCII characters
+and an active principal whose catalog role covers the requested `kind`: an active
+catalog owner may create every kind, while the independent
+`project_creator = true` capability (or the legacy exclusive role) may create
+`kind = project` and nothing else. Platform-admin alone is not sufficient,
+and a denial for a kind the role does not cover is the same `403` as a denial for
+no catalog role at all. API writes require an `api`-audience service token,
+matching the trusted-channel rule of the shared `create_root` command. The
+validated root and exactly one direct self-scoped owner grant for the creating
+principal are committed atomically, for a project creator exactly as for a
+catalog owner. The response is `201`, includes `Location` and `ETag`,
 and contains the created object; the idempotent replay, duplicate-ID conflict,
 and changed-payload `409 conflict` semantics match child creation.
 
@@ -542,6 +547,66 @@ grant, idempotency, relationship, monitoring, or source-coverage state.
 Invalid credentials retain the normal authentication failure throttling and
 security evidence and never reach preview planning.
 
+### `POST /api/v1/objects/{object_id}/rename`
+
+Changes only the common top-level `label` of one object. It is available for
+every nameable kind: `host`, `system`, `network`, `device`, `service`,
+`credential_reference`, `runbook`, `decision`, and `project`.
+
+The request body is the closed document `{"new_label": "..."}` and nothing
+else, so a caller never reconstructs a complete object document to change a
+display name. The object is named by the path and the base revision by the
+current strong `If-Match` ETag.
+
+Requires the dedicated `rename` permission on that exact object; general
+`write` is not a substitute, and `rename` alone permits no other mutation.
+Missing and concealed path IDs return the usual `404`. A principal that can
+discover the object but holds no `rename` receives `403`. Missing `If-Match` is
+`428 precondition_required`, and a malformed, weak, or stale value is
+`412 precondition_failed`. A proposed label rejected by the kind's existing
+validation — including the shared secret-shaped value rule — is
+`422 validation_error`; no new global label uniqueness rule is introduced.
+
+The response is a closed `V1ObjectRenameOut` document with `object_id`,
+`object_kind`, `old_label`, `new_label`, `revision`, `etag`, and `changed`. It
+is deliberately not an object document.
+
+The operation changes the common top-level `label` and only that. For `host`
+and `system`, the human UI derives its displayed primary name from
+`data.network.hostnames[0]` instead, so renaming those kinds changes the stored
+label without changing that derived display name; use the full-object update to
+change a hostname.
+
+Renaming to the current label is a deterministic no-op: it verifies the claimed
+revision under the same lock the shared upsert uses, reports `changed = false`,
+does not advance the revision, and writes no audit event. Two callers holding
+the same base ETag cannot both rename: the second receives
+`412 precondition_failed`.
+
+A successful rename writes exactly one `label` column plus the optimistic
+concurrency columns, so object ID, kind, references, relationships, placement,
+status, lifecycle, health, summary, kind-specific data, provenance, and grants
+are unchanged. It emits one `object_renamed` audit event carrying the object,
+kind, old and new label, actor, channel, request ID, and resulting revision.
+
+### `POST /api/v1/objects/{object_id}/rename-preview`
+
+Previews exactly the rename above without applying it, from the same path ID,
+body, and `If-Match`. Effective `rename` on that exact object is still
+required, and the shared plan applies the same label validation.
+
+The response is a closed `V1ObjectRenamePreviewOut` document with the same
+fields, bounds, digests, and value/pointer contract as
+`POST /api/v1/objects/{object_id}/update-preview`. Because the proposal is the
+stored record with only `label` replaced, a changed preview publishes exactly
+one `/label` diff entry, which is at once the exact rename diff and the
+evidence that no other path changes. A no-op preview publishes an empty diff
+and equal base and expected result revisions.
+
+Like the update preview, an authenticated rename preview issues reads only and
+creates no lock, reservation, or later-apply guarantee: a write in between
+makes the old ETag stale in the ordinary way.
+
 ### `DELETE /api/v1/objects/{object_id}`
 
 Requires the separate `delete` permission plus current `If-Match`. Referenced
@@ -602,6 +667,7 @@ POST     /api/v1/admin/principals/{principal_id}/tokens
 POST     /api/v1/admin/principals/{principal_id}/tokens/rotate
 DELETE   /api/v1/admin/principals/{principal_id}/tokens/{token_name}
 POST     /api/v1/admin/principals/{principal_id}/catalog-role
+POST     /api/v1/admin/principals/{principal_id}/project-creator
 ```
 
 Lifecycle and credential mutations advance the principal revision. Token
@@ -613,7 +679,7 @@ The last-active-admin and independent last-effective-owner invariants fail
 atomically.
 
 The dedicated catalog-role route accepts the closed nullable values
-`catalog_owner`, `catalog_viewer`, and `null`. It alone uses an active human
+`catalog_owner`, `catalog_viewer`, legacy `project_creator`, and `null`. It uses an active human
 browser session, double-submit CSRF, current-password reauthentication, the
 target principal `If-Match` ETag, and a current-state dual platform-admin plus
 catalog-owner authorization check. Real changes advance the principal revision
@@ -621,6 +687,13 @@ once and emit redacted `catalog_role_changed` security evidence; no-ops preserve
 the revision and emit no success event. Replacing or removing the last active
 catalog owner remains forbidden. Viewer targets receive no special credential
 authority or token behavior.
+
+The separate `project-creator` route accepts `project_creator: true|false` plus
+`current_admin_password`. It uses the same browser-CSRF, current-password,
+dual-admin, target ETag, no-op, and audit protections as the catalog-role route.
+It changes no catalog role or object grant, so `catalog_viewer` read access
+remains intact. An active principal with the capability may create only root
+Projects and receives a direct Owner/self grant on each created Project.
 
 The principal-targeted grant routes are administrative aliases for the shared
 object grant command layer. They require both the platform `admin` role and the
@@ -639,7 +712,11 @@ revision and ETag plus two explicitly separate projections:
   principals so stale assignments remain administratively visible;
 - `effective_access`: active principals that currently receive permissions on
   this object, with additive permissions and every direct or inherited grant
-  source.
+  source;
+- `owner_coverage`: `state` (`owned` or `ownerless`), the counts of active
+  direct and inherited Owner grants and of inactive direct Owner grants,
+  `actor_has_owner_source`, and `adoption_available`. A global catalog role is
+  never counted as an Owner source here.
 
 Principal fields are limited to ID, login, display name, principal type, and
 active state. Credential, session, token, password, and hash fields are never
@@ -671,6 +748,44 @@ accepts `principal_id`, `role`, and `scope`; update accepts `role` and `scope`.
 Only an effective Owner may create, change, or revoke an Owner grant. The
 last-effective-owner and actor-self-lockout guards cover role changes, scope
 shrinks, and revocation over the canonical placement graph.
+
+An actor with `manage_access` but no effective Owner grant receives `403` with
+one of two stable error codes instead of the generic `forbidden`:
+
+- `owner_required_to_manage_owner_grants`: the object has an active Owner, so
+  ask an Owner to make the change;
+- `object_has_no_owner_use_adoption_flow`: no active direct or inherited Owner
+  grant reaches the object, so a catalog owner must use the adoption command
+  below. Ordinary grant management never mints that first Owner.
+
+### Ownerless-object adoption
+
+```text
+POST /api/v1/objects/{object_id}/access/adoption
+```
+
+The narrow, audited recovery for a legacy object that no active direct or
+inherited Owner grant reaches. The body is `{"principal_id": "..."}` and the
+current strong ETag is required in `If-Match`. The command:
+
+- requires an active `catalog_owner` on a trusted channel (the token audience
+  must match the `api` or `mcp` channel); anyone else receives `403
+  adoption_requires_catalog_owner` before the object is inspected;
+- requires an existing active target principal (`409 owner_principal_inactive`);
+- refuses with `409 object_has_owner_coverage` as soon as any active direct or
+  inherited Owner grant exists, so it can never add a second Owner or bypass the
+  Owner-only rules of a healthy object;
+- assigns exactly one direct `Owner/self` grant, advances the object revision,
+  and returns `201` with the new ETag, the grant, and `previous_owner_count`;
+- writes one immutable `owner_adopt` object audit event (actor, catalog
+  authority, target principal, channel, request ID, old/new revision, previous
+  direct/inherited Owner counts, inactive direct Owner grants, and the grant)
+  plus one `ownerless_object_adoption` security event.
+
+Two concurrent adoptions with the same ETag have exactly one winner; the other
+receives `412 precondition_failed`, and a retry with the fresh ETag receives
+`409 object_has_owner_coverage`. The last-owner and self-lockout guards apply
+unchanged to the adopted grant afterwards.
 
 An actual change returns the new revision and ETag and writes one immutable
 object audit event. An exact duplicate create or unchanged update returns

@@ -7,6 +7,7 @@ from collections.abc import Collection, Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
+from pydantic import ValidationError
 from sqlalchemy import delete, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
@@ -18,9 +19,11 @@ from blockwart.domain.auth import (
     Permission,
     PrincipalContext,
     Role,
+    catalog_role_creates_root_kind,
     permissions_for_role,
 )
 from blockwart.domain.decisions import iter_decision_references
+from blockwart.domain.placement import CANONICAL_PLACEMENT_RELATION_TYPE
 from blockwart.domain.projects import iter_project_references
 from blockwart.domain.references import TypedReference
 from blockwart.domain.relationships import (
@@ -47,7 +50,15 @@ from blockwart.models import (
     Principal,
     Relationship,
 )
-from blockwart.schemas.catalog import CatalogObjectIn, CatalogObjectOut
+from blockwart.schemas.catalog import (
+    CatalogObjectIn,
+    CatalogObjectOut,
+    ObjectRenameCandidate,
+)
+from blockwart.services.access import (
+    lock_grant_command_state,
+    lock_owner_coverage_state,
+)
 from blockwart.services.audit import add_audit_event
 from blockwart.services.catalog import (
     ObjectUpsertPlan,
@@ -62,6 +73,7 @@ from blockwart.services.catalog import (
     upsert_object,
 )
 from blockwart.services.identity import record_security_event
+from blockwart.services.ownership import InitialOwnerError, assign_initial_owner
 from blockwart.services.policy import PolicySnapshot, policy_for_principal
 from blockwart.services.read_access import ReadAccess
 
@@ -71,7 +83,17 @@ _WRITE_CHANNELS = frozenset({"ui", "api", "mcp"})
 
 
 class CommandError(RuntimeError):
-    """Stable base error for authorized write commands."""
+    """Stable base error for authorized write commands.
+
+    ``code`` is an optional stable machine reason. REST and MCP publish it as
+    the error envelope ``code`` and the UI localizes it, so a caller can tell,
+    for example, a healthy object's Owner-source requirement from the ownerless
+    recovery path instead of retrying a generic denial.
+    """
+
+    def __init__(self, message: str = "", *, code: str | None = None) -> None:
+        super().__init__(message)
+        self.code = code
 
 
 class CommandNotFound(CommandError):
@@ -81,8 +103,15 @@ class CommandNotFound(CommandError):
 class CommandAuthorizationDenied(CommandError):
     """The principal lacks the required object permission."""
 
-    def __init__(self, *, object_id: str, permission: Permission) -> None:
-        super().__init__("object permission denied")
+    def __init__(
+        self,
+        *,
+        object_id: str,
+        permission: Permission,
+        code: str | None = None,
+        message: str = "object permission denied",
+    ) -> None:
+        super().__init__(message, code=code)
         self.object_id = object_id
         self.permission = permission
 
@@ -97,6 +126,10 @@ class CommandPreconditionRequired(CommandError):
 
 class CommandPreconditionFailed(CommandError):
     """The supplied optimistic concurrency precondition is stale."""
+
+
+class CommandValidationFailed(CommandError):
+    """A projected field value was rejected by its canonical domain contract."""
 
 
 class IdempotencyConflict(CommandConflict):
@@ -408,6 +441,307 @@ def preview_catalog_object_update(
     )
 
 
+@dataclass(frozen=True, slots=True)
+class ObjectRenamePlan:
+    """The shared read-only decision behind both rename preview and apply.
+
+    Planning resolves object authorization under the dedicated `rename`
+    capability, the current strong ETag precondition, and the kind-specific
+    validation of the proposed label. It never mutates, flushes, or reserves
+    anything, and it never consults or produces any field other than `label`.
+    """
+
+    row: CatalogObject
+    object_id: str
+    object_kind: str
+    expected_revision: int
+    current_label: str
+    new_label: str
+    context: WriteContext
+
+    @property
+    def changed(self) -> bool:
+        return self.current_label != self.new_label
+
+
+@dataclass(frozen=True, slots=True)
+class ObjectRenamePreviewResult:
+    object_id: str
+    object_kind: str
+    changed: bool
+    base_revision: int
+    base_etag: str
+    expected_result_revision: int
+    expected_result_etag: str
+    diff: list[PreviewDiffEntry]
+    diff_truncated: bool
+    diff_digest: str
+    contract_version: str
+    preview_digest: str
+
+
+@dataclass(frozen=True, slots=True)
+class ObjectRenameResult:
+    object_id: str
+    object_kind: str
+    old_label: str
+    new_label: str
+    revision: int
+    etag: str
+    changed: bool
+
+
+def plan_object_rename(
+    session: Session,
+    context: WriteContext,
+    *,
+    object_id: str,
+    new_label: str,
+    expected_revision: int | str | None,
+    refresh_policy: bool = False,
+) -> ObjectRenamePlan:
+    """Resolve one narrow object rename completely, without mutating anything.
+
+    This is the single shared gate for the real rename and its read-only
+    preview: object concealment, the dedicated `rename` capability on that
+    exact object, the current strong ETag precondition, and the kind-specific
+    label validation of :class:`ObjectRenameCandidate`. General `write` is
+    deliberately not accepted as a substitute, and no other object field is
+    read, projected, or proposed.
+    """
+    current_context = (
+        WriteContext(
+            principal=context.principal,
+            policy=policy_for_principal(session, context.principal.id),
+            channel=context.channel,
+            request_id=context.request_id,
+        )
+        if refresh_policy
+        else context
+    )
+    row = _require_permission(
+        session,
+        current_context,
+        object_id=object_id,
+        permission=Permission.RENAME,
+    )
+    resolved_revision = _resolve_expected_revision(expected_revision)
+    if row.revision != resolved_revision:
+        raise CommandPreconditionFailed("object revision changed")
+    return ObjectRenamePlan(
+        row=row,
+        object_id=object_id,
+        object_kind=row.kind,
+        expected_revision=resolved_revision,
+        current_label=row.label,
+        new_label=_validated_rename_label(row, new_label),
+        context=current_context,
+    )
+
+
+def preview_object_rename(
+    session: Session,
+    context: WriteContext,
+    *,
+    object_id: str,
+    new_label: str,
+    expected_revision: int | str | None,
+    refresh_policy: bool = False,
+) -> ObjectRenamePreviewResult:
+    """Resolve the same rename read-only and publish its exact diff.
+
+    The proposed record is the stored record with `label` replaced and nothing
+    else, so the published diff is both the exact rename diff and the evidence
+    that no other path changes. It shares the bounded, redacted, versioned
+    preview contract of the full-object update preview, and it grants no lock,
+    reservation, or later-apply guarantee.
+    """
+    plan = plan_object_rename(
+        session,
+        context,
+        object_id=object_id,
+        new_label=new_label,
+        expected_revision=expected_revision,
+        refresh_policy=refresh_policy,
+    )
+    before = _current_snapshot(plan.row)
+    after = {**before, "label": plan.new_label}
+    rendered_before = _render_preview_snapshot(before, context=plan.context)
+    rendered_after = _render_preview_snapshot(after, context=plan.context)
+    diff, diff_truncated, diff_digest = preview_diff(
+        before,
+        after,
+        rendered_before=rendered_before,
+        rendered_after=rendered_after,
+        digest_before=rendered_before,
+        digest_after=_render_preview_snapshot(after),
+    )
+    base_revision = plan.expected_revision
+    result_revision = base_revision + 1 if plan.changed else base_revision
+    body: dict[str, object] = {
+        "base_etag": revision_etag(base_revision),
+        "base_revision": base_revision,
+        "changed": plan.changed,
+        "preview_contract_version": PREVIEW_CONTRACT_VERSION,
+        "diff": [entry.as_json() for entry in diff],
+        "diff_digest": diff_digest,
+        "diff_truncated": diff_truncated,
+        "expected_result_etag": revision_etag(result_revision),
+        "expected_result_revision": result_revision,
+        "object_id": object_id,
+        "object_kind": plan.object_kind,
+    }
+    return ObjectRenamePreviewResult(
+        object_id=object_id,
+        object_kind=plan.object_kind,
+        changed=plan.changed,
+        base_revision=base_revision,
+        base_etag=revision_etag(base_revision),
+        expected_result_revision=result_revision,
+        expected_result_etag=revision_etag(result_revision),
+        diff=diff,
+        diff_truncated=diff_truncated,
+        diff_digest=diff_digest,
+        contract_version=PREVIEW_CONTRACT_VERSION,
+        preview_digest=preview_digest(body),
+    )
+
+
+def rename_catalog_object(
+    session: Session,
+    context: WriteContext,
+    *,
+    object_id: str,
+    new_label: str,
+    expected_revision: int | str | None,
+    refresh_policy: bool = False,
+) -> ObjectRenameResult:
+    """Plan and apply one authorized narrow rename in this transaction.
+
+    The plan is resolved again here, inside the write transaction, so a
+    concurrent write between an earlier preview and this call fails the normal
+    precondition. The applied statement names `label` and the optimistic
+    concurrency columns only, so identity, kind, references, relationships,
+    placement, status, lifecycle, health, summary, kind-specific data,
+    provenance, and grants cannot change even in principle.
+
+    A no-op rename is deterministic: it confirms the claimed revision under the
+    same lock the shared upsert uses, then reports the unchanged revision
+    without advancing it and without writing an audit event.
+    """
+    plan = plan_object_rename(
+        session,
+        context,
+        object_id=object_id,
+        new_label=new_label,
+        expected_revision=expected_revision,
+        refresh_policy=refresh_policy,
+    )
+    context = plan.context
+    if not plan.changed:
+        current_id = session.scalar(
+            select(CatalogObject.id)
+            .where(
+                CatalogObject.id == object_id,
+                CatalogObject.revision == plan.expected_revision,
+            )
+            .with_for_update()
+        )
+        if current_id is None:
+            raise CommandPreconditionFailed("object revision changed")
+        return ObjectRenameResult(
+            object_id=object_id,
+            object_kind=plan.object_kind,
+            old_label=plan.current_label,
+            new_label=plan.new_label,
+            revision=plan.expected_revision,
+            etag=revision_etag(plan.expected_revision),
+            changed=False,
+        )
+    before = _object_snapshot(plan.row)
+    result = session.execute(
+        update(CatalogObject)
+        .where(
+            CatalogObject.id == object_id,
+            CatalogObject.revision == plan.expected_revision,
+        )
+        .values(
+            label=plan.new_label,
+            revision=CatalogObject.revision + 1,
+            updated_at=_now(),
+        )
+        .execution_options(synchronize_session=False)
+    )
+    if result.rowcount != 1:
+        raise CommandPreconditionFailed("object revision changed")
+    new_revision = plan.expected_revision + 1
+    session.expire(plan.row)
+    _write_command_audit(
+        session,
+        context,
+        object_id=object_id,
+        action="object_renamed",
+        old_revision=plan.expected_revision,
+        new_revision=new_revision,
+        before=before,
+        after={**before, "label": plan.new_label},
+        changes=[_change("label", plan.current_label, plan.new_label)],
+        extra={
+            "object_ref": f"{plan.object_kind}:{object_id}",
+            "object_kind": plan.object_kind,
+            "old_label": plan.current_label,
+            "new_label": plan.new_label,
+        },
+    )
+    return ObjectRenameResult(
+        object_id=object_id,
+        object_kind=plan.object_kind,
+        old_label=plan.current_label,
+        new_label=plan.new_label,
+        revision=new_revision,
+        etag=revision_etag(new_revision),
+        changed=True,
+    )
+
+
+def _validated_rename_label(row: CatalogObject, new_label: str) -> str:
+    """Validate one proposed label under the stored record's own kind contract.
+
+    The candidate carries the stored document verbatim, so the proposal differs
+    from the record in the label alone. A record whose stored state already
+    fails its own kind contract — a corrupt data document, for instance — is
+    reported as a conflict rather than as a rejected label, because its rename
+    is blocked by the record and not by the caller's input.
+    """
+    raw_data = _raw_object_snapshot(row)["data"]
+    data = raw_data if isinstance(raw_data, dict) else {}
+    try:
+        return _rename_candidate(row, data, new_label).label
+    except ValidationError as exc:
+        try:
+            _rename_candidate(row, data, row.label)
+        except ValidationError as stored:
+            raise CommandConflict("stored object cannot be renamed") from stored
+        raise CommandValidationFailed("proposed label is not valid") from exc
+
+
+def _rename_candidate(
+    row: CatalogObject,
+    data: dict[str, object],
+    label: str,
+) -> ObjectRenameCandidate:
+    return ObjectRenameCandidate(
+        id=row.id,
+        kind=row.kind,
+        label=label,
+        status=row.status,
+        lifecycle=row.lifecycle,
+        health=row.health,
+        summary=row.summary,
+        data=data,
+    )
+
+
 def _current_snapshot(
     row: CatalogObject,
 ) -> dict[str, object]:
@@ -551,15 +885,7 @@ def create_child_object(
         write_audit=False,
         touch_revisions=False,
     )
-    session.add(
-        ObjectGrant(
-            principal_id=context.principal.id,
-            object_id=created.id,
-            role=Role.OWNER,
-            scope=GrantScope.SELF,
-            created_by_principal_id=context.principal.id,
-        )
-    )
+    _assign_creator_owner(session, context, object_id=created.id)
     parent_revision = _bump_object_revision(session, parent.id)
     session.flush()
     result = get_object(session, created.id)
@@ -624,16 +950,17 @@ def create_catalog_root(
     """Atomically create one disconnected top-level catalog root.
 
     Authorization is resolved from current database state inside the
-    transaction: the actor must be active and hold the ``catalog_owner`` role.
-    Platform-admin alone is not sufficient, and an active catalog owner needs
-    no platform-admin role for this catalog operation. The root and exactly
-    one real direct Owner/self grant for the creating principal commit
-    together; no placement parent, synthetic relationship, subtree grant,
-    wildcard, or sentinel grant is ever created. Catalog-role membership is
-    never changed by this catalog write.
+    transaction: the actor must be active and hold a catalog role that covers
+    the requested kind — ``catalog_owner`` for every kind, or the narrow
+    ``project_creator`` for ``project`` only. Platform-admin alone is not
+    sufficient, and neither catalog role needs a platform-admin role for this
+    catalog operation. The root and exactly one real direct Owner/self grant
+    for the creating principal commit together; no placement parent, synthetic
+    relationship, subtree grant, wildcard, or sentinel grant is ever created.
+    Catalog-role membership is never changed by this catalog write.
     """
     timestamp = now or _now()
-    _require_active_catalog_owner(session, context)
+    authority = _require_root_creation_authority(session, context, kind=payload.kind)
     request_payload = {"payload": payload.model_dump(mode="json")}
     record, replay = reserve_idempotency_record(
         session,
@@ -658,15 +985,7 @@ def create_catalog_root(
 
     created = upsert_object(session, payload, write_audit=False)
     object_ref = f"{created.kind}:{created.id}"
-    session.add(
-        ObjectGrant(
-            principal_id=context.principal.id,
-            object_id=created.id,
-            role=Role.OWNER,
-            scope=GrantScope.SELF,
-            created_by_principal_id=context.principal.id,
-        )
-    )
+    _assign_creator_owner(session, context, object_id=created.id)
     session.flush()
     result = get_object(session, created.id)
     root_row = session.get(CatalogObject, created.id)
@@ -693,6 +1012,9 @@ def create_catalog_root(
         extra={
             "object_ref": object_ref,
             "parent_ref": None,
+            # Which delegable catalog authority was actually used, so the audit
+            # trail distinguishes a narrow project creator from a catalog owner.
+            "catalog_authority": authority.value,
             "creator_owner_grant": {
                 "principal_id": context.principal.id,
                 "role": Role.OWNER,
@@ -785,15 +1107,7 @@ def create_attached_device(
         )
     except RelationshipIntegrityError as exc:
         raise CommandConflict(str(exc)) from exc
-    session.add(
-        ObjectGrant(
-            principal_id=context.principal.id,
-            object_id=created.id,
-            role=Role.OWNER,
-            scope=GrantScope.SELF,
-            created_by_principal_id=context.principal.id,
-        )
-    )
+    _assign_creator_owner(session, context, object_id=created.id)
     parent_revision = _bump_object_revision(session, parent.id)
     session.flush()
     result = get_object(session, created.id)
@@ -864,6 +1178,26 @@ def delete_catalog_object(
     expected_revision = _resolve_expected_revision(expected_revision)
     if row.revision != expected_revision:
         raise CommandPreconditionFailed("object revision changed")
+    lock_grant_command_state(
+        session,
+        actor_principal_id=context.principal.id,
+        object_id=object_id,
+    )
+    session.expire_all()
+    context = WriteContext(
+        principal=context.principal,
+        policy=policy_for_principal(session, context.principal.id),
+        channel=context.channel,
+        request_id=context.request_id,
+    )
+    row = _require_permission(
+        session,
+        context,
+        object_id=object_id,
+        permission=Permission.DELETE,
+    )
+    if row.revision != expected_revision:
+        raise CommandPreconditionFailed("object revision changed")
     before = _object_snapshot(row)
     claimed_revision = _claim_object_revision(
         session,
@@ -911,6 +1245,25 @@ def create_object_relationship(
         expected_revision=expected_revision,
     )
     canonical_metadata = _canonical_relationship_metadata(relation_type, metadata)
+    if relation_type == CANONICAL_PLACEMENT_RELATION_TYPE:
+        lock_owner_coverage_state(
+            session,
+            extra_principal_ids=(context.principal.id,),
+        )
+        context = WriteContext(
+            principal=context.principal,
+            policy=policy_for_principal(session, context.principal.id),
+            channel=context.channel,
+            request_id=context.request_id,
+        )
+        target, peer, expected_revision = _relationship_command_objects(
+            session,
+            context,
+            object_id=object_id,
+            from_ref=from_ref,
+            to_ref=to_ref,
+            expected_revision=expected_revision,
+        )
     existing = session.scalar(
         select(Relationship).where(
             Relationship.from_ref == from_ref,
@@ -1131,6 +1484,40 @@ def delete_object_relationship(
         relationship,
         relation_type=relation_type,
     )
+    if relation_type == CANONICAL_PLACEMENT_RELATION_TYPE:
+        lock_owner_coverage_state(
+            session,
+            extra_principal_ids=(context.principal.id,),
+        )
+        context = WriteContext(
+            principal=context.principal,
+            policy=policy_for_principal(session, context.principal.id),
+            channel=context.channel,
+            request_id=context.request_id,
+        )
+        target, peer, expected_revision = _relationship_command_objects(
+            session,
+            context,
+            object_id=object_id,
+            from_ref=from_ref,
+            to_ref=to_ref,
+            expected_revision=expected_revision,
+        )
+        relationship = session.scalar(
+            select(Relationship)
+            .where(
+                Relationship.from_ref == from_ref,
+                Relationship.relation_type == relation_type,
+                Relationship.to_ref == to_ref,
+            )
+            .execution_options(populate_existing=True)
+        )
+        if relationship is None:
+            raise CommandNotFound("relationship not found")
+        canonical_metadata = relationship_metadata(
+            relationship,
+            relation_type=relation_type,
+        )
     old_revision = target.revision
     new_revision = _claim_object_revision(
         session,
@@ -1200,6 +1587,7 @@ def record_command_denial(
             "object_id": error.object_id,
             "permission": error.permission,
             "principal_id": context.principal.id,
+            **({"reason": error.code} if error.code is not None else {}),
         },
     )
 
@@ -1238,16 +1626,48 @@ def _require_permission(
     return row
 
 
-def _require_active_catalog_owner(session: Session, context: WriteContext) -> None:
-    """Require the actor to be an active catalog owner from current DB state.
+def _assign_creator_owner(
+    session: Session,
+    context: WriteContext,
+    *,
+    object_id: str,
+) -> None:
+    """Give the authenticated creator the atomic first ``Owner/self`` grant.
+
+    The shared ownership primitive re-reads the creator inside this
+    transaction, so a creator deactivated after authentication aborts the
+    whole create instead of committing an ownerless object.
+    """
+    try:
+        assign_initial_owner(
+            session,
+            object_id=object_id,
+            owner_principal_id=context.principal.id,
+            created_by_principal_id=context.principal.id,
+        )
+    except InitialOwnerError as exc:
+        raise CommandConflict(str(exc), code=exc.code) from exc
+
+
+def _require_root_creation_authority(
+    session: Session,
+    context: WriteContext,
+    *,
+    kind: str,
+) -> CatalogRole:
+    """Require a catalog role that authorizes creating a root of ``kind``.
 
     The check re-reads the principal row inside the command transaction so a
     stale access snapshot cannot satisfy the gate after a concurrent role or
-    activation change. Platform-admin alone is denied; the catalog-owner axis
-    is independent. The trusted channel must also match the token audience:
-    browser UI actors carry no service-token audience, while api/mcp channel
-    actors must hold the matching audience. One indistinguishable denial is
-    raised for every missing property.
+    activation change. Platform-admin alone is denied; the catalog axis is
+    independent. ``catalog_owner`` authorizes every kind, while the narrow
+    ``project_creator`` role authorizes exactly ``project`` and nothing else —
+    it is not consulted for any other command, so it confers no catalog-wide
+    write, delete, or access-management authority anywhere. The trusted channel
+    must also match the token audience: browser UI actors carry no
+    service-token audience, while api/mcp channel actors must hold the matching
+    audience. One indistinguishable denial is raised for every missing
+    property, so a caller cannot probe which one it lacks.
     """
     if context.channel == "ui":
         trusted_origin = context.principal.service_token_audience is None
@@ -1258,12 +1678,18 @@ def _require_active_catalog_owner(session: Session, context: WriteContext) -> No
         not trusted_origin
         or actor is None
         or not actor.active
-        or actor.catalog_role != CatalogRole.CATALOG_OWNER
+        or not (
+            catalog_role_creates_root_kind(actor.catalog_role, kind)
+            or (actor.project_creator and kind == "project")
+        )
     ):
         raise CommandAuthorizationDenied(
             object_id="<catalog-root>",
             permission=Permission.CREATE_CHILD,
         )
+    if actor.catalog_role == CatalogRole.CATALOG_OWNER:
+        return CatalogRole.CATALOG_OWNER
+    return CatalogRole.PROJECT_CREATOR
 
 
 def _relationship_command_objects(

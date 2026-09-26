@@ -9,7 +9,7 @@ import tempfile
 import time
 from datetime import timedelta
 from pathlib import Path
-from urllib.error import URLError
+from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
 from mcp import ClientSession, StdioServerParameters
@@ -26,7 +26,9 @@ from blockwart.domain.attention import (
 from blockwart.domain.auth import CatalogRole, GrantScope, PlatformRole, Role
 from blockwart.mcp.server import TOOLS
 from blockwart.models import CatalogObject
+from blockwart.schemas.catalog import CatalogObjectIn
 from blockwart.services.access import create_object_grant
+from blockwart.services.catalog import upsert_object
 from blockwart.services.identity import (
     create_human_principal,
     create_service_account,
@@ -36,6 +38,7 @@ from blockwart.services.identity import (
 from blockwart.ui.security import AUTH_SESSION_COOKIE_NAME
 
 BASE_URL = "http://127.0.0.1:8000"
+LEGACY_OWNERLESS_ID = "package-smoke-legacy-ownerless"
 
 
 def fetch_json(path: str, *, token: str | None = None) -> dict:
@@ -43,6 +46,31 @@ def fetch_json(path: str, *, token: str | None = None) -> dict:
     request = Request(f"{BASE_URL}{path}", headers=headers)
     with urlopen(request, timeout=7) as response:
         return json.load(response)
+
+
+def post_json(
+    path: str,
+    body: dict,
+    *,
+    token: str,
+    headers: dict[str, str] | None = None,
+) -> tuple[int, dict]:
+    """POST one JSON body and return the status with the parsed envelope."""
+    request = Request(
+        f"{BASE_URL}{path}",
+        data=json.dumps(body).encode("utf-8"),
+        headers={
+            "Authorization": f"Bearer {token}",
+            "Content-Type": "application/json",
+            **(headers or {}),
+        },
+        method="POST",
+    )
+    try:
+        with urlopen(request, timeout=7) as response:
+            return response.status, json.load(response)
+    except HTTPError as error:
+        return error.code, json.load(error)
 
 
 def wait_until_ready() -> dict:
@@ -59,7 +87,7 @@ def wait_until_ready() -> dict:
     raise RuntimeError("installed package did not become ready")
 
 
-def prepare_authorized_readers() -> tuple[str, str, str]:
+def prepare_authorized_readers() -> tuple[str, str, str, str]:
     engine = build_engine(os.environ["BLOCKWART_DATABASE_URL"])
     try:
         with Session(engine) as session:
@@ -82,6 +110,12 @@ def prepare_authorized_readers() -> tuple[str, str, str]:
                     login="package-smoke.candidate",
                     display_name="Package Smoke Grant Candidate",
                 )
+                project_creator = create_service_account(
+                    session,
+                    login="package-smoke.project-creator",
+                    display_name="Package Smoke Project Creator",
+                    catalog_role=CatalogRole.PROJECT_CREATOR,
+                )
                 for object_id in session.scalars(
                     select(CatalogObject.id).order_by(CatalogObject.id)
                 ):
@@ -99,6 +133,18 @@ def prepare_authorized_readers() -> tuple[str, str, str]:
                         role=Role.VIEWER,
                         scope=GrantScope.SELF,
                     )
+                # A legacy object written without the creation commands, like
+                # an old import: no active Owner grant reaches it. The installed
+                # MCP adoption tool must be able to recover it.
+                upsert_object(
+                    session,
+                    CatalogObjectIn(
+                        id=LEGACY_OWNERLESS_ID,
+                        kind="host",
+                        label="Package Smoke Legacy Ownerless",
+                        data={"schema_version": 1},
+                    ),
+                )
                 service_token = issue_service_token(
                     session,
                     principal_id=service_principal.id,
@@ -110,9 +156,76 @@ def prepare_authorized_readers() -> tuple[str, str, str]:
                     principal_id=browser_principal.id,
                     ttl_seconds=3600,
                 )
-        return service_token.value, browser_session.value, grant_candidate.id
+                creator_token = issue_service_token(
+                    session,
+                    principal_id=project_creator.id,
+                    name="package-smoke-project-creator",
+                    audience="api",
+                )
+        return (
+            service_token.value,
+            browser_session.value,
+            grant_candidate.id,
+            creator_token.value,
+        )
     finally:
         engine.dispose()
+
+
+def check_root_project_creator(token: str) -> None:
+    """Prove the installed package delegates root Projects and nothing else.
+
+    The principal holds only ``catalog_role = project_creator``: it creates one
+    root Project, receives Owner/self on it, and is refused every other root
+    kind and every catalog-wide read.
+    """
+    created_status, created = post_json(
+        "/api/v1/roots",
+        {
+            "id": "package-smoke-delegated-project",
+            "kind": "project",
+            "label": "Package Smoke Delegated Project",
+            "data": {
+                "schema_version": 1,
+                "category": "implementation",
+                "project_status": "planned",
+            },
+        },
+        token=token,
+        headers={"Idempotency-Key": "package-smoke-delegated-0001"},
+    )
+    assert created_status == 201, created
+    assert created["catalog_object"]["kind"] == "project"
+    assert created["catalog_object"]["parent_path"] == []
+    assert sorted(created["catalog_object"]["capabilities"]) == [
+        "create_child",
+        "delete",
+        "discover",
+        "manage_access",
+        "read",
+        "rename",
+        "write",
+    ]
+
+    denied_status, denied = post_json(
+        "/api/v1/roots",
+        {
+            "id": "package-smoke-delegated-host",
+            "kind": "host",
+            "label": "Package Smoke Delegated Host",
+            "data": {"schema_version": 1},
+        },
+        token=token,
+        headers={"Idempotency-Key": "package-smoke-delegated-0002"},
+    )
+    assert denied_status == 403, denied
+    assert denied["error"]["code"] == "forbidden"
+
+    # The role grants no catalog-wide read: only the created root is visible.
+    visible = fetch_json("/api/v1/objects", token=token)
+    assert [item["id"] for item in visible["items"]] == [
+        "package-smoke-delegated-project"
+    ]
 
 
 async def check_mcp(
@@ -157,6 +270,8 @@ async def check_mcp(
                 "blockwart.create_root",
                 "blockwart.update_object",
                 "blockwart.preview_object_update",
+                "blockwart.rename_object",
+                "blockwart.preview_object_rename",
                 "blockwart.delete_object",
                 "blockwart.create_relationship",
                 "blockwart.delete_relationship",
@@ -171,6 +286,7 @@ async def check_mcp(
                 "blockwart.create_grant",
                 "blockwart.update_grant",
                 "blockwart.revoke_grant",
+                "blockwart.adopt_ownerless_object",
             }
             assert all(
                 tool.annotations
@@ -197,6 +313,7 @@ async def check_mcp(
                         "blockwart.get_device_graph",
                         "blockwart.get_network_topology",
                         "blockwart.preview_object_update",
+                        "blockwart.preview_object_rename",
                     }
                     else not tool.annotations.readOnlyHint
                 )
@@ -517,6 +634,36 @@ async def check_mcp(
                 },
             )
             assert not grant_revoked.isError
+            legacy_access = _tool_payload(
+                await session.call_tool(
+                    "blockwart.get_object_access",
+                    {"object_id": LEGACY_OWNERLESS_ID},
+                )
+            )
+            assert legacy_access["owner_coverage"]["state"] == "ownerless"
+            assert legacy_access["owner_coverage"]["adoption_available"] is True
+            adopted = _tool_payload(
+                await session.call_tool(
+                    "blockwart.adopt_ownerless_object",
+                    {
+                        "object_id": LEGACY_OWNERLESS_ID,
+                        "principal_id": grant_candidate_id,
+                        "if_match": legacy_access["etag"],
+                    },
+                )
+            )
+            assert adopted["previous_owner_count"] == 0
+            assert adopted["grant"]["role"] == "owner"
+            assert adopted["grant"]["scope"] == "self"
+            adopted_access = _tool_payload(
+                await session.call_tool(
+                    "blockwart.get_object_access",
+                    {"object_id": LEGACY_OWNERLESS_ID},
+                )
+            )
+            assert adopted_access["owner_coverage"]["state"] == "owned"
+            assert adopted_access["owner_coverage"]["direct_active_owner_grants"] == 1
+            assert adopted_access["etag"] == adopted["etag"]
             child_create_args = {
                 "parent_id": "fabrik",
                 "idempotency_key": "package-smoke-create-0001",
@@ -757,7 +904,12 @@ def prove_contract_drift_fail_fast(mcp_entrypoint: Path, api_token: str) -> None
 
 def main() -> None:
     readiness = wait_until_ready()
-    api_token, browser_session, grant_candidate_id = prepare_authorized_readers()
+    (
+        api_token,
+        browser_session,
+        grant_candidate_id,
+        project_creator_token,
+    ) = prepare_authorized_readers()
     index_request = Request(
         f"{BASE_URL}/",
         headers={
@@ -780,7 +932,7 @@ def main() -> None:
         token=api_token,
     )["objects"][0]
 
-    assert readiness["revision"] == "20260825_0021"
+    assert readiness["revision"] == "20260925_0024"
     assert "Blockwart" in index
     assert static_content_type == "text/css"
     assert not any(
@@ -798,6 +950,7 @@ def main() -> None:
         "transport",
         "exposure",
     }.issubset(service["endpoints"][0])
+    check_root_project_creator(project_creator_token)
     protocol = asyncio.run(
         check_mcp(
             search["results"][0]["id"],
@@ -808,7 +961,7 @@ def main() -> None:
     print(
         "installed_package=ok "
         f"cwd={Path.cwd()} revision={readiness['revision']} "
-        f"openapi_paths={len(openapi['paths'])} mcp_protocol={protocol} mcp_calls=38 "
+        f"openapi_paths={len(openapi['paths'])} mcp_protocol={protocol} mcp_calls=41 "
         "mcp_contract=compatible mcp_contract_drift=fail_fast"
     )
 
