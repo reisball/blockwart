@@ -3,11 +3,11 @@ set -euo pipefail
 
 PROJECT_ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 PYTHON_BIN=${PYTHON_BIN:-python3}
-EXPECTED_PIP_TOOLS_VERSION=7.6.0
+EXPECTED_PIP_TOOLS_VERSION=7.6.1
 MODE=${1:-update}
 
-if [[ "$MODE" != update && "$MODE" != --check ]]; then
-  echo "usage: $0 [--check]" >&2
+if [[ "$MODE" != update && "$MODE" != --preserve && "$MODE" != --check ]]; then
+  echo "usage: $0 [--preserve|--check]" >&2
   exit 2
 fi
 
@@ -36,7 +36,7 @@ compile_lock() {
   if [[ -n "$extra" ]]; then
     extra_args=(--extra "$extra")
   fi
-  if [[ "$MODE" == --check ]]; then
+  if [[ "$MODE" == --check || "$MODE" == --preserve ]]; then
     cp "$committed_lock" "$body"
     upgrade_args=(--no-upgrade)
   else
@@ -74,6 +74,13 @@ if [[ "$MODE" == --check ]]; then
 fi
 
 mkdir -p "$PROJECT_ROOT/requirements"
-compile_lock "" "$PROJECT_ROOT/requirements/runtime.txt"
-compile_lock dev "$PROJECT_ROOT/requirements/dev.txt"
+if [[ "$MODE" == --preserve ]]; then
+  compile_lock "" "$TEMP_DIR/runtime.txt" "$PROJECT_ROOT/requirements/runtime.txt"
+  compile_lock dev "$TEMP_DIR/dev.txt" "$PROJECT_ROOT/requirements/dev.txt"
+  cp "$TEMP_DIR/runtime.txt" "$PROJECT_ROOT/requirements/runtime.txt"
+  cp "$TEMP_DIR/dev.txt" "$PROJECT_ROOT/requirements/dev.txt"
+else
+  compile_lock "" "$PROJECT_ROOT/requirements/runtime.txt"
+  compile_lock dev "$PROJECT_ROOT/requirements/dev.txt"
+fi
 echo "dependency_locks=updated"

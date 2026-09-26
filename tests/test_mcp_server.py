@@ -320,6 +320,15 @@ def test_mcp_client_completes_handshake_and_calls_every_read_only_tool() -> None
                             "blockwart.list_own_direct_grants",
                             {"role": "owner", "limit": 3, "cursor": "opaque-own-cursor"},
                         ),
+                        "blockwart.list_admin_principal_assignments": await session.call_tool(
+                            "blockwart.list_admin_principal_assignments",
+                            {
+                                "principal_id": "principal/admin",
+                                "assignment_type": "direct",
+                                "limit": 2,
+                                "cursor": "opaque-assignment-cursor",
+                            },
+                        ),
                         "blockwart.preview_grant_scope": await session.call_tool(
                             "blockwart.preview_grant_scope",
                             {"object_id": "host/fabrik", "scope": "subtree"},
@@ -419,6 +428,7 @@ def test_mcp_client_completes_handshake_and_calls_every_read_only_tool() -> None
         "blockwart.list_admin_principals",
         "blockwart.get_admin_principal",
         "blockwart.list_own_direct_grants",
+        "blockwart.list_admin_principal_assignments",
         "blockwart.preview_grant_scope",
         "blockwart.create_grant",
         "blockwart.update_grant",
@@ -444,6 +454,7 @@ def test_mcp_client_completes_handshake_and_calls_every_read_only_tool() -> None
             "blockwart.list_admin_principals",
             "blockwart.get_admin_principal",
             "blockwart.list_own_direct_grants",
+            "blockwart.list_admin_principal_assignments",
             "blockwart.preview_grant_scope",
             "blockwart.get_device_graph",
             "blockwart.get_network_topology",
@@ -521,6 +532,15 @@ def test_mcp_client_completes_handshake_and_calls_every_read_only_tool() -> None
     assert result_payloads["blockwart.list_own_direct_grants"]["query"]["cursor"] == [
         "opaque-own-cursor"
     ]
+    assignment_payload = result_payloads["blockwart.list_admin_principal_assignments"]
+    assert assignment_payload["path"] == (
+        "/api/v1/admin/principals/principal%2Fadmin/assignments"
+    )
+    assert assignment_payload["query"] == {
+        "assignment_type": ["direct"],
+        "limit": ["2"],
+        "cursor": ["opaque-assignment-cursor"],
+    }
     assert result_payloads["blockwart.preview_grant_scope"]["path"] == (
         "/api/v1/objects/host%2Ffabrik/access/preview"
     )
@@ -611,6 +631,7 @@ def test_mcp_client_completes_handshake_and_calls_every_read_only_tool() -> None
         "/api/v1/admin/principals",
         "/api/v1/admin/principals/principal%2Fadmin",
         "/api/v1/auth/me/direct-grants",
+        "/api/v1/admin/principals/principal%2Fadmin/assignments",
         "/api/v1/objects/host%2Ffabrik/access/preview",
         "/api/v1/objects/host%2Ffabrik/device-graph",
         "/api/v1/objects/host%2Ffabrik/network-topology",
@@ -1290,6 +1311,7 @@ def test_mcp_tools_publish_explicit_read_write_and_delete_hints() -> None:
         "blockwart.list_admin_principals",
         "blockwart.get_admin_principal",
         "blockwart.list_own_direct_grants",
+        "blockwart.list_admin_principal_assignments",
         "blockwart.preview_grant_scope",
         "blockwart.create_grant",
         "blockwart.update_grant",
@@ -1316,6 +1338,7 @@ def test_mcp_tools_publish_explicit_read_write_and_delete_hints() -> None:
             "blockwart.list_admin_principals",
             "blockwart.get_admin_principal",
             "blockwart.list_own_direct_grants",
+            "blockwart.list_admin_principal_assignments",
             "blockwart.preview_grant_scope",
             "blockwart.get_device_graph",
             "blockwart.get_network_topology",
@@ -1397,17 +1420,44 @@ def test_project_chronology_tools_publish_the_closed_rest_contract() -> None:
 def test_mcp_descriptions_route_fresh_agent_read_and_create_intents() -> None:
     tools = {tool["name"]: tool for tool in TOOLS}
 
-    assert "compact summaries" in tools["blockwart.search"]["description"]
+    assert "search summaries" in tools["blockwart.search"]["description"]
     assert "when its id is known" in tools["blockwart.get_object_context"]["description"]
     assert "newest-first" in tools["blockwart.list_audit_events"]["description"]
     assert "comment content stays separate" in tools["blockwart.list_audit_events"]["description"]
-    assert "full sanitized details in one call" in tools["blockwart.get_context"]["description"]
+    assert "sanitized details in one call" in tools["blockwart.get_context"]["description"]
     assert "single agent call" in tools["blockwart.create_child"]["description"]
     assert "single agent call" in tools["blockwart.create_attached_device"]["description"]
     assert not {
         "blockwart.get_asset_details",
         "blockwart.get_service_details",
     } & set(tools)
+
+
+def test_mcp_read_descriptions_match_published_projection_defaults() -> None:
+    tools = {tool["name"]: tool for tool in TOOLS}
+    read_names = (
+        "blockwart.search",
+        "blockwart.get_context",
+        "blockwart.get_object_contexts",
+    )
+
+    for name in read_names:
+        tool = tools[name]
+        description = tool["description"]
+        properties = tool["inputSchema"]["properties"]
+        default = properties["projection"]["default"]
+        assert default == "full"
+        assert f"projection defaults to {default}" in description.lower()
+        assert "projection=compact" in description
+        assert "projection=context" in description
+
+    search = tools["blockwart.search"]
+    assert "not full object details" in search["description"]
+    assert "include_recent_comments" not in search["inputSchema"]["properties"]
+    for name in ("blockwart.get_context", "blockwart.get_object_contexts"):
+        tool = tools[name]
+        assert "include_recent_comments" in tool["inputSchema"]["properties"]
+        assert "include_recent_comments" in tool["description"]
 
 
 def test_mcp_search_and_context_support_host_and_structured_filters() -> None:
@@ -1858,6 +1908,16 @@ def test_mcp_admin_tools_are_read_only_and_never_expose_credential_operations() 
         {"principal_id": "principal/root"},
         fetcher=fake_fetch,
     )
+    call_tool(
+        "blockwart.list_admin_principal_assignments",
+        {
+            "principal_id": "principal/root",
+            "assignment_type": "direct",
+            "limit": 7,
+            "cursor": "opaque-assignment-cursor",
+        },
+        fetcher=fake_fetch,
+    )
 
     assert calls == [
         (
@@ -1871,7 +1931,23 @@ def test_mcp_admin_tools_are_read_only_and_never_expose_credential_operations() 
             },
         ),
         ("/api/v1/admin/principals/principal%2Froot", {}),
+        (
+            "/api/v1/admin/principals/principal%2Froot/assignments",
+            {
+                "assignment_type": "direct",
+                "limit": 7,
+                "cursor": "opaque-assignment-cursor",
+            },
+        ),
     ]
+    schema = next(
+        tool["inputSchema"]
+        for tool in TOOLS
+        if tool["name"] == "blockwart.list_admin_principal_assignments"
+    )
+    assert schema["properties"]["assignment_type"]["enum"] == ["direct", "effective"]
+    assert schema["properties"]["limit"]["maximum"] == 50
+    assert "cursor" in schema["properties"]
     assert not any("password" in tool["name"] or "token" in tool["name"] for tool in TOOLS)
 
 
@@ -2195,3 +2271,154 @@ def test_unscoped_describe_schema_keeps_the_historical_payload_byte_for_byte() -
 def test_an_unknown_schema_section_is_rejected_by_the_published_tool_schema() -> None:
     with pytest.raises(ToolInputError):
         call_tool("blockwart.describe_schema", {"sections": ["everything"]})
+
+
+def _schema_call(arguments: dict) -> dict:
+    response = call_tool("blockwart.describe_schema", arguments)
+    return json.loads(response["content"][0]["text"])
+
+
+def _relation_type_details(arguments: dict) -> list[dict]:
+    with pytest.raises(ToolInputError) as raised:
+        call_tool("blockwart.describe_schema", arguments)
+    return raised.value.details
+
+
+def test_describe_schema_relation_type_input_schema_is_the_registry() -> None:
+    from blockwart.domain.relationships import RELATIONSHIP_TYPES
+
+    schema = next(t for t in TOOLS if t["name"] == "blockwart.describe_schema")["inputSchema"]
+    assert schema["properties"]["relation_type"]["enum"] == list(RELATIONSHIP_TYPES)
+    assert "relation_type" not in schema.get("required", [])
+
+
+def test_describe_schema_relation_type_returns_only_that_type() -> None:
+    from blockwart.domain.relationship_projection import relationship_type_projection
+    from blockwart.domain.relationships import (
+        RELATIONSHIP_RULES,
+        RELATIONSHIP_TYPES,
+        allowed_endpoint_pairs,
+    )
+
+    accepting = [
+        t
+        for t in RELATIONSHIP_TYPES
+        if any("device" in pair for pair in allowed_endpoint_pairs(t))
+    ]
+    assert accepting
+    for relation_type in accepting:
+        payload = _schema_call(
+            {"kind": "device", "sections": ["relationships"], "relation_type": relation_type}
+        )
+        relationships = payload["relationships"]
+        assert payload["requested_relation_type"] == relation_type
+        assert payload["sections"] == ["relationships"]
+        assert [t["relation_type"] for t in relationships["types"]] == [relation_type]
+        assert relationships["types"][0]["direction"]["directed_pairs"]
+        assert relationships["types"][0] == {
+            **relationship_type_projection(relation_type),
+            "metadata": {
+                **relationship_type_projection(relation_type)["metadata"],
+                "fields": relationships["types"][0]["metadata"]["fields"],
+            },
+        }
+        rule = RELATIONSHIP_RULES[relation_type]
+        assert [p["name"] for p in relationships["endpoint_predicates"]] == [
+            rule.endpoint_predicate_name
+        ]
+        assert [g["rule"] for g in relationships["graph_rules"]] == sorted(rule.graph_rules)
+        # The closed vocabulary is never narrowed.
+        assert relationships["relation_types"] == list(RELATIONSHIP_TYPES)
+        assert "rejection_policy" not in relationships
+
+
+def test_describe_schema_relation_type_leaves_errors_independent() -> None:
+    both = _schema_call(
+        {"sections": ["relationships", "errors"], "relation_type": "hosts"}
+    )
+    errors = _schema_call({"sections": ["errors"]})
+    assert both["relationship_errors"] == errors["relationship_errors"]
+    assert [t["relation_type"] for t in both["relationships"]["types"]] == ["hosts"]
+
+
+def test_describe_schema_unknown_relation_type_is_a_field_accurate_error() -> None:
+    details = _relation_type_details({"relation_type": "friends_with"})
+    assert [(d["location"], d["code"]) for d in details] == [("relation_type", "value_not_allowed")]
+    assert "friends_with" not in json.dumps(details)
+
+
+def test_describe_schema_unknown_relation_type_via_runtime_check() -> None:
+    with pytest.raises(ToolInputError) as raised:
+        mcp_server.describe_schema_payload(relation_type="friends_with")
+    assert [d["location"] for d in raised.value.details] == ["relation_type"]
+
+
+def test_describe_schema_kind_incompatible_relation_type_is_rejected_not_broadened() -> None:
+    from blockwart.domain.relationships import RELATIONSHIP_TYPES, allowed_endpoint_pairs
+
+    mismatched = [
+        (kind, t)
+        for kind in mcp_server.ALL_OBJECT_KINDS
+        for t in RELATIONSHIP_TYPES
+        if not any(kind in pair for pair in allowed_endpoint_pairs(t))
+    ]
+    assert mismatched, "registry has no kind/type mismatch to exercise"
+    for kind, relation_type in mismatched:
+        details = _relation_type_details(
+            {"kind": kind, "sections": ["relationships"], "relation_type": relation_type}
+        )
+        assert [(d["location"], d["code"]) for d in details] == [
+            ("relation_type", "value_not_allowed")
+        ]
+
+
+def test_describe_schema_relation_type_requires_the_relationships_section() -> None:
+    details = _relation_type_details(
+        {"sections": ["object_fields", "errors"], "relation_type": "hosts"}
+    )
+    assert [(d["location"], d["code"]) for d in details] == [("relation_type", "field_not_allowed")]
+
+
+def test_describe_schema_relation_type_without_sections_uses_the_complete_scope() -> None:
+    payload = _schema_call({"relation_type": "hosts"})
+    assert payload["sections"] == list(mcp_server.SCHEMA_SECTIONS)
+    assert [t["relation_type"] for t in payload["relationships"]["types"]] == ["hosts"]
+
+
+def test_describe_schema_other_invalid_arguments_stay_opaque() -> None:
+    assert _relation_type_details({"sections": ["everything"]}) == []
+    assert _relation_type_details({"kind": "nonsense", "relation_type": "hosts"}) == []
+
+
+def test_describe_schema_relation_type_keeps_unfiltered_results_unchanged() -> None:
+    assert mcp_server.describe_schema_payload(relation_type=None) == (
+        mcp_server.describe_schema_payload()
+    )
+    assert mcp_server.relationship_projection("device", None) == (
+        mcp_server.relationship_projection("device")
+    )
+
+
+def test_describe_schema_relation_type_size_comparison(capsys) -> None:
+    """Synthetic size evidence: the filter is a strict reduction of the kind-scoped read."""
+    scenarios = {
+        "complete (no scope)": {},
+        "kind=device, sections=[relationships]": {
+            "kind": "device",
+            "sections": ["relationships"],
+        },
+        "kind=device, sections=[relationships], relation_type=attached_to": {
+            "kind": "device",
+            "sections": ["relationships"],
+            "relation_type": "attached_to",
+        },
+    }
+    sizes = {}
+    with capsys.disabled():
+        print("\ndescribe_schema relation_type size comparison (compact JSON, bytes / ~tokens@4B):")
+        for label, arguments in scenarios.items():
+            text = json.dumps(_schema_call(arguments), separators=(",", ":"))
+            sizes[label] = len(text.encode())
+            print(f"  {label}: {sizes[label]} bytes / ~{sizes[label] // 4} tokens")
+    complete, kind_scoped, filtered = sizes.values()
+    assert filtered < kind_scoped < complete
