@@ -511,12 +511,14 @@ TOOLS: list[JSON] = [
     {
         "name": "blockwart.search",
         "description": (
-            "Find candidate Blockwart objects as compact summaries. Use get_context when "
-            "the same call should search and return full authorized details. Set "
-            "projection = compact for a wide discovery page: it keeps every identity, "
-            "revision, visibility decision, and effective permission, publishes each "
-            "distinct permission set once in capability_sets, and drops the repeated "
-            "parent, provenance, and network blocks."
+            "Find candidate Blockwart objects as search summaries. The projection "
+            "defaults to full: "
+            "the complete search-summary shape, not full object details. You can also select "
+            "projection=context; use projection=compact for a wide discovery page: it keeps "
+            "every identity, revision, visibility decision, and effective permission, publishes "
+            "each distinct permission set once in capability_sets, and drops the repeated "
+            "parent, provenance, and network blocks. Use get_context when the same call "
+            "should search and return full authorized details."
         ),
         "inputSchema": {
             "type": "object",
@@ -553,16 +555,16 @@ TOOLS: list[JSON] = [
     {
         "name": "blockwart.get_object_contexts",
         "description": (
-            "Retrieve full sanitized contexts for up to 20 already-known Blockwart object ids in "
-            "one bounded read-only roundtrip, preserving input order. Each readable item is "
-            "field-equivalent to get_object_context including its write-ready strong ETag; "
+            "Retrieve sanitized contexts for up to 20 already-known Blockwart object ids in "
+            "one bounded read-only roundtrip, preserving input order. The projection defaults to "
+            "full; each readable item is then field-equivalent to get_object_context, "
+            "including its write-ready strong ETag; "
             "discover-only items are strict stubs; concealed and missing ids are indistinguishable "
             "concealed placeholders. Use get_object_context for one id and get_context to search "
-            "by attribute instead of by known id. With omitted projection controls, the "
-            "backwards-compatible full default includes its bounded comment preview; compact "
-            "and context omit it unless include_recent_comments asks for one. projection = "
-            "compact returns the same identities, revisions, and effective permissions in far "
-            "less context."
+            "by attribute instead of by known id. The full default includes the bounded comment "
+            "preview. Choose projection=compact to retain identities, revisions, and "
+            "effective permissions in less context; projection=context keeps details. "
+            "Both omit the preview unless include_recent_comments requests it."
         ),
         "inputSchema": {
             "type": "object",
@@ -724,11 +726,13 @@ TOOLS: list[JSON] = [
         "name": "blockwart.get_context",
         "description": (
             "Find objects by name, kind, parent, endpoint, state, or provenance and return "
-            "their full sanitized details in one call, including current strong ETags. Reuse "
-            "an ETag unchanged as if_match on write tools; use search for compact candidate "
-            "lists. projection and fields narrow the returned sections without changing "
-            "which objects match; include_recent_comments switches the bounded comment "
-            "preview on or off."
+            "sanitized details in one call, including current strong ETags. "
+            "The projection defaults to full. Reuse an ETag unchanged as if_match on write tools; "
+            "use search with projection=compact for candidate lists. Here, projection=compact "
+            "returns a smaller discovery view, while projection=context keeps details but "
+            "omits the bounded comment preview unless include_recent_comments requests it. "
+            "Projection and fields narrow returned sections without changing which objects "
+            "match; include_recent_comments switches the bounded preview on or off."
         ),
         "inputSchema": {
             "type": "object",
