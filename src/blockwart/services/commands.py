@@ -4,6 +4,7 @@ import hashlib
 import json
 import re
 from collections.abc import Collection, Mapping
+from copy import deepcopy
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
@@ -11,6 +12,7 @@ from pydantic import ValidationError
 from sqlalchemy import delete, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from blockwart.domain.auth import (
@@ -58,6 +60,7 @@ from blockwart.schemas.catalog import (
 from blockwart.services.access import (
     lock_grant_command_state,
     lock_owner_coverage_state,
+    lock_principal_rows,
 )
 from blockwart.services.audit import add_audit_event
 from blockwart.services.catalog import (
@@ -70,6 +73,7 @@ from blockwart.services.catalog import (
     get_object,
     plan_object_upsert,
     relationship_endpoint_descriptors,
+    typed_reference_holders,
     upsert_object,
 )
 from blockwart.services.identity import record_security_event
@@ -80,6 +84,20 @@ from blockwart.services.read_access import ReadAccess
 _ETAG_PATTERN = re.compile(r'^"rev-([1-9][0-9]*)"$')
 _IDEMPOTENCY_KEY_PATTERN = re.compile(r"^[\x21-\x7e]{16,128}$")
 _WRITE_CHANNELS = frozenset({"ui", "api", "mcp"})
+
+CREDENTIAL_REFERENCE_KIND = "credential_reference"
+CREDENTIAL_REFERENCE_SERVICE_KIND = "service"
+SERVICE_CREDENTIAL_REFERENCE_ACTION = "create_service_credential_reference"
+CREDENTIAL_REFERENCE_LINK_ACTION = "credential_reference_link"
+# Stable machine reasons of the service-bound credential-reference command.
+# REST and MCP publish them as the error envelope ``code``, so a caller can act
+# on the exact reason instead of retrying a generic failure.
+CREATE_CREDENTIAL_REFERENCE_REQUIRED = "create_credential_reference_required"
+CREDENTIAL_REFERENCE_REQUIRES_SERVICE = "credential_reference_requires_service"
+CREDENTIAL_REFERENCE_KIND_REQUIRED = "credential_reference_kind_required"
+ACCESS_METHOD_NOT_FOUND = "access_method_not_found"
+CREDENTIAL_REFERENCE_ID_UNAVAILABLE = "credential_reference_id_unavailable"
+SERVICE_RECORD_INVALID = "service_record_invalid"
 
 
 class CommandError(RuntimeError):
@@ -165,6 +183,22 @@ class WriteContext:
 class ObjectCommandResult:
     catalog_object: CatalogObjectOut
     etag: str
+    changed: bool
+    replayed: bool = False
+
+
+@dataclass(frozen=True, slots=True)
+class ServiceCredentialReferenceResult:
+    """The created reference, its only link, and the explicit new ownership."""
+
+    credential_reference: CatalogObjectOut
+    etag: str
+    service_id: str
+    service_revision: int
+    service_etag: str
+    access_method_index: int
+    link_path: str
+    owner_principal_id: str
     changed: bool
     replayed: bool = False
 
@@ -1159,6 +1193,399 @@ def create_attached_device(
         catalog_object=result,
         etag=revision_etag(result.revision),
         changed=True,
+    )
+
+
+def create_service_credential_reference(
+    session: Session,
+    context: WriteContext,
+    *,
+    service_id: str,
+    access_method_index: int,
+    payload: CatalogObjectIn,
+    expected_revision: int | str | None,
+    idempotency_key: str,
+    idempotency_ttl_seconds: int,
+    now: datetime | None = None,
+) -> ServiceCredentialReferenceResult:
+    """Atomically create one credential reference bound to one service access method.
+
+    This is the narrowly delegable path for credential-reference metadata. It
+    requires the dedicated ``create_credential_reference`` permission on the
+    service, which neither placement ``create_child`` nor general ``write``
+    implies, and it needs no catalog role. The new object is a disconnected
+    ``credential_reference`` with no placement parent and no relationship; its
+    only association is one typed reference appended to
+    ``data.access_methods[access_method_index].credential_references`` of the
+    exact service revision named by the strong ETag.
+
+    The reference, its single direct Owner/self grant for the creator, the link,
+    both audit events, and the idempotency result commit together or not at
+    all. The service document changes in that one list only: every other field,
+    access method, relationship, grant, and object stays untouched, and the
+    service revision advances exactly once. An ID that already names an object
+    or is already held by any stored typed reference is refused rather than
+    linked, so an existing reference can never be reused through this command.
+    The reference data may only name objects the caller can read, and the
+    command stores metadata only: no secret value, secret-store access, or
+    target-system access is created or granted.
+    """
+    timestamp = now or _now()
+    service = _require_credential_reference_permission(
+        session,
+        context,
+        service_id=service_id,
+    )
+    if service.kind != CREDENTIAL_REFERENCE_SERVICE_KIND:
+        raise CommandConflict(
+            "credential references can only be bound to a service",
+            code=CREDENTIAL_REFERENCE_REQUIRES_SERVICE,
+        )
+    resolved_revision = _resolve_expected_revision(expected_revision)
+    if payload.kind != CREDENTIAL_REFERENCE_KIND:
+        raise CommandConflict(
+            "service-bound creation requires kind=credential_reference",
+            code=CREDENTIAL_REFERENCE_KIND_REQUIRED,
+        )
+    if isinstance(access_method_index, bool) or access_method_index < 0:
+        raise CommandConflict(
+            "service access method not found",
+            code=ACCESS_METHOD_NOT_FOUND,
+        )
+    request_payload = {
+        "service_id": service_id,
+        "access_method_index": access_method_index,
+        "expected_revision": resolved_revision,
+        "payload": payload.model_dump(mode="json"),
+    }
+    record, replay = reserve_idempotency_record(
+        session,
+        context,
+        key=idempotency_key,
+        operation_context=f"{SERVICE_CREDENTIAL_REFERENCE_ACTION}:{service_id}",
+        request_payload=request_payload,
+        ttl_seconds=idempotency_ttl_seconds,
+        now=timestamp,
+    )
+    if replay is not None:
+        return _service_credential_reference_result(replay, replayed=True)
+
+    # The shared lock order takes principal rows before object rows. The service
+    # row is then claimed at the exact ETag revision, so concurrent writers with
+    # the same base revision have exactly one winner and the losers fail before
+    # they create anything. Authorization is resolved again from current state
+    # once these locks are held.
+    lock_principal_rows(session, (context.principal.id,))
+    locked_service = session.scalar(
+        select(CatalogObject)
+        .where(
+            CatalogObject.id == service_id,
+            CatalogObject.revision == resolved_revision,
+        )
+        .with_for_update()
+        .execution_options(populate_existing=True)
+    )
+    if locked_service is None:
+        raise CommandPreconditionFailed("object revision changed")
+    context = WriteContext(
+        principal=context.principal,
+        policy=policy_for_principal(session, context.principal.id),
+        channel=context.channel,
+        request_id=context.request_id,
+    )
+    service = _require_credential_reference_permission(
+        session,
+        context,
+        service_id=service_id,
+    )
+
+    stored_data = _stored_service_data(service)
+    current_references = _access_method_credential_references(
+        stored_data,
+        access_method_index,
+    )
+    reference_ref = f"{CREDENTIAL_REFERENCE_KIND}:{payload.id}"
+    if session.get(CatalogObject, payload.id) is not None or typed_reference_holders(
+        session,
+        reference_ref,
+    ):
+        raise CommandConflict(
+            "credential reference id is already in use",
+            code=CREDENTIAL_REFERENCE_ID_UNAVAILABLE,
+        )
+    _require_knowledge_reference_access(
+        session,
+        context,
+        payload,
+        all_typed_references=True,
+    )
+    linked_references = [*current_references, reference_ref]
+    linked_data = deepcopy(stored_data)
+    linked_data["access_methods"][access_method_index][
+        "credential_references"
+    ] = linked_references
+    _validate_linked_service(
+        session,
+        service,
+        linked_data,
+        reference_id=payload.id,
+        expected_revision=resolved_revision,
+    )
+
+    try:
+        created = upsert_object(session, payload, write_audit=False)
+    except IntegrityError as exc:
+        # A concurrent writer committed the same ID after the check above.
+        raise CommandConflict(
+            "credential reference id is already in use",
+            code=CREDENTIAL_REFERENCE_ID_UNAVAILABLE,
+        ) from exc
+    _assign_creator_owner(session, context, object_id=created.id)
+
+    before = _object_snapshot(service)
+    service_ref = f"{service.kind}:{service_id}"
+    service_revision = resolved_revision + 1
+    linked = session.execute(
+        update(CatalogObject)
+        .where(
+            CatalogObject.id == service_id,
+            CatalogObject.revision == resolved_revision,
+        )
+        .values(
+            data_json=json.dumps(linked_data, sort_keys=True),
+            revision=CatalogObject.revision + 1,
+            updated_at=_now(),
+        )
+        .execution_options(synchronize_session=False)
+    )
+    if linked.rowcount != 1:
+        raise CommandPreconditionFailed("object revision changed")
+    session.flush()
+    session.expire(service)
+    link_path = f"data.access_methods[{access_method_index}].credential_references"
+    result = get_object(session, created.id)
+    reference_row = session.get(CatalogObject, created.id)
+    if result is None or reference_row is None:
+        raise CommandConflict("created object could not be loaded")
+    result = result.model_copy(
+        update={
+            "capabilities": sorted(
+                permissions_for_role(Role.OWNER),
+                key=lambda permission: permission.value,
+            )
+        }
+    )
+    owner_grant = {
+        "principal_id": context.principal.id,
+        "role": Role.OWNER,
+        "scope": GrantScope.SELF,
+    }
+    _write_command_audit(
+        session,
+        context,
+        object_id=created.id,
+        action=SERVICE_CREDENTIAL_REFERENCE_ACTION,
+        old_revision=0,
+        new_revision=reference_row.revision,
+        before=None,
+        after=_object_snapshot(reference_row),
+        changes=[],
+        extra={
+            "object_ref": reference_ref,
+            "parent_ref": None,
+            "service_ref": service_ref,
+            "access_method_index": access_method_index,
+            "link_path": link_path,
+            "creator_owner_grant": owner_grant,
+            "affected_revisions": {service_id: service_revision},
+        },
+    )
+    _write_command_audit(
+        session,
+        context,
+        object_id=service_id,
+        action=CREDENTIAL_REFERENCE_LINK_ACTION,
+        old_revision=resolved_revision,
+        new_revision=service_revision,
+        before=before,
+        after={**before, "data": redact_secret_values(linked_data)},
+        changes=[_change(link_path, current_references, linked_references)],
+        extra={
+            "object_ref": service_ref,
+            "credential_reference_ref": reference_ref,
+            "access_method_index": access_method_index,
+            "link_path": link_path,
+            "affected_revisions": {created.id: reference_row.revision},
+        },
+    )
+    response = {
+        "credential_reference": result.model_dump(mode="json"),
+        "etag": revision_etag(result.revision),
+        "service_id": service_id,
+        "service_revision": service_revision,
+        "service_etag": revision_etag(service_revision),
+        "access_method_index": access_method_index,
+        "link_path": link_path,
+        "owner_grant": {
+            "principal_id": context.principal.id,
+            "role": Role.OWNER.value,
+            "scope": GrantScope.SELF.value,
+        },
+        "changed": True,
+    }
+    record.resource_id = result.id
+    record.response_json = _canonical_json(response)
+    session.flush()
+    return _service_credential_reference_result(response, replayed=False)
+
+
+def _require_credential_reference_permission(
+    session: Session,
+    context: WriteContext,
+    *,
+    service_id: str,
+) -> CatalogObject:
+    """Require ``create_credential_reference`` and publish the missing capability.
+
+    A caller that cannot discover the service receives the same not-found
+    result as for a missing one. A caller that can discover it already sees its
+    own capabilities, so naming the one missing permission reveals nothing new
+    and spares it a trial-and-error call chain.
+    """
+    try:
+        return _require_permission(
+            session,
+            context,
+            object_id=service_id,
+            permission=Permission.CREATE_CREDENTIAL_REFERENCE,
+        )
+    except CommandAuthorizationDenied as exc:
+        raise CommandAuthorizationDenied(
+            object_id=service_id,
+            permission=Permission.CREATE_CREDENTIAL_REFERENCE,
+            code=CREATE_CREDENTIAL_REFERENCE_REQUIRED,
+            message=(
+                "creating a service-bound credential reference requires the "
+                "create_credential_reference permission on the service"
+            ),
+        ) from exc
+
+
+def _stored_service_data(service: CatalogObject) -> dict[str, object]:
+    try:
+        data = json.loads(service.data_json)
+    except (TypeError, json.JSONDecodeError) as exc:
+        raise CommandConflict(
+            "stored service record is invalid",
+            code=SERVICE_RECORD_INVALID,
+        ) from exc
+    if not isinstance(data, dict):
+        raise CommandConflict(
+            "stored service record is invalid",
+            code=SERVICE_RECORD_INVALID,
+        )
+    return data
+
+
+def _access_method_credential_references(
+    data: Mapping[str, object],
+    access_method_index: int,
+) -> list[str]:
+    """Return the current reference list of exactly one stored access method.
+
+    The strong ETag pins the stored document, so the index names exactly one
+    entry of ``data.access_methods`` as the caller read it.
+    """
+    access_methods = data.get("access_methods")
+    if not isinstance(access_methods, list) or access_method_index >= len(access_methods):
+        raise CommandConflict(
+            "service access method not found",
+            code=ACCESS_METHOD_NOT_FOUND,
+        )
+    access_method = access_methods[access_method_index]
+    references = (
+        access_method.get("credential_references", [])
+        if isinstance(access_method, dict)
+        else None
+    )
+    if not isinstance(references, list):
+        raise CommandConflict(
+            "stored service record is invalid",
+            code=SERVICE_RECORD_INVALID,
+        )
+    return list(references)
+
+
+def _validate_linked_service(
+    session: Session,
+    service: CatalogObject,
+    linked_data: dict[str, object],
+    *,
+    reference_id: str,
+    expected_revision: int,
+) -> None:
+    """Hold the linked service document to the full canonical write contract.
+
+    Validation runs the same schema, secret, ACL-shaped-key, interface,
+    placement, typed-reference, and relationship rules as a full update, with
+    the new reference ID resolving to its kind. Only the stored document plus
+    the one appended reference is ever written, so validation never becomes a
+    hidden rewrite of an unrelated field. A stored record that no longer
+    satisfies its contract blocks the link instead of being repaired here.
+    """
+    try:
+        candidate = CatalogObjectIn(
+            id=service.id,
+            kind=service.kind,
+            label=service.label,
+            status=service.status,
+            lifecycle=service.lifecycle,
+            health=service.health,
+            summary=service.summary,
+            data=linked_data,
+        )
+        plan_object_upsert(
+            session,
+            candidate,
+            known_object_kinds={reference_id: CREDENTIAL_REFERENCE_KIND},
+            expected_revision=expected_revision,
+        )
+    except RevisionConflict as exc:
+        raise CommandPreconditionFailed("object revision changed") from exc
+    except (ValidationError, RelationshipIntegrityError) as exc:
+        raise CommandConflict(
+            "stored service record does not satisfy its current contract",
+            code=SERVICE_RECORD_INVALID,
+        ) from exc
+
+
+def _service_credential_reference_result(
+    response: Mapping[str, object],
+    *,
+    replayed: bool,
+) -> ServiceCredentialReferenceResult:
+    owner_grant = response.get("owner_grant")
+    service_revision = response.get("service_revision")
+    access_method_index = response.get("access_method_index")
+    if (
+        not isinstance(owner_grant, Mapping)
+        or not isinstance(service_revision, int)
+        or not isinstance(access_method_index, int)
+    ):
+        raise CommandConflict("stored idempotency response is invalid")
+    return ServiceCredentialReferenceResult(
+        credential_reference=CatalogObjectOut.model_validate(
+            response["credential_reference"]
+        ),
+        etag=str(response["etag"]),
+        service_id=str(response["service_id"]),
+        service_revision=service_revision,
+        service_etag=str(response["service_etag"]),
+        access_method_index=access_method_index,
+        link_path=str(response["link_path"]),
+        owner_principal_id=str(owner_grant["principal_id"]),
+        changed=bool(response["changed"]),
+        replayed=replayed,
     )
 
 

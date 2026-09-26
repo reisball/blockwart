@@ -45,6 +45,9 @@ automatically.
   grants separately;
 - delegate creating top-level Project roots on its own, without handing out
   catalog-wide write, delete, or access-management authority;
+- delegate creating credential-reference metadata for one service and linking it
+  to one of its access methods in one atomic call, without catalog-wide root
+  creation or unrestricted service editing;
 - enforce centralized RBAC, optimistic concurrency, idempotency, audit, and
   last-owner safeguards;
 - import reviewed infrastructure data from Markdown/YAML with a dry-run-first

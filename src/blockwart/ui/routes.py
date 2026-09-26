@@ -297,6 +297,8 @@ def _localized_audit_lines(
         "create": "audit.create",
         "create_attached_device": "audit.create_attached_device",
         "create_root": "audit.create_root",
+        "create_service_credential_reference": "audit.create_service_credential_reference",
+        "credential_reference_link": "audit.credential_reference_link",
         "delete": "audit.delete",
         "relationship_create": "audit.relationship_create",
         "relationship_delete": "audit.relationship_delete",

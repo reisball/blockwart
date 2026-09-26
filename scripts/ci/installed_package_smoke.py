@@ -199,6 +199,7 @@ def check_root_project_creator(token: str) -> None:
     assert created["catalog_object"]["parent_path"] == []
     assert sorted(created["catalog_object"]["capabilities"]) == [
         "create_child",
+        "create_credential_reference",
         "delete",
         "discover",
         "manage_access",
@@ -276,6 +277,7 @@ async def check_mcp(
                 "blockwart.create_relationship",
                 "blockwart.delete_relationship",
                 "blockwart.create_attached_device",
+                "blockwart.create_service_credential_reference",
                 "blockwart.get_device_graph",
                 "blockwart.get_network_topology",
                 "blockwart.get_object_access",
@@ -402,6 +404,7 @@ async def check_mcp(
                 "blockwart.create_root",
                 "blockwart.update_object",
                 "blockwart.create_attached_device",
+                "blockwart.create_service_credential_reference",
             }
             relationships = schema_contract["relationships"]
             relationship_types = {
@@ -943,7 +946,7 @@ def main() -> None:
         token=api_token,
     )["objects"][0]
 
-    assert readiness["revision"] == "20260925_0024"
+    assert readiness["revision"] == "20260926_0025"
     assert "Blockwart" in index
     assert static_content_type == "text/css"
     assert not any(
