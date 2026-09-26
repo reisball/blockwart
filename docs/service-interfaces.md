@@ -13,6 +13,16 @@ Blockwart keeps three related concepts separate:
   credential-reference IDs, and operating notes. Credential values never
   belong in Blockwart.
 
+A principal with `write` on a service maintains its access methods through the
+ordinary full-object update. Recording where the credential of one access
+method is kept does not need that authority: the service-scoped
+`create_credential_reference` capability creates one new `credential_reference`
+object and appends it to `access_methods[<index>].credential_references` in one
+atomic, ETag-bound call, changing nothing else. The index names the entry of
+the stored `data.access_methods` list at the ETag's revision, so access methods
+without a stored `id` stay addressable. See
+[Service-bound credential-reference creation](auth-rbac.md#service-bound-credential-reference-creation).
+
 ## Canonical endpoint
 
 Each normalized endpoint has:

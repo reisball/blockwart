@@ -1134,6 +1134,7 @@ def test_rest_principal_projection_exposes_catalog_role_and_global_authority(
             "source": "catalog_owner",
             "permissions": [
                 "create_child",
+                "create_credential_reference",
                 "delete",
                 "discover",
                 "manage_access",

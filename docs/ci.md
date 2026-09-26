@@ -29,24 +29,24 @@ Use Python 3.12 on Linux and the exact compiler version:
 
 ```bash
 python3.12 -m venv /tmp/blockwart-lock-venv
-/tmp/blockwart-lock-venv/bin/python -m pip install "pip==26.1.2" "pip-tools==7.6.0"
+/tmp/blockwart-lock-venv/bin/python -m pip install "pip==26.2" "pip-tools==7.6.1"
 PYTHON_BIN=/tmp/blockwart-lock-venv/bin/python \
-  ./scripts/update-dependency-locks.sh
+  ./scripts/update-dependency-locks.sh --preserve
 PYTHON_BIN=/tmp/blockwart-lock-venv/bin/python \
   ./scripts/update-dependency-locks.sh --check
 ```
 
-The bootstrap and development extra currently pin or constrain pip below 26.2 because
-`pip-tools 7.6.0` imports a pip compatibility symbol removed in pip 26.2. Keep both
-guards until the pinned compiler version supports pip 26.2 or newer.
+The bootstrap and development extra pin the verified pip 26.2 / pip-tools 7.6.1 pair.
+Keep the compiler version in the bootstrap, development extra, and lock script aligned.
 
-The update command starts from empty temporary lock bodies and passes `--upgrade`, so it resolves
-the newest compatible runtime and development graphs. Check mode instead seeds each temporary
-body from its corresponding committed lock and passes `--no-upgrade`. It therefore preserves
-compatible committed versions even when newer releases exist, while still failing for missing
-locks or graph changes caused by stale, removed, or incompatible requirements. Check mode does not
-modify committed lock files: it renders comparison candidates below a temporary directory and
-compares them byte for byte with the committed locks. `pip` and `pip-tools` may cache elsewhere.
+The `--preserve` command seeds each temporary body from its committed lock and passes
+`--no-upgrade`, retaining compatible versions during focused updates. The default update
+command starts from empty temporary lock bodies and passes `--upgrade` to resolve the newest
+compatible runtime and development graphs. Check mode also uses the committed versions and
+fails for missing locks or graph changes caused by stale, removed, or incompatible requirements.
+It does not modify committed lock files: it renders comparison candidates below a temporary
+directory and compares them byte for byte with the committed locks. `pip` and `pip-tools` may
+cache elsewhere.
 
 Review the complete dependency diff, run the full proof below, and commit `pyproject.toml` and both
 generated files together. A dependency update is not a deployment.
@@ -80,13 +80,15 @@ docker build \
 
 The package smoke builds a wheel, installs it into a clean virtual environment, changes to a
 directory outside the repository, starts `blockwart-start`, loads packaged templates and static
-assets, runs the relationship-integrity diagnostic, and exercises all 35
-tools through 42 read/write, preview, Project-workspace, coverage, attention,
+assets, runs the relationship-integrity diagnostic, and exercises all 38
+tools through 43 read/write, preview, Project-workspace, coverage, attention,
 activity, comment, audit, grant-management, and ownerless-adoption calls to the
-installed `blockwart-mcp`
-console command. Before seeding it bootstraps the first catalog owner without an
-anchor, proves that `blockwart-seed` refuses to run without `--owner-login`, seeds
-with that explicit first Owner, and runs the read-only `blockwart-db owners` report.
+installed `blockwart-mcp` console command. It also proves identical same-commit
+wrapper/API metadata and a fail-fast incompatible diagnosis for a deliberately
+reduced materialized tool catalog through both installed CLI paths. Before
+seeding it bootstraps the first catalog owner without an anchor, proves that
+`blockwart-seed` refuses to run without `--owner-login`, seeds with that
+explicit first Owner, and runs the read-only `blockwart-db owners` report.
 Before starting, it plants one legacy ownerless object and proves three
 things: `blockwart-db owners` reports it, and `blockwart-start` refuses with
 `startup_error=owner_coverage_incomplete`. Then the installed

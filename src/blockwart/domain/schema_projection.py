@@ -52,11 +52,14 @@ from blockwart.domain.runbooks import runbook_contract_projection
 from blockwart.domain.security import FORBIDDEN_ACL_DATA_KEYS, FORBIDDEN_SECRET_KEYS
 from blockwart.domain.service_components import service_component_contract_projection
 
-# Version 7 additively publishes opt-in service monitoring: the closed
-# configuration document, the provider-neutral observation vocabulary, and
-# integer value bounds. Version 6 additively published bounded service-local
-# components and their directed dependency graph.
-SCHEMA_PROJECTION_VERSION = 8
+# Version 9 additively publishes the service-bound credential-reference write
+# intent and, for every write intent, its creation path and the permission or
+# catalog authority it requires. Version 7 additively published opt-in service
+# monitoring: the closed configuration document, the provider-neutral
+# observation vocabulary, and integer value bounds. Version 6 additively
+# published bounded service-local components and their directed dependency
+# graph.
+SCHEMA_PROJECTION_VERSION = 9
 SCHEMA_DATA_VERSION = 1
 OBJECT_STATUS_VALUES: tuple[str, ...] = get_args(LegacyObjectStatus)
 DEFAULT_OBJECT_STATUS = "active"

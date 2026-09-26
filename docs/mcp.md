@@ -62,6 +62,17 @@ This repository supplies the evidence and verifier only. It does not edit
 OpenClaw configuration, refresh a foreign runtime, restart a process, deploy,
 or obtain cross-agent rights.
 
+CI proves two contract properties against an installed wheel from the same
+commit: (1) the installed wrapper and the running API publish identical
+metadata, and (2) a deliberately reduced materialized tool catalog (mirroring
+the 2026-08-13 production drift of 26 API tools versus 21 wrapper tools) is
+diagnosed `incompatible` through both the installed
+`blockwart-mcp --validate-runtime-catalog` and the live
+`blockwart-mcp --doctor` paths. The installed integration test proves that a
+reduced catalog is rejected against a same-commit API; a genuinely stale
+wrapper against a newer API is covered by the unit tests in
+`tests/test_mcp_manifest_contract.py`, not by the installed smoke.
+
 It wraps the object-authorized v1 API:
 
 - blockwart.describe_schema -> local projection of the canonical domain object and
@@ -88,12 +99,15 @@ It wraps the object-authorized v1 API:
 - blockwart.create_relationship -> POST /api/v1/objects/{object_id}/relationships
 - blockwart.delete_relationship -> DELETE /api/v1/objects/{object_id}/relationships
 - blockwart.create_attached_device -> POST /api/v1/objects/{parent_id}/attached-devices
+- blockwart.create_service_credential_reference -> POST /api/v1/objects/{service_id}/credential-references
 - blockwart.get_device_graph -> GET /api/v1/objects/{object_id}/device-graph
 - blockwart.get_network_topology -> GET /api/v1/objects/{object_id}/network-topology
 - blockwart.get_object_access -> GET /api/v1/objects/{object_id}/access
 - blockwart.search_principals -> GET /api/v1/objects/{object_id}/access/principals
 - blockwart.list_admin_principals -> GET /api/v1/admin/principals
 - blockwart.get_admin_principal -> GET /api/v1/admin/principals/{principal_id}
+- blockwart.list_own_direct_grants -> GET /api/v1/auth/me/direct-grants
+- blockwart.list_admin_principal_assignments -> GET /api/v1/admin/principals/{principal_id}/assignments
 - blockwart.preview_grant_scope -> GET /api/v1/objects/{object_id}/access/preview
 - blockwart.create_grant -> POST /api/v1/objects/{object_id}/access/grants
 - blockwart.update_grant -> PUT /api/v1/objects/{object_id}/access/grants/{grant_id}
@@ -153,7 +167,26 @@ Choose the smallest tool that directly answers the intent:
   that accept that kind as an endpoint; the published relationship vocabulary
   stays complete. For one small write, request exactly one `kind`, one
   `write_intent`, and `sections: ["object_fields", "minimal_example"]`; add
-  `relationships` or `errors` only when that write needs them.
+  `relationships` or `errors` only when that write needs them. Every write
+  intent also publishes its `creation_path` (`placement_child`,
+  `disconnected_root`, `attached_device`, `service_bound_reference`, or `null`
+  for an update) and an `authorization` block naming the object permission and
+  the argument whose object must hold it, the grant roles and catalog roles
+  that carry it, or — for root creation — the root kinds each catalog authority
+  covers. Compare it with the target object's `capabilities` before writing
+  instead of discovering a missing capability through denials.
+  The optional `relation_type` (enum generated from the relationship registry)
+  narrows only the `relationships` section to that one type: its `types` entry
+  plus just the endpoint predicate and graph rules it uses; the closed
+  `relation_types` vocabulary, `metadata_policy`, and `command_semantics` stay
+  intact and `errors` stays independent and unfiltered. An unknown value, a
+  type that does not accept `kind`, or a `sections` list without
+  `relationships` is rejected as `invalid_arguments` with one detail located at
+  `relation_type` (`value_not_allowed` or `field_not_allowed`); the request is
+  never broadened. Omitting it keeps the existing payload byte-for-byte.
+  Synthetic sizes (compact JSON): complete contract 158167 bytes;
+  `kind=device` + `sections=["relationships"]` 17997 bytes; adding
+  `relation_type=attached_to` 4830 bytes (~4 bytes/token: ~39.5k, ~4.5k, ~1.2k).
 - Use `blockwart.get_object_context` when the exact object ID is already known.
 - Use `blockwart.get_object_contexts` when several exact object IDs are already
   known and their authorized contexts must be retrieved in one bounded
@@ -209,7 +242,8 @@ are intentionally not added.
 
 Every readable full detail contains `revision` and its current strong `etag`
 (`"rev-N"`). Pass that `etag` byte-for-byte as `if_match` to `update_object`,
-`delete_object`, relationship tools, or access-management writes. A fresh read
+`delete_object`, `create_service_credential_reference`, relationship tools, or
+access-management writes. A fresh read
 after a successful non-delete mutation supplies the next current value;
 deletion leaves no object or successor ETag to read. Discover-only stubs
 contain neither field, so they cannot be used to infer or attempt a write
@@ -291,15 +325,18 @@ means it deliberately bundles lower-level API concerns behind one agent call.
 | `rename_object` | Change only one object's display name | `directly sufficient` | Carries the resource, the proposed label, and the precondition only, so a display-name change needs neither a reconstructed object document nor general write authority. |
 | `preview_object_rename` | Review one proposed rename | `directly sufficient` | Uses the exact rename arguments and shared plan, and its single `/label` diff entry is also the published evidence that no other path changes. |
 | `delete_object` | Delete one known object | `directly sufficient` | The destructive action and current ETag remain explicit. |
-| `create_relationship` | Link existing objects | `directly sufficient` | Its published schema carries the closed relationship vocabulary and the type-dependent metadata; its response contains the exact relationship, metadata, revision, and ETag. |
+| `create_relationship` | Link existing objects | `directly sufficient` | Its flat agent schema carries the closed relationship vocabulary and metadata fields; `describe_schema` exposes the type-dependent rules. Its response contains the exact relationship, metadata, revision, and ETag. |
 | `delete_relationship` | Unlink existing objects | `directly sufficient` | The exact edge and current ETag remain explicit; the same closed vocabulary applies. |
 | `create_attached_device` | Create and attach one device | `intent tool`, `response improved` | Resolves the parent internally and proves the attachment, metadata, ownership, revision, and idempotency. |
+| `create_service_credential_reference` | Record where one service access method's credential is kept | `intent tool`, `response improved` | Bundles metadata creation, the single access-method link, and the caller's Owner/self assignment into one atomic, idempotent, ETag-bound call that needs only the service-scoped `create_credential_reference` capability, never `catalog_owner` or `write` on the service. |
 | `get_device_graph` | Inspect device attachments | `directly sufficient` | Returns the authorized `attached_to` graph with link metadata. |
 | `get_network_topology` | Inspect network paths | `directly sufficient` | Returns bounded direct or inherited paths with metadata and truncation state. |
 | `get_object_access` | Inspect access | `directly sufficient` | Separates direct grants from effective permissions. |
 | `search_principals` | Select a grant principal | `directly sufficient` | Keeps principal choice explicit before a security write. |
 | `list_admin_principals` | List platform principals | `directly sufficient` | Provides bounded, cursor-paginated administrator discovery. |
-| `get_admin_principal` | Read one platform principal | `directly sufficient` | Returns one authorized principal and its filtered assignments. |
+| `get_admin_principal` | Read one platform principal | `directly sufficient` | Legacy full detail remains unchanged; large assignment lists may exceed tool output limits. |
+| `list_admin_principal_assignments` | Page principal assignments | `directly sufficient` | Separately pages direct grants or individual effective grant sources with bounded cursor results. |
+| `list_own_direct_grants` | Inventory the caller's own direct grants | `directly sufficient` | Self-only, read-only, cursor-paginated `{target_kind, target_id, role, scope}` items with optional `role` filter; takes no principal argument and needs no platform or catalog role. |
 | `preview_grant_scope` | Preview grant coverage | `directly sufficient` | Makes subtree impact visible before mutation. |
 | `create_grant` | Add object access | `directly sufficient` | Principal selection and the access-resource ETag stay explicit. |
 | `update_grant` | Change object access | `directly sufficient` | No hidden create/update branching or automatic CAS retry is introduced. |
@@ -421,17 +458,21 @@ The result and `blockwart.list_comments` return source plus format, not rendered
 HTML. Markdown safety and migration behavior are specified in
 `object-comments.md`.
 
-`blockwart.create_relationship` and `blockwart.delete_relationship` publish the
-relationship contract in their input schemas, generated from the same domain
-registry the commands enforce: `relation_type` is a closed enum, `metadata`
-carries the union of every published field, and one JSON Schema condition per
-relationship type narrows the accepted metadata document to that exact type.
-`depends_on` and the other non-link types therefore accept no link metadata,
-`attached_to` exactly its five link fields, and `uplinks_to` those plus `mode`.
-`blockwart.create_attached_device` publishes exactly the `attached_to` metadata
-fields. Creating an existing triplet replaces its canonical metadata and an
-identical document is a no-op with `changed: false`; delete matches the triplet
-only. Endpoint predicates, duplicates, primary conflicts, and cycles depend on
+`blockwart.create_relationship` and `blockwart.delete_relationship` publish
+flat, agent-readable input schemas with the five required arguments:
+`object_id`, `if_match` (the current ETag), `from_ref`, `relation_type`, and
+`to_ref`. The closed `relation_type` enum and union of published `metadata`
+fields come from the domain registry. Type-dependent metadata rules remain in
+`blockwart.describe_schema` and in the server's registry-derived validation
+schema; they are enforced before any upstream request. The public input schema
+omits top-level `allOf` conditions because the agent-tool projection renders
+them as `unknown` intersections. `depends_on` and the other non-link types
+therefore still accept no link metadata, `attached_to` exactly its five link
+fields, and `uplinks_to` those plus `mode`. `blockwart.create_attached_device`
+publishes exactly the `attached_to` metadata fields. Creating an existing
+triplet replaces its canonical metadata and an identical document is a no-op
+with `changed: false`; delete matches the triplet only, independent of metadata.
+Endpoint predicates, duplicates, primary conflicts, and cycles depend on
 stored state and remain upstream conflicts.
 
 `blockwart.list_audit_events` carries `object_id`, `limit`, the opaque
@@ -458,6 +499,29 @@ The established `catalog_object`, `etag`, `changed`, and `replayed` fields stay
 unchanged for compatibility. The compact proof follows from the successful
 atomic API command; neither tool loads a complete device graph or retries a
 failed concurrency precondition.
+
+`blockwart.create_service_credential_reference` executes the shared
+service-bound credential-reference command of
+`POST /api/v1/objects/{service_id}/credential-references`. It takes `service_id`,
+the service's current strong `if_match` ETag, the zero-based
+`access_method_index` into that revision's `data.access_methods`, an
+`idempotency_key`, and `credential_reference`, the canonical object document
+with `kind` pinned to `credential_reference`. It requires the
+`create_credential_reference` capability on that service — the
+`credential_reference_creator` grant role, `owner`, or `catalog_owner` — and
+never `create_child`, a root-creation authority, or `write` on the service. A
+caller without it receives `create_credential_reference_required`; the other
+stable codes are `access_method_not_found`,
+`credential_reference_id_unavailable`, `credential_reference_requires_service`,
+and `service_record_invalid`. The new reference gets no placement parent and no
+relationship; exactly one typed reference is appended to the chosen access
+method, the service revision advances once, and nothing else changes. The
+result carries the created object and its `etag`, `service_etag` and
+`service_revision`, `link_path`, the REST `owner_grant`, and the additive
+`service_ref`, `owner_assignment`, and `revision` proofs. A replay with the same
+key returns the original result with `replayed = true`. The tool stores metadata
+only and grants no secret-store or target-system access; see
+[Service-bound credential-reference creation](auth-rbac.md#service-bound-credential-reference-creation).
 
 `blockwart.create_root` executes the same shared `create_root` command as REST
 and the browser UI. It requires an already active service principal with an
@@ -486,11 +550,25 @@ codes such as `owner_required_to_manage_owner_grants`,
 `blockwart.adopt_ownerless_object` is the MCP form of the audited adoption
 command and carries exactly its REST authority, ETag, and refusal rules.
 
-The two platform-admin MCP tools are read-only. They require the calling
+The platform-admin MCP read tools are read-only. They require the calling
 service account to have the explicit `admin` platform role, and assignment
 rows remain filtered by that same principal's object `manage_access` policy.
 `blockwart.list_admin_principals` forwards `query`, `principal_type`, `active`,
 `limit`, and the opaque `cursor`, returning `next_cursor` without a total count.
+For a complete assignment audit, call `blockwart.list_admin_principal_assignments`
+with `assignment_type=direct` and then `assignment_type=effective`, following
+each `next_cursor` until null. Pages default to 20 items and are capped at 50,
+but may be shorter to keep serialized MCP output below 64 KiB. Each effective
+row contains at most one grant source, so the same `object_id` may occur on
+multiple pages. Combine sources and deduplicate repeated permissions by
+`object_id` for an object-level view. An effective object with no visible
+source appears once with an empty `sources` list. Cursors are bound to the
+calling admin, target principal, and assignment type. The original
+`get_admin_principal` remains unchanged for existing callers, but its complete
+embedded lists can exceed a tool output limit.
+
+`blockwart.list_own_direct_grants` is not admin-only: it forwards `role`, `limit`, and
+`cursor` to the self-scoped REST route and returns the caller's own direct grants only.
 MCP intentionally provides no password, session-secret, or service-token-value
 operation; existing object grant tools remain the only MCP assignment writes.
 
@@ -565,7 +643,7 @@ unchanged. See `api-boundary-contract.md`.
 Object-write and relationship tool validation failures (`blockwart.create_root`,
 `blockwart.create_child`, `blockwart.update_object`, `blockwart.preview_object_update`,
 `blockwart.rename_object`, `blockwart.preview_object_rename`,
-`blockwart.create_attached_device`,
+`blockwart.create_attached_device`, `blockwart.create_service_credential_reference`,
 `blockwart.create_relationship`, and `blockwart.delete_relationship`) return field-accurate,
 sanitized `details` on the `invalid_arguments` error. Each detail carries exactly the canonical
 fields the schema projection publishes: `code` (stable violation type), `location` (rejected

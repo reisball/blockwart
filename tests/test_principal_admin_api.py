@@ -732,3 +732,109 @@ def test_principal_grant_alias_does_not_leak_binding_before_object_authorization
 
     assert {response.status_code for response in responses} == {403}
     assert len({response.text for response in responses}) == 1
+
+
+def test_admin_assignment_pages_are_complete_scoped_and_query_bound(
+    principal_admin_api_client: TestClient,
+    principal_admin_api_state,
+) -> None:
+    state = principal_admin_api_state
+    target_id = state["target_id"]
+    with state["session_factory"]() as session:
+        with transaction(session):
+            for object_id in ("api-page-a", "api-page-b", "api-page-c"):
+                obj = upsert_object(session, _object(object_id))
+                create_object_grant(
+                    session,
+                    principal_id=state["api_admin_id"],
+                    object_id=obj.id,
+                    role=Role.ACCESS_MANAGER,
+                    scope=GrantScope.SELF,
+                )
+                create_object_grant(
+                    session,
+                    principal_id=target_id,
+                    object_id=obj.id,
+                    role=Role.VIEWER,
+                    scope=GrantScope.SELF,
+                )
+            second_admin = create_service_account(
+                session,
+                login="api.second.platform.admin",
+                display_name="Second API Platform Admin",
+                platform_role=PlatformRole.ADMIN,
+            )
+            for object_id in ("api-visible", "api-page-a", "api-page-b", "api-page-c"):
+                create_object_grant(
+                    session,
+                    principal_id=second_admin.id,
+                    object_id=object_id,
+                    role=Role.ACCESS_MANAGER,
+                    scope=GrantScope.SELF,
+                )
+            second_admin_token = issue_service_token(
+                session, principal_id=second_admin.id, name="second-admin-api"
+            ).value
+
+    path = f"/api/v1/admin/principals/{target_id}/assignments"
+    headers = _auth(state["tokens"]["admin"])
+    detail = principal_admin_api_client.get(
+        f"/api/v1/admin/principals/{target_id}", headers=headers
+    )
+    assert detail.status_code == 200
+    assert "api-hidden" not in detail.text
+
+    for assignment_type, field in (
+        ("direct", "direct_grants"),
+        ("effective", "effective_access"),
+    ):
+        cursor = None
+        seen: list[str] = []
+        first_cursor = None
+        while True:
+            params = {"assignment_type": assignment_type, "limit": 1}
+            if cursor is not None:
+                params["cursor"] = cursor
+            response = principal_admin_api_client.get(path, params=params, headers=headers)
+            assert response.status_code == 200
+            body = response.json()
+            assert body["assignment_type"] == assignment_type
+            assert len(body[field]) <= 1
+            other_field = "direct_grants" if field == "effective_access" else "effective_access"
+            assert body[other_field] == []
+            seen.extend(item["object_id"] for item in body[field])
+            cursor = body["next_cursor"]
+            if first_cursor is None:
+                first_cursor = cursor
+            if cursor is None:
+                break
+        expected = [item["object_id"] for item in detail.json()[field]]
+        assert seen == expected
+        assert len(seen) == len(set(seen)) == 4
+        assert first_cursor is not None
+        assert principal_admin_api_client.get(
+            path,
+            params={"assignment_type": assignment_type, "cursor": first_cursor},
+            headers=_auth(second_admin_token),
+        ).status_code == 400
+        wrong_type = "effective" if assignment_type == "direct" else "direct"
+        assert principal_admin_api_client.get(
+            path,
+            params={"assignment_type": wrong_type, "limit": 1, "cursor": first_cursor},
+            headers=headers,
+        ).status_code == 400
+        assert principal_admin_api_client.get(
+            f"/api/v1/admin/principals/{state['api_admin_id']}/assignments",
+            params={"assignment_type": assignment_type, "cursor": first_cursor},
+            headers=headers,
+        ).status_code == 400
+
+    assert principal_admin_api_client.get(
+        path, headers=_auth(state["tokens"]["non_admin"])
+    ).status_code == 403
+    assert principal_admin_api_client.get(
+        path, params={"limit": 51}, headers=headers
+    ).status_code == 422
+    assert principal_admin_api_client.get(
+        path, params={"cursor": "not-a-cursor"}, headers=headers
+    ).status_code == 400

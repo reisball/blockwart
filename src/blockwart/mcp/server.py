@@ -32,6 +32,12 @@ from blockwart.domain.attention import (
     ATTENTION_REASON_VALUES,
     ATTENTION_SEVERITY_VALUES,
 )
+from blockwart.domain.auth import (
+    CATALOG_ROLE_PERMISSIONS,
+    CATALOG_ROLE_ROOT_KINDS,
+    Permission,
+    roles_for_permission,
+)
 from blockwart.domain.decisions import (
     APPLIES_TO_MAX_LENGTH,
     APPLIES_TO_PATTERN,
@@ -68,8 +74,13 @@ from blockwart.domain.relationship_projection import (
     relation_type_json_schema,
     relationship_metadata_conditions,
     relationship_projection,
+    relationship_type_accepts_kind,
 )
-from blockwart.domain.relationships import RELATIONSHIP_PATH_ROOTS, RELATIONSHIP_RULES
+from blockwart.domain.relationships import (
+    RELATIONSHIP_PATH_ROOTS,
+    RELATIONSHIP_RULES,
+    RELATIONSHIP_TYPES,
+)
 from blockwart.domain.runbooks import RUNBOOK_RISKS, RUNBOOK_STATUSES
 from blockwart.domain.schema_projection import (
     minimal_object_example,
@@ -244,6 +255,13 @@ DEVICE_WRITE_SCHEMA: JSON = {
         "kind": {"type": "string", "const": "device"},
     },
 }
+CREDENTIAL_REFERENCE_WRITE_SCHEMA: JSON = {
+    **OBJECT_WRITE_SCHEMA,
+    "properties": {
+        **OBJECT_WRITE_SCHEMA["properties"],
+        "kind": {"type": "string", "const": "credential_reference"},
+    },
+}
 # Every object write intent points at one canonical projection instead of
 # carrying its own copy of the kind-specific data rules. The accepted kinds and
 # parent kinds are derived from the same domain relationship registry the
@@ -254,12 +272,44 @@ CHILD_WRITE_KINDS: tuple[str, ...] = tuple(
     kind for kind in ALL_OBJECT_KINDS if kind in _PLACEMENT_RULE.to_kinds
 )
 ATTACHED_DEVICE_KINDS: tuple[str, ...] = ("device",)
+SERVICE_CREDENTIAL_REFERENCE_TOOL = "blockwart.create_service_credential_reference"
+SERVICE_CREDENTIAL_REFERENCE_KINDS: tuple[str, ...] = ("credential_reference",)
 WRITE_INTENT_TOOLS: tuple[str, ...] = (
     "blockwart.create_child",
     "blockwart.create_root",
     "blockwart.update_object",
     "blockwart.create_attached_device",
+    SERVICE_CREDENTIAL_REFERENCE_TOOL,
 )
+# How each write intent creates or changes an object, and which authority it
+# needs. Placement-child creation, disconnected-root creation, and service-bound
+# credential-reference creation are three different delegations, so the
+# published contract names each one instead of leaving a client to tell them
+# apart from denials. Roles are derived from the same domain registry the
+# policy enforces.
+_INTENT_CREATION_PATHS: dict[str, str | None] = {
+    "blockwart.create_child": "placement_child",
+    "blockwart.create_root": "disconnected_root",
+    "blockwart.update_object": None,
+    "blockwart.create_attached_device": "attached_device",
+    SERVICE_CREDENTIAL_REFERENCE_TOOL: "service_bound_reference",
+}
+_INTENT_OBJECT_PERMISSIONS: dict[str, tuple[Permission, str] | None] = {
+    "blockwart.create_child": (Permission.CREATE_CHILD, "parent_id"),
+    "blockwart.create_root": None,
+    "blockwart.update_object": (Permission.WRITE, "object_id"),
+    "blockwart.create_attached_device": (Permission.CREATE_CHILD, "parent_id"),
+    SERVICE_CREDENTIAL_REFERENCE_TOOL: (
+        Permission.CREATE_CREDENTIAL_REFERENCE,
+        "service_id",
+    ),
+}
+SERVICE_CREDENTIAL_REFERENCE_LINK: JSON = {
+    "object_argument": "service_id",
+    "object_kinds": ["service"],
+    "selector_argument": "access_method_index",
+    "path": "access_methods[].credential_references",
+}
 # The read-only preview of a full-object update. It is not a write intent,
 # so it never appears in the describe_schema write-intent projection, but its
 # rejected arguments use the same field-accurate contract as the update it
@@ -287,6 +337,7 @@ FIELD_ACCURATE_TOOLS: tuple[str, ...] = (
 # The read tools whose rejected page size publishes one narrowly scoped
 # field-accurate detail. Every other rejected read argument keeps the opaque
 # invalid_arguments shape, so no other input is described or echoed.
+RELATION_TYPE_FIELD = "relation_type"
 SEARCH_LIMIT_TOOLS: tuple[str, ...] = ("blockwart.search", "blockwart.get_context")
 # Tools whose arguments carry canonical relationship paths.
 RELATIONSHIP_ARGUMENT_TOOLS: tuple[str, ...] = (
@@ -315,6 +366,19 @@ RELATIONSHIP_PROPERTIES: JSON = {
     },
 }
 RELATIONSHIP_METADATA_CONDITIONS: list[JSON] = relationship_metadata_conditions()
+# Top-level allOf/if/then collapses the consumer's argument signature to
+# `unknown & ...`. Keep the published shape flat for agents and apply the
+# registry-derived conditions in Blockwart's own validator before any write.
+RELATIONSHIP_AGENT_INPUT_SCHEMA: JSON = {
+    "type": "object",
+    "properties": RELATIONSHIP_PROPERTIES,
+    "required": ["object_id", "if_match", "from_ref", "relation_type", "to_ref"],
+    "additionalProperties": False,
+}
+RELATIONSHIP_VALIDATION_SCHEMA: JSON = {
+    **RELATIONSHIP_AGENT_INPUT_SCHEMA,
+    "allOf": RELATIONSHIP_METADATA_CONDITIONS,
+}
 ATTACHED_DEVICE_METADATA_SCHEMA: JSON = {
     **metadata_json_schema("attached_to"),
     "default": {},
@@ -354,6 +418,7 @@ GRANT_ROLE_SCHEMA: JSON = {
         "renamer",
         "editor",
         "creator",
+        "credential_reference_creator",
         "access_manager",
         "owner",
     ],
@@ -514,12 +579,14 @@ TOOLS: list[JSON] = [
     {
         "name": "blockwart.search",
         "description": (
-            "Find candidate Blockwart objects as compact summaries. Use get_context when "
-            "the same call should search and return full authorized details. Set "
-            "projection = compact for a wide discovery page: it keeps every identity, "
-            "revision, visibility decision, and effective permission, publishes each "
-            "distinct permission set once in capability_sets, and drops the repeated "
-            "parent, provenance, and network blocks."
+            "Find candidate Blockwart objects as search summaries. The projection "
+            "defaults to full: "
+            "the complete search-summary shape, not full object details. You can also select "
+            "projection=context; use projection=compact for a wide discovery page: it keeps "
+            "every identity, revision, visibility decision, and effective permission, publishes "
+            "each distinct permission set once in capability_sets, and drops the repeated "
+            "parent, provenance, and network blocks. Use get_context when the same call "
+            "should search and return full authorized details."
         ),
         "inputSchema": {
             "type": "object",
@@ -556,16 +623,16 @@ TOOLS: list[JSON] = [
     {
         "name": "blockwart.get_object_contexts",
         "description": (
-            "Retrieve full sanitized contexts for up to 20 already-known Blockwart object ids in "
-            "one bounded read-only roundtrip, preserving input order. Each readable item is "
-            "field-equivalent to get_object_context including its write-ready strong ETag; "
+            "Retrieve sanitized contexts for up to 20 already-known Blockwart object ids in "
+            "one bounded read-only roundtrip, preserving input order. The projection defaults to "
+            "full; each readable item is then field-equivalent to get_object_context, "
+            "including its write-ready strong ETag; "
             "discover-only items are strict stubs; concealed and missing ids are indistinguishable "
             "concealed placeholders. Use get_object_context for one id and get_context to search "
-            "by attribute instead of by known id. With omitted projection controls, the "
-            "backwards-compatible full default includes its bounded comment preview; compact "
-            "and context omit it unless include_recent_comments asks for one. projection = "
-            "compact returns the same identities, revisions, and effective permissions in far "
-            "less context."
+            "by attribute instead of by known id. The full default includes the bounded comment "
+            "preview. Choose projection=compact to retain identities, revisions, and "
+            "effective permissions in less context; projection=context keeps details. "
+            "Both omit the preview unless include_recent_comments requests it."
         ),
         "inputSchema": {
             "type": "object",
@@ -727,11 +794,13 @@ TOOLS: list[JSON] = [
         "name": "blockwart.get_context",
         "description": (
             "Find objects by name, kind, parent, endpoint, state, or provenance and return "
-            "their full sanitized details in one call, including current strong ETags. Reuse "
-            "an ETag unchanged as if_match on write tools; use search for compact candidate "
-            "lists. projection and fields narrow the returned sections without changing "
-            "which objects match; include_recent_comments switches the bounded comment "
-            "preview on or off."
+            "sanitized details in one call, including current strong ETags. "
+            "The projection defaults to full. Reuse an ETag unchanged as if_match on write tools; "
+            "use search with projection=compact for candidate lists. Here, projection=compact "
+            "returns a smaller discovery view, while projection=context keeps details but "
+            "omits the bounded comment preview unless include_recent_comments requests it. "
+            "Projection and fields narrow returned sections without changing which objects "
+            "match; include_recent_comments switches the bounded preview on or off."
         ),
         "inputSchema": {
             "type": "object",
@@ -896,9 +965,13 @@ TOOLS: list[JSON] = [
             "lifecycle/health semantics, and one minimal valid example per write "
             "intent; and for every registered relationship type its directed endpoint "
             "kinds, endpoint predicates, type-dependent metadata fields, graph rules, "
-            "revision/no-op semantics, and rejection catalog. Call it before "
-            "create_child, create_root, update_object, create_attached_device, "
-            "create_relationship, or delete_relationship; it reads no catalog data. "
+            "revision/no-op semantics, and rejection catalog. Each write intent also "
+            "names its creation path (placement child, disconnected root, attached "
+            "device, or service-bound credential reference) and the exact permission "
+            "or catalog authority it requires, with the roles that carry it. Call it "
+            "before create_child, create_root, update_object, create_attached_device, "
+            "create_service_credential_reference, create_relationship, or "
+            "delete_relationship; it reads no catalog data. "
             "Scope it with kind, write_intent, and sections to prepare exactly one "
             "small write without loading foreign intent or relationship contracts."
         ),
@@ -919,6 +992,18 @@ TOOLS: list[JSON] = [
                     "description": (
                         "Restrict the published write intents to exactly this one "
                         "tool; every other intent contract and example is omitted"
+                    ),
+                },
+                "relation_type": {
+                    "type": "string",
+                    "enum": list(RELATIONSHIP_TYPES),
+                    "description": (
+                        "Restrict the relationships section to exactly this one "
+                        "registered relationship type (its directed endpoint "
+                        "rules, predicate, metadata contract, and graph rules). "
+                        "With kind, the type must accept that kind as an "
+                        "endpoint. Requires the relationships section, which "
+                        "the default complete contract includes."
                     ),
                 },
                 "sections": {
@@ -1093,19 +1178,7 @@ TOOLS: list[JSON] = [
             f"{SCHEMA_TOOL_NAME} for the accepted relationship types, their directed "
             "endpoint kinds, endpoint predicates, and type-dependent metadata."
         ),
-        "inputSchema": {
-            "type": "object",
-            "properties": RELATIONSHIP_PROPERTIES,
-            "required": [
-                "object_id",
-                "if_match",
-                "from_ref",
-                "relation_type",
-                "to_ref",
-            ],
-            "additionalProperties": False,
-            "allOf": RELATIONSHIP_METADATA_CONDITIONS,
-        },
+        "inputSchema": RELATIONSHIP_AGENT_INPUT_SCHEMA,
         "annotations": WRITE_ANNOTATIONS,
     },
     {
@@ -1116,19 +1189,7 @@ TOOLS: list[JSON] = [
             f"depends on stored metadata. Call {SCHEMA_TOOL_NAME} for the accepted "
             "relationship types."
         ),
-        "inputSchema": {
-            "type": "object",
-            "properties": RELATIONSHIP_PROPERTIES,
-            "required": [
-                "object_id",
-                "if_match",
-                "from_ref",
-                "relation_type",
-                "to_ref",
-            ],
-            "additionalProperties": False,
-            "allOf": RELATIONSHIP_METADATA_CONDITIONS,
-        },
+        "inputSchema": RELATIONSHIP_AGENT_INPUT_SCHEMA,
         "annotations": DELETE_ANNOTATIONS,
     },
     {
@@ -1153,6 +1214,55 @@ TOOLS: list[JSON] = [
                 "metadata": ATTACHED_DEVICE_METADATA_SCHEMA,
             },
             "required": ["parent_id", "idempotency_key", "device"],
+            "additionalProperties": False,
+        },
+        "annotations": WRITE_ANNOTATIONS,
+    },
+    {
+        "name": SERVICE_CREDENTIAL_REFERENCE_TOOL,
+        "description": (
+            "Create one credential_reference metadata object and link it to exactly one "
+            "access method of an authorized service in a single atomic, idempotent call. "
+            "Requires the create_credential_reference capability on service_id (grant "
+            "role credential_reference_creator, owner, or catalog_owner); neither "
+            "create_child, create_root authority, nor write is needed or sufficient. The "
+            "reference gets no placement parent and no relationship: exactly one typed "
+            "reference is appended to data.access_methods[access_method_index]."
+            "credential_references of the service revision named by if_match, which "
+            "advances once, and nothing else changes. Returns the reference with its "
+            "ETag, the service's new ETag, the link, and the caller's Owner/self "
+            "assignment on the new reference. Metadata only: secret values are rejected "
+            "and no secret-store or target-system access is granted. Build "
+            f"credential_reference.data from {SCHEMA_TOOL_NAME}."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "service_id": {"type": "string", "minLength": 1, "maxLength": 128},
+                "access_method_index": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "description": (
+                        "Zero-based position of the target entry in data.access_methods "
+                        "of the service read that returned if_match"
+                    ),
+                },
+                "if_match": ETAG_SCHEMA,
+                "idempotency_key": {
+                    "type": "string",
+                    "minLength": 16,
+                    "maxLength": 128,
+                    "pattern": "^[!-~]+$",
+                },
+                "credential_reference": CREDENTIAL_REFERENCE_WRITE_SCHEMA,
+            },
+            "required": [
+                "service_id",
+                "access_method_index",
+                "if_match",
+                "idempotency_key",
+                "credential_reference",
+            ],
             "additionalProperties": False,
         },
         "annotations": WRITE_ANNOTATIONS,
@@ -1243,6 +1353,49 @@ TOOLS: list[JSON] = [
             "type": "object",
             "properties": {
                 "principal_id": {"type": "string", "minLength": 1, "maxLength": 36},
+            },
+            "required": ["principal_id"],
+            "additionalProperties": False,
+        },
+        "annotations": READ_ONLY_ANNOTATIONS,
+    },
+    {
+        "name": "blockwart.list_own_direct_grants",
+        "description": (
+            "List only the authenticated caller's own direct grants (role, scope, "
+            "target kind and target id) across catalog objects and projects; "
+            "cursor-paginated, never accepts a principal id."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "role": GRANT_ROLE_SCHEMA,
+                "limit": {"type": "integer", "minimum": 1, "maximum": 200, "default": 100},
+                "cursor": {"type": "string", "minLength": 1, "maxLength": 2048},
+            },
+            "additionalProperties": False,
+        },
+        "annotations": READ_ONLY_ANNOTATIONS,
+    },
+    {
+        "name": "blockwart.list_admin_principal_assignments",
+        "description": (
+            "Page one admin-authorized principal's actor-manageable direct grants "
+            "or individual effective grant sources. An object can repeat across "
+            "pages; use next_cursor until null. "
+            "get_admin_principal remains available for existing callers."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "principal_id": {"type": "string", "minLength": 1, "maxLength": 36},
+                "assignment_type": {
+                    "type": "string",
+                    "enum": ["direct", "effective"],
+                    "default": "effective",
+                },
+                "limit": {"type": "integer", "minimum": 1, "maximum": 50, "default": 20},
+                "cursor": {"type": "string", "maxLength": 2048},
             },
             "required": ["principal_id"],
             "additionalProperties": False,
@@ -1349,6 +1502,7 @@ def describe_schema_payload(
     *,
     write_intent: str | None = None,
     sections: list[str] | tuple[str, ...] | None = None,
+    relation_type: str | None = None,
 ) -> JSON:
     """Project the canonical domain object and relationship registries for MCP clients.
 
@@ -1359,11 +1513,17 @@ def describe_schema_payload(
     `kind`, `write_intent`, and `sections` only ever remove published material.
     Omitting the new scopes keeps the historical payload byte-for-byte intact;
     a scoped payload echoes the resolved sections it actually contains.
+
+    `relation_type` narrows only the `relationships` section to one registered
+    type; the independent `errors` section is unaffected. An unknown
+    type, a type that does not accept `kind`, or a `sections` selection that
+    omits `relationships` is rejected with a detail located at `relation_type`;
+    it never broadens or silently ignores the filter.
     """
     # The optional ``kind`` argument predates read projections. Retain the
     # exact historical payload whenever neither new scope is requested, so a
     # caller that has not adopted write-intent/section scoping sees no change.
-    if write_intent is None and sections is None:
+    if write_intent is None and sections is None and relation_type is None:
         projection = object_schema_projection()
         if kind is not None:
             projection["kinds"] = [
@@ -1377,6 +1537,7 @@ def describe_schema_payload(
         }
 
     selected = _selected_schema_sections(sections)
+    _validate_relation_type_scope(kind, relation_type, selected)
     projection = object_schema_projection()
     payload: JSON = {
         "version": projection["version"],
@@ -1385,6 +1546,8 @@ def describe_schema_payload(
         "requested_write_intent": write_intent,
         "sections": list(selected),
     }
+    if relation_type is not None:
+        payload["requested_relation_type"] = relation_type
     if "object_fields" in selected:
         for field in (
             "requirement_values",
@@ -1410,7 +1573,7 @@ def describe_schema_payload(
             example="minimal_example" in selected,
         )
     if "relationships" in selected:
-        payload["relationships"] = _relationships_without_errors(kind)
+        payload["relationships"] = _relationships_without_errors(kind, relation_type)
     return payload
 
 
@@ -1427,14 +1590,36 @@ def _selected_schema_sections(
     return tuple(section for section in SCHEMA_SECTIONS if section in requested)
 
 
-def _relationships_without_errors(kind: str | None) -> JSON:
+def _validate_relation_type_scope(
+    kind: str | None,
+    relation_type: str | None,
+    selected: tuple[str, ...],
+) -> None:
+    """Reject a relation_type the resolved scope cannot honour, naming the field."""
+    if relation_type is None:
+        return
+    if relation_type not in RELATIONSHIP_RULES:
+        code = VIOLATION_VALUE_NOT_ALLOWED
+    elif "relationships" not in selected:
+        code = VIOLATION_FIELD_NOT_ALLOWED
+    elif kind is not None and not relationship_type_accepts_kind(relation_type, kind):
+        code = VIOLATION_VALUE_NOT_ALLOWED
+    else:
+        return
+    raise ToolInputError(
+        "Tool arguments are invalid",
+        [public_detail(location=RELATION_TYPE_FIELD, code=code)],
+    )
+
+
+def _relationships_without_errors(kind: str | None, relation_type: str | None = None) -> JSON:
     """Return the relationship structure section without its error contract.
 
     A scoped `relationships` read describes types, directed endpoints, metadata
     shapes, and graph rules only. Rejection codes and metadata violation codes
     live exclusively under the independent `errors` section.
     """
-    relationships = relationship_projection(kind)
+    relationships = relationship_projection(kind, relation_type)
     relationships.pop("rejection_policy")
     for relationship_type in relationships["types"]:
         for metadata_field in relationship_type["metadata"]["fields"]:
@@ -1519,6 +1704,20 @@ def _write_intents(
             _ATTACHMENT_RULE.relation_type,
             sorted(_ATTACHMENT_RULE.to_kinds),
         ),
+        (
+            SERVICE_CREDENTIAL_REFERENCE_TOOL,
+            "credential_reference",
+            SERVICE_CREDENTIAL_REFERENCE_KINDS,
+            (
+                "service_id",
+                "access_method_index",
+                "if_match",
+                "idempotency_key",
+                "credential_reference",
+            ),
+            None,
+            [],
+        ),
     ):
         if write_intent is not None and name != write_intent:
             continue
@@ -1531,10 +1730,53 @@ def _write_intents(
             intent["required_arguments"] = list(arguments)
             intent["relation_type"] = relationship
             intent["parent_kinds"] = parent_kinds
+            intent["creation_path"] = _INTENT_CREATION_PATHS[name]
+            intent["authorization"] = _intent_authorization(name, supported)
+            intent["reference_link"] = (
+                dict(SERVICE_CREDENTIAL_REFERENCE_LINK)
+                if name == SERVICE_CREDENTIAL_REFERENCE_TOOL
+                else None
+            )
         if example:
             intent["example"] = _write_intent_example(name, argument, supported[0])
         intents.append(intent)
     return intents
+
+
+def _intent_authorization(name: str, kinds: list[str]) -> JSON:
+    """Project the authority one write intent requires for the published kinds.
+
+    An object permission is checked on the object named by `object_argument`
+    and is carried by the listed grant roles and global catalog roles. Root
+    creation is not an object permission, because a root has no object to hold
+    one; it is published as the root kinds each catalog authority covers.
+    """
+    requirement = _INTENT_OBJECT_PERMISSIONS[name]
+    if requirement is None:
+        root_kinds = {
+            role.value: covered
+            for role, allowed in CATALOG_ROLE_ROOT_KINDS.items()
+            if (covered := [kind for kind in kinds if allowed is None or kind in allowed])
+        }
+        return {
+            "permission": None,
+            "object_argument": None,
+            "object_roles": [],
+            "catalog_roles": sorted(root_kinds),
+            "root_kinds": root_kinds,
+        }
+    permission, argument = requirement
+    return {
+        "permission": permission.value,
+        "object_argument": argument,
+        "object_roles": sorted(role.value for role in roles_for_permission(permission)),
+        "catalog_roles": sorted(
+            role.value
+            for role, permissions in CATALOG_ROLE_PERMISSIONS.items()
+            if permission in permissions
+        ),
+        "root_kinds": None,
+    }
 
 
 def _write_intent_example(name: str, argument: str, kind: str) -> JSON:
@@ -1548,6 +1790,14 @@ def _write_intent_example(name: str, argument: str, kind: str) -> JSON:
         }
     if name == "blockwart.create_root":
         return {"idempotency_key": idempotency_key, **example}
+    if name == SERVICE_CREDENTIAL_REFERENCE_TOOL:
+        return {
+            "service_id": "example-service",
+            "access_method_index": 0,
+            "if_match": '"rev-1"',
+            "idempotency_key": idempotency_key,
+            **example,
+        }
     parent_kind = "host" if name == "blockwart.create_child" else "system"
     intent_example: JSON = {
         "parent_id": f"example-{parent_kind}",
@@ -1619,6 +1869,8 @@ def _search_limit_details(name: str, arguments: JSON) -> list[dict[str, str | in
     bounded integer. A violation of any other argument contributes nothing, so
     a rejected term, filter, or cursor is never echoed or even named.
     """
+    if name == SCHEMA_TOOL_NAME:
+        return _relation_type_details(arguments)
     if name not in SEARCH_LIMIT_TOOLS:
         return []
     schema = TOOL_DEFINITIONS[name]["inputSchema"]["properties"][SEARCH_LIMIT_FIELD]
@@ -1636,6 +1888,25 @@ def _search_limit_details(name: str, arguments: JSON) -> list[dict[str, str | in
                 received=arguments.get(SEARCH_LIMIT_FIELD),
                 minimum=schema["minimum"],
                 maximum=schema["maximum"],
+            )
+        )
+    return order_public_details(details)
+
+
+def _relation_type_details(arguments: JSON) -> list[dict[str, str | int | None]]:
+    """Project a rejected describe_schema relation_type onto its field detail.
+
+    Only the `relation_type` argument is described; a violation of any other
+    describe_schema argument stays opaque, and the rejected value is never echoed.
+    """
+    details: list[dict[str, str | int | None]] = []
+    for error in TOOL_INPUT_VALIDATORS[SCHEMA_TOOL_NAME].iter_errors(arguments):
+        if list(error.absolute_path) != [RELATION_TYPE_FIELD]:
+            continue
+        details.append(
+            public_detail(
+                location=RELATION_TYPE_FIELD,
+                code=_ARGUMENT_VIOLATIONS.get(str(error.validator), GENERIC_SCHEMA_VIOLATION),
             )
         )
     return order_public_details(details)
@@ -1686,7 +1957,10 @@ def _compile_input_validator(schema: JSON) -> Validator:
 
 
 TOOL_INPUT_VALIDATORS: dict[str, Validator] = {
-    name: _compile_input_validator(tool["inputSchema"]) for name, tool in TOOL_DEFINITIONS.items()
+    name: _compile_input_validator(
+        RELATIONSHIP_VALIDATION_SCHEMA if name in RELATIONSHIP_TOOLS else tool["inputSchema"]
+    )
+    for name, tool in TOOL_DEFINITIONS.items()
 }
 
 
@@ -1754,6 +2028,7 @@ def call_tool(
             args.get("kind"),
             write_intent=args.get("write_intent"),
             sections=args.get("sections"),
+            relation_type=args.get("relation_type"),
         )
     elif name == "blockwart.search":
         payload = _legacy_page_payload(
@@ -2037,6 +2312,29 @@ def call_tool(
             relationship_metadata=metadata,
             parent_is_source=False,
         )
+    elif name == SERVICE_CREDENTIAL_REFERENCE_TOOL:
+        service_id = _required_string(args, "service_id")
+        access_method_index = _required_index(args, "access_method_index")
+        requested_reference = _required_object(args, "credential_reference")
+        command_payload = request(
+            "POST",
+            f"/api/v1/objects/{quote(service_id, safe='')}/credential-references",
+            {
+                "access_method_index": access_method_index,
+                "credential_reference": requested_reference,
+            },
+            {
+                "If-Match": _required_string(args, "if_match"),
+                "Idempotency-Key": _required_string(args, "idempotency_key"),
+                "X-Blockwart-Channel": "mcp",
+            },
+        )
+        payload = _self_contained_service_credential_reference_payload(
+            command_payload,
+            requested_service_id=service_id,
+            requested_access_method_index=access_method_index,
+            requested_object=requested_reference,
+        )
     elif name == "blockwart.get_device_graph":
         object_id = _required_string(args, "object_id")
         payload = fetch(
@@ -2080,6 +2378,25 @@ def call_tool(
         payload = fetch(
             f"/api/v1/admin/principals/{quote(principal_id, safe='')}",
             {},
+        )
+    elif name == "blockwart.list_own_direct_grants":
+        payload = fetch(
+            "/api/v1/auth/me/direct-grants",
+            {
+                "role": args.get("role"),
+                "limit": args.get("limit", 100),
+                "cursor": args.get("cursor"),
+            },
+        )
+    elif name == "blockwart.list_admin_principal_assignments":
+        principal_id = _required_string(args, "principal_id")
+        payload = fetch(
+            f"/api/v1/admin/principals/{quote(principal_id, safe='')}/assignments",
+            {
+                "assignment_type": args.get("assignment_type", "effective"),
+                "limit": args.get("limit", 20),
+                "cursor": args.get("cursor"),
+            },
         )
     elif name == "blockwart.preview_grant_scope":
         object_id = _required_string(args, "object_id")
@@ -2590,6 +2907,13 @@ def _required_integer(args: JSON, key: str) -> int:
     return value
 
 
+def _required_index(args: JSON, key: str) -> int:
+    value = args.get(key)
+    if not isinstance(value, int) or isinstance(value, bool) or value < 0:
+        raise ToolInputError(f"{key} is required")
+    return value
+
+
 def _required_object_ids(args: JSON, key: str) -> list[str]:
     value = args.get(key)
     if not isinstance(value, list) or not value:
@@ -2707,6 +3031,59 @@ def _self_contained_root_payload(
     return {
         **command_payload,
         "parent_ref": None,
+        "owner_assignment": {
+            "principal": "authenticated_caller",
+            "role": "owner",
+            "scope": "self",
+        },
+        "revision": revision,
+    }
+
+
+def _self_contained_service_credential_reference_payload(
+    command_payload: JSON,
+    *,
+    requested_service_id: str,
+    requested_access_method_index: int,
+    requested_object: JSON,
+) -> JSON:
+    """Prove the upstream result is exactly the requested reference and link."""
+    catalog_object = command_payload.get("credential_reference")
+    owner_grant = command_payload.get("owner_grant")
+    if not isinstance(catalog_object, dict) or not isinstance(owner_grant, dict):
+        raise _invalid_upstream_response()
+
+    requested_id = requested_object.get("id")
+    object_id = catalog_object.get("id")
+    revision = catalog_object.get("revision")
+    service_revision = command_payload.get("service_revision")
+    if (
+        not isinstance(requested_id, str)
+        or object_id != requested_id
+        or catalog_object.get("kind") != "credential_reference"
+        or catalog_object.get("parent_path") != []
+        or isinstance(revision, bool)
+        or not isinstance(revision, int)
+        or revision < 1
+        or command_payload.get("etag") != f'"rev-{revision}"'
+        or command_payload.get("service_id") != requested_service_id
+        or isinstance(service_revision, bool)
+        or not isinstance(service_revision, int)
+        or service_revision < 2
+        or command_payload.get("service_etag") != f'"rev-{service_revision}"'
+        or command_payload.get("access_method_index") != requested_access_method_index
+        or command_payload.get("link_path")
+        != f"data.access_methods[{requested_access_method_index}].credential_references"
+        or owner_grant.get("role") != "owner"
+        or owner_grant.get("scope") != "self"
+        or not isinstance(command_payload.get("changed"), bool)
+        or not isinstance(command_payload.get("replayed"), bool)
+    ):
+        raise _invalid_upstream_response()
+
+    return {
+        **command_payload,
+        "service_ref": f"service:{requested_service_id}",
         "owner_assignment": {
             "principal": "authenticated_caller",
             "role": "owner",

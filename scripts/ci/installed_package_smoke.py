@@ -5,6 +5,7 @@ import json
 import os
 import subprocess
 import sysconfig
+import tempfile
 import time
 from datetime import timedelta
 from pathlib import Path
@@ -23,6 +24,7 @@ from blockwart.domain.attention import (
     ATTENTION_SEVERITY_VALUES,
 )
 from blockwart.domain.auth import CatalogRole, GrantScope, PlatformRole, Role
+from blockwart.mcp.server import TOOLS
 from blockwart.models import CatalogObject
 from blockwart.schemas.catalog import CatalogObjectIn
 from blockwart.services.access import create_object_grant
@@ -197,6 +199,7 @@ def check_root_project_creator(token: str) -> None:
     assert created["catalog_object"]["parent_path"] == []
     assert sorted(created["catalog_object"]["capabilities"]) == [
         "create_child",
+        "create_credential_reference",
         "delete",
         "discover",
         "manage_access",
@@ -275,12 +278,15 @@ async def check_mcp(
                 "blockwart.create_relationship",
                 "blockwart.delete_relationship",
                 "blockwart.create_attached_device",
+                "blockwart.create_service_credential_reference",
                 "blockwart.get_device_graph",
                 "blockwart.get_network_topology",
                 "blockwart.get_object_access",
                 "blockwart.search_principals",
                 "blockwart.list_admin_principals",
                 "blockwart.get_admin_principal",
+                "blockwart.list_own_direct_grants",
+                "blockwart.list_admin_principal_assignments",
                 "blockwart.preview_grant_scope",
                 "blockwart.create_grant",
                 "blockwart.update_grant",
@@ -309,6 +315,8 @@ async def check_mcp(
                         "blockwart.search_principals",
                         "blockwart.list_admin_principals",
                         "blockwart.get_admin_principal",
+                        "blockwart.list_own_direct_grants",
+                        "blockwart.list_admin_principal_assignments",
                         "blockwart.preview_grant_scope",
                         "blockwart.get_device_graph",
                         "blockwart.get_network_topology",
@@ -398,6 +406,7 @@ async def check_mcp(
                 "blockwart.create_root",
                 "blockwart.update_object",
                 "blockwart.create_attached_device",
+                "blockwart.create_service_credential_reference",
             }
             relationships = schema_contract["relationships"]
             relationship_types = {
@@ -491,8 +500,15 @@ async def check_mcp(
                     {"principal_id": grant_candidate_id},
                 ),
                 await session.call_tool("blockwart.get_activity", {"limit": 1}),
+                await session.call_tool(
+                    "blockwart.list_admin_principal_assignments",
+                    {"principal_id": grant_candidate_id, "limit": 1},
+                ),
             ]
             assert all(not result.isError for result in read_results)
+            assignment_page = _tool_payload(read_results[-1])
+            assert assignment_page["assignment_type"] == "effective"
+            assert len(assignment_page["effective_access"]) <= 1
             # The installed wrapper must project the same closed attention
             # vocabulary the application resolver owns, not a wrapper-local copy.
             attention_payload = _tool_payload(read_results[5])
@@ -875,6 +891,44 @@ def _tool_payload(result) -> dict:
     return json.loads(content.text)
 
 
+def prove_contract_drift_fail_fast(mcp_entrypoint: Path, api_token: str) -> None:
+    """Fail CI on the 2026-08-13 production drift shape through installed CLIs.
+
+    A deliberately reduced materialized tool catalog (mirroring the 2026-08-13
+    drift of 26 API tools vs 21 wrapper tools) must be diagnosed as
+    incompatible before normal agent work, both by the local verifier and by
+    the doctor path against this live same-commit API.
+
+    This installed integration test proves that a reduced catalog is rejected
+    when the installed wrapper and live API are from the same build. A
+    genuinely stale wrapper against a newer API is covered by the unit tests
+    in ``tests/test_mcp_manifest_contract.py``, not by this smoke. Tool count
+    alone never decides compatibility.
+    """
+    with tempfile.TemporaryDirectory(prefix="blockwart-mcp-drift-") as drift_dir:
+        catalog_path = Path(drift_dir) / "materialized-tools.json"
+        # Deliberately fewer materialized tools than the API contract publishes.
+        catalog_path.write_text(json.dumps({"tools": TOOLS[:-9]}), encoding="utf-8")
+        validate_payload = json.loads(
+            subprocess.check_output(
+                [str(mcp_entrypoint), "--validate-runtime-catalog", str(catalog_path)],
+                text=True,
+            )
+        )
+        doctor_payload = json.loads(
+            subprocess.check_output(
+                [str(mcp_entrypoint), "--doctor", "--runtime-catalog", str(catalog_path)],
+                env={**os.environ, "BLOCKWART_API_TOKEN": api_token},
+                text=True,
+            )
+        )
+    assert validate_payload["status"] == "incompatible"
+    assert validate_payload["classification"] == "stale_runtime_catalog"
+    assert doctor_payload["status"] == "incompatible"
+    assert doctor_payload["classification"] == "stale_runtime_catalog"
+    assert doctor_payload["api_status"] == "compatible"
+
+
 def main() -> None:
     readiness = wait_until_ready()
     (
@@ -905,7 +959,7 @@ def main() -> None:
         token=api_token,
     )["objects"][0]
 
-    assert readiness["revision"] == "20260926_0025"
+    assert readiness["revision"] == "20260926_0026"
     assert "Blockwart" in index
     assert static_content_type == "text/css"
     assert not any(
@@ -915,6 +969,7 @@ def main() -> None:
     assert search["count"] == 1
     assert service["endpoints"]
     assert wrapper_metadata == api_contract_metadata
+    prove_contract_drift_fail_fast(mcp_entrypoint, api_token)
     assert {
         "id",
         "type",
@@ -933,8 +988,8 @@ def main() -> None:
     print(
         "installed_package=ok "
         f"cwd={Path.cwd()} revision={readiness['revision']} "
-        f"openapi_paths={len(openapi['paths'])} mcp_protocol={protocol} mcp_calls=42 "
-        "mcp_contract=compatible"
+        f"openapi_paths={len(openapi['paths'])} mcp_protocol={protocol} mcp_calls=43 "
+        "mcp_contract=compatible mcp_contract_drift=fail_fast"
     )
 
 

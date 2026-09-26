@@ -95,6 +95,17 @@ def render_audit_summary_english(
             f"{_display_value(details.get('old_label'))} to "
             f"{_display_value(details.get('new_label'))}"
         ).strip()
+    if event == "create_service_credential_reference":
+        return (
+            f"Created {_text(details.get('object_ref'))} for "
+            f"{_text(details.get('service_ref'))} and linked it at "
+            f"{_text(details.get('link_path'))}"
+        ).strip()
+    if event == "credential_reference_link":
+        return (
+            f"Linked {_text(details.get('credential_reference_ref'))} at "
+            f"{_text(details.get('link_path'))}"
+        ).strip()
     if event in {"grant_create", "grant_update", "grant_revoke"}:
         target = _text(
             details.get("target_principal_id")

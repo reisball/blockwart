@@ -4,6 +4,7 @@ import copy
 import json
 from pathlib import Path
 
+from blockwart.mcp import server
 from blockwart.mcp.manifest import (
     canonical_manifest_bytes,
     contract_metadata,
@@ -13,16 +14,15 @@ from blockwart.mcp.manifest import (
 from blockwart.mcp.server import TOOLS, local_contract_metadata, validate_runtime_catalog
 
 
-def test_activity_tool_has_the_reviewed_manifest_evidence() -> None:
-    metadata = contract_metadata(TOOLS, build_revision="issue-188")
+def test_integrated_mcp_contract_has_reviewed_manifest_evidence() -> None:
+    metadata = contract_metadata(TOOLS, build_revision="issue-188-236-245-248-249-250-251")
 
-    # Activity adds one read-only tool to the merged registry. Review its
-    # complete manifest projection before recording the digest below.
+    # The activity read joins the reviewed credential, grant, relationship and schema tools.
     assert metadata == {
-        "build_revision": "issue-188",
+        "build_revision": "issue-188-236-245-248-249-250-251",
         "contract_version": "1",
-        "manifest_digest": "1c8176f9be25451bde2c382e47eed05b8263d253a1d3785cb6417330493af898",
-        "tool_count": 35,
+        "manifest_digest": "da326b838ad775dc02fc90bd8524ffcf8f99b8f386ec3775e9598a63badccd1e",
+        "tool_count": 38,
     }
 
 
@@ -53,7 +53,7 @@ def test_reduced_catalog_is_incompatible_before_normal_tool_use() -> None:
 
     diagnosis = diagnose_contract(local, api=reduced)
 
-    assert local["tool_count"] == 35
+    assert local["tool_count"] == 38
     assert reduced["tool_count"] == 22
     assert diagnosis["status"] == "incompatible"
     assert diagnosis["classification"] == "wrapper_drift"
@@ -105,3 +105,54 @@ def test_runtime_catalog_verifier_distinguishes_stale_catalog_without_leaking_it
     assert file_diagnosis["status"] == "incompatible"
     assert file_diagnosis["classification"] == "stale_runtime_catalog"
     assert "token-should-not-appear" not in json.dumps(file_diagnosis)
+
+
+def test_doctor_reports_wrapper_drift_against_divergent_api(monkeypatch) -> None:
+    local = contract_metadata(TOOLS, build_revision="same-build")
+    monkeypatch.setattr(
+        server,
+        "fetch_json",
+        lambda path, params: {**local, "build_revision": "old-api-build"},
+    )
+
+    diagnosis = server.doctor_contract()
+
+    assert diagnosis["status"] == "incompatible"
+    assert diagnosis["classification"] == "wrapper_drift"
+    assert diagnosis["api_status"] == "incompatible"
+
+
+def test_doctor_reports_unknown_when_api_metadata_is_unreachable(monkeypatch) -> None:
+    def unreachable(path, params):
+        raise server.UpstreamError(
+            "upstream_http_error",
+            "Blockwart Agent API returned an error.",
+        )
+
+    monkeypatch.setattr(server, "fetch_json", unreachable)
+
+    diagnosis = server.doctor_contract()
+
+    assert diagnosis["status"] == "unknown"
+    assert diagnosis["classification"] == "unknown"
+
+
+def test_doctor_separates_stale_runtime_catalog_from_wrapper_drift(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    """A matching API with a reduced materialized list is not wrapper drift."""
+    monkeypatch.setattr(
+        server, "fetch_json", lambda path, params: dict(server.local_contract_metadata())
+    )
+    # Same drift shape as the 2026-08-13 production find: deliberately fewer
+    # materialized tools than the API contract publishes.
+    catalog_path = tmp_path / "materialized-tools.json"
+    catalog_path.write_text(json.dumps({"tools": copy.deepcopy(TOOLS[:-9])}))
+
+    diagnosis = server.doctor_contract(runtime_catalog_path=str(catalog_path))
+
+    assert diagnosis["api_status"] == "compatible"
+    assert diagnosis["runtime_catalog_status"] == "incompatible"
+    assert diagnosis["status"] == "incompatible"
+    assert diagnosis["classification"] == "stale_runtime_catalog"
