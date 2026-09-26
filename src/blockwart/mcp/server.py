@@ -1195,6 +1195,30 @@ TOOLS: list[JSON] = [
         "annotations": READ_ONLY_ANNOTATIONS,
     },
     {
+        "name": "blockwart.list_admin_principal_assignments",
+        "description": (
+            "Page one admin-authorized principal's actor-manageable direct grants "
+            "or effective object access. Use next_cursor until null; "
+            "get_admin_principal remains available for existing callers."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "principal_id": {"type": "string", "minLength": 1, "maxLength": 36},
+                "assignment_type": {
+                    "type": "string",
+                    "enum": ["direct", "effective"],
+                    "default": "effective",
+                },
+                "limit": {"type": "integer", "minimum": 1, "maximum": 50, "default": 20},
+                "cursor": {"type": "string", "maxLength": 2048},
+            },
+            "required": ["principal_id"],
+            "additionalProperties": False,
+        },
+        "annotations": READ_ONLY_ANNOTATIONS,
+    },
+    {
         "name": "blockwart.preview_grant_scope",
         "description": "Preview the current canonical placement coverage of a grant scope.",
         "inputSchema": {
@@ -2010,6 +2034,16 @@ def call_tool(
         payload = fetch(
             f"/api/v1/admin/principals/{quote(principal_id, safe='')}",
             {},
+        )
+    elif name == "blockwart.list_admin_principal_assignments":
+        principal_id = _required_string(args, "principal_id")
+        payload = fetch(
+            f"/api/v1/admin/principals/{quote(principal_id, safe='')}/assignments",
+            {
+                "assignment_type": args.get("assignment_type", "effective"),
+                "limit": args.get("limit", 20),
+                "cursor": args.get("cursor"),
+            },
         )
     elif name == "blockwart.preview_grant_scope":
         object_id = _required_string(args, "object_id")

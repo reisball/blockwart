@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from datetime import timedelta
-from typing import Annotated
+from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, Response
 from sqlalchemy.orm import Session
@@ -21,6 +21,7 @@ from blockwart.schemas.admin import (
     PasswordResetIn,
     PrincipalAdminDetailOut,
     PrincipalAdminListOut,
+    PrincipalAssignmentPageOut,
     PrincipalCreateIn,
     PrincipalCredentialOut,
     PrincipalGrantCreateIn,
@@ -45,6 +46,7 @@ from blockwart.services.principal_management import (
     create_managed_principal,
     create_managed_principal_grant,
     issue_managed_service_token,
+    query_principal_assignments,
     query_principal_detail,
     query_principal_page,
     record_catalog_owner_denial,
@@ -147,6 +149,37 @@ def get_admin_principal(
     )
     response.headers["ETag"] = detail.principal.etag
     return PrincipalAdminDetailOut.model_validate(detail)
+
+
+@router.get("/{principal_id}/assignments", response_model=PrincipalAssignmentPageOut)
+def list_admin_principal_assignments(
+    principal_id: str,
+    session: Annotated[Session, Depends(get_session)],
+    access: Annotated[ReadAccess, Depends(require_api_read_access)],
+    assignment_type: Literal["direct", "effective"] = "effective",
+    limit: Annotated[int, Query(ge=1, le=50)] = 20,
+    cursor: Annotated[
+        str | None,
+        Query(max_length=2048, description="Opaque cursor returned by the previous page"),
+    ] = None,
+) -> PrincipalAssignmentPageOut:
+    """Page direct grants or effective access; the detail API remains unchanged."""
+    try:
+        page = _execute_admin(
+            session,
+            lambda: query_principal_assignments(
+                session,
+                access,
+                principal_id=principal_id,
+                assignment_type=assignment_type,
+                limit=limit,
+                cursor=cursor,
+            ),
+            write=False,
+        )
+    except InvalidCursor as exc:
+        raise HTTPException(status_code=400, detail="Invalid cursor") from exc
+    return PrincipalAssignmentPageOut.model_validate(page)
 
 
 @router.post(

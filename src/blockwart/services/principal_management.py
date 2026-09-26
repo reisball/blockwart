@@ -5,6 +5,7 @@ import json
 import re
 from dataclasses import dataclass
 from datetime import datetime, timedelta
+from typing import Literal
 
 from sqlalchemy import func, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
@@ -217,6 +218,14 @@ class PrincipalAdminDetail:
 @dataclass(frozen=True, slots=True)
 class PrincipalAdminPage:
     items: tuple[PrincipalAdminSummary, ...]
+    next_cursor: str | None
+
+
+@dataclass(frozen=True, slots=True)
+class PrincipalAssignmentPage:
+    assignment_type: Literal["direct", "effective"]
+    direct_grants: tuple[DirectPrincipalGrantView, ...]
+    effective_access: tuple[EffectivePrincipalGrantView, ...]
     next_cursor: str | None
 
 
@@ -496,6 +505,41 @@ def query_principal_detail(
         effective_access=tuple(effective_access),
         global_authorities=global_authorities,
         service_tokens=tuple(_token_view(row) for row in tokens),
+    )
+
+
+def query_principal_assignments(
+    session: Session,
+    access: ReadAccess,
+    *,
+    principal_id: str,
+    assignment_type: Literal["direct", "effective"],
+    limit: int,
+    cursor: str | None,
+) -> PrincipalAssignmentPage:
+    """Page actor-manageable assignments using stable object/grant keys."""
+    detail = query_principal_detail(session, access, principal_id=principal_id)
+    items = detail.direct_grants if assignment_type == "direct" else detail.effective_access
+    page = paginate_items(
+        items,
+        key=(
+            (lambda item: (item.object_id, f"{item.grant_id:020d}"))
+            if assignment_type == "direct"
+            else (lambda item: (item.object_id, ""))
+        ),
+        limit=limit,
+        resource="admin_principal_assignments",
+        sort="object_id",
+        direction="asc",
+        query={"principal_id": principal_id, "assignment_type": assignment_type},
+        cursor=cursor,
+        include_total=False,
+    )
+    return PrincipalAssignmentPage(
+        assignment_type=assignment_type,
+        direct_grants=tuple(page.items) if assignment_type == "direct" else (),
+        effective_access=tuple(page.items) if assignment_type == "effective" else (),
+        next_cursor=page.next_cursor,
     )
 
 
