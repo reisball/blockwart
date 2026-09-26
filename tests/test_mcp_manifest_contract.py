@@ -14,15 +14,14 @@ from blockwart.mcp.manifest import (
 from blockwart.mcp.server import TOOLS, local_contract_metadata, validate_runtime_catalog
 
 
-def test_admin_assignment_pagination_has_the_reviewed_manifest_evidence() -> None:
-    metadata = contract_metadata(TOOLS, build_revision="issue-245")
+def test_relationship_signature_and_assignment_pagination_have_reviewed_manifest_evidence() -> None:
+    metadata = contract_metadata(TOOLS, build_revision="issue-245-248")
 
-    # Assignment pagination adds one read tool and moves the reviewed manifest
-    # digest with that public contract.
+    # Both public MCP contract changes are present in the integrated manifest.
     assert metadata == {
-        "build_revision": "issue-245",
+        "build_revision": "issue-245-248",
         "contract_version": "1",
-        "manifest_digest": "e593973c196c6d7a4db96861dcf5ee52122d93bf24e46ba1a2b2ab7c67bb04ae",
+        "manifest_digest": "9845d50998e81f32520b4357e10ea66b210a9cff43201a0d3f7d59d8e70822a6",
         "tool_count": 35,
     }
 
