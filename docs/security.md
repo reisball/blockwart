@@ -17,6 +17,19 @@ Credential-reference records must keep:
 - `handling_rules.markdown_secret_allowed: false`
 - `handling_rules.agents_may_read_value: false`
 
+Creating credential-reference metadata for one service is delegable without
+catalog-wide authority. The service-scoped `create_credential_reference`
+capability, carried by the narrow `credential_reference_creator` grant role,
+`owner`, and `catalog_owner`, authorizes exactly one atomic command: create one
+disconnected reference and append it to one access method of that service. It
+implies no service editing, placement-child or root creation, or access to a
+secret store or target system, and no existing role gains it except the
+all-permission `owner` and `catalog_owner`. The same secret-shaped key and value
+rejection, credential-reference raw-value rule, reference readability, audit,
+ETag, idempotency, and rollback guarantees apply; an existing or already
+referenced ID is refused rather than reused. See
+[Service-bound credential-reference creation](auth-rbac.md#service-bound-credential-reference-creation).
+
 The authentication foundation uses Argon2id password hashes, hashed opaque
 browser sessions and service tokens, one-time login challenges, session-bound
 CSRF validation, revocation, expiry, and a separate security-event stream.

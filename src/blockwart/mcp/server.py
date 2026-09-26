@@ -29,6 +29,12 @@ from blockwart.domain.attention import (
     ATTENTION_REASON_VALUES,
     ATTENTION_SEVERITY_VALUES,
 )
+from blockwart.domain.auth import (
+    CATALOG_ROLE_PERMISSIONS,
+    CATALOG_ROLE_ROOT_KINDS,
+    Permission,
+    roles_for_permission,
+)
 from blockwart.domain.decisions import (
     APPLIES_TO_MAX_LENGTH,
     APPLIES_TO_PATTERN,
@@ -241,6 +247,13 @@ DEVICE_WRITE_SCHEMA: JSON = {
         "kind": {"type": "string", "const": "device"},
     },
 }
+CREDENTIAL_REFERENCE_WRITE_SCHEMA: JSON = {
+    **OBJECT_WRITE_SCHEMA,
+    "properties": {
+        **OBJECT_WRITE_SCHEMA["properties"],
+        "kind": {"type": "string", "const": "credential_reference"},
+    },
+}
 # Every object write intent points at one canonical projection instead of
 # carrying its own copy of the kind-specific data rules. The accepted kinds and
 # parent kinds are derived from the same domain relationship registry the
@@ -251,12 +264,44 @@ CHILD_WRITE_KINDS: tuple[str, ...] = tuple(
     kind for kind in ALL_OBJECT_KINDS if kind in _PLACEMENT_RULE.to_kinds
 )
 ATTACHED_DEVICE_KINDS: tuple[str, ...] = ("device",)
+SERVICE_CREDENTIAL_REFERENCE_TOOL = "blockwart.create_service_credential_reference"
+SERVICE_CREDENTIAL_REFERENCE_KINDS: tuple[str, ...] = ("credential_reference",)
 WRITE_INTENT_TOOLS: tuple[str, ...] = (
     "blockwart.create_child",
     "blockwart.create_root",
     "blockwart.update_object",
     "blockwart.create_attached_device",
+    SERVICE_CREDENTIAL_REFERENCE_TOOL,
 )
+# How each write intent creates or changes an object, and which authority it
+# needs. Placement-child creation, disconnected-root creation, and service-bound
+# credential-reference creation are three different delegations, so the
+# published contract names each one instead of leaving a client to tell them
+# apart from denials. Roles are derived from the same domain registry the
+# policy enforces.
+_INTENT_CREATION_PATHS: dict[str, str | None] = {
+    "blockwart.create_child": "placement_child",
+    "blockwart.create_root": "disconnected_root",
+    "blockwart.update_object": None,
+    "blockwart.create_attached_device": "attached_device",
+    SERVICE_CREDENTIAL_REFERENCE_TOOL: "service_bound_reference",
+}
+_INTENT_OBJECT_PERMISSIONS: dict[str, tuple[Permission, str] | None] = {
+    "blockwart.create_child": (Permission.CREATE_CHILD, "parent_id"),
+    "blockwart.create_root": None,
+    "blockwart.update_object": (Permission.WRITE, "object_id"),
+    "blockwart.create_attached_device": (Permission.CREATE_CHILD, "parent_id"),
+    SERVICE_CREDENTIAL_REFERENCE_TOOL: (
+        Permission.CREATE_CREDENTIAL_REFERENCE,
+        "service_id",
+    ),
+}
+SERVICE_CREDENTIAL_REFERENCE_LINK: JSON = {
+    "object_argument": "service_id",
+    "object_kinds": ["service"],
+    "selector_argument": "access_method_index",
+    "path": "access_methods[].credential_references",
+}
 # The read-only preview of a full-object update. It is not a write intent,
 # so it never appears in the describe_schema write-intent projection, but its
 # rejected arguments use the same field-accurate contract as the update it
@@ -351,6 +396,7 @@ GRANT_ROLE_SCHEMA: JSON = {
         "renamer",
         "editor",
         "creator",
+        "credential_reference_creator",
         "access_manager",
         "owner",
     ],
@@ -841,9 +887,13 @@ TOOLS: list[JSON] = [
             "lifecycle/health semantics, and one minimal valid example per write "
             "intent; and for every registered relationship type its directed endpoint "
             "kinds, endpoint predicates, type-dependent metadata fields, graph rules, "
-            "revision/no-op semantics, and rejection catalog. Call it before "
-            "create_child, create_root, update_object, create_attached_device, "
-            "create_relationship, or delete_relationship; it reads no catalog data. "
+            "revision/no-op semantics, and rejection catalog. Each write intent also "
+            "names its creation path (placement child, disconnected root, attached "
+            "device, or service-bound credential reference) and the exact permission "
+            "or catalog authority it requires, with the roles that carry it. Call it "
+            "before create_child, create_root, update_object, create_attached_device, "
+            "create_service_credential_reference, create_relationship, or "
+            "delete_relationship; it reads no catalog data. "
             "Scope it with kind, write_intent, and sections to prepare exactly one "
             "small write without loading foreign intent or relationship contracts."
         ),
@@ -1098,6 +1148,55 @@ TOOLS: list[JSON] = [
                 "metadata": ATTACHED_DEVICE_METADATA_SCHEMA,
             },
             "required": ["parent_id", "idempotency_key", "device"],
+            "additionalProperties": False,
+        },
+        "annotations": WRITE_ANNOTATIONS,
+    },
+    {
+        "name": SERVICE_CREDENTIAL_REFERENCE_TOOL,
+        "description": (
+            "Create one credential_reference metadata object and link it to exactly one "
+            "access method of an authorized service in a single atomic, idempotent call. "
+            "Requires the create_credential_reference capability on service_id (grant "
+            "role credential_reference_creator, owner, or catalog_owner); neither "
+            "create_child, create_root authority, nor write is needed or sufficient. The "
+            "reference gets no placement parent and no relationship: exactly one typed "
+            "reference is appended to data.access_methods[access_method_index]."
+            "credential_references of the service revision named by if_match, which "
+            "advances once, and nothing else changes. Returns the reference with its "
+            "ETag, the service's new ETag, the link, and the caller's Owner/self "
+            "assignment on the new reference. Metadata only: secret values are rejected "
+            "and no secret-store or target-system access is granted. Build "
+            f"credential_reference.data from {SCHEMA_TOOL_NAME}."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "service_id": {"type": "string", "minLength": 1, "maxLength": 128},
+                "access_method_index": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "description": (
+                        "Zero-based position of the target entry in data.access_methods "
+                        "of the service read that returned if_match"
+                    ),
+                },
+                "if_match": ETAG_SCHEMA,
+                "idempotency_key": {
+                    "type": "string",
+                    "minLength": 16,
+                    "maxLength": 128,
+                    "pattern": "^[!-~]+$",
+                },
+                "credential_reference": CREDENTIAL_REFERENCE_WRITE_SCHEMA,
+            },
+            "required": [
+                "service_id",
+                "access_method_index",
+                "if_match",
+                "idempotency_key",
+                "credential_reference",
+            ],
             "additionalProperties": False,
         },
         "annotations": WRITE_ANNOTATIONS,
@@ -1464,6 +1563,20 @@ def _write_intents(
             _ATTACHMENT_RULE.relation_type,
             sorted(_ATTACHMENT_RULE.to_kinds),
         ),
+        (
+            SERVICE_CREDENTIAL_REFERENCE_TOOL,
+            "credential_reference",
+            SERVICE_CREDENTIAL_REFERENCE_KINDS,
+            (
+                "service_id",
+                "access_method_index",
+                "if_match",
+                "idempotency_key",
+                "credential_reference",
+            ),
+            None,
+            [],
+        ),
     ):
         if write_intent is not None and name != write_intent:
             continue
@@ -1476,10 +1589,53 @@ def _write_intents(
             intent["required_arguments"] = list(arguments)
             intent["relation_type"] = relationship
             intent["parent_kinds"] = parent_kinds
+            intent["creation_path"] = _INTENT_CREATION_PATHS[name]
+            intent["authorization"] = _intent_authorization(name, supported)
+            intent["reference_link"] = (
+                dict(SERVICE_CREDENTIAL_REFERENCE_LINK)
+                if name == SERVICE_CREDENTIAL_REFERENCE_TOOL
+                else None
+            )
         if example:
             intent["example"] = _write_intent_example(name, argument, supported[0])
         intents.append(intent)
     return intents
+
+
+def _intent_authorization(name: str, kinds: list[str]) -> JSON:
+    """Project the authority one write intent requires for the published kinds.
+
+    An object permission is checked on the object named by `object_argument`
+    and is carried by the listed grant roles and global catalog roles. Root
+    creation is not an object permission, because a root has no object to hold
+    one; it is published as the root kinds each catalog authority covers.
+    """
+    requirement = _INTENT_OBJECT_PERMISSIONS[name]
+    if requirement is None:
+        root_kinds = {
+            role.value: covered
+            for role, allowed in CATALOG_ROLE_ROOT_KINDS.items()
+            if (covered := [kind for kind in kinds if allowed is None or kind in allowed])
+        }
+        return {
+            "permission": None,
+            "object_argument": None,
+            "object_roles": [],
+            "catalog_roles": sorted(root_kinds),
+            "root_kinds": root_kinds,
+        }
+    permission, argument = requirement
+    return {
+        "permission": permission.value,
+        "object_argument": argument,
+        "object_roles": sorted(role.value for role in roles_for_permission(permission)),
+        "catalog_roles": sorted(
+            role.value
+            for role, permissions in CATALOG_ROLE_PERMISSIONS.items()
+            if permission in permissions
+        ),
+        "root_kinds": None,
+    }
 
 
 def _write_intent_example(name: str, argument: str, kind: str) -> JSON:
@@ -1493,6 +1649,14 @@ def _write_intent_example(name: str, argument: str, kind: str) -> JSON:
         }
     if name == "blockwart.create_root":
         return {"idempotency_key": idempotency_key, **example}
+    if name == SERVICE_CREDENTIAL_REFERENCE_TOOL:
+        return {
+            "service_id": "example-service",
+            "access_method_index": 0,
+            "if_match": '"rev-1"',
+            "idempotency_key": idempotency_key,
+            **example,
+        }
     parent_kind = "host" if name == "blockwart.create_child" else "system"
     intent_example: JSON = {
         "parent_id": f"example-{parent_kind}",
@@ -1966,6 +2130,29 @@ def call_tool(
             relation_type="attached_to",
             relationship_metadata=metadata,
             parent_is_source=False,
+        )
+    elif name == SERVICE_CREDENTIAL_REFERENCE_TOOL:
+        service_id = _required_string(args, "service_id")
+        access_method_index = _required_index(args, "access_method_index")
+        requested_reference = _required_object(args, "credential_reference")
+        command_payload = request(
+            "POST",
+            f"/api/v1/objects/{quote(service_id, safe='')}/credential-references",
+            {
+                "access_method_index": access_method_index,
+                "credential_reference": requested_reference,
+            },
+            {
+                "If-Match": _required_string(args, "if_match"),
+                "Idempotency-Key": _required_string(args, "idempotency_key"),
+                "X-Blockwart-Channel": "mcp",
+            },
+        )
+        payload = _self_contained_service_credential_reference_payload(
+            command_payload,
+            requested_service_id=service_id,
+            requested_access_method_index=access_method_index,
+            requested_object=requested_reference,
         )
     elif name == "blockwart.get_device_graph":
         object_id = _required_string(args, "object_id")
@@ -2520,6 +2707,13 @@ def _required_integer(args: JSON, key: str) -> int:
     return value
 
 
+def _required_index(args: JSON, key: str) -> int:
+    value = args.get(key)
+    if not isinstance(value, int) or isinstance(value, bool) or value < 0:
+        raise ToolInputError(f"{key} is required")
+    return value
+
+
 def _required_object_ids(args: JSON, key: str) -> list[str]:
     value = args.get(key)
     if not isinstance(value, list) or not value:
@@ -2637,6 +2831,59 @@ def _self_contained_root_payload(
     return {
         **command_payload,
         "parent_ref": None,
+        "owner_assignment": {
+            "principal": "authenticated_caller",
+            "role": "owner",
+            "scope": "self",
+        },
+        "revision": revision,
+    }
+
+
+def _self_contained_service_credential_reference_payload(
+    command_payload: JSON,
+    *,
+    requested_service_id: str,
+    requested_access_method_index: int,
+    requested_object: JSON,
+) -> JSON:
+    """Prove the upstream result is exactly the requested reference and link."""
+    catalog_object = command_payload.get("credential_reference")
+    owner_grant = command_payload.get("owner_grant")
+    if not isinstance(catalog_object, dict) or not isinstance(owner_grant, dict):
+        raise _invalid_upstream_response()
+
+    requested_id = requested_object.get("id")
+    object_id = catalog_object.get("id")
+    revision = catalog_object.get("revision")
+    service_revision = command_payload.get("service_revision")
+    if (
+        not isinstance(requested_id, str)
+        or object_id != requested_id
+        or catalog_object.get("kind") != "credential_reference"
+        or catalog_object.get("parent_path") != []
+        or isinstance(revision, bool)
+        or not isinstance(revision, int)
+        or revision < 1
+        or command_payload.get("etag") != f'"rev-{revision}"'
+        or command_payload.get("service_id") != requested_service_id
+        or isinstance(service_revision, bool)
+        or not isinstance(service_revision, int)
+        or service_revision < 2
+        or command_payload.get("service_etag") != f'"rev-{service_revision}"'
+        or command_payload.get("access_method_index") != requested_access_method_index
+        or command_payload.get("link_path")
+        != f"data.access_methods[{requested_access_method_index}].credential_references"
+        or owner_grant.get("role") != "owner"
+        or owner_grant.get("scope") != "self"
+        or not isinstance(command_payload.get("changed"), bool)
+        or not isinstance(command_payload.get("replayed"), bool)
+    ):
+        raise _invalid_upstream_response()
+
+    return {
+        **command_payload,
+        "service_ref": f"service:{requested_service_id}",
         "owner_assignment": {
             "principal": "authenticated_caller",
             "role": "owner",

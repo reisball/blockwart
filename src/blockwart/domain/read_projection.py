@@ -190,6 +190,7 @@ _PERMISSION_CODES: dict[Permission, str] = {
     Permission.WRITE: "w",
     Permission.RENAME: "n",
     Permission.CREATE_CHILD: "c",
+    Permission.CREATE_CREDENTIAL_REFERENCE: "k",
     Permission.MANAGE_ACCESS: "m",
     Permission.DELETE: "x",
 }

@@ -68,7 +68,7 @@ Blockwart stores independent authorization axes on a principal:
 | Axis | Stored as | Meaning |
 |---|---|---|
 | identity administration | `platform_role = admin` | identity and credential administration |
-| global catalog authority | `catalog_role = catalog_owner` | all seven permissions on every object |
+| global catalog authority | `catalog_role = catalog_owner` | all eight permissions on every object |
 | global catalog read-only | `catalog_role = catalog_viewer` | exactly `discover` and `read` on every object |
 | global root-project creation | `project_creator = true` | create a top-level root of `kind = project` and nothing else, additively to the catalog role |
 | legacy root-project creation | `catalog_role = project_creator` | still recognized for existing principals; use the independent capability for new assignments |
@@ -137,8 +137,9 @@ An object grant assigns one role to one principal at one object with either
 | `renamer` | `discover`, `read`, `rename` |
 | `editor` | `discover`, `read`, `write`, `rename` |
 | `creator` | `discover`, `read`, `create_child` |
+| `credential_reference_creator` | `discover`, `read`, `create_credential_reference` |
 | `access_manager` | `discover`, `read`, `manage_access` |
-| `owner` | all permissions, including `rename` and `delete` |
+| `owner` | all permissions, including `rename`, `create_credential_reference`, and `delete` |
 
 `discover` exposes only the safe stub projection. `read` permits the full
 object projection. Grants are additive, do not imply access to parents or
@@ -154,6 +155,17 @@ and `catalog_owner` carry it alongside their existing authority. `viewer`,
 changes no other stored field, so it can never move an object in the placement
 tree or widen anyone's access.
 
+`create_credential_reference` is likewise a capability of its own. On a
+service it permits exactly one command — creating a new `credential_reference`
+object bound to one access method of that service, described in
+[Service-bound credential-reference creation](#service-bound-credential-reference-creation)
+— and nothing else: no update, rename, delete, relationship, or grant change of
+the service, and no placement-child or root creation. `credential_reference_creator`
+is the narrow role that delegates only that, while `owner` and `catalog_owner`
+carry it through their existing all-permission sets. `editor`, `creator`,
+`renamer`, `viewer`, `access_manager`, and `catalog_viewer` deliberately do not
+receive it, so no existing assignment is widened.
+
 `subtree` follows only the canonical placement graph:
 
 - `host -> system`
@@ -167,7 +179,8 @@ reparenting changes access without a stale application cache.
 ## Global catalog roles
 
 An active principal with `catalog_role = catalog_owner` holds `discover`,
-`read`, `write`, `rename`, `create_child`, `manage_access`, and `delete` on
+`read`, `write`, `rename`, `create_child`, `create_credential_reference`,
+`manage_access`, and `delete` on
 every object that currently exists, including objects created after the role
 was assigned.
 
@@ -184,7 +197,8 @@ An active human or service-account principal with
 `catalog_role = catalog_viewer` holds exactly `discover` and `read` on the same
 complete current catalog and every object created later, including a new
 disconnected root. It never implies `write`, `rename`, `create_child`,
-`manage_access`, `delete`, platform administration, credential administration,
+`create_credential_reference`, `manage_access`, `delete`, platform
+administration, credential administration,
 or token
 administration. Login, a valid browser session or token, and platform admin
 alone likewise never imply catalog viewing. The viewer is a distinct typed
@@ -193,8 +207,9 @@ per-object rows.
 
 An active human or service-account principal with
 `catalog_role = project_creator` holds **no** catalog-wide object permission at
-all: not `discover`, `read`, `write`, `rename`, `create_child`, `manage_access`,
-or `delete`, on any object, current or future. Its entire authority is the
+all: not `discover`, `read`, `write`, `rename`, `create_child`,
+`create_credential_reference`, `manage_access`, or `delete`, on any object,
+current or future. Its entire authority is the
 right to create one kind of disconnected top-level root — `kind = project` —
 through the `create_root` command described below.
 
@@ -408,6 +423,116 @@ was actually used (`catalog_owner` or `project_creator`), so the audit trail
 distinguishes a narrow delegated creation from a global one. It never includes
 secrets or raw credentials.
 
+## Service-bound credential-reference creation
+
+A credential reference is catalog metadata that names where a credential is
+kept — provider, protected path, key, item hint, scope, and handling rules. It
+never holds a value, it is never a placement child of the service that uses it,
+and a service links it through `data.access_methods[].credential_references`.
+Recording one for one service used to need three unrelated authorities:
+`creator` cannot place a `credential_reference` below a service, `create_root`
+for a `credential_reference` requires `catalog_owner`, and the link needs
+`write`, that is unrestricted editing, on the service. Creating a placement
+child, a disconnected root, and a service-bound reference are therefore three
+separately published creation paths; `blockwart.describe_schema` names each
+one and the permission or catalog authority it requires.
+
+### Supported delegation path
+
+1. An Owner of the service, or an `access_manager` on it, grants the agent
+   `credential_reference_creator` on that service with `self` scope, or on a
+   host or system with `subtree` scope to cover the services placed below it.
+   The normal grant commands apply: REST
+   `POST /api/v1/objects/{object_id}/access/grants`, MCP `blockwart.create_grant`,
+   or the UI **Access control** panel. No catalog role and no platform role is
+   assigned.
+2. The agent reads the service through REST `GET /api/v1/objects/{service_id}`
+   or MCP `blockwart.get_object_context`, confirms that its `capabilities`
+   contain `create_credential_reference`, picks the target entry of
+   `data.access_methods`, and keeps the strong `etag`.
+3. The agent calls REST `POST /api/v1/objects/{service_id}/credential-references`
+   or MCP `blockwart.create_service_credential_reference` with that ETag, the
+   zero-based `access_method_index`, an `Idempotency-Key`, and the new
+   credential-reference object. See [API v1](api-v1.md) and [MCP](mcp.md).
+
+### Command contract
+
+One shared application command runs in one transaction. It:
+
+- authorizes `create_credential_reference` on the service from the request
+  policy and again from current database state after it has locked the caller's
+  principal row and claimed the service row at the exact `If-Match` revision. A
+  concealed or missing service is the same `404`. A discoverable service without
+  the capability is `403` with the stable code
+  `create_credential_reference_required` and one redacted
+  `object_command_authorization` denial event;
+- accepts only `kind = credential_reference` and applies the canonical object
+  schema, secret-shaped key and value rejection, the credential-reference
+  raw-value rule, ACL-shaped-key rejection, and normalization of object creation;
+- requires `read` on every typed reference inside the new object's data, so a
+  concealed, a missing, and a kind-mismatched target are the same `404`;
+- refuses an ID that already names an object or is already held by any stored
+  typed reference or relationship with `409 credential_reference_id_unavailable`.
+  An existing reference, readable or not, is never reused, re-owned, or linked,
+  and a dangling legacy reference is never silently captured;
+- creates the reference as a disconnected object with no placement parent and
+  no relationship, and writes exactly one direct `Owner/self` grant for the
+  caller through the shared ownership primitive;
+- appends exactly one `credential_reference:<id>` to
+  `data.access_methods[access_method_index].credential_references` and advances
+  the service revision once. The applied statement writes only the service's
+  data document and optimistic concurrency columns, and the document differs
+  from the stored one in that single list: every other field, the other access
+  methods, the service-level `credential_references`, relationships, and grants
+  are unchanged. The result must still satisfy the full canonical service
+  contract; a stored record that does not is refused with
+  `409 service_record_invalid` instead of being repaired; and
+- records `create_service_credential_reference` on the new object and
+  `credential_reference_link` on the service, each with actor, channel, request
+  ID, old and new revision, and the exact link path, and stores the idempotency
+  result.
+
+Any failure rolls the whole transaction back: no reference, grant, link, audit
+event, or idempotency reservation survives. Missing `If-Match` is `428`; a
+malformed, weak, or stale value is `412`, and concurrent callers holding the
+same base ETag have exactly one winner. The same key and request replay the
+original result even after the service revision moved on; the same key with any
+other service, index, ETag, or object is `409`. An index outside
+`data.access_methods` is `409 access_method_not_found`, and a target that is not
+a service is `409 credential_reference_requires_service`.
+
+### Ownership and maintenance
+
+The caller becomes the explicit Owner of the new reference. It can then read,
+update, rename, and manage access to that reference, and to nothing else of the
+service: it can neither edit nor unlink the access method, and a linked
+reference cannot be deleted while the service still references it. The
+service's Owners and editors keep full control of their service, including
+removing the link through an ordinary ETag-bound update. They see the typed
+reference in the service data but read the reference object itself only through
+their own grants or a global catalog role; its Owner grants further access
+explicitly through the normal grant commands.
+
+The command stores metadata only. It never stores or reveals a secret value, and
+it grants no access to a secret store or to the target system.
+
+### Owner-mediated workaround
+
+Where nobody holds or may be given `credential_reference_creator`, the same
+result still needs three separately authorized steps, and the agent still needs
+no broad role:
+
+1. an existing catalog owner creates the disconnected reference with
+   `create_root` and becomes its Owner;
+2. a principal with `write` on the service — its Owner or an editor — links it
+   through an ETag-bound full-object update, which also requires `read` on the
+   new reference; and
+3. the reference's Owner grants the agent explicitly scoped access to that
+   reference, for example `editor/self`, for later maintenance.
+
+The delegation path replaces these steps with one atomic, idempotent,
+service-scoped call. It never assigns `catalog_owner` or `write` on the service.
+
 ## Grant management
 
 An actor needs effective `manage_access` on the anchor object to list, create,
@@ -465,7 +590,7 @@ writes the first direct `Owner/self` grant inside every creation transaction:
 
 | Creation path | First Owner |
 |---|---|
-| REST `POST /api/v1/roots`, `/children`, `/attached-devices`; MCP `create_root`, `create_child`, `create_attached_device`; browser create forms | the authenticated creator |
+| REST `POST /api/v1/roots`, `/children`, `/attached-devices`, `/credential-references`; MCP `create_root`, `create_child`, `create_attached_device`, `create_service_credential_reference`; browser create forms | the authenticated creator |
 | `blockwart-seed` | the explicit `--owner-login` principal |
 | `blockwart-import-markdown --apply` | the explicit `--owner-login` principal |
 | reviewed Knowledge apply | the applying catalog-owner principal |
@@ -684,6 +809,16 @@ viewer can then receive the independent capability without surrendering global
 read access. Downgrade fails closed while any independent capability cannot be
 represented by the legacy exclusive role.
 
+Alembic revision `20260926_0025` expands only the object-grant role check
+constraint, to accept `credential_reference_creator`. It writes no grant and
+rewrites no existing row: `owner` and `catalog_owner` gain
+`create_credential_reference` from the role or catalog role they already store,
+and no other stored role gains it. PostgreSQL replaces the constraint in place;
+SQLite rebuilds `object_grants`, which carries no trigger. Downgrade to
+`20260925_0024` is data-preserving when no such grant remains and fails closed
+while any grant still carries `credential_reference_creator`; revoke those
+grants through the normal grant commands before retrying.
+
 Service-account tokens use a protected output file:
 
 ```bash
@@ -744,6 +879,8 @@ also require the matching object permission. Schema settings are read-only over
 HTTP, and normal object creation requires an authorized placement parent through
 the shared `create_child` command. New top-level roots are created either as an
 explicit seed or import control-plane operation or by an active catalog owner
-through the dedicated `create_root` command described above. Production
+through the dedicated `create_root` command described above. A credential
+reference bound to one service access method is created only through the
+service-scoped `create_credential_reference` capability described above. Production
 identity bootstrap, token injection, and runtime rollout still require their
 dedicated approval.

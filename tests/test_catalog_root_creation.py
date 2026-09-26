@@ -283,6 +283,7 @@ def test_service_catalog_owner_creates_root_with_real_owner_grant(
     assert result.catalog_object.placement_state == "root"
     assert result.catalog_object.capabilities == [
         "create_child",
+        "create_credential_reference",
         "delete",
         "discover",
         "manage_access",
