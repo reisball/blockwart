@@ -21,7 +21,7 @@ def test_admin_assignment_pagination_has_the_reviewed_manifest_evidence() -> Non
     assert metadata == {
         "build_revision": "issue-245",
         "contract_version": "1",
-        "manifest_digest": "41f1bcc39e0dc2e9612060a4a759e9b915bcf644a6b2ec0257c172fbda931882",
+        "manifest_digest": "e593973c196c6d7a4db96861dcf5ee52122d93bf24e46ba1a2b2ab7c67bb04ae",
         "tool_count": 35,
     }
 
