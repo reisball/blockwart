@@ -13,15 +13,14 @@ from blockwart.mcp.manifest import (
 from blockwart.mcp.server import TOOLS, local_contract_metadata, validate_runtime_catalog
 
 
-def test_root_project_creator_tools_have_the_reviewed_manifest_evidence() -> None:
-    metadata = contract_metadata(TOOLS, build_revision="issue-237")
+def test_relationship_signature_has_reviewed_manifest_evidence() -> None:
+    metadata = contract_metadata(TOOLS, build_revision="issue-248")
 
-    # Ownerless recovery adds one narrowly scoped audited write tool and moves
-    # the reviewed manifest digest with that public contract.
+    # The readable relationship input schemas change the public MCP manifest.
     assert metadata == {
-        "build_revision": "issue-237",
+        "build_revision": "issue-248",
         "contract_version": "1",
-        "manifest_digest": "3c4d793151c40ab8a728ca47238d085c561a5a5ef4392f7870cc1f676c08c7de",
+        "manifest_digest": "da0a9e72edd7ad2dc2d647e79389c6facf67f6c5f59bc9611616ba2b85f65832",
         "tool_count": 34,
     }
 
