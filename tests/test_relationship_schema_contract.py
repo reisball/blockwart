@@ -11,6 +11,7 @@ field-accurate error contract without disclosing catalog state.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import re
 from pathlib import Path
@@ -64,6 +65,7 @@ from blockwart.mcp.server import (
     ToolInputError,
     call_tool,
     describe_schema_payload,
+    list_tools,
 )
 from blockwart.models import Relationship
 from blockwart.schemas.v1 import (
@@ -508,8 +510,18 @@ def test_relationship_tool_schemas_are_generated_from_the_registry() -> None:
         metadata_json_schema("attached_to")["properties"]
     )
     assert "mode" not in ATTACHED_DEVICE_METADATA_SCHEMA["properties"]
+    # Inspect the MCP SDK's actual tools/list projection, not only the source
+    # definitions. Its top-level shape must remain readable to an agent.
+    wire_schemas = {tool.name: tool.inputSchema for tool in asyncio.run(list_tools())}
+    required = {"object_id", "if_match", "from_ref", "relation_type", "to_ref"}
     for tool in RELATIONSHIP_TOOLS:
-        assert TOOL_DEFINITIONS[tool]["inputSchema"]["allOf"] == conditions
+        schema = wire_schemas[tool]
+        assert schema == TOOL_DEFINITIONS[tool]["inputSchema"]
+        assert schema["type"] == "object"
+        assert required == set(schema["required"])
+        assert all(schema["properties"][field]["type"] == "string" for field in required)
+        assert "allOf" not in schema
+        assert TOOL_INPUT_VALIDATORS[tool].schema["allOf"] == conditions
         assert tool in FIELD_ACCURATE_TOOLS
 
 
