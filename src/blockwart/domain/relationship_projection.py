@@ -43,32 +43,55 @@ from blockwart.domain.validation_errors import PUBLIC_DETAIL_FIELDS
 RELATIONSHIP_PROJECTION_VERSION = 1
 
 
-def relationship_projection(kind: str | None = None) -> dict[str, Any]:
+def relationship_type_accepts_kind(relation_type: str, kind: str) -> bool:
+    """Whether a registered relationship type accepts `kind` on either endpoint."""
+    return _accepts_kind(relation_type, kind)
+
+
+def relationship_projection(
+    kind: str | None = None,
+    relation_type: str | None = None,
+) -> dict[str, Any]:
     """Return the complete machine-readable projection of the relationship registry.
 
     `kind` restricts the detailed entries to the relationship types that accept
     that object kind on either endpoint. The published `relation_types`
     vocabulary always stays the complete closed registry, so a filtered
     contract can never look like a different one.
+
+    `relation_type` further restricts the detailed entries to that one
+    registered type: its `types` entry, and only the endpoint predicate and
+    graph rules that type uses. It must be a registered type that accepts
+    `kind`; the caller validates that, and a value outside the registry raises
+    `KeyError` instead of silently returning a broader projection.
     """
+    if relation_type is not None and relation_type not in RELATIONSHIP_RULES:
+        raise KeyError(relation_type)
+    selected = [
+        candidate
+        for candidate in RELATIONSHIP_TYPES
+        if (kind is None or _accepts_kind(candidate, kind))
+        and (relation_type is None or candidate == relation_type)
+    ]
+    predicate_names = sorted(ENDPOINT_PREDICATE_CONTRACTS)
+    graph_rule_names = sorted(GRAPH_RULE_CONTRACTS)
+    if relation_type is not None:
+        rule = RELATIONSHIP_RULES[relation_type]
+        predicate_names = [rule.endpoint_predicate_name]
+        graph_rule_names = sorted(rule.graph_rules)
     return {
         "version": RELATIONSHIP_PROJECTION_VERSION,
         "source": "blockwart.domain.relationships",
         "relation_types": list(RELATIONSHIP_TYPES),
         "relation_type_is_closed": True,
-        "endpoint_predicates": endpoint_predicate_projections(),
+        "endpoint_predicates": [endpoint_predicate_projection(name) for name in predicate_names],
         "graph_rules": [
-            {"rule": rule, "description": description}
-            for rule, description in sorted(GRAPH_RULE_CONTRACTS.items())
+            {"rule": name, "description": GRAPH_RULE_CONTRACTS[name]} for name in graph_rule_names
         ],
         "metadata_policy": metadata_policy_projection(),
         "command_semantics": command_semantics_projection(),
         "rejection_policy": rejection_policy_projection(),
-        "types": [
-            relationship_type_projection(relation_type)
-            for relation_type in RELATIONSHIP_TYPES
-            if kind is None or _accepts_kind(relation_type, kind)
-        ],
+        "types": [relationship_type_projection(candidate) for candidate in selected],
     }
 
 

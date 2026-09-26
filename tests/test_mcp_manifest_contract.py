@@ -21,7 +21,7 @@ def test_root_project_creator_tools_have_the_reviewed_manifest_evidence() -> Non
     assert metadata == {
         "build_revision": "issue-237",
         "contract_version": "1",
-        "manifest_digest": "3c4d793151c40ab8a728ca47238d085c561a5a5ef4392f7870cc1f676c08c7de",
+        "manifest_digest": "3c2dcbc0e4028ab5e3d90683caf755eaf51ff1fc9a33ef3338e605da0291ab99",
         "tool_count": 34,
     }
 

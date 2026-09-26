@@ -2180,3 +2180,154 @@ def test_unscoped_describe_schema_keeps_the_historical_payload_byte_for_byte() -
 def test_an_unknown_schema_section_is_rejected_by_the_published_tool_schema() -> None:
     with pytest.raises(ToolInputError):
         call_tool("blockwart.describe_schema", {"sections": ["everything"]})
+
+
+def _schema_call(arguments: dict) -> dict:
+    response = call_tool("blockwart.describe_schema", arguments)
+    return json.loads(response["content"][0]["text"])
+
+
+def _relation_type_details(arguments: dict) -> list[dict]:
+    with pytest.raises(ToolInputError) as raised:
+        call_tool("blockwart.describe_schema", arguments)
+    return raised.value.details
+
+
+def test_describe_schema_relation_type_input_schema_is_the_registry() -> None:
+    from blockwart.domain.relationships import RELATIONSHIP_TYPES
+
+    schema = next(t for t in TOOLS if t["name"] == "blockwart.describe_schema")["inputSchema"]
+    assert schema["properties"]["relation_type"]["enum"] == list(RELATIONSHIP_TYPES)
+    assert "relation_type" not in schema.get("required", [])
+
+
+def test_describe_schema_relation_type_returns_only_that_type() -> None:
+    from blockwart.domain.relationship_projection import relationship_type_projection
+    from blockwart.domain.relationships import (
+        RELATIONSHIP_RULES,
+        RELATIONSHIP_TYPES,
+        allowed_endpoint_pairs,
+    )
+
+    accepting = [
+        t
+        for t in RELATIONSHIP_TYPES
+        if any("device" in pair for pair in allowed_endpoint_pairs(t))
+    ]
+    assert accepting
+    for relation_type in accepting:
+        payload = _schema_call(
+            {"kind": "device", "sections": ["relationships"], "relation_type": relation_type}
+        )
+        relationships = payload["relationships"]
+        assert payload["requested_relation_type"] == relation_type
+        assert payload["sections"] == ["relationships"]
+        assert [t["relation_type"] for t in relationships["types"]] == [relation_type]
+        assert relationships["types"][0]["direction"]["directed_pairs"]
+        assert relationships["types"][0] == {
+            **relationship_type_projection(relation_type),
+            "metadata": {
+                **relationship_type_projection(relation_type)["metadata"],
+                "fields": relationships["types"][0]["metadata"]["fields"],
+            },
+        }
+        rule = RELATIONSHIP_RULES[relation_type]
+        assert [p["name"] for p in relationships["endpoint_predicates"]] == [
+            rule.endpoint_predicate_name
+        ]
+        assert [g["rule"] for g in relationships["graph_rules"]] == sorted(rule.graph_rules)
+        # The closed vocabulary is never narrowed.
+        assert relationships["relation_types"] == list(RELATIONSHIP_TYPES)
+        assert "rejection_policy" not in relationships
+
+
+def test_describe_schema_relation_type_leaves_errors_independent() -> None:
+    both = _schema_call(
+        {"sections": ["relationships", "errors"], "relation_type": "hosts"}
+    )
+    errors = _schema_call({"sections": ["errors"]})
+    assert both["relationship_errors"] == errors["relationship_errors"]
+    assert [t["relation_type"] for t in both["relationships"]["types"]] == ["hosts"]
+
+
+def test_describe_schema_unknown_relation_type_is_a_field_accurate_error() -> None:
+    details = _relation_type_details({"relation_type": "friends_with"})
+    assert [(d["location"], d["code"]) for d in details] == [("relation_type", "value_not_allowed")]
+    assert "friends_with" not in json.dumps(details)
+
+
+def test_describe_schema_unknown_relation_type_via_runtime_check() -> None:
+    with pytest.raises(ToolInputError) as raised:
+        mcp_server.describe_schema_payload(relation_type="friends_with")
+    assert [d["location"] for d in raised.value.details] == ["relation_type"]
+
+
+def test_describe_schema_kind_incompatible_relation_type_is_rejected_not_broadened() -> None:
+    from blockwart.domain.relationships import RELATIONSHIP_TYPES, allowed_endpoint_pairs
+
+    mismatched = [
+        (kind, t)
+        for kind in mcp_server.ALL_OBJECT_KINDS
+        for t in RELATIONSHIP_TYPES
+        if not any(kind in pair for pair in allowed_endpoint_pairs(t))
+    ]
+    assert mismatched, "registry has no kind/type mismatch to exercise"
+    for kind, relation_type in mismatched:
+        details = _relation_type_details(
+            {"kind": kind, "sections": ["relationships"], "relation_type": relation_type}
+        )
+        assert [(d["location"], d["code"]) for d in details] == [
+            ("relation_type", "value_not_allowed")
+        ]
+
+
+def test_describe_schema_relation_type_requires_the_relationships_section() -> None:
+    details = _relation_type_details(
+        {"sections": ["object_fields", "errors"], "relation_type": "hosts"}
+    )
+    assert [(d["location"], d["code"]) for d in details] == [("relation_type", "field_not_allowed")]
+
+
+def test_describe_schema_relation_type_without_sections_uses_the_complete_scope() -> None:
+    payload = _schema_call({"relation_type": "hosts"})
+    assert payload["sections"] == list(mcp_server.SCHEMA_SECTIONS)
+    assert [t["relation_type"] for t in payload["relationships"]["types"]] == ["hosts"]
+
+
+def test_describe_schema_other_invalid_arguments_stay_opaque() -> None:
+    assert _relation_type_details({"sections": ["everything"]}) == []
+    assert _relation_type_details({"kind": "nonsense", "relation_type": "hosts"}) == []
+
+
+def test_describe_schema_relation_type_keeps_unfiltered_results_unchanged() -> None:
+    assert mcp_server.describe_schema_payload(relation_type=None) == (
+        mcp_server.describe_schema_payload()
+    )
+    assert mcp_server.relationship_projection("device", None) == (
+        mcp_server.relationship_projection("device")
+    )
+
+
+def test_describe_schema_relation_type_size_comparison(capsys) -> None:
+    """Synthetic size evidence: the filter is a strict reduction of the kind-scoped read."""
+    scenarios = {
+        "complete (no scope)": {},
+        "kind=device, sections=[relationships]": {
+            "kind": "device",
+            "sections": ["relationships"],
+        },
+        "kind=device, sections=[relationships], relation_type=attached_to": {
+            "kind": "device",
+            "sections": ["relationships"],
+            "relation_type": "attached_to",
+        },
+    }
+    sizes = {}
+    with capsys.disabled():
+        print("\ndescribe_schema relation_type size comparison (compact JSON, bytes / ~tokens@4B):")
+        for label, arguments in scenarios.items():
+            text = json.dumps(_schema_call(arguments), separators=(",", ":"))
+            sizes[label] = len(text.encode())
+            print(f"  {label}: {sizes[label]} bytes / ~{sizes[label] // 4} tokens")
+    complete, kind_scoped, filtered = sizes.values()
+    assert filtered < kind_scoped < complete
