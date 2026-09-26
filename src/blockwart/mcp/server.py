@@ -1195,6 +1195,24 @@ TOOLS: list[JSON] = [
         "annotations": READ_ONLY_ANNOTATIONS,
     },
     {
+        "name": "blockwart.list_own_direct_grants",
+        "description": (
+            "List only the authenticated caller's own direct grants (role, scope, "
+            "target kind and target id) across catalog objects and projects; "
+            "cursor-paginated, never accepts a principal id."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "role": GRANT_ROLE_SCHEMA,
+                "limit": {"type": "integer", "minimum": 1, "maximum": 200, "default": 100},
+                "cursor": {"type": "string", "minLength": 1, "maxLength": 2048},
+            },
+            "additionalProperties": False,
+        },
+        "annotations": READ_ONLY_ANNOTATIONS,
+    },
+    {
         "name": "blockwart.preview_grant_scope",
         "description": "Preview the current canonical placement coverage of a grant scope.",
         "inputSchema": {
@@ -2010,6 +2028,15 @@ def call_tool(
         payload = fetch(
             f"/api/v1/admin/principals/{quote(principal_id, safe='')}",
             {},
+        )
+    elif name == "blockwart.list_own_direct_grants":
+        payload = fetch(
+            "/api/v1/auth/me/direct-grants",
+            {
+                "role": args.get("role"),
+                "limit": args.get("limit", 100),
+                "cursor": args.get("cursor"),
+            },
         )
     elif name == "blockwart.preview_grant_scope":
         object_id = _required_string(args, "object_id")

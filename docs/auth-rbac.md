@@ -37,6 +37,43 @@ Authorization: Bearer <service-account token>
 It returns only the authenticated principal's stable identity fields. The same
 bearer credential is required by `/api/objects`, `/api/agent`, and `/api/v1`.
 
+### Own direct-grant inventory
+
+```text
+GET /api/v1/auth/me/direct-grants?role=owner&limit=100&cursor=<opaque>
+Authorization: Bearer <service-account token>
+```
+
+Any authenticated, active principal may list its **own** direct grants; no platform
+role or catalog role is required and none is added. The principal comes only from the
+credential — the route has no principal parameter and rejects a `principal_id` query
+value. Unauthenticated, revoked, expired, or inactive callers receive the uniform
+`401`. The existing admin principal endpoints and their RBAC are unchanged.
+
+Each item is `{target_kind, target_id, role, scope}`: `target_kind` is `project` when the
+granted object is a top-level `project`, otherwise `catalog_object`; `role` and `scope`
+(`self` or `subtree`) are the grant's own values. Only direct grants are returned, never
+inherited or effective access, and nothing about other principals, labels, or object
+contents. Different roles or scopes on one target are separate items.
+
+- `role` (optional) filters to exactly that role, so `role=owner` excludes viewer
+  grants and every other role.
+- `limit` is `1..200` (default `100`); out-of-range values are rejected.
+- `cursor` is the opaque `next_cursor` of the previous page and is bound to the
+  authenticated principal and `role` filter; malformed, oversized, or mismatched
+  cursors return `400`.
+- Order is `(target_id, role, scope)` ascending. On an unchanged grant set, following
+  `next_cursor` until it is `null` returns every matching grant exactly once.
+- Consistency under mutation: pages are keyset-based, not snapshots. A grant that exists
+  for the whole traversal is never skipped or repeated; a grant created or revoked during
+  it may or may not appear depending on whether its position is after the current cursor.
+  Re-run the traversal to confirm a changed inventory.
+
+The endpoint does not change grants or catalog data. Normal authentication
+bookkeeping still applies. MCP exposes it as
+`blockwart.list_own_direct_grants` (`role`, `limit`, `cursor`; no principal argument) with
+identical semantics.
+
 The browser identity page is available at `/auth`. Login uses a one-time,
 server-stored pre-authentication challenge. Authenticated browser sessions are
 opaque, revocable, time-limited, `Secure`, `HttpOnly`, `SameSite=Strict`, and

@@ -316,6 +316,10 @@ def test_mcp_client_completes_handshake_and_calls_every_read_only_tool() -> None
                             "blockwart.get_admin_principal",
                             {"principal_id": "principal/admin"},
                         ),
+                        "blockwart.list_own_direct_grants": await session.call_tool(
+                            "blockwart.list_own_direct_grants",
+                            {"role": "owner", "limit": 3, "cursor": "opaque-own-cursor"},
+                        ),
                         "blockwart.preview_grant_scope": await session.call_tool(
                             "blockwart.preview_grant_scope",
                             {"object_id": "host/fabrik", "scope": "subtree"},
@@ -414,6 +418,7 @@ def test_mcp_client_completes_handshake_and_calls_every_read_only_tool() -> None
         "blockwart.search_principals",
         "blockwart.list_admin_principals",
         "blockwart.get_admin_principal",
+        "blockwart.list_own_direct_grants",
         "blockwart.preview_grant_scope",
         "blockwart.create_grant",
         "blockwart.update_grant",
@@ -438,6 +443,7 @@ def test_mcp_client_completes_handshake_and_calls_every_read_only_tool() -> None
             "blockwart.search_principals",
             "blockwart.list_admin_principals",
             "blockwart.get_admin_principal",
+            "blockwart.list_own_direct_grants",
             "blockwart.preview_grant_scope",
             "blockwart.get_device_graph",
             "blockwart.get_network_topology",
@@ -509,6 +515,12 @@ def test_mcp_client_completes_handshake_and_calls_every_read_only_tool() -> None
     assert result_payloads["blockwart.get_admin_principal"]["path"] == (
         "/api/v1/admin/principals/principal%2Fadmin"
     )
+    assert result_payloads["blockwart.list_own_direct_grants"]["path"] == (
+        "/api/v1/auth/me/direct-grants"
+    )
+    assert result_payloads["blockwart.list_own_direct_grants"]["query"]["cursor"] == [
+        "opaque-own-cursor"
+    ]
     assert result_payloads["blockwart.preview_grant_scope"]["path"] == (
         "/api/v1/objects/host%2Ffabrik/access/preview"
     )
@@ -581,7 +593,7 @@ def test_mcp_client_completes_handshake_and_calls_every_read_only_tool() -> None
         "GET",
         "GET",
         "POST",
-        *["GET"] * 15,
+        *["GET"] * 16,
     ]
     assert [request["path"] for request in requests] == [
         "/api/v1/objects",
@@ -598,6 +610,7 @@ def test_mcp_client_completes_handshake_and_calls_every_read_only_tool() -> None
         "/api/v1/objects/host%2Ffabrik/access/principals",
         "/api/v1/admin/principals",
         "/api/v1/admin/principals/principal%2Fadmin",
+        "/api/v1/auth/me/direct-grants",
         "/api/v1/objects/host%2Ffabrik/access/preview",
         "/api/v1/objects/host%2Ffabrik/device-graph",
         "/api/v1/objects/host%2Ffabrik/network-topology",
@@ -1276,6 +1289,7 @@ def test_mcp_tools_publish_explicit_read_write_and_delete_hints() -> None:
         "blockwart.search_principals",
         "blockwart.list_admin_principals",
         "blockwart.get_admin_principal",
+        "blockwart.list_own_direct_grants",
         "blockwart.preview_grant_scope",
         "blockwart.create_grant",
         "blockwart.update_grant",
@@ -1301,6 +1315,7 @@ def test_mcp_tools_publish_explicit_read_write_and_delete_hints() -> None:
             "blockwart.search_principals",
             "blockwart.list_admin_principals",
             "blockwart.get_admin_principal",
+            "blockwart.list_own_direct_grants",
             "blockwart.preview_grant_scope",
             "blockwart.get_device_graph",
             "blockwart.get_network_topology",
