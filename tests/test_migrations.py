@@ -49,7 +49,8 @@ RELEASE_MONITORING_REVISION = "20260825_0021"
 OBJECT_RENAME_REVISION = "20260909_0022"
 PROJECT_CREATOR_REVISION = "20260909_0023"
 ADDITIVE_PROJECT_CREATOR_REVISION = "20260925_0024"
-HEAD_REVISION = ADDITIVE_PROJECT_CREATOR_REVISION
+CREDENTIAL_REFERENCE_CREATOR_REVISION = "20260926_0025"
+HEAD_REVISION = CREDENTIAL_REFERENCE_CREATOR_REVISION
 _GUARD_TRIGGER_NAMES = (
     "ck_principals_last_active_admin_update",
     "ck_principals_last_active_admin_delete",
@@ -3317,3 +3318,119 @@ def test_additive_project_creator_migration_preserves_roles_and_grants(
         connection.close()
     with pytest.raises(RuntimeError, match="independent project_creator"):
         command.downgrade(config, PROJECT_CREATOR_REVISION)
+
+
+def test_credential_reference_creator_migration_widens_only_the_role_vocabulary(
+    tmp_path: Path,
+) -> None:
+    database_path = tmp_path / "credential-reference-creator.sqlite3"
+    database_url = _database_url(database_path)
+    config = build_alembic_config(database_url)
+    command.upgrade(config, ADDITIVE_PROJECT_CREATOR_REVISION)
+    connection = sqlite3.connect(database_path)
+    try:
+        connection.execute(
+            "INSERT INTO principals (id, principal_type, login, display_name, "
+            "active, platform_role, catalog_role, revision) VALUES "
+            "('kept-owner', 'human', 'kept.owner', 'Kept Owner', 1, 'admin', "
+            "'catalog_owner', 3), "
+            "('kept-agent', 'service_account', 'kept.agent', 'Kept Agent', 1, NULL, "
+            "NULL, 2)"
+        )
+        connection.execute(
+            "INSERT INTO catalog_objects (id, kind, label, status, lifecycle, health, "
+            "data_json, provenance_json, revision) VALUES "
+            "('kept-service', 'service', 'Kept Service', 'active', 'active', "
+            "'healthy', '{\"schema_version\":1}', '{}', 4)"
+        )
+        connection.execute(
+            "INSERT INTO object_grants (principal_id, object_id, role, scope, "
+            "created_by_principal_id) VALUES "
+            "('kept-owner', 'kept-service', 'owner', 'self', 'kept-owner'), "
+            "('kept-agent', 'kept-service', 'creator', 'self', 'kept-owner'), "
+            "('kept-agent', 'kept-service', 'editor', 'self', 'kept-owner')"
+        )
+        connection.commit()
+        before_principals = connection.execute(
+            "SELECT * FROM principals ORDER BY id"
+        ).fetchall()
+        before_objects = connection.execute(
+            "SELECT * FROM catalog_objects ORDER BY id"
+        ).fetchall()
+        before_grants = connection.execute(
+            "SELECT id, principal_id, object_id, role, scope, created_by_principal_id "
+            "FROM object_grants ORDER BY id"
+        ).fetchall()
+    finally:
+        connection.close()
+
+    command.upgrade(config, CREDENTIAL_REFERENCE_CREATOR_REVISION)
+    connection = sqlite3.connect(database_path)
+    try:
+        # No principal, object, or grant is rewritten and no role is granted.
+        assert connection.execute(
+            "SELECT * FROM principals ORDER BY id"
+        ).fetchall() == before_principals
+        assert connection.execute(
+            "SELECT * FROM catalog_objects ORDER BY id"
+        ).fetchall() == before_objects
+        assert connection.execute(
+            "SELECT id, principal_id, object_id, role, scope, created_by_principal_id "
+            "FROM object_grants ORDER BY id"
+        ).fetchall() == before_grants
+        connection.execute(
+            "INSERT INTO object_grants (principal_id, object_id, role, scope, "
+            "created_by_principal_id) VALUES "
+            "('kept-agent', 'kept-service', 'credential_reference_creator', 'self', "
+            "'kept-owner')"
+        )
+        connection.commit()
+        with pytest.raises(sqlite3.IntegrityError, match="CHECK constraint failed"):
+            connection.execute(
+                "UPDATE object_grants SET role = 'credential_reference_editor' "
+                "WHERE role = 'credential_reference_creator'"
+            )
+        connection.rollback()
+        triggers = {
+            str(row[0])
+            for row in connection.execute(
+                "SELECT name FROM sqlite_master WHERE type = 'trigger'"
+            )
+        }
+        assert set(_GUARD_TRIGGER_NAMES) | set(_COUNTER_TRIGGER_NAMES) <= triggers
+        assert connection.execute("PRAGMA foreign_key_check").fetchall() == []
+    finally:
+        connection.close()
+
+    with pytest.raises(RuntimeError, match="explicitly revoked before downgrade"):
+        command.downgrade(config, ADDITIVE_PROJECT_CREATOR_REVISION)
+    assert _revision(database_url) == CREDENTIAL_REFERENCE_CREATOR_REVISION
+
+    connection = sqlite3.connect(database_path)
+    try:
+        connection.execute(
+            "DELETE FROM object_grants WHERE role = 'credential_reference_creator'"
+        )
+        connection.commit()
+    finally:
+        connection.close()
+    command.downgrade(config, ADDITIVE_PROJECT_CREATOR_REVISION)
+    connection = sqlite3.connect(database_path)
+    try:
+        assert connection.execute(
+            "SELECT * FROM principals ORDER BY id"
+        ).fetchall() == before_principals
+        assert connection.execute(
+            "SELECT id, principal_id, object_id, role, scope, created_by_principal_id "
+            "FROM object_grants ORDER BY id"
+        ).fetchall() == before_grants
+        with pytest.raises(sqlite3.IntegrityError, match="CHECK constraint failed"):
+            connection.execute(
+                "INSERT INTO object_grants (principal_id, object_id, role, scope) "
+                "VALUES ('kept-agent', 'kept-service', "
+                "'credential_reference_creator', 'self')"
+            )
+        connection.rollback()
+        assert connection.execute("PRAGMA foreign_key_check").fetchall() == []
+    finally:
+        connection.close()

@@ -1101,6 +1101,43 @@ def ensure_kind_change_allowed(
         )
 
 
+def typed_reference_holders(session: Session, object_ref: str) -> list[str]:
+    """Return every relationship and object document that names ``object_ref``.
+
+    A new object whose typed reference is already held somewhere — a dangling
+    legacy reference, for instance — would silently become the target of that
+    existing reference. Callers that must bind a new object to exactly one
+    place use this to fail closed instead. Documents are prefiltered by the
+    exact serialized reference string and then confirmed by parsing; a
+    matching document that cannot be parsed counts as a holder.
+    """
+    holders = [
+        f"relationship:{relationship_id}"
+        for relationship_id in session.scalars(
+            select(Relationship.id)
+            .where(
+                (Relationship.from_ref == object_ref)
+                | (Relationship.to_ref == object_ref)
+            )
+            .order_by(Relationship.id)
+        ).all()
+    ]
+    candidates = session.scalars(
+        select(CatalogObject)
+        .where(CatalogObject.data_json.contains(json.dumps(object_ref), autoescape=True))
+        .order_by(CatalogObject.id)
+    ).all()
+    for row in candidates:
+        try:
+            data = json.loads(row.data_json)
+        except (TypeError, json.JSONDecodeError):
+            holders.append(f"catalog_object:{row.id}")
+            continue
+        if object_ref in iter_typed_reference_strings(data):
+            holders.append(f"catalog_object:{row.id}")
+    return holders
+
+
 def _reference_blockers(session: Session, object_ref: str) -> list[str]:
     blockers = [
         f"relationship:{row.id}"

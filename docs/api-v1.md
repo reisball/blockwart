@@ -447,6 +447,96 @@ catalog owner. The response is `201`, includes `Location` and `ETag`,
 and contains the created object; the idempotent replay, duplicate-ID conflict,
 and changed-payload `409 conflict` semantics match child creation.
 
+### `POST /api/v1/objects/{service_id}/credential-references`
+
+Creates one new `credential_reference` metadata object and links it to exactly
+one access method of the service in the path. This is the service-bound
+creation path: it is neither placement-child creation (`/children`, which never
+accepts a credential reference) nor disconnected-root creation (`/roots`, which
+requires a catalog authority covering the kind). See
+[Service-bound credential-reference creation](auth-rbac.md#service-bound-credential-reference-creation)
+for the delegation path and the owner-mediated workaround.
+
+Requires the dedicated `create_credential_reference` permission on that exact
+service: the narrow `credential_reference_creator` grant role, `owner`, or
+`catalog_owner`. Neither `create_child`, `write`, nor a root-creation authority
+is required or sufficient, so the reported `creator/self` delegation and an
+`editor` grant are both refused. Missing and concealed services return the
+usual `404`; a principal that can discover the service but lacks the
+capability receives `403` with the stable code
+`create_credential_reference_required`, and the denial is recorded as a
+redacted security event.
+
+The request requires the service's current strong `If-Match` ETag and an
+`Idempotency-Key` of 16..128 visible ASCII characters. The body is the closed
+document:
+
+```json
+{
+  "access_method_index": 0,
+  "credential_reference": {
+    "id": "billing-api-operator",
+    "kind": "credential_reference",
+    "label": "Billing API operator credential",
+    "data": {
+      "schema_version": 1,
+      "provider": "infisical",
+      "reference": {"path": "/apps/billing", "key": "API_KEY"},
+      "used_by": {"services": ["service:billing-api"]}
+    }
+  }
+}
+```
+
+`access_method_index` is the zero-based position of the target entry in
+`data.access_methods` of the service revision named by `If-Match`, exactly as
+the read that supplied the ETag returned it; stored access methods need no
+stable `id` to be addressable. `credential_reference` is the canonical object
+write contract with `kind` pinned to `credential_reference`, so the shared
+schema, normalization, typed-reference, ACL-shaped-key, secret-shaped-value,
+and credential-reference raw-value rules apply unchanged. Every typed reference
+inside its data must name an object the caller can read; concealed, missing,
+and kind-mismatched targets share one `404`. No other field of the service can
+be expressed in the body.
+
+The response is `201` with a closed `V1ServiceCredentialReferenceOut` document:
+the created `credential_reference` object with its Owner capabilities and its
+own `etag`, `service_id`, the resulting `service_revision` and `service_etag`,
+`access_method_index`, the canonical `link_path`
+(`data.access_methods[<index>].credential_references`), the explicit
+`owner_grant` (`principal_id` of the caller, `role = owner`, `scope = self`),
+`changed`, and `replayed`. The `ETag` and `Location` headers name the created
+reference.
+
+The reference, the caller's single direct Owner/self grant, the link, the two
+audit events (`create_service_credential_reference` on the reference and
+`credential_reference_link` on the service), and the idempotency result commit
+atomically. The new reference has no placement parent and no relationship. The
+service revision advances exactly once, and its data document differs only by
+the one appended typed reference; every other field, access method, reference
+list, relationship, and grant is unchanged. The command stores metadata only
+and grants no secret-store or target-system access.
+
+| Condition | Result |
+|---|---|
+| Missing `Idempotency-Key` | `400` |
+| Concealed or missing service | `404 not_found` |
+| Discoverable service without the capability | `403 create_credential_reference_required` |
+| Missing `If-Match` | `428 precondition_required` |
+| Malformed, weak, or stale `If-Match`; another writer won the same base revision | `412 precondition_failed` |
+| Path object is not a service | `409 credential_reference_requires_service` |
+| `access_method_index` names no entry | `409 access_method_not_found` |
+| ID already names an object or is held by a stored typed reference or relationship | `409 credential_reference_id_unavailable` |
+| Stored service no longer satisfies its canonical contract | `409 service_record_invalid` |
+| Same key reused for another service, index, ETag, or object | `409 conflict` |
+| Rejected body, including secret-shaped values or another `kind` | `422 validation_error` |
+
+Repeating the same request with the same key within the idempotency TTL returns
+the stored result with `replayed = true`, even after the service revision moved
+on, and creates nothing further; its `service_etag` is then the one the original
+call produced, so read the service again before a later ETag-bound write. A new
+key for an already created reference ID is `409 credential_reference_id_unavailable`.
+
 ### `PUT /api/v1/objects/{object_id}`
 
 Requires `write` on that exact object and `If-Match` with the current strong

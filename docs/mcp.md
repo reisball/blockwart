@@ -88,6 +88,7 @@ It wraps the object-authorized v1 API:
 - blockwart.create_relationship -> POST /api/v1/objects/{object_id}/relationships
 - blockwart.delete_relationship -> DELETE /api/v1/objects/{object_id}/relationships
 - blockwart.create_attached_device -> POST /api/v1/objects/{parent_id}/attached-devices
+- blockwart.create_service_credential_reference -> POST /api/v1/objects/{service_id}/credential-references
 - blockwart.get_device_graph -> GET /api/v1/objects/{object_id}/device-graph
 - blockwart.get_network_topology -> GET /api/v1/objects/{object_id}/network-topology
 - blockwart.get_object_access -> GET /api/v1/objects/{object_id}/access
@@ -153,7 +154,14 @@ Choose the smallest tool that directly answers the intent:
   that accept that kind as an endpoint; the published relationship vocabulary
   stays complete. For one small write, request exactly one `kind`, one
   `write_intent`, and `sections: ["object_fields", "minimal_example"]`; add
-  `relationships` or `errors` only when that write needs them.
+  `relationships` or `errors` only when that write needs them. Every write
+  intent also publishes its `creation_path` (`placement_child`,
+  `disconnected_root`, `attached_device`, `service_bound_reference`, or `null`
+  for an update) and an `authorization` block naming the object permission and
+  the argument whose object must hold it, the grant roles and catalog roles
+  that carry it, or — for root creation — the root kinds each catalog authority
+  covers. Compare it with the target object's `capabilities` before writing
+  instead of discovering a missing capability through denials.
 - Use `blockwart.get_object_context` when the exact object ID is already known.
 - Use `blockwart.get_object_contexts` when several exact object IDs are already
   known and their authorized contexts must be retrieved in one bounded
@@ -209,7 +217,8 @@ are intentionally not added.
 
 Every readable full detail contains `revision` and its current strong `etag`
 (`"rev-N"`). Pass that `etag` byte-for-byte as `if_match` to `update_object`,
-`delete_object`, relationship tools, or access-management writes. A fresh read
+`delete_object`, `create_service_credential_reference`, relationship tools, or
+access-management writes. A fresh read
 after a successful non-delete mutation supplies the next current value;
 deletion leaves no object or successor ETag to read. Discover-only stubs
 contain neither field, so they cannot be used to infer or attempt a write
@@ -294,6 +303,7 @@ means it deliberately bundles lower-level API concerns behind one agent call.
 | `create_relationship` | Link existing objects | `directly sufficient` | Its published schema carries the closed relationship vocabulary and the type-dependent metadata; its response contains the exact relationship, metadata, revision, and ETag. |
 | `delete_relationship` | Unlink existing objects | `directly sufficient` | The exact edge and current ETag remain explicit; the same closed vocabulary applies. |
 | `create_attached_device` | Create and attach one device | `intent tool`, `response improved` | Resolves the parent internally and proves the attachment, metadata, ownership, revision, and idempotency. |
+| `create_service_credential_reference` | Record where one service access method's credential is kept | `intent tool`, `response improved` | Bundles metadata creation, the single access-method link, and the caller's Owner/self assignment into one atomic, idempotent, ETag-bound call that needs only the service-scoped `create_credential_reference` capability, never `catalog_owner` or `write` on the service. |
 | `get_device_graph` | Inspect device attachments | `directly sufficient` | Returns the authorized `attached_to` graph with link metadata. |
 | `get_network_topology` | Inspect network paths | `directly sufficient` | Returns bounded direct or inherited paths with metadata and truncation state. |
 | `get_object_access` | Inspect access | `directly sufficient` | Separates direct grants from effective permissions. |
@@ -454,6 +464,29 @@ unchanged for compatibility. The compact proof follows from the successful
 atomic API command; neither tool loads a complete device graph or retries a
 failed concurrency precondition.
 
+`blockwart.create_service_credential_reference` executes the shared
+service-bound credential-reference command of
+`POST /api/v1/objects/{service_id}/credential-references`. It takes `service_id`,
+the service's current strong `if_match` ETag, the zero-based
+`access_method_index` into that revision's `data.access_methods`, an
+`idempotency_key`, and `credential_reference`, the canonical object document
+with `kind` pinned to `credential_reference`. It requires the
+`create_credential_reference` capability on that service — the
+`credential_reference_creator` grant role, `owner`, or `catalog_owner` — and
+never `create_child`, a root-creation authority, or `write` on the service. A
+caller without it receives `create_credential_reference_required`; the other
+stable codes are `access_method_not_found`,
+`credential_reference_id_unavailable`, `credential_reference_requires_service`,
+and `service_record_invalid`. The new reference gets no placement parent and no
+relationship; exactly one typed reference is appended to the chosen access
+method, the service revision advances once, and nothing else changes. The
+result carries the created object and its `etag`, `service_etag` and
+`service_revision`, `link_path`, the REST `owner_grant`, and the additive
+`service_ref`, `owner_assignment`, and `revision` proofs. A replay with the same
+key returns the original result with `replayed = true`. The tool stores metadata
+only and grants no secret-store or target-system access; see
+[Service-bound credential-reference creation](auth-rbac.md#service-bound-credential-reference-creation).
+
 `blockwart.create_root` executes the same shared `create_root` command as REST
 and the browser UI. It requires an already active service principal with an
 `mcp`-audience token, an `idempotency_key`, and authority covering the requested kind:
@@ -560,7 +593,7 @@ unchanged. See `api-boundary-contract.md`.
 Object-write and relationship tool validation failures (`blockwart.create_root`,
 `blockwart.create_child`, `blockwart.update_object`, `blockwart.preview_object_update`,
 `blockwart.rename_object`, `blockwart.preview_object_rename`,
-`blockwart.create_attached_device`,
+`blockwart.create_attached_device`, `blockwart.create_service_credential_reference`,
 `blockwart.create_relationship`, and `blockwart.delete_relationship`) return field-accurate,
 sanitized `details` on the `invalid_arguments` error. Each detail carries exactly the canonical
 fields the schema projection publishes: `code` (stable violation type), `location` (rejected

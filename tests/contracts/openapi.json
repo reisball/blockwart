@@ -3696,6 +3696,7 @@
           "write",
           "rename",
           "create_child",
+          "create_credential_reference",
           "manage_access",
           "delete"
         ],
@@ -4783,6 +4784,7 @@
           "renamer",
           "editor",
           "creator",
+          "credential_reference_creator",
           "access_manager",
           "owner"
         ],
@@ -5605,6 +5607,123 @@
           "direction"
         ],
         "title": "V1ContextPageOut",
+        "type": "object"
+      },
+      "V1CredentialReferenceObjectIn": {
+        "description": "One new credential-reference object for the service-bound command.\n\nIt is the canonical object write contract with `kind` pinned, so every\nschema, normalization, reference, ACL-shaped-key, and secret-shaped-value\nrule of object creation applies unchanged.",
+        "properties": {
+          "data": {
+            "additionalProperties": true,
+            "description": "Kind-specific catalog data. The top-level x-blockwart-object-schema OpenAPI extension is generated from the same domain registry that validates writes.",
+            "title": "Data",
+            "type": "object"
+          },
+          "health": {
+            "anyOf": [
+              {
+                "enum": [
+                  "unknown",
+                  "healthy",
+                  "degraded",
+                  "down",
+                  "maintenance"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Health"
+          },
+          "id": {
+            "pattern": "^[a-z0-9][a-z0-9_-]*[a-z0-9]$|^[a-z0-9]$",
+            "title": "Id",
+            "type": "string"
+          },
+          "kind": {
+            "const": "credential_reference",
+            "title": "Kind",
+            "type": "string"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "lifecycle": {
+            "anyOf": [
+              {
+                "enum": [
+                  "planned",
+                  "active",
+                  "retired"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Lifecycle"
+          },
+          "provenance": {
+            "$ref": "#/components/schemas/CatalogProvenance"
+          },
+          "status": {
+            "default": "active",
+            "enum": [
+              "active",
+              "inactive",
+              "deleted"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "summary": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Summary"
+          }
+        },
+        "required": [
+          "id",
+          "kind",
+          "label"
+        ],
+        "title": "V1CredentialReferenceObjectIn",
+        "type": "object"
+      },
+      "V1CredentialReferenceOwnerGrantOut": {
+        "additionalProperties": false,
+        "description": "The one direct grant the creator receives on the new reference.",
+        "properties": {
+          "principal_id": {
+            "title": "Principal Id",
+            "type": "string"
+          },
+          "role": {
+            "const": "owner",
+            "title": "Role",
+            "type": "string"
+          },
+          "scope": {
+            "const": "self",
+            "title": "Scope",
+            "type": "string"
+          }
+        },
+        "required": [
+          "principal_id",
+          "role",
+          "scope"
+        ],
+        "title": "V1CredentialReferenceOwnerGrantOut",
         "type": "object"
       },
       "V1DeleteCommandOut": {
@@ -7977,6 +8096,90 @@
           "direct"
         ],
         "title": "V1ScopePreviewObjectOut",
+        "type": "object"
+      },
+      "V1ServiceCredentialReferenceCreateIn": {
+        "additionalProperties": false,
+        "description": "The complete request body of one service-bound credential-reference creation.\n\nThe service is named by the path and its base revision by the strong\n`If-Match` ETag. `access_method_index` names exactly one entry of that\nrevision's `data.access_methods`, as returned by the service read that\nsupplied the ETag. The body carries the new object and nothing else, so no\nother service field, relationship, or grant can be smuggled into the\noperation.",
+        "properties": {
+          "access_method_index": {
+            "description": "Zero-based position of the target entry in data.access_methods of the service revision named by If-Match.",
+            "minimum": 0.0,
+            "title": "Access Method Index",
+            "type": "integer"
+          },
+          "credential_reference": {
+            "$ref": "#/components/schemas/V1CredentialReferenceObjectIn"
+          }
+        },
+        "required": [
+          "access_method_index",
+          "credential_reference"
+        ],
+        "title": "V1ServiceCredentialReferenceCreateIn",
+        "type": "object"
+      },
+      "V1ServiceCredentialReferenceOut": {
+        "additionalProperties": false,
+        "description": "The applied result of one service-bound credential-reference creation.\n\nIt publishes the created object with its own ETag, the one link it received,\nthe service's resulting revision, and the explicit ownership of the new\nobject. An idempotent replay returns the original result unchanged, so its\nservice revision may be older than the current one.",
+        "properties": {
+          "access_method_index": {
+            "minimum": 0.0,
+            "title": "Access Method Index",
+            "type": "integer"
+          },
+          "changed": {
+            "title": "Changed",
+            "type": "boolean"
+          },
+          "credential_reference": {
+            "$ref": "#/components/schemas/CatalogObjectOut"
+          },
+          "etag": {
+            "pattern": "^\"rev-[1-9][0-9]*\"$",
+            "title": "Etag",
+            "type": "string"
+          },
+          "link_path": {
+            "description": "Canonical data path of the one list that received the new typed reference.",
+            "title": "Link Path",
+            "type": "string"
+          },
+          "owner_grant": {
+            "$ref": "#/components/schemas/V1CredentialReferenceOwnerGrantOut"
+          },
+          "replayed": {
+            "default": false,
+            "title": "Replayed",
+            "type": "boolean"
+          },
+          "service_etag": {
+            "pattern": "^\"rev-[1-9][0-9]*\"$",
+            "title": "Service Etag",
+            "type": "string"
+          },
+          "service_id": {
+            "title": "Service Id",
+            "type": "string"
+          },
+          "service_revision": {
+            "minimum": 1.0,
+            "title": "Service Revision",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "credential_reference",
+          "etag",
+          "service_id",
+          "service_revision",
+          "service_etag",
+          "access_method_index",
+          "link_path",
+          "owner_grant",
+          "changed"
+        ],
+        "title": "V1ServiceCredentialReferenceOut",
         "type": "object"
       },
       "V1SourceCoverageDetailOut": {
@@ -18713,6 +18916,186 @@
         ]
       }
     },
+    "/api/v1/objects/{service_id}/credential-references": {
+      "post": {
+        "description": "Create one disconnected credential reference and link it to the service.\n\nRequires the dedicated `create_credential_reference` permission on the\nservice (the `credential_reference_creator` role, `owner`, or\n`catalog_owner`); neither `create_child`, `write`, nor any root-creation\nauthority is required or sufficient. The strong service `If-Match` ETag and\nan `Idempotency-Key` are required. The new reference receives no placement\nparent and no relationship; exactly one typed reference is appended to\n`data.access_methods[access_method_index].credential_references`, the\nservice revision advances once, and the caller receives one direct\nOwner/self grant on the new reference. Everything commits atomically.",
+        "operationId": "create_v1_service_credential_reference_api_v1_objects__service_id__credential_references_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "service_id",
+            "required": true,
+            "schema": {
+              "title": "Service Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "If-Match",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "If-Match"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Idempotency-Key"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/V1ServiceCredentialReferenceCreateIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ServiceCredentialReferenceOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Authentication required"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Permission denied"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Resource not found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "412": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Precondition failed"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Request validation failed"
+          },
+          "428": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Precondition required"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Internal server error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Service unavailable"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Create one credential reference bound to one service access method",
+        "tags": [
+          "api-v1-readonly"
+        ]
+      }
+    },
     "/api/v1/projects": {
       "get": {
         "operationId": "list_v1_projects_api_v1_projects_get",
@@ -29057,7 +29440,7 @@
       "raw_secret_values_rejected": true
     },
     "source": "blockwart.domain.object_schema",
-    "version": 8,
+    "version": 9,
     "violation_policy": {
       "description": "A rejected write names the canonical public data path, one violation code, and the published rule when a schema postcondition rejected it. Rejected values are never returned.",
       "detail_fields": [
