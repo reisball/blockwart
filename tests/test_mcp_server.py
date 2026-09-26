@@ -316,6 +316,15 @@ def test_mcp_client_completes_handshake_and_calls_every_read_only_tool() -> None
                             "blockwart.get_admin_principal",
                             {"principal_id": "principal/admin"},
                         ),
+                        "blockwart.list_admin_principal_assignments": await session.call_tool(
+                            "blockwart.list_admin_principal_assignments",
+                            {
+                                "principal_id": "principal/admin",
+                                "assignment_type": "direct",
+                                "limit": 2,
+                                "cursor": "opaque-assignment-cursor",
+                            },
+                        ),
                         "blockwart.preview_grant_scope": await session.call_tool(
                             "blockwart.preview_grant_scope",
                             {"object_id": "host/fabrik", "scope": "subtree"},
@@ -414,6 +423,7 @@ def test_mcp_client_completes_handshake_and_calls_every_read_only_tool() -> None
         "blockwart.search_principals",
         "blockwart.list_admin_principals",
         "blockwart.get_admin_principal",
+        "blockwart.list_admin_principal_assignments",
         "blockwart.preview_grant_scope",
         "blockwart.create_grant",
         "blockwart.update_grant",
@@ -438,6 +448,7 @@ def test_mcp_client_completes_handshake_and_calls_every_read_only_tool() -> None
             "blockwart.search_principals",
             "blockwart.list_admin_principals",
             "blockwart.get_admin_principal",
+            "blockwart.list_admin_principal_assignments",
             "blockwart.preview_grant_scope",
             "blockwart.get_device_graph",
             "blockwart.get_network_topology",
@@ -509,6 +520,15 @@ def test_mcp_client_completes_handshake_and_calls_every_read_only_tool() -> None
     assert result_payloads["blockwart.get_admin_principal"]["path"] == (
         "/api/v1/admin/principals/principal%2Fadmin"
     )
+    assignment_payload = result_payloads["blockwart.list_admin_principal_assignments"]
+    assert assignment_payload["path"] == (
+        "/api/v1/admin/principals/principal%2Fadmin/assignments"
+    )
+    assert assignment_payload["query"] == {
+        "assignment_type": ["direct"],
+        "limit": ["2"],
+        "cursor": ["opaque-assignment-cursor"],
+    }
     assert result_payloads["blockwart.preview_grant_scope"]["path"] == (
         "/api/v1/objects/host%2Ffabrik/access/preview"
     )
@@ -581,7 +601,7 @@ def test_mcp_client_completes_handshake_and_calls_every_read_only_tool() -> None
         "GET",
         "GET",
         "POST",
-        *["GET"] * 15,
+        *["GET"] * 16,
     ]
     assert [request["path"] for request in requests] == [
         "/api/v1/objects",
@@ -598,6 +618,7 @@ def test_mcp_client_completes_handshake_and_calls_every_read_only_tool() -> None
         "/api/v1/objects/host%2Ffabrik/access/principals",
         "/api/v1/admin/principals",
         "/api/v1/admin/principals/principal%2Fadmin",
+        "/api/v1/admin/principals/principal%2Fadmin/assignments",
         "/api/v1/objects/host%2Ffabrik/access/preview",
         "/api/v1/objects/host%2Ffabrik/device-graph",
         "/api/v1/objects/host%2Ffabrik/network-topology",
@@ -1276,6 +1297,7 @@ def test_mcp_tools_publish_explicit_read_write_and_delete_hints() -> None:
         "blockwart.search_principals",
         "blockwart.list_admin_principals",
         "blockwart.get_admin_principal",
+        "blockwart.list_admin_principal_assignments",
         "blockwart.preview_grant_scope",
         "blockwart.create_grant",
         "blockwart.update_grant",
@@ -1301,6 +1323,7 @@ def test_mcp_tools_publish_explicit_read_write_and_delete_hints() -> None:
             "blockwart.search_principals",
             "blockwart.list_admin_principals",
             "blockwart.get_admin_principal",
+            "blockwart.list_admin_principal_assignments",
             "blockwart.preview_grant_scope",
             "blockwart.get_device_graph",
             "blockwart.get_network_topology",
@@ -1843,6 +1866,16 @@ def test_mcp_admin_tools_are_read_only_and_never_expose_credential_operations() 
         {"principal_id": "principal/root"},
         fetcher=fake_fetch,
     )
+    call_tool(
+        "blockwart.list_admin_principal_assignments",
+        {
+            "principal_id": "principal/root",
+            "assignment_type": "direct",
+            "limit": 7,
+            "cursor": "opaque-assignment-cursor",
+        },
+        fetcher=fake_fetch,
+    )
 
     assert calls == [
         (
@@ -1856,7 +1889,23 @@ def test_mcp_admin_tools_are_read_only_and_never_expose_credential_operations() 
             },
         ),
         ("/api/v1/admin/principals/principal%2Froot", {}),
+        (
+            "/api/v1/admin/principals/principal%2Froot/assignments",
+            {
+                "assignment_type": "direct",
+                "limit": 7,
+                "cursor": "opaque-assignment-cursor",
+            },
+        ),
     ]
+    schema = next(
+        tool["inputSchema"]
+        for tool in TOOLS
+        if tool["name"] == "blockwart.list_admin_principal_assignments"
+    )
+    assert schema["properties"]["assignment_type"]["enum"] == ["direct", "effective"]
+    assert schema["properties"]["limit"]["maximum"] == 50
+    assert "cursor" in schema["properties"]
     assert not any("password" in tool["name"] or "token" in tool["name"] for tool in TOOLS)
 
 
