@@ -758,6 +758,23 @@ def test_admin_assignment_pages_are_complete_scoped_and_query_bound(
                     role=Role.VIEWER,
                     scope=GrantScope.SELF,
                 )
+            second_admin = create_service_account(
+                session,
+                login="api.second.platform.admin",
+                display_name="Second API Platform Admin",
+                platform_role=PlatformRole.ADMIN,
+            )
+            for object_id in ("api-visible", "api-page-a", "api-page-b", "api-page-c"):
+                create_object_grant(
+                    session,
+                    principal_id=second_admin.id,
+                    object_id=object_id,
+                    role=Role.ACCESS_MANAGER,
+                    scope=GrantScope.SELF,
+                )
+            second_admin_token = issue_service_token(
+                session, principal_id=second_admin.id, name="second-admin-api"
+            ).value
 
     path = f"/api/v1/admin/principals/{target_id}/assignments"
     headers = _auth(state["tokens"]["admin"])
@@ -795,6 +812,11 @@ def test_admin_assignment_pages_are_complete_scoped_and_query_bound(
         assert seen == expected
         assert len(seen) == len(set(seen)) == 4
         assert first_cursor is not None
+        assert principal_admin_api_client.get(
+            path,
+            params={"assignment_type": assignment_type, "cursor": first_cursor},
+            headers=_auth(second_admin_token),
+        ).status_code == 400
         wrong_type = "effective" if assignment_type == "direct" else "direct"
         assert principal_admin_api_client.get(
             path,

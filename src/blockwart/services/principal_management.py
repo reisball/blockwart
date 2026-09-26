@@ -531,7 +531,11 @@ def query_principal_assignments(
         resource="admin_principal_assignments",
         sort="object_id",
         direction="asc",
-        query={"principal_id": principal_id, "assignment_type": assignment_type},
+        query={
+            "actor_principal_id": access.principal.id,
+            "principal_id": principal_id,
+            "assignment_type": assignment_type,
+        },
         cursor=cursor,
         include_total=False,
     )

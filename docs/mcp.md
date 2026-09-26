@@ -491,7 +491,8 @@ rows remain filtered by that same principal's object `manage_access` policy.
 For a complete assignment audit, call `blockwart.list_admin_principal_assignments`
 with `assignment_type=direct` and then `assignment_type=effective`, following
 each `next_cursor` until null. Pages default to 20 items and are capped at 50;
-cursors are bound to the principal and assignment type. The original
+cursors are bound to the calling admin, target principal, and assignment
+type. The original
 `get_admin_principal` remains unchanged for existing callers, but its complete
 embedded lists can exceed a tool output limit.
 
