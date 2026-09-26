@@ -15,15 +15,16 @@ from blockwart.mcp.server import TOOLS, local_contract_metadata, validate_runtim
 
 
 def test_integrated_mcp_contract_has_reviewed_manifest_evidence() -> None:
-    metadata = contract_metadata(TOOLS, build_revision="issue-245-248-249")
+    metadata = contract_metadata(TOOLS, build_revision="issue-245-248-249-250")
 
-    # The pagination, relationship signature, and read descriptions are integrated.
+    # The pagination, relationship, read-description, and schema-filter changes are integrated.
     assert metadata == {
-        "build_revision": "issue-245-248-249",
+        "build_revision": "issue-245-248-249-250",
         "contract_version": "1",
-        "manifest_digest": "c248f8beeabdf3ab2e7686ae22e2f79038d019c0fe082e7c7bcf8d8fbe88ac57",
+        "manifest_digest": "31cf22ae6e2b0091187a8e96888cd3a419a4dc2b0353f22fd33ff7d152b45fca",
         "tool_count": 35,
     }
+
 
 def test_manifest_bytes_and_digest_ignore_registered_tool_order() -> None:
     original = copy.deepcopy(TOOLS)
