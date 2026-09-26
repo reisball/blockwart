@@ -105,6 +105,7 @@ It wraps the object-authorized v1 API:
 - blockwart.search_principals -> GET /api/v1/objects/{object_id}/access/principals
 - blockwart.list_admin_principals -> GET /api/v1/admin/principals
 - blockwart.get_admin_principal -> GET /api/v1/admin/principals/{principal_id}
+- blockwart.list_own_direct_grants -> GET /api/v1/auth/me/direct-grants
 - blockwart.list_admin_principal_assignments -> GET /api/v1/admin/principals/{principal_id}/assignments
 - blockwart.preview_grant_scope -> GET /api/v1/objects/{object_id}/access/preview
 - blockwart.create_grant -> POST /api/v1/objects/{object_id}/access/grants
@@ -325,6 +326,7 @@ means it deliberately bundles lower-level API concerns behind one agent call.
 | `list_admin_principals` | List platform principals | `directly sufficient` | Provides bounded, cursor-paginated administrator discovery. |
 | `get_admin_principal` | Read one platform principal | `directly sufficient` | Legacy full detail remains unchanged; large assignment lists may exceed tool output limits. |
 | `list_admin_principal_assignments` | Page principal assignments | `directly sufficient` | Separately pages direct grants or individual effective grant sources with bounded cursor results. |
+| `list_own_direct_grants` | Inventory the caller's own direct grants | `directly sufficient` | Self-only, read-only, cursor-paginated `{target_kind, target_id, role, scope}` items with optional `role` filter; takes no principal argument and needs no platform or catalog role. |
 | `preview_grant_scope` | Preview grant coverage | `directly sufficient` | Makes subtree impact visible before mutation. |
 | `create_grant` | Add object access | `directly sufficient` | Principal selection and the access-resource ETag stay explicit. |
 | `update_grant` | Change object access | `directly sufficient` | No hidden create/update branching or automatic CAS retry is introduced. |
@@ -527,6 +529,8 @@ calling admin, target principal, and assignment type. The original
 `get_admin_principal` remains unchanged for existing callers, but its complete
 embedded lists can exceed a tool output limit.
 
+`blockwart.list_own_direct_grants` is not admin-only: it forwards `role`, `limit`, and
+`cursor` to the self-scoped REST route and returns the caller's own direct grants only.
 MCP intentionally provides no password, session-secret, or service-token-value
 operation; existing object grant tools remain the only MCP assignment writes.
 
