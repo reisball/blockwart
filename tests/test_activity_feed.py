@@ -13,6 +13,7 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 from fastapi.testclient import TestClient
+from sqlalchemy import event
 from sqlalchemy.orm import Session
 
 import blockwart.api.routes.v1 as v1_routes
@@ -20,15 +21,16 @@ import blockwart.services.activity as activity_service
 import blockwart.ui.routes as ui_routes
 from blockwart.api.deps import get_session
 from blockwart.domain.activity import classify_activity_event_type
-from blockwart.domain.auth import Permission, PrincipalContext, PrincipalType
+from blockwart.domain.auth import CatalogRole, Permission, PrincipalContext, PrincipalType
 from blockwart.main import create_app
 from blockwart.mcp.server import TOOLS, call_tool
-from blockwart.models import AuditEvent, Relationship
+from blockwart.models import AuditEvent, Principal, Relationship
 from blockwart.schemas.catalog import CatalogObjectIn
 from blockwart.services.catalog import delete_object, upsert_object
+from blockwart.services.identity import create_service_account, issue_service_token
 from blockwart.services.pagination import InvalidCursor
 from blockwart.services.policy import PolicySnapshot
-from blockwart.services.read_access import ReadAccess
+from blockwart.services.read_access import ReadAccess, read_access_for_principal
 
 NOW = datetime(2026, 8, 20, 12, 0, tzinfo=UTC)
 
@@ -163,8 +165,7 @@ def test_equal_timestamps_keep_a_stable_newest_first_order(
         return [
             i.event_id
             for i in items
-            if i.event_type == "object_revision"
-            and i.summary.startswith("Updated host:stable")
+            if i.event_type == "object_revision" and i.summary.startswith("Updated host:stable")
         ]
 
     # Both update rows share one timestamp; the zero-padded event id
@@ -270,9 +271,7 @@ def test_rights_loss_between_pages_fails_closed(alembic_session_factory) -> None
         upsert_object(session, _asset("page-a"))
         upsert_object(session, _asset("page-b"))
         for offset, object_id in enumerate(("page-a", "page-b")):
-            session.add(
-                _audit(object_id, "update", created_at=stamp - timedelta(seconds=offset))
-            )
+            session.add(_audit(object_id, "update", created_at=stamp - timedelta(seconds=offset)))
 
     with alembic_session_factory() as session:
         first = _page(
@@ -311,9 +310,7 @@ def test_pagination_cursor_boundaries_are_deterministic(
         ids = [f"paged-{index}" for index in range(5)]
         for index, object_id in enumerate(ids):
             _seed(session, object_id, created_at=base - timedelta(seconds=index))
-            session.add(
-                _audit(object_id, "update", created_at=base - timedelta(seconds=index))
-            )
+            session.add(_audit(object_id, "update", created_at=base - timedelta(seconds=index)))
 
     access = _access(readable=set(ids), principal_id="walker")
     collected: list[str] = []
@@ -376,10 +373,7 @@ def test_filters_since_event_type_kind_parent_and_subtree(
     with alembic_session_factory() as session:
         subtree = _page(session, access, parent="parent-host")
         since_stamp = (
-            (base - timedelta(seconds=15))
-            .replace(tzinfo=UTC)
-            .isoformat()
-            .replace("+00:00", "Z")
+            (base - timedelta(seconds=15)).replace(tzinfo=UTC).isoformat().replace("+00:00", "Z")
         )
         since_only = _page(session, access, since=since_stamp)
         typed = _page(session, access, event_type="relationship_mutation")
@@ -415,9 +409,7 @@ def test_more_events_than_scan_budget_stay_reachable_without_gaps_or_duplicates(
     alembic_session_factory,
     monkeypatch,
 ) -> None:
-    # The scan budget is a documented size signal, not a hard cap: keyset
-    # pagination must walk every matching event, so the 5001st event is
-    # reachable and no event is skipped or duplicated.
+    # Each page has a hard candidate cap; cursor walking still reaches all rows.
     monkeypatch.setattr(activity_service, "ACTIVITY_MAX_SCAN_EVENTS", 3)
     base = NOW - timedelta(minutes=11)
     ids = [f"scan-{index}" for index in range(7)]
@@ -440,7 +432,7 @@ def test_more_events_than_scan_budget_stay_reachable_without_gaps_or_duplicates(
     assert len(set(collected)) == 7
 
 
-def test_include_total_reports_the_full_result_and_flags_budget_overshoot(
+def test_include_total_reports_budget_exhaustion_without_a_false_exact_count(
     alembic_session_factory,
     monkeypatch,
 ) -> None:
@@ -454,12 +446,11 @@ def test_include_total_reports_the_full_result_and_flags_budget_overshoot(
     with alembic_session_factory() as session:
         page = _page(session, _access(readable=set(ids)), limit=2, include_total=True)
 
-    # The total is the exact authorized filtered count, never a page-sized window.
-    assert page.total == 7
-    assert page.total_exceeds_budget is True
+    assert page.total is None
+    assert page.total_status == "budget_exhausted"
 
 
-def test_total_exceeds_budget_is_null_without_an_exact_count(
+def test_total_status_is_not_requested_without_an_exact_count(
     alembic_session_factory,
     monkeypatch,
 ) -> None:
@@ -478,17 +469,15 @@ def test_total_exceeds_budget_is_null_without_an_exact_count(
             include_total=False,
         )
 
-    # Without an exact count the budget signal is undefined, never a false
-    # positive: keyset pagination still reaches every matching row.
     assert page.total is None
-    assert page.total_exceeds_budget is None
+    assert page.total_status == "not_requested"
 
 
-def test_total_exceeds_budget_is_false_when_exact_count_is_within_budget(
+def test_total_status_is_exact_when_count_is_within_budget(
     alembic_session_factory,
     monkeypatch,
 ) -> None:
-    monkeypatch.setattr(activity_service, "ACTIVITY_MAX_SCAN_EVENTS", 100)
+    monkeypatch.setattr(activity_service, "ACTIVITY_MAX_SCAN_EVENTS", 3)
     base = NOW - timedelta(minutes=12, seconds=45)
     ids = [f"within-{index}" for index in range(3)]
     with alembic_session_factory() as session, session.begin():
@@ -499,7 +488,189 @@ def test_total_exceeds_budget_is_false_when_exact_count_is_within_budget(
         page = _page(session, _access(readable=set(ids)), limit=2, include_total=True)
 
     assert page.total == 3
-    assert page.total_exceeds_budget is False
+    assert page.total_status == "exact"
+
+
+def test_hidden_events_do_not_consume_authorized_budget_or_change_cursor(
+    alembic_session_factory,
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(activity_service, "ACTIVITY_MAX_SCAN_EVENTS", 2)
+    stamp = NOW - timedelta(minutes=12)
+    with alembic_session_factory() as session, session.begin():
+        for index, object_id in enumerate(("hidden-a", "hidden-b", "visible")):
+            _seed(session, object_id, created_at=stamp + timedelta(seconds=index))
+
+    access = _access(readable={"visible"}, discoverable={"hidden-a", "hidden-b"})
+    with alembic_session_factory() as session:
+        first = _page(session, access, direction="asc", limit=1)
+        narrowed = _page(session, access, object_id="visible", limit=1)
+
+    assert [item.object.object_id for item in first.items] == ["visible"]
+    assert first.next_cursor is None
+    assert first.total == 1 and first.total_status == "exact"
+    assert narrowed.total == 1 and narrowed.total_status == "exact"
+
+
+def test_page_and_count_queries_have_candidate_limits(
+    alembic_session_factory,
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(activity_service, "ACTIVITY_MAX_SCAN_EVENTS", 3)
+    stamp = NOW - timedelta(minutes=13)
+    ids = {f"bounded-{index}" for index in range(8)}
+    with alembic_session_factory() as session, session.begin():
+        for object_id in sorted(ids):
+            _seed(session, object_id, created_at=stamp)
+
+    statements: list[tuple[str, tuple]] = []
+
+    def observe(_conn, _cursor, statement, parameters, _context, _executemany):
+        if "FROM audit_events" in statement and statement.lstrip().startswith("SELECT"):
+            statements.append((statement, parameters))
+
+    with alembic_session_factory() as session:
+        event.listen(session.get_bind(), "before_cursor_execute", observe)
+        try:
+            page = _page(session, _access(readable=ids), limit=2)
+        finally:
+            event.remove(session.get_bind(), "before_cursor_execute", observe)
+
+    assert page.total_status == "budget_exhausted"
+    assert len(statements) == 2
+    assert all(" LIMIT " in sql and "count(" not in sql.lower() for sql, _ in statements)
+    assert [params[-2] for _, params in statements] == [3, 4]
+
+
+def test_catalog_viewer_activity_avoids_full_catalog_id_read_and_revokes_cursor(
+    alembic_session_factory,
+) -> None:
+    stamp = NOW - timedelta(minutes=14)
+    with alembic_session_factory() as session, session.begin():
+        for object_id in ("global-a", "global-b", "global-c"):
+            _seed(session, object_id, created_at=stamp)
+        principal = create_service_account(
+            session,
+            login="activity.global.viewer",
+            display_name="Activity Global Viewer",
+            catalog_role=CatalogRole.CATALOG_VIEWER,
+        )
+
+    statements: list[str] = []
+
+    def observe(_conn, _cursor, statement, _parameters, _context, _executemany):
+        statements.append(statement)
+
+    with alembic_session_factory() as session:
+        event.listen(session.get_bind(), "before_cursor_execute", observe)
+        try:
+            access = read_access_for_principal(
+                session, principal, materialize_global_permissions=False
+            )
+            first = _page(session, access, limit=1)
+        finally:
+            event.remove(session.get_bind(), "before_cursor_execute", observe)
+
+    assert first.items[0].object.object_id in {"global-a", "global-b", "global-c"}
+    assert first.total == 3 and first.total_status == "exact"
+    assert first.next_cursor
+    assert not any(
+        "FROM catalog_objects" in sql and "WHERE catalog_objects.id IN" not in sql
+        for sql in statements
+    )
+
+    with alembic_session_factory() as session, session.begin():
+        stored = session.get(Principal, principal.id)
+        stored.catalog_role = None
+    with alembic_session_factory() as session:
+        revoked = read_access_for_principal(
+            session, principal, materialize_global_permissions=False
+        )
+        with pytest.raises(InvalidCursor):
+            _page(session, revoked, limit=1, cursor=first.next_cursor)
+
+
+@pytest.mark.parametrize("role", [CatalogRole.CATALOG_OWNER, CatalogRole.CATALOG_VIEWER])
+def test_catalog_role_parent_scope_uses_catalog_join_without_id_enumeration(
+    alembic_session_factory,
+    role: CatalogRole,
+) -> None:
+    stamp = NOW - timedelta(minutes=14)
+    with alembic_session_factory() as session, session.begin():
+        _seed(session, "global-root", created_at=stamp)
+        _seed(session, "global-child", kind="system", created_at=stamp)
+        _seed(session, "global-other", created_at=stamp)
+        session.add(
+            Relationship(
+                from_ref="host:global-root",
+                relation_type="hosts",
+                to_ref="system:global-child",
+                metadata_json="{}",
+            )
+        )
+        principal = create_service_account(
+            session,
+            login=f"activity.parent.{role.value}",
+            display_name="Activity Parent Reader",
+            catalog_role=role,
+        )
+
+    with alembic_session_factory() as session:
+        access = read_access_for_principal(session, principal, materialize_global_permissions=False)
+        page = _page(session, access, parent="global-root", direction="asc")
+        child = _page(session, access, parent="global-root", kind="system")
+
+    assert {item.object.object_id for item in page.items} == {"global-root", "global-child"}
+    assert page.total == 2
+    assert [item.object.object_id for item in child.items] == ["global-child"]
+
+
+def test_catalog_viewer_rest_dependency_uses_nonmaterialized_policy(
+    alembic_session_factory,
+) -> None:
+    with alembic_session_factory() as session, session.begin():
+        _seed(session, "rest-global", created_at=NOW - timedelta(minutes=14))
+        principal = create_service_account(
+            session,
+            login="activity.rest.viewer",
+            display_name="Activity REST Viewer",
+            catalog_role=CatalogRole.CATALOG_VIEWER,
+        )
+        token = issue_service_token(
+            session, principal_id=principal.id, name="activity-rest"
+        ).value
+
+    app = create_app()
+
+    def session_dependency():
+        with alembic_session_factory() as session:
+            yield session
+
+    app.dependency_overrides[get_session] = session_dependency
+    statements: list[str] = []
+
+    def observe(_conn, _cursor, statement, _parameters, _context, _executemany):
+        statements.append(statement)
+
+    engine = alembic_session_factory.kw["bind"]
+    event.listen(engine, "before_cursor_execute", observe)
+    try:
+        with TestClient(app) as client:
+            response = client.get(
+                "/api/v1/activity",
+                headers={"Authorization": f"Bearer {token}"},
+                params={"include_total": "true"},
+            )
+    finally:
+        event.remove(engine, "before_cursor_execute", observe)
+
+    assert response.status_code == 200, response.text
+    assert response.json()["total_status"] == "exact"
+    assert any(item["object"]["object_id"] == "rest-global" for item in response.json()["items"])
+    assert not any(
+        "FROM catalog_objects" in sql and "WHERE catalog_objects.id IN" not in sql
+        for sql in statements
+    )
 
 
 def test_new_event_between_pages_does_not_duplicate_or_gap(
@@ -550,9 +721,7 @@ def test_cursor_binds_to_policy_fingerprint_across_principals(
         upsert_object(session, _asset("fp-a"))
         upsert_object(session, _asset("fp-b"))
         for offset, object_id in enumerate(("fp-a", "fp-b")):
-            session.add(
-                _audit(object_id, "update", created_at=stamp - timedelta(seconds=offset))
-            )
+            session.add(_audit(object_id, "update", created_at=stamp - timedelta(seconds=offset)))
 
     with alembic_session_factory() as session:
         first = _page(
@@ -604,9 +773,7 @@ def test_parent_subtree_ignores_unrelated_placement_relationships(
         for object_id in ("root-host", "child-system", "unrelated-host", "unrelated-system"):
             session.add(_audit(object_id, "update", created_at=base))
 
-    access = _access(
-        readable={"root-host", "child-system", "unrelated-host", "unrelated-system"}
-    )
+    access = _access(readable={"root-host", "child-system", "unrelated-host", "unrelated-system"})
     with alembic_session_factory() as session:
         subtree = _page(session, access, parent="root-host")
 

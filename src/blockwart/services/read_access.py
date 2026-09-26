@@ -29,8 +29,14 @@ class ReadAccess:
 def read_access_for_principal(
     session: Session,
     principal: PrincipalContext,
+    *,
+    materialize_global_permissions: bool = True,
 ) -> ReadAccess:
     return ReadAccess(
         principal=principal,
-        policy=policy_for_principal(session, principal.id),
+        policy=policy_for_principal(
+            session,
+            principal.id,
+            materialize_global_permissions=materialize_global_permissions,
+        ),
     )

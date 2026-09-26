@@ -129,6 +129,7 @@ class Relationship(Base):
 
 class AuditEvent(Base):
     __tablename__ = "audit_events"
+    __table_args__ = (Index("ix_audit_events_created_at_id", "created_at", "id"),)
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     object_id: Mapped[str | None] = mapped_column(String(128), nullable=True, index=True)

@@ -5059,22 +5059,21 @@
             ],
             "title": "Total"
           },
-          "total_exceeds_budget": {
-            "anyOf": [
-              {
-                "type": "boolean"
-              },
-              {
-                "type": "null"
-              }
+          "total_status": {
+            "enum": [
+              "not_requested",
+              "exact",
+              "budget_exhausted"
             ],
-            "title": "Total Exceeds Budget"
+            "title": "Total Status",
+            "type": "string"
           }
         },
         "required": [
           "items",
           "generated_at",
-          "direction"
+          "direction",
+          "total_status"
         ],
         "title": "V1ActivityPageOut",
         "type": "object"
@@ -10705,13 +10704,13 @@
             }
           },
           {
-            "description": "Compute the exact total over the authorized filtered item set. This is optional and potentially expensive: it runs a full authorized COUNT, not a bounded page read.",
+            "description": "Attempt an exact authorized total within the activity scan budget. When the budget is exhausted, total is null and total_status is budget_exhausted.",
             "in": "query",
             "name": "include_total",
             "required": false,
             "schema": {
               "default": false,
-              "description": "Compute the exact total over the authorized filtered item set. This is optional and potentially expensive: it runs a full authorized COUNT, not a bounded page read.",
+              "description": "Attempt an exact authorized total within the activity scan budget. When the budget is exhausted, total is null and total_status is budget_exhausted.",
               "title": "Include Total",
               "type": "boolean"
             }

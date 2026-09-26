@@ -17,6 +17,9 @@ reviewed contract change, never an accidental pass-through.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Literal
+
+ActivityTotalStatus = Literal["not_requested", "exact", "budget_exhausted"]
 
 ACTIVITY_EVENT_TYPES: tuple[str, ...] = (
     "object_revision",
@@ -101,7 +104,7 @@ class ActivityPage:
     next_cursor: str | None
     total: int | None
     generated_at: str
-    total_exceeds_budget: bool | None = None
+    total_status: ActivityTotalStatus = "not_requested"
 
 
 __all__ = [

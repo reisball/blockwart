@@ -333,7 +333,7 @@ class V1ActivityPageOut(BaseModel):
     generated_at: str = Field(max_length=64)
     sort: Literal["occurred_at"] = "occurred_at"
     direction: SortDirection
-    total_exceeds_budget: bool | None = None
+    total_status: Literal["not_requested", "exact", "budget_exhausted"]
 
 
 # The known-id batch surface is bounded to 20 ids. Each id follows the same

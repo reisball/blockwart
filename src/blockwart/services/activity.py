@@ -17,24 +17,17 @@ the caller with full detail visibility. Events without an object attribution
 and events of deleted or concealed objects are dropped fail-closed: they can
 influence neither items, nor counts, nor cursors, nor ordering.
 
-Pagination is database-level keyset pagination over ``(created_at, id)``: the
-opaque cursor is translated into a SQL predicate before ``LIMIT limit + 1``, so
-every matching event stays reachable through cursor walking and no event is
-skipped or duplicated. Keyset pagination is bounded per page: each page reads
-at most ``limit + 1`` rows. ``include_total`` runs a separate authorized
-filtered ``COUNT`` over the same WHERE chain, so the total is the exact full
-result count; that exact count is optional and potentially expensive because it
-scans the whole authorized filtered set. ``ACTIVITY_MAX_SCAN_EVENTS`` is a
-documented size budget: when an exact total is requested and exceeds it, the
-response exposes ``total_exceeds_budget: true`` so callers can narrow their
-filters instead of mistaking a page for the full result.
+Each page reads at most ``limit + 1`` authorized rows. An optional exact count
+reads at most ``ACTIVITY_MAX_SCAN_EVENTS + 1`` authorized rows. If more rows
+exist, ``total`` is null and ``total_status`` is ``budget_exhausted``; no
+approximate count is advertised.
 """
 
 from __future__ import annotations
 
 from datetime import UTC, datetime
 
-from sqlalchemy import and_, bindparam, func, or_, select, text
+from sqlalchemy import and_, bindparam, or_, select, text
 from sqlalchemy.orm import Session
 
 from blockwart.domain.activity import (
@@ -64,13 +57,8 @@ from blockwart.services.read_access import ReadAccess
 
 ACTIVITY_RESOURCE = "activity"
 ACTIVITY_SORT_FIELD = "occurred_at"
-# Documented size budget: the feed is designed around at most this many newest
-# audit rows per result set. It is not a hard scan cap: keyset pagination walks
-# the full authorized filtered set one bounded page at a time, and
-# ``include_total`` counts it exactly. When an exact total is requested and
-# exceeds this budget the response exposes ``total_exceeds_budget: true`` so
-# callers can narrow their filters instead of mistaking a page for the full
-# result.
+# Maximum authorized audit rows returned by one page or exact count. The count
+# may fetch one additional row solely to detect budget exhaustion.
 ACTIVITY_MAX_SCAN_EVENTS = 5000
 # Defensive depth bound for the parent-anchored recursive placement traversal.
 # The canonical hierarchy is host -> system -> service (depth <= 2); this bound
@@ -117,12 +105,7 @@ def query_activity_page(
         raise ActivityQueryError("unknown activity parent")
     since_dt = _parse_since(since)
 
-    readable = _readable_objects(session, access)
-    subtree_ids = (
-        _placement_subtree_ids(session, readable, parent)
-        if parent is not None
-        else None
-    )
+    subtree_ids = _placement_subtree_ids(session, access, parent) if parent is not None else None
 
     query = {
         "access": access.cursor_scope,
@@ -143,14 +126,18 @@ def query_activity_page(
     )
 
     conditions = _filter_conditions(
-        readable=readable,
+        access=access,
         subtree_ids=subtree_ids,
         since_dt=since_dt,
         object_id=object_id,
         event_type=event_type,
         kind=kind,
     )
-    base = select(AuditEvent).where(*conditions)
+    base = (
+        select(AuditEvent)
+        .join(CatalogObject, AuditEvent.object_id == CatalogObject.id)
+        .where(*conditions)
+    )
 
     order = (
         (AuditEvent.created_at.asc(), AuditEvent.id.asc())
@@ -166,11 +153,11 @@ def query_activity_page(
                 direction,
             )
         )
-    page_statement = page_statement.limit(limit + 1)
-
-    rows = list(session.scalars(page_statement).all())
+    page_cap = min(limit + 1, ACTIVITY_MAX_SCAN_EVENTS)
+    rows = list(session.scalars(page_statement.limit(page_cap)).all())
+    readable = _readable_objects(session, access, {row.object_id for row in rows})
     items: list[ActivityItem] = []
-    for row in rows:
+    for row in rows[:limit]:
         item = _project_event(
             row,
             readable=readable,
@@ -180,12 +167,10 @@ def query_activity_page(
         )
         if item is not None:
             items.append(item)
-
-    has_more = len(rows) > limit
-    page_items = items[:limit]
+    has_more = len(rows) > limit or (page_cap <= limit and len(rows) == page_cap)
     next_cursor = None
-    if has_more and page_items:
-        primary, tie_breaker = page_items[-1].key
+    if has_more and items:
+        primary, tie_breaker = items[-1].key
         next_cursor = encode_page_cursor(
             resource=ACTIVITY_RESOURCE,
             sort=ACTIVITY_SORT_FIELD,
@@ -196,42 +181,53 @@ def query_activity_page(
         )
 
     total = None
+    total_status = "not_requested"
     if include_total:
-        total = session.scalar(
-            select(func.count()).select_from(AuditEvent).where(*conditions)
-        ) or 0
+        count_rows = list(
+            session.scalars(
+                select(AuditEvent.id)
+                .join(CatalogObject, AuditEvent.object_id == CatalogObject.id)
+                .where(*conditions)
+                .limit(ACTIVITY_MAX_SCAN_EVENTS + 1)
+            ).all()
+        )
+        if len(count_rows) > ACTIVITY_MAX_SCAN_EVENTS:
+            total_status = "budget_exhausted"
+        else:
+            total = len(count_rows)
+            total_status = "exact"
 
     reference = now or datetime.now(UTC)
     return ActivityPage(
-        items=page_items,
+        items=items,
         next_cursor=next_cursor,
         total=total,
         generated_at=format_rfc3339_utc(reference) or "",
-        total_exceeds_budget=(
-            total > ACTIVITY_MAX_SCAN_EVENTS if include_total and total is not None else None
-        ),
+        total_status=total_status,
     )
 
 
 def _filter_conditions(
     *,
-    readable: _ReadableCatalog,
+    access: ReadAccess,
     subtree_ids: set[str] | None,
     since_dt: datetime | None,
     object_id: str | None,
     event_type: str | None,
     kind: str | None,
 ) -> list:
-    """Build the shared authorized WHERE chain for page and count queries."""
+    """Authorize before ordering, cursors, counts, and page limits."""
     conditions = []
     if since_dt is not None:
         conditions.append(AuditEvent.created_at >= since_dt)
     if object_id is not None:
         conditions.append(AuditEvent.object_id == object_id)
-    # Authorization and filters are pushed into SQL: only rows attributed to
-    # currently DETAIL-visible objects are examined, and event_type/kind/parent
-    # narrow the set before pagination or counting applies.
-    conditions.append(AuditEvent.object_id.in_(readable.ids))
+    if not _global_read(access):
+        conditions.append(AuditEvent.object_id.in_(access.policy.authorized_ids(Permission.READ)))
+    if kind is not None:
+        conditions.append(CatalogObject.kind == kind)
+    if subtree_ids is not None:
+        conditions.append(AuditEvent.object_id.in_(subtree_ids))
     if event_type is not None:
         action_set = _actions_for_event_type(event_type)
         if action_set is not None:
@@ -243,11 +239,6 @@ def _filter_conditions(
                 | COMMENT_CREATE_AUDIT_ACTIONS
             )
             conditions.append(AuditEvent.action.notin_(all_known))
-    if kind is not None:
-        kind_ids = readable.ids_by_kind.get(kind, frozenset())
-        conditions.append(AuditEvent.object_id.in_(kind_ids))
-    if subtree_ids is not None:
-        conditions.append(AuditEvent.object_id.in_(subtree_ids))
     return conditions
 
 
@@ -306,39 +297,37 @@ def _keyset_predicate(
 class _ReadableCatalog:
     """The authorized DETAIL-visibility projection used for attribution."""
 
-    __slots__ = ("ids", "refs", "kinds", "labels", "ids_by_kind")
+    __slots__ = ("ids", "refs", "kinds", "labels")
 
     def __init__(self) -> None:
         self.ids: set[str] = set()
         self.refs: dict[str, str] = {}
         self.kinds: dict[str, str] = {}
         self.labels: dict[str, str] = {}
-        self.ids_by_kind: dict[str, set[str]] = {}
 
 
-def _readable_objects(session: Session, access: ReadAccess) -> _ReadableCatalog:
-    """Load only the currently DETAIL-visible catalog rows.
-
-    The visibility decision comes from the already-built policy snapshot
-    (``authorized_ids(READ)``). This function loads only those object rows;
-    building the policy snapshot itself still reads every catalog ID per
-    request for catalog-wide roles.
-    """
-    readable_ids = access.policy.authorized_ids(Permission.READ)
-    readable = _ReadableCatalog()
-    if not readable_ids:
-        return readable
-    rows = list(
-        session.scalars(
-            select(CatalogObject).where(CatalogObject.id.in_(readable_ids))
-        ).all()
+def _global_read(access: ReadAccess) -> bool:
+    return any(
+        Permission.READ in authority.permissions for authority in access.policy.global_authorities
     )
+
+
+def _readable_objects(
+    session: Session, access: ReadAccess, candidate_ids: set[str | None]
+) -> _ReadableCatalog:
+    """Resolve only scanned candidates against the current catalog and policy."""
+    readable = _ReadableCatalog()
+    ids = {object_id for object_id in candidate_ids if object_id is not None}
+    if not _global_read(access):
+        ids.intersection_update(access.policy.authorized_ids(Permission.READ))
+    if not ids:
+        return readable
+    rows = list(session.scalars(select(CatalogObject).where(CatalogObject.id.in_(ids))).all())
     for row in rows:
         readable.ids.add(row.id)
         readable.refs[row.id] = f"{row.kind}:{row.id}"
         readable.kinds[row.id] = row.kind
         readable.labels[row.id] = row.label
-        readable.ids_by_kind.setdefault(row.kind, set()).add(row.id)
     return readable
 
 
@@ -355,7 +344,7 @@ def _actions_for_event_type(event_type: str) -> frozenset[str] | None:
 
 def _placement_subtree_ids(
     session: Session,
-    readable: _ReadableCatalog,
+    access: ReadAccess,
     parent: str,
 ) -> set[str]:
     """Resolve the readable placement subtree of one visible parent.
@@ -368,35 +357,71 @@ def _placement_subtree_ids(
     An unknown or concealed parent resolves to an empty scope, which yields an
     empty page indistinguishable from a parent without activity.
     """
+    readable = _readable_objects(session, access, {parent})
     if parent not in readable.ids:
         return set()
     parent_ref = readable.refs[parent]
-    readable_refs = list(readable.refs.values())
+    # Object-scoped grants need an explicit readable-target constraint. Global
+    # READ is a wildcard: joining the catalog in the CTE avoids enumerating it.
+    global_read = _global_read(access)
+    if global_read:
+        target_guard = "JOIN catalog_objects target ON r.to_ref = target.kind || ':' || target.id"
+        readable_guard = ""
+        readable_refs: list[str] = []
+    else:
+        local = _readable_objects(
+            session, access, set(access.policy.authorized_ids(Permission.READ))
+        )
+        target_guard = ""
+        readable_guard = "AND r.to_ref IN :readable_refs"
+        readable_refs = list(local.refs.values())
     statement = text(
-        """
+        f"""
         WITH RECURSIVE subtree(ref, depth) AS (
             SELECT :parent_ref, 0
             UNION
             SELECT r.to_ref, s.depth + 1
             FROM relationships r
             JOIN subtree s ON r.from_ref = s.ref
+            {target_guard}
             WHERE r.relation_type = :rel_type
-              AND r.to_ref IN :readable_refs
+              {readable_guard}
               AND s.depth < :max_depth
         )
         SELECT ref FROM subtree
         """
-    ).bindparams(bindparam("readable_refs", expanding=True))
-    refs = session.execute(
-        statement,
-        {
-            "parent_ref": parent_ref,
-            "rel_type": CANONICAL_PLACEMENT_RELATION_TYPE,
-            "readable_refs": readable_refs,
-            "max_depth": ACTIVITY_MAX_SUBTREE_DEPTH,
-        },
-    ).scalars().all()
+    )
+    if not global_read:
+        statement = statement.bindparams(bindparam("readable_refs", expanding=True))
+    refs = (
+        session.execute(
+            statement,
+            {
+                "parent_ref": parent_ref,
+                "rel_type": CANONICAL_PLACEMENT_RELATION_TYPE,
+                "readable_refs": readable_refs,
+                "max_depth": ACTIVITY_MAX_SUBTREE_DEPTH,
+            },
+        )
+        .scalars()
+        .all()
+    )
     return {ref.split(":", 1)[1] for ref in refs}
+
+
+def _is_visible(
+    row: AuditEvent,
+    readable: _ReadableCatalog,
+    kind: str | None,
+    subtree_ids: set[str] | None,
+) -> bool:
+    object_id = row.object_id
+    return (
+        object_id is not None
+        and object_id in readable.ids
+        and (kind is None or readable.kinds[object_id] == kind)
+        and (subtree_ids is None or object_id in subtree_ids)
+    )
 
 
 def _project_event(
@@ -409,16 +434,12 @@ def _project_event(
 ) -> ActivityItem | None:
     """Classify and authorize one audit row; drop anything not fully visible."""
     object_id = row.object_id
-    if object_id is None or object_id not in readable.ids:
+    if not _is_visible(row, readable, kind, subtree_ids):
         return None
     resolved_type = classify_activity_event_type(row.action)
     if event_type is not None and resolved_type != event_type:
         return None
     object_kind = readable.kinds[object_id]
-    if kind is not None and object_kind != kind:
-        return None
-    if subtree_ids is not None and object_id not in subtree_ids:
-        return None
     occurred_at = format_rfc3339_utc(row.created_at)
     if occurred_at is None:
         return None

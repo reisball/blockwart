@@ -21,7 +21,7 @@ def test_activity_tool_has_the_reviewed_manifest_evidence() -> None:
     assert metadata == {
         "build_revision": "issue-188",
         "contract_version": "1",
-        "manifest_digest": "8eb5470ee52103bee8b7038310a89488dd796aec049338f90d47327ef1d3b2ec",
+        "manifest_digest": "1c8176f9be25451bde2c382e47eed05b8263d253a1d3785cb6417330493af898",
         "tool_count": 35,
     }
 

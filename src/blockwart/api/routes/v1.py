@@ -367,9 +367,9 @@ def get_v1_activity(
         bool,
         Query(
             description=(
-                "Compute the exact total over the authorized filtered item set. "
-                "This is optional and potentially expensive: it runs a full "
-                "authorized COUNT, not a bounded page read."
+                "Attempt an exact authorized total within the activity scan budget. "
+                "When the budget is exhausted, total is null and total_status "
+                "is budget_exhausted."
             )
         ),
     ] = False,
@@ -400,7 +400,7 @@ def get_v1_activity(
             "total": page.total,
             "generated_at": page.generated_at,
             "direction": direction,
-            "total_exceeds_budget": page.total_exceeds_budget,
+            "total_status": page.total_status,
         }
     )
 

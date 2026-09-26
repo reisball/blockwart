@@ -810,12 +810,12 @@ TOOLS: list[JSON] = [
             "comment, or audit resource that owns the type-specific details. It is "
             "strictly pull and read-only: no push delivery, no probe, no source "
             "read, and no catalog write. Events of concealed or deleted objects "
-            "influence neither items, counts, cursors, nor ordering; losing access "
-            "between pages fails closed to a freshly authorized result set. "
-            "Keyset pagination is bounded per page; include_total runs an exact "
-            "authorized COUNT that is optional and potentially expensive, and "
-            "total_exceeds_budget flags when that exact total overshoots the "
-            "documented size budget."
+            "influence neither items, counts, cursors, nor ordering; role and "
+            "grant changes between pages invalidate cursors. "
+            "Each page reads a bounded authorized result; concealed events "
+            "affect neither pages nor cursors. include_total attempts an exact "
+            "authorized count within the scan budget. total_status is exact or "
+            "budget_exhausted; total is null when the count cannot finish."
         ),
         "inputSchema": {
             "type": "object",

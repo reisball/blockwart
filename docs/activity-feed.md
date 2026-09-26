@@ -51,9 +51,10 @@ envelope.
   deletion therefore cannot leak through the feed to principals who must not
   know about the object.
 - Cursors bind to the principal/policy fingerprint and the exact query
-  parameters. Losing access between pages invalidates the cursor (fail-closed);
-  the next page request starts from a freshly authorized result set instead of
-  skipping a concealed gap.
+  parameters. A role or grant change invalidates the cursor (fail-closed).
+  Catalog additions and deletions do not change a catalog-wide role's
+  fingerprint: the next page still applies current visibility and the keyset
+  predicate. Deleted objects simply leave the result set.
 
 ## Filters, Ordering, Pagination
 
@@ -68,36 +69,36 @@ envelope.
   zero-padded event id, so equal timestamps keep one stable order in both
   directions.
 - Cursor keyset pagination with `limit` between 1 and 100; each page reads at
-  most `limit + 1` rows, so pagination is bounded per page. Counts
-  (`include_total=true`) aggregate exactly the authorized filtered set via a
-  separate `COUNT` over the same WHERE chain; that exact count is optional and
-  potentially expensive because it scans the whole authorized filtered set.
-  When an exact total is requested and exceeds `ACTIVITY_MAX_SCAN_EVENTS`, the
-  response exposes `total_exceeds_budget: true` so callers can narrow their
-  filters instead of mistaking a page for the full result.
+  most `limit + 1` authorized rows. The continuation predicate and visibility
+  filter apply in SQL before the page limit. Concealed and deleted events
+  affect neither the page boundary nor the cursor.
 
 ## Size Budget
 
-Keyset pagination is bounded per page: each page reads at most `limit + 1`
-rows, so every matching event stays reachable through cursor walking and no
-event is skipped or duplicated. The exact total is a separate, optional cost:
+`ACTIVITY_MAX_SCAN_EVENTS = 5000` is a hard result-scan budget per operation:
 
-- keyset pagination walks the authorized filtered set via a `(created_at, id)`
-  predicate before `LIMIT limit + 1`, so each page is bounded regardless of how
-  many events match;
-- `include_total` runs one authorized filtered `COUNT` over the same WHERE
-  chain (no `limit + 1`), so the total is the exact full result count, but
-  that count is optional and potentially expensive because it scans the whole
-  authorized filtered set;
-- `ACTIVITY_MAX_SCAN_EVENTS = 5000` is a documented size budget, not a hard
-  scan cap: when an exact total is requested and exceeds it the response sets
-  `total_exceeds_budget: true` (and `null` when no exact count was requested);
-- each request builds the current policy snapshot, as in #176, then loads only
-  the authorized object rows for attribution; for catalog-wide roles, building
-  that snapshot reads every catalog ID on each request and remains a
-  scalability concern;
-- no additional full-catalog scan grows per readable object, and no catalog
-  database rewrite (event sourcing) happens or is required.
+- Page retrieval reads at most `limit + 1` authorized, filtered rows (and at
+  most the budget). Cursor walking can reach every matching event; a full
+  terminal page may have a continuation cursor leading to an empty page.
+- `include_total=true` reads at most 5001 authorized, filtered event IDs: 5000
+  for the count and one probe. It returns `total_status: "exact"` and an integer
+  `total` only when the entire result fits. If the probe finds another row, it
+  returns `total_status: "budget_exhausted"` and `total: null`. This signals
+  that an exact count was unavailable; it never presents a partial count as
+  exact. `include_total=false` returns `total_status: "not_requested"` and
+  `total: null`.
+- The page and count use the same authorization and filters; counts are over
+  the full filtered set, independent of the current cursor. Narrower filters
+  can make an exact count available.
+- For catalog-wide readers, the policy snapshot carries the role authority
+  without enumerating every catalog ID. SQL joins audit attribution to the
+  current catalog, and only page objects are loaded for labels. Object-scoped
+  readers use their effective readable-ID set.
+
+The cap bounds rows returned to application code. Database work can still
+depend on indexes and filter selectivity; the database may inspect more rows
+to satisfy a filtered, ordered query. This is a remaining query-planning limit,
+not a promise of a database execution-time bound.
 
 Activity older than the first page stays reachable through cursor walking or
 narrower filters (`since`, `event_type`, `object_id`), not through unbounded
