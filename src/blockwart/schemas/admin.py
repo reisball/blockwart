@@ -114,6 +114,15 @@ class PrincipalAdminDetailOut(BaseModel):
     service_tokens: list[PrincipalTokenOut]
 
 
+class PrincipalAssignmentPageOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    assignment_type: Literal["direct", "effective"]
+    direct_grants: list[DirectPrincipalGrantOut]
+    effective_access: list[EffectivePrincipalGrantOut]
+    next_cursor: str | None = None
+
+
 class PrincipalCreateIn(BaseModel):
     principal_type: PrincipalType
     login: str = Field(min_length=3, max_length=128)

@@ -21,6 +21,7 @@ EXPECTED_OPERATIONS = {
     "/api/v1/attention": {"get"},
     "/api/v1/admin/principals": {"get", "post"},
     "/api/v1/admin/principals/{principal_id}": {"get", "put"},
+    "/api/v1/admin/principals/{principal_id}/assignments": {"get"},
     "/api/v1/admin/principals/{principal_id}/grants": {"post"},
     "/api/v1/admin/principals/{principal_id}/grants/{grant_id}": {"put", "delete"},
     "/api/v1/admin/principals/{principal_id}/catalog-role": {"post"},

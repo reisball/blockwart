@@ -656,9 +656,19 @@ The principal list accepts `q`, `principal_type`, `active`, `limit` (1..200),
 and the opaque, filter-bound `cursor` returned as `next_cursor`. It deliberately
 does not return a total count.
 
+The assignment endpoint accepts `assignment_type=direct|effective`, `limit`
+(1..50), and an opaque `cursor`, returning `next_cursor` without a total
+count. The actual page can be shorter than `limit` to keep MCP output below
+64 KiB. Each effective row carries at most one grant source; the same
+`object_id` may therefore appear on multiple pages. Combine its `sources`
+and deduplicate its repeated permissions by `object_id` for an object-level
+view. An effective object with no visible grant source appears once with an
+empty `sources` list. The full-detail endpoint remains unchanged.
+
 ```text
 GET|POST /api/v1/admin/principals
 GET|PUT  /api/v1/admin/principals/{principal_id}
+GET      /api/v1/admin/principals/{principal_id}/assignments
 POST     /api/v1/admin/principals/{principal_id}/grants
 PUT      /api/v1/admin/principals/{principal_id}/grants/{grant_id}
 DELETE   /api/v1/admin/principals/{principal_id}/grants/{grant_id}?object_id=...

@@ -280,6 +280,7 @@ async def check_mcp(
                 "blockwart.search_principals",
                 "blockwart.list_admin_principals",
                 "blockwart.get_admin_principal",
+                "blockwart.list_admin_principal_assignments",
                 "blockwart.preview_grant_scope",
                 "blockwart.create_grant",
                 "blockwart.update_grant",
@@ -307,6 +308,7 @@ async def check_mcp(
                         "blockwart.search_principals",
                         "blockwart.list_admin_principals",
                         "blockwart.get_admin_principal",
+                        "blockwart.list_admin_principal_assignments",
                         "blockwart.preview_grant_scope",
                         "blockwart.get_device_graph",
                         "blockwart.get_network_topology",
@@ -488,8 +490,15 @@ async def check_mcp(
                     "blockwart.get_admin_principal",
                     {"principal_id": grant_candidate_id},
                 ),
+                await session.call_tool(
+                    "blockwart.list_admin_principal_assignments",
+                    {"principal_id": grant_candidate_id, "limit": 1},
+                ),
             ]
             assert all(not result.isError for result in read_results)
+            assignment_page = _tool_payload(read_results[-1])
+            assert assignment_page["assignment_type"] == "effective"
+            assert len(assignment_page["effective_access"]) <= 1
             # The installed wrapper must project the same closed attention
             # vocabulary the application resolver owns, not a wrapper-local copy.
             attention_payload = _tool_payload(read_results[5])
@@ -920,7 +929,7 @@ def main() -> None:
     print(
         "installed_package=ok "
         f"cwd={Path.cwd()} revision={readiness['revision']} "
-        f"openapi_paths={len(openapi['paths'])} mcp_protocol={protocol} mcp_calls=41 "
+        f"openapi_paths={len(openapi['paths'])} mcp_protocol={protocol} mcp_calls=42 "
         "mcp_contract=compatible"
     )
 
