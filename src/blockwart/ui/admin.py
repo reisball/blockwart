@@ -50,6 +50,7 @@ from blockwart.services.principal_management import (
     revoke_managed_principal_grant,
     revoke_managed_service_token,
     set_managed_catalog_role,
+    set_managed_project_creator,
     update_managed_principal,
     update_managed_principal_grant,
 )
@@ -303,6 +304,45 @@ def set_principal_catalog_role_from_ui(
                 principal_id=principal_id,
                 expected_revision=if_match,
                 catalog_role=CatalogRole(catalog_role) if catalog_role else None,
+                actor_password=current_admin_password,
+                channel="ui",
+                request_id=request_correlation_id(request),
+            ),
+        )
+    except HTTPException as exc:
+        return _render_principal_detail(
+            request,
+            session,
+            principal_id,
+            error=str(exc.detail),
+            status_code=exc.status_code,
+        )
+    return RedirectResponse(url=f"/admin/principals/{principal_id}", status_code=303)
+
+
+@router.post(
+    "/{principal_id}/project-creator",
+    response_class=HTMLResponse,
+    dependencies=[Depends(require_browser_write_csrf)],
+)
+def set_principal_project_creator_from_ui(
+    request: Request,
+    principal_id: str,
+    session: Annotated[Session, Depends(get_session)],
+    current_admin_password: Annotated[str, Form(max_length=1024)],
+    if_match: Annotated[str, Form()],
+    project_creator: Annotated[Literal["0", "1"], Form()],
+) -> HTMLResponse:
+    access = read_access_from_request(request)
+    try:
+        _execute_admin_ui(
+            session,
+            lambda: set_managed_project_creator(
+                session,
+                access,
+                principal_id=principal_id,
+                expected_revision=if_match,
+                project_creator=project_creator == "1",
                 actor_password=current_admin_password,
                 channel="ui",
                 request_id=request_correlation_id(request),

@@ -104,7 +104,7 @@ addresses, identities, and credential references are fictional. Use the
 packaged CLI for local or deployment-prep initialization:
 
 ```bash
-blockwart-seed --create-schema --seed seeds/pilot_objects.yaml
+blockwart-seed --create-schema --seed seeds/pilot_objects.yaml --owner-login kai
 ```
 
 The CLI uses `BLOCKWART_DATABASE_URL` unless `--database-url` is supplied. `--create-schema` runs

@@ -2,6 +2,7 @@ import json
 from copy import deepcopy
 
 import pytest
+from ownership_support import ensure_seed_owner
 from pydantic import ValidationError
 
 from blockwart.domain.object_schema import (
@@ -503,7 +504,7 @@ def test_seed_import_uses_same_nested_schema_paths(alembic_session_factory) -> N
             ValueError,
             match=r"data\.network\.addresses\[1\]\.ip",
         ):
-            import_seed_payload(session, payload)
+            import_seed_payload(session, payload, owner_principal_id=ensure_seed_owner(session))
 
 
 def test_markdown_plan_validates_through_catalog_schema(tmp_path) -> None:

@@ -39,8 +39,8 @@ from blockwart.domain.timestamps import format_rfc3339_utc
 from blockwart.models import CatalogObject, Relationship
 from blockwart.schemas.catalog import CatalogObjectIn
 from blockwart.services.access import (
-    active_owner_covered_object_ids,
     ensure_owner_coverage_preserved,
+    owner_grant_covered_object_ids,
 )
 from blockwart.services.catalog import (
     create_relationship,
@@ -50,6 +50,11 @@ from blockwart.services.catalog import (
     upsert_object,
 )
 from blockwart.services.network_classification import NetworkClassificationEvidence
+from blockwart.services.ownership import (
+    assign_initial_owner,
+    ensure_objects_directly_owned,
+    resolve_owner_principal,
+)
 from blockwart.services.seeds import SeedImportResult
 
 STATUS_MARKER_STATES = {
@@ -512,11 +517,22 @@ def import_tools_markdown(
     session: Session,
     tools_path: str | Path,
     *,
+    owner_principal_id: str | None,
     references_root: str | Path | None = None,
     network_evidence: Mapping[str, NetworkClassificationEvidence] | None = None,
     source_uri: str = "workspace://TOOLS.md",
 ) -> SeedImportResult:
-    previously_covered_ids = active_owner_covered_object_ids(session)
+    """Apply one Markdown import; every object it creates is owned by the named owner.
+
+    The explicit owner is resolved before any write, and each created object
+    receives its direct ``Owner/self`` grant in this same transaction.
+    """
+    owner = resolve_owner_principal(
+        session,
+        owner_principal_id,
+        include_owner_coverage_locks=True,
+    )
+    previously_covered_ids = owner_grant_covered_object_ids(session)
     plan = build_tools_import_plan(
         tools_path,
         references_root=references_root,
@@ -535,6 +551,7 @@ def import_tools_markdown(
     known_object_kinds.update({payload.id: payload.kind for payload in object_payloads})
 
     imported_objects = 0
+    created_ids: list[str] = []
     protected_refs: set[str] = set()
     for payload in object_payloads:
         existing = session.get(CatalogObject, payload.id)
@@ -548,6 +565,14 @@ def import_tools_markdown(
             payload,
             known_object_kinds=known_object_kinds,
         )
+        if existing is None:
+            assign_initial_owner(
+                session,
+                object_id=payload.id,
+                owner_principal_id=owner.id,
+                created_by_principal_id=owner.id,
+            )
+            created_ids.append(payload.id)
         imported_objects += 1
 
     _remove_stale_workspace_services(session, objects)
@@ -580,6 +605,7 @@ def import_tools_markdown(
         session,
         previously_covered_ids=previously_covered_ids,
     )
+    ensure_objects_directly_owned(session, created_ids)
     return SeedImportResult(
         objects_imported=imported_objects,
         relationships_imported=inserted_relationships,

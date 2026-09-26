@@ -89,6 +89,12 @@ def render_audit_summary_english(
                 return "; ".join(rendered)
         object_ref = _text(details.get("object_ref"))
         return f"Updated {object_ref}".strip()
+    if event == "object_renamed":
+        return (
+            f"Renamed {_text(details.get('object_ref'))} from "
+            f"{_display_value(details.get('old_label'))} to "
+            f"{_display_value(details.get('new_label'))}"
+        ).strip()
     if event in {"grant_create", "grant_update", "grant_revoke"}:
         target = _text(
             details.get("target_principal_id")

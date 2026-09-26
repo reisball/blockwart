@@ -4,6 +4,7 @@ from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
+from ownership_support import SEED_OWNER_LOGIN, ensure_seed_owner
 from sqlalchemy import select
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session
@@ -15,7 +16,7 @@ from blockwart.config import Settings
 from blockwart.db.session import transaction
 from blockwart.domain.asset_state import is_asset_kind
 from blockwart.main import create_app
-from blockwart.models import AuditEvent, CatalogObject, Relationship
+from blockwart.models import AuditEvent, CatalogObject, ObjectGrant, Relationship
 from blockwart.schemas.catalog import CatalogObjectIn
 from blockwart.services.catalog import (
     create_relationship,
@@ -342,28 +343,39 @@ def test_import_services_flush_without_committing(
     )
 
     with factory() as session:
-        import_seed_file(session, SEED_PATH)
+        import_seed_file(session, SEED_PATH, owner_principal_id=ensure_seed_owner(session))
         assert session.commit_calls == 0
         session.rollback()
 
     with factory() as session:
-        import_tools_markdown(session, tools_path, references_root=tmp_path)
+        import_tools_markdown(
+            session,
+            tools_path,
+            references_root=tmp_path,
+            owner_principal_id=ensure_seed_owner(session),
+        )
         assert session.commit_calls == 0
         session.rollback()
 
     with factory() as session:
         with transaction(session):
-            import_seed_file(session, SEED_PATH)
+            import_seed_file(session, SEED_PATH, owner_principal_id=ensure_seed_owner(session))
         assert session.commit_calls == 1
 
     with factory() as session:
         session.query(AuditEvent).delete()
         session.query(Relationship).delete()
+        session.query(ObjectGrant).delete()
         session.query(CatalogObject).delete()
         session.commit()
         session.commit_calls = 0
         with transaction(session):
-            import_tools_markdown(session, tools_path, references_root=tmp_path)
+            import_tools_markdown(
+                session,
+                tools_path,
+                references_root=tmp_path,
+                owner_principal_id=ensure_seed_owner(session),
+            )
         assert session.commit_calls == 1
 
 
@@ -378,6 +390,7 @@ def test_markdown_replace_rolls_back_on_database_error(
     factory = database.sessions
     with factory() as session:
         _add_object(session, object_id="must-survive")
+        ensure_seed_owner(session)
         session.commit()
 
     tools_path = tmp_path / "TOOLS.md"
@@ -409,6 +422,8 @@ def test_markdown_replace_rolls_back_on_database_error(
             str(tmp_path),
             "--apply",
             "--replace",
+            "--owner-login",
+            SEED_OWNER_LOGIN,
         ]
     )
 
@@ -430,6 +445,7 @@ def test_markdown_replace_preserves_same_id_revision_monotonicity(
             object_id="revision-demo",
             kind="service",
         )
+        ensure_seed_owner(session)
         session.flush()
         session.get(CatalogObject, "revision-demo").revision = 7
         session.commit()
@@ -457,6 +473,8 @@ def test_markdown_replace_preserves_same_id_revision_monotonicity(
                 str(tmp_path),
                 "--apply",
                 "--replace",
+                "--owner-login",
+                SEED_OWNER_LOGIN,
             ]
         )
         == 0
@@ -479,6 +497,7 @@ def test_seed_cli_rolls_back_and_redacts_database_error(
     factory = database.sessions
     with factory() as session:
         _add_object(session, object_id="seed-survivor")
+        ensure_seed_owner(session)
         session.commit()
 
     def fail_seed(session: Session, *args, **kwargs):
@@ -494,6 +513,8 @@ def test_seed_cli_rolls_back_and_redacts_database_error(
             database_url,
             "--seed",
             str(SEED_PATH),
+            "--owner-login",
+            SEED_OWNER_LOGIN,
         ]
     )
 

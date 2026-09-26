@@ -15,7 +15,7 @@ from blockwart.api.deps import get_session
 from blockwart.api.security import require_api_read_access
 from blockwart.db.migrations import upgrade_database
 from blockwart.db.session import build_engine
-from blockwart.domain.auth import Permission, PrincipalContext, PrincipalType
+from blockwart.domain.auth import CatalogRole, Permission, PrincipalContext, PrincipalType
 from blockwart.models import CatalogObject, Principal
 from blockwart.services.policy import PolicySnapshot
 from blockwart.services.read_access import ReadAccess
@@ -97,6 +97,7 @@ def _unrestricted_read_access(session: Session) -> ReadAccess:
                 login="test-unrestricted",
                 display_name="Test Unrestricted",
                 active=True,
+                catalog_role=CatalogRole.CATALOG_OWNER,
             )
         )
         session.flush()
