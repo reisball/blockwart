@@ -29,12 +29,14 @@ from sqlalchemy.dialects import postgresql, sqlite
 from sqlalchemy.engine import Engine
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
+from sqlalchemy.schema import CreateIndex
 
 from blockwart.db.base import Base
 from blockwart.db.migrations import build_alembic_config
 from blockwart.db.session import build_engine
 from blockwart.domain.search import SearchQuery
 from blockwart.models import (
+    AccessRequest,
     CatalogObject,
     IdempotencyRecord,
     ServiceTokenFailureBucket,
@@ -56,6 +58,17 @@ from blockwart.services.project_migration import (
 # Constants and helpers
 # ---------------------------------------------------------------------------
 
+
+def test_open_access_request_index_is_partial_on_both_dialects() -> None:
+    index = next(
+        index
+        for index in AccessRequest.__table__.indexes
+        if index.name == "uq_access_requests_open"
+    )
+    for dialect in (sqlite.dialect(), postgresql.dialect()):
+        statement = str(CreateIndex(index).compile(dialect=dialect))
+        assert "WHERE status IN ('pending', 'approved')" in statement
+
 PG_TEST_URL = os.environ.get(
     "BLOCKWART_TEST_PG_URL",
     "postgresql+psycopg2://postgres:test@127.0.0.1:5432/blockwart_test",
@@ -65,7 +78,8 @@ CATALOG_OWNER_REVISION = "20260806_0015"
 SOURCE_COVERAGE_REVISION = "20260811_0016"
 PROJECT_CHRONOLOGY_REVISION = "20260818_0018"
 CATALOG_VIEWER_REVISION = "20260822_0019"
-HEAD_REVISION = "20260826_0023"
+OBJECT_RENAME_REVISION = "20260909_0022"
+HEAD_REVISION = "20260926_0026"
 
 
 def _pg_url(database: str) -> str:
@@ -309,6 +323,95 @@ def test_postgresql_fresh_migrations_match_model_schema(
 
 
 @PG_SKIP
+def test_postgresql_project_creator_migration_upgrade_and_safe_downgrade(
+    pg_database_name: str,
+) -> None:
+    database_url = _pg_url(pg_database_name)
+    _upgrade_to(database_url, OBJECT_RENAME_REVISION)
+    engine = build_engine(database_url)
+    try:
+        with engine.begin() as connection:
+            _insert_principal(
+                connection,
+                principal_id="00000000-0000-0000-0000-000000000237",
+                login="preserved-owner-237",
+                platform_role="admin",
+                catalog_role="catalog_owner",
+            )
+            _insert_principal(
+                connection,
+                principal_id="00000000-0000-0000-0000-000000000238",
+                login="preserved-viewer-237",
+                catalog_role="catalog_viewer",
+            )
+        before = _table_rows(engine, {"principals", "principal_invariant_counts"})
+        existing_columns = {
+            table: [column["name"] for column in inspect(engine).get_columns(table)]
+            for table in ("principals", "principal_invariant_counts")
+        }
+    finally:
+        engine.dispose()
+
+    _upgrade_to(database_url, HEAD_REVISION)
+    engine = build_engine(database_url)
+    try:
+        # Widening the constraint rewrites no row and adds no counter row.
+        assert _table_rows_for_columns(engine, existing_columns) == before
+        with engine.begin() as connection:
+            _insert_principal(
+                connection,
+                principal_id="00000000-0000-0000-0000-000000000239",
+                login="service-creator-237",
+                catalog_role="project_creator",
+            )
+        with pytest.raises(IntegrityError):
+            with engine.begin() as connection:
+                connection.execute(
+                    text(
+                        "UPDATE principals SET catalog_role = 'project_editor' "
+                        "WHERE id = '00000000-0000-0000-0000-000000000239'"
+                    )
+                )
+    finally:
+        engine.dispose()
+
+    config = build_alembic_config(database_url)
+    with pytest.raises(RuntimeError, match="explicitly removed before downgrade"):
+        command.downgrade(config, OBJECT_RENAME_REVISION)
+
+    engine = build_engine(database_url)
+    try:
+        with engine.begin() as connection:
+            connection.execute(
+                text("DELETE FROM principals WHERE catalog_role = 'project_creator'")
+            )
+    finally:
+        engine.dispose()
+    command.downgrade(config, OBJECT_RENAME_REVISION)
+    engine = build_engine(database_url)
+    try:
+        assert _table_rows(engine, {"principals", "principal_invariant_counts"}) == before
+        with pytest.raises(IntegrityError):
+            with engine.begin() as connection:
+                _insert_principal(
+                    connection,
+                    principal_id="00000000-0000-0000-0000-000000000240",
+                    login="rejected-creator-237",
+                    catalog_role="project_creator",
+                )
+        with pytest.raises(Exception, match="last active catalog owner"):
+            with engine.begin() as connection:
+                connection.execute(
+                    text(
+                        "UPDATE principals SET catalog_role = NULL "
+                        "WHERE id = '00000000-0000-0000-0000-000000000237'"
+                    )
+                )
+    finally:
+        engine.dispose()
+
+
+@PG_SKIP
 def test_postgresql_catalog_viewer_migration_upgrade_and_safe_downgrade(
     pg_database_name: str,
 ) -> None:
@@ -325,13 +428,17 @@ def test_postgresql_catalog_viewer_migration_upgrade_and_safe_downgrade(
                 catalog_role="catalog_owner",
             )
         before = _table_rows(engine, {"principals", "principal_invariant_counts"})
+        existing_columns = {
+            table: [column["name"] for column in inspect(engine).get_columns(table)]
+            for table in ("principals", "principal_invariant_counts")
+        }
     finally:
         engine.dispose()
 
     _upgrade_to(database_url, HEAD_REVISION)
     engine = build_engine(database_url)
     try:
-        assert _table_rows(engine, {"principals", "principal_invariant_counts"}) == before
+        assert _table_rows_for_columns(engine, existing_columns) == before
         with engine.begin() as connection:
             _insert_principal(
                 connection,

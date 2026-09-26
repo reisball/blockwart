@@ -22,7 +22,7 @@ class ObjectGrant(Base):
     __table_args__ = (
         CheckConstraint(
             "role IN "
-            "('discoverer','viewer','editor','creator','access_manager','owner')",
+            "('discoverer','viewer','renamer','editor','creator','access_manager','owner')",
             name="ck_object_grants_role",
         ),
         CheckConstraint(
@@ -117,6 +117,7 @@ class AccessRequest(Base):
             "scope",
             unique=True,
             sqlite_where=text("status IN ('pending', 'approved')"),
+            postgresql_where=text("status IN ('pending', 'approved')"),
         ),
         Index(
             "ix_access_requests_object_status",

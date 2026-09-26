@@ -5,7 +5,7 @@ from collections.abc import Callable
 from fastapi import HTTPException, Request
 from sqlalchemy.orm import Session
 
-from blockwart.api.errors import request_correlation_id
+from blockwart.api.errors import CodedHTTPException, request_correlation_id
 from blockwart.db.session import transaction
 from blockwart.domain.placement import PlacementError
 from blockwart.domain.relationships import RelationshipIntegrityError
@@ -41,6 +41,8 @@ def execute_ui_command[T](
     except CommandAuthorizationDenied as exc:
         with transaction(session):
             record_command_denial(session, context, exc)
+        if exc.code is not None:
+            raise CodedHTTPException(403, error_code=exc.code, detail=str(exc)) from exc
         raise HTTPException(status_code=403, detail="Object permission denied") from exc
     except CommandNotFound as exc:
         raise HTTPException(status_code=404, detail="Resource not found") from exc
@@ -49,6 +51,8 @@ def execute_ui_command[T](
     except CommandPreconditionFailed as exc:
         raise HTTPException(status_code=412, detail=str(exc)) from exc
     except (IdempotencyConflict, CommandConflict) as exc:
+        if exc.code is not None:
+            raise CodedHTTPException(409, error_code=exc.code, detail=str(exc)) from exc
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     except (PlacementError, RelationshipIntegrityError) as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc

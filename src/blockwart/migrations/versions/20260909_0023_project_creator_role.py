@@ -1,20 +1,23 @@
-"""allow the explicit global catalog-viewer role
+"""allow the narrow global catalog role ``project_creator``
 
-Revision ID: 20260822_0019
-Revises: 20260818_0018
+Revision ID: 20260909_0023
+Revises: 20260909_0022
 
-The migration only expands the existing catalog-role value constraint. It does
-not assign a role, create a grant, or otherwise mutate principal authority. A
-downgrade fails closed while any principal still carries ``catalog_viewer``
-because the preceding schema cannot represent that value without data loss.
+The migration only expands the existing catalog-role value constraint by the
+new narrow ``project_creator`` role. It assigns no role, writes no grant, and
+rewrites no existing row: every ``catalog_owner`` and ``catalog_viewer``
+assignment keeps its exact stored value and its exact meaning.
 
-It additionally repairs one historical schema before touching the constraint:
-an installation upgraded to 20260818_0018 before revision 20260731_0012 was
-retroactively corrected carries the last-active-admin and last-active-catalog-
-owner guards but neither ``principal_invariant_counts`` nor the six counter
-triggers. The counter triggers recreated here reference that table, so the next
-SQLite table rebuild would fail while it is absent. See
-``_ensure_principal_invariant_counts``.
+``project_creator`` carries no catalog-wide object permission and no
+last-active-holder invariant, so no counter row, counter trigger, or guard
+trigger is added for it. The four established last-active guards and the six
+counter triggers stay bound to ``platform_admin`` and ``catalog_owner`` only,
+and are recreated verbatim after the SQLite table rebuild that replaces the
+check constraint drops them.
+
+A downgrade fails closed while any principal still carries ``project_creator``,
+because the preceding schema cannot represent that value without silently
+dropping the root-creation authority it expresses.
 """
 
 from __future__ import annotations
@@ -24,19 +27,17 @@ from collections.abc import Sequence
 import sqlalchemy as sa
 from alembic import op
 
-revision: str = "20260822_0019"
-down_revision: str | Sequence[str] | None = "20260818_0018"
+revision: str = "20260909_0023"
+down_revision: str | Sequence[str] | None = "20260909_0022"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
-_INVARIANT_SOURCES = (
-    ("platform_admin", "platform_role = 'admin'"),
-    ("catalog_owner", "catalog_role = 'catalog_owner'"),
-)
-
-_OWNER_ONLY_CHECK = "catalog_role IS NULL OR catalog_role = 'catalog_owner'"
 _OWNER_VIEWER_CHECK = (
     "catalog_role IS NULL OR catalog_role IN ('catalog_owner','catalog_viewer')"
+)
+_OWNER_VIEWER_CREATOR_CHECK = (
+    "catalog_role IS NULL OR "
+    "catalog_role IN ('catalog_owner','catalog_viewer','project_creator')"
 )
 
 # SQLite rebuilds ``principals`` to replace its check constraint and therefore
@@ -162,68 +163,25 @@ _SQLITE_TRIGGER_NAMES = (
 
 
 def upgrade() -> None:
-    _replace_catalog_role_check(_OWNER_VIEWER_CHECK)
+    _replace_catalog_role_check(_OWNER_VIEWER_CREATOR_CHECK)
 
 
 def downgrade() -> None:
     bind = op.get_bind()
-    viewer_count = bind.scalar(
+    creator_count = bind.scalar(
         sa.text(
-            "SELECT COUNT(*) FROM principals WHERE catalog_role = 'catalog_viewer'"
+            "SELECT COUNT(*) FROM principals WHERE catalog_role = 'project_creator'"
         )
     )
-    if int(viewer_count or 0) != 0:
+    if int(creator_count or 0) != 0:
         raise RuntimeError(
-            "Catalog viewer roles must be explicitly removed before downgrade; "
+            "Project-creator roles must be explicitly removed before downgrade; "
             "restore the paired pre-migration backup if rollback is required"
         )
-    _replace_catalog_role_check(_OWNER_ONLY_CHECK)
-
-
-def _ensure_principal_invariant_counts() -> None:
-    """Restore ``principal_invariant_counts`` when the deployed schema lacks it.
-
-    The table and its counter triggers were added to revision 20260731_0012
-    retroactively, so a database upgraded to 20260818_0018 before that can be
-    missing both while still carrying the four last-active guard triggers. Every
-    absent row is reconstructed by counting the principals that actually hold the
-    role, never a guessed value. A database that already has the table keeps its
-    trigger-maintained counters untouched.
-    """
-    bind = op.get_bind()
-    if not sa.inspect(bind).has_table("principal_invariant_counts"):
-        op.create_table(
-            "principal_invariant_counts",
-            sa.Column("invariant", sa.String(length=32), nullable=False),
-            sa.Column("active_count", sa.Integer(), nullable=False),
-            sa.CheckConstraint(
-                "active_count >= 0",
-                name="ck_principal_invariant_counts_nonnegative",
-            ),
-            sa.CheckConstraint(
-                "invariant IN ('platform_admin','catalog_owner')",
-                name="ck_principal_invariant_counts_known",
-            ),
-            sa.PrimaryKeyConstraint("invariant"),
-        )
-    present = {
-        str(row[0])
-        for row in bind.execute(
-            sa.text("SELECT invariant FROM principal_invariant_counts")
-        )
-    }
-    for invariant, predicate in _INVARIANT_SOURCES:
-        if invariant in present:
-            continue
-        op.execute(
-            "INSERT INTO principal_invariant_counts (invariant, active_count) "
-            f"SELECT '{invariant}', COUNT(*) FROM principals "
-            f"WHERE active = true AND {predicate}"
-        )
+    _replace_catalog_role_check(_OWNER_VIEWER_CHECK)
 
 
 def _replace_catalog_role_check(expression: str) -> None:
-    _ensure_principal_invariant_counts()
     bind = op.get_bind()
     if bind.dialect.name == "sqlite":
         for trigger_name in _SQLITE_TRIGGER_NAMES:

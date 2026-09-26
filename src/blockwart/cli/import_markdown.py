@@ -12,7 +12,7 @@ from sqlalchemy.orm import sessionmaker
 from blockwart.db.migrations import DatabaseMigrationError, upgrade_database
 from blockwart.db.session import DatabaseTransactionError, build_engine, transaction
 from blockwart.domain.source_coverage import resolve_coverage, summarize_coverage
-from blockwart.models import AuditEvent, CatalogObject, Relationship
+from blockwart.models import AuditEvent, CatalogObject, ObjectGrant, Relationship
 from blockwart.services.markdown_import import (
     MarkdownImportNetworkError,
     build_tools_import_plan,
@@ -23,6 +23,7 @@ from blockwart.services.network_classification import (
     NetworkClassificationError,
     load_network_classification_evidence,
 )
+from blockwart.services.ownership import InitialOwnerError, resolve_owner_login
 from blockwart.services.source_coverage import (
     load_current_snapshot,
     record_source_snapshot,
@@ -85,6 +86,14 @@ def build_parser() -> argparse.ArgumentParser:
         help=(
             "Persist the dry-run's sanitized source snapshot only. This never creates, "
             "updates, or deletes catalog objects."
+        ),
+    )
+    parser.add_argument(
+        "--owner-login",
+        help=(
+            "Login of the existing active principal that receives a direct "
+            "Owner/self grant on every object --apply creates. Required with "
+            "--apply; an import never creates an ownerless object."
         ),
     )
     parser.add_argument(
@@ -207,6 +216,11 @@ def main(argv: Sequence[str] | None = None) -> int:
     try:
         with session_factory() as session:
             with transaction(session):
+                owner = resolve_owner_login(
+                    session,
+                    args.owner_login,
+                    include_owner_coverage_locks=True,
+                )
                 previous_revisions: dict[str, int] = {}
                 if args.replace:
                     previous_revisions = dict(
@@ -216,10 +230,12 @@ def main(argv: Sequence[str] | None = None) -> int:
                     )
                     session.query(AuditEvent).delete()
                     session.query(Relationship).delete()
+                    session.query(ObjectGrant).delete()
                     session.query(CatalogObject).delete()
                 result = import_tools_markdown(
                     session,
                     tools_path,
+                    owner_principal_id=owner.id,
                     references_root=Path(args.references_root),
                     network_evidence=network_evidence,
                     source_uri=args.source_uri,
@@ -230,6 +246,9 @@ def main(argv: Sequence[str] | None = None) -> int:
                         row.revision = max(row.revision, previous_revision + 1)
                 object_count = session.query(CatalogObject).count()
                 relationship_count = session.query(Relationship).count()
+    except InitialOwnerError as exc:
+        print(f"markdown_import_error={exc.code}", file=sys.stderr)
+        return 2
     except DatabaseTransactionError:
         print("markdown_import_error=database_transaction_failed", file=sys.stderr)
         return 1

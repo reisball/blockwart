@@ -1,7 +1,7 @@
 """add access requests and temporary grant expiry
 
-Revision ID: 20260826_0023
-Revises: 20260825_0021
+Revision ID: 20260926_0026
+Revises: 20260925_0024
 
 The revision is purely additive for existing rows.  It adds one nullable
 column (``object_grants.expires_at``), one new table (``access_requests``)
@@ -31,8 +31,8 @@ from collections.abc import Sequence
 import sqlalchemy as sa
 from alembic import op
 
-revision: str = "20260826_0023"
-down_revision: str | Sequence[str] | None = "20260825_0021"
+revision: str = "20260926_0026"
+down_revision: str | Sequence[str] | None = "20260925_0024"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 

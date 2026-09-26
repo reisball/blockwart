@@ -1,6 +1,7 @@
 from pathlib import Path
 
 import pytest
+from ownership_support import ensure_seed_owner
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -9,6 +10,7 @@ from blockwart.schemas.catalog import CatalogObjectIn
 from blockwart.services.catalog import upsert_object
 from blockwart.services.markdown_import import (
     MarkdownImportNetworkError,
+    _credential_provider,
     build_tools_import_plan,
     import_tools_markdown,
 )
@@ -17,6 +19,22 @@ from blockwart.services.network_classification import NetworkClassificationEvide
 
 def _session(alembic_session_factory) -> Session:
     return alembic_session_factory()
+
+
+@pytest.mark.parametrize(
+    ("auth", "expected"),
+    [
+        ("API token in Infisical /apps/demo", "infisical"),
+        ("Infisical project secret", "infisical"),
+        ("Web login in Vaultwarden", "vaultwarden"),
+        ("stored in secrets.json", "secrets_json"),
+        ("read from /opt/demo/.env", "env_file"),
+        ("local SSH key", "local_file"),
+        ("managed elsewhere", "external"),
+    ],
+)
+def test_credential_provider_normalizes_named_providers(auth: str, expected: str) -> None:
+    assert _credential_provider(auth) == expected
 
 
 def test_build_tools_import_plan_parses_infrastructure_rows(tmp_path: Path) -> None:
@@ -113,7 +131,12 @@ def test_import_tools_markdown_writes_valid_objects(
     )
 
     with _session(alembic_session_factory) as session:
-        result = import_tools_markdown(session, tools_path, references_root=tmp_path)
+        result = import_tools_markdown(
+            session,
+            tools_path,
+            references_root=tmp_path,
+            owner_principal_id=ensure_seed_owner(session),
+        )
         rows = session.scalars(select(CatalogObject)).all()
 
     assert result.objects_imported == 1
@@ -170,7 +193,12 @@ def test_import_tools_markdown_creates_hosted_service_relationship(
     )
 
     with _session(alembic_session_factory) as session:
-        result = import_tools_markdown(session, tools_path, references_root=tmp_path)
+        result = import_tools_markdown(
+            session,
+            tools_path,
+            references_root=tmp_path,
+            owner_principal_id=ensure_seed_owner(session),
+        )
         objects = {row.id: row for row in session.scalars(select(CatalogObject)).all()}
         relationships = session.scalars(select(Relationship)).all()
 
@@ -240,7 +268,12 @@ def test_import_tools_markdown_updates_previous_workspace_import_shape(
             )
         )
         session.flush()
-        import_tools_markdown(session, tools_path, references_root=tmp_path)
+        import_tools_markdown(
+            session,
+            tools_path,
+            references_root=tmp_path,
+            owner_principal_id=ensure_seed_owner(session),
+        )
         row = session.get(CatalogObject, "ct-121_agent-zero")
 
     assert row is not None
@@ -310,7 +343,12 @@ def test_import_tools_markdown_removes_stale_workspace_host_relationship(
         )
         session.commit()
 
-        import_tools_markdown(session, tools_path, references_root=tmp_path)
+        import_tools_markdown(
+            session,
+            tools_path,
+            references_root=tmp_path,
+            owner_principal_id=ensure_seed_owner(session),
+        )
         relationships = session.scalars(select(Relationship)).all()
 
     assert [
@@ -361,7 +399,12 @@ def test_import_tools_markdown_merges_canonical_existing_objects(
                 data={"schema_version": 1, "related_services": ["service:fabrik-proxmox"]},
             ),
         )
-        result = import_tools_markdown(session, tools_path, references_root=tmp_path)
+        result = import_tools_markdown(
+            session,
+            tools_path,
+            references_root=tmp_path,
+            owner_principal_id=ensure_seed_owner(session),
+        )
         row = session.get(CatalogObject, "fabrik")
 
     assert result.objects_imported == 0

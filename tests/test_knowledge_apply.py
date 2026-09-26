@@ -14,7 +14,14 @@ from blockwart.db.migrations import upgrade_database
 from blockwart.db.session import build_engine
 from blockwart.domain.auth import CatalogRole, PrincipalType
 from blockwart.domain.relationships import validate_relationship_request
-from blockwart.models import AuditEvent, CatalogObject, ObjectComment, Principal, Relationship
+from blockwart.models import (
+    AuditEvent,
+    CatalogObject,
+    ObjectComment,
+    ObjectGrant,
+    Principal,
+    Relationship,
+)
 from blockwart.services import knowledge_apply as knowledge_apply_service
 from blockwart.services.audit import add_audit_event, load_audit_details
 from blockwart.services.knowledge_apply import (
@@ -33,6 +40,7 @@ from blockwart.services.knowledge_planning import (
     load_target_snapshot,
     target_snapshot_digest,
 )
+from blockwart.services.ownership import ownerless_object_ids
 
 EXAMPLE_ROOT = Path(__file__).resolve().parents[1] / "examples" / "knowledge-plan"
 MANIFEST_PATH = EXAMPLE_ROOT / "manifest.json"
@@ -91,6 +99,16 @@ def _database(tmp_path: Path, *, owner: bool = True) -> tuple[str, Path]:
                         '"observed_at":null,"verified_at":null,"stale_after":null}'
                     ),
                     revision=7,
+                )
+            )
+            session.flush()
+            session.add(
+                ObjectGrant(
+                    principal_id=OWNER_ID,
+                    object_id="demo-runtime",
+                    role="owner",
+                    scope="self",
+                    created_by_principal_id=OWNER_ID,
                 )
             )
             session.commit()
@@ -229,6 +247,17 @@ def test_success_is_atomic_bounded_and_second_identical_apply_is_noop(tmp_path: 
             runtime = session.get(CatalogObject, "demo-runtime")
             assert runbook is not None
             assert runtime is not None and runtime.revision == 9
+            # The newly created Runbook commits with the applying catalog owner
+            # as its one direct Owner/self; the healthy existing object keeps its grant.
+            new_grants = list(
+                session.scalars(
+                    select(ObjectGrant).where(ObjectGrant.object_id == "demo-diagnosis")
+                )
+            )
+            assert [
+                (grant.principal_id, grant.role, grant.scope) for grant in new_grants
+            ] == [(args["principal_id"], "owner", "self")]
+            assert ownerless_object_ids(session) == set()
             assert session.scalar(select(func.count(Relationship.id))) == 1
             assert session.scalar(select(func.count(ObjectComment.id))) == 0
             audits = list(
