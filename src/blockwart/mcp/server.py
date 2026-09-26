@@ -1198,7 +1198,8 @@ TOOLS: list[JSON] = [
         "name": "blockwart.list_admin_principal_assignments",
         "description": (
             "Page one admin-authorized principal's actor-manageable direct grants "
-            "or effective object access. Use next_cursor until null; "
+            "or individual effective grant sources. An object can repeat across "
+            "pages; use next_cursor until null. "
             "get_admin_principal remains available for existing callers."
         ),
         "inputSchema": {

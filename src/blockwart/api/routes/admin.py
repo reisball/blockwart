@@ -163,7 +163,7 @@ def list_admin_principal_assignments(
         Query(max_length=2048, description="Opaque cursor returned by the previous page"),
     ] = None,
 ) -> PrincipalAssignmentPageOut:
-    """Page direct grants or effective access; the detail API remains unchanged."""
+    """Page direct grants or individual effective sources; detail remains unchanged."""
     try:
         page = _execute_admin(
             session,

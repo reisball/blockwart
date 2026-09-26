@@ -301,7 +301,7 @@ means it deliberately bundles lower-level API concerns behind one agent call.
 | `search_principals` | Select a grant principal | `directly sufficient` | Keeps principal choice explicit before a security write. |
 | `list_admin_principals` | List platform principals | `directly sufficient` | Provides bounded, cursor-paginated administrator discovery. |
 | `get_admin_principal` | Read one platform principal | `directly sufficient` | Legacy full detail remains unchanged; large assignment lists may exceed tool output limits. |
-| `list_admin_principal_assignments` | Page principal assignments | `directly sufficient` | Separately pages direct grants or effective object access with bounded cursor results. |
+| `list_admin_principal_assignments` | Page principal assignments | `directly sufficient` | Separately pages direct grants or individual effective grant sources with bounded cursor results. |
 | `preview_grant_scope` | Preview grant coverage | `directly sufficient` | Makes subtree impact visible before mutation. |
 | `create_grant` | Add object access | `directly sufficient` | Principal selection and the access-resource ETag stay explicit. |
 | `update_grant` | Change object access | `directly sufficient` | No hidden create/update branching or automatic CAS retry is introduced. |
@@ -490,9 +490,13 @@ rows remain filtered by that same principal's object `manage_access` policy.
 `limit`, and the opaque `cursor`, returning `next_cursor` without a total count.
 For a complete assignment audit, call `blockwart.list_admin_principal_assignments`
 with `assignment_type=direct` and then `assignment_type=effective`, following
-each `next_cursor` until null. Pages default to 20 items and are capped at 50;
-cursors are bound to the calling admin, target principal, and assignment
-type. The original
+each `next_cursor` until null. Pages default to 20 items and are capped at 50,
+but may be shorter to keep serialized MCP output below 64 KiB. Each effective
+row contains at most one grant source, so the same `object_id` may occur on
+multiple pages. Combine sources and deduplicate repeated permissions by
+`object_id` for an object-level view. An effective object with no visible
+source appears once with an empty `sources` list. Cursors are bound to the
+calling admin, target principal, and assignment type. The original
 `get_admin_principal` remains unchanged for existing callers, but its complete
 embedded lists can exceed a tool output limit.
 

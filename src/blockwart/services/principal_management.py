@@ -3,7 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass, replace
 from datetime import datetime, timedelta
 from typing import Literal
 
@@ -517,18 +517,24 @@ def query_principal_assignments(
     limit: int,
     cursor: str | None,
 ) -> PrincipalAssignmentPage:
-    """Page actor-manageable assignments using stable object/grant keys."""
+    """Page grants or individual effective sources within a bounded tool reply."""
     detail = query_principal_detail(session, access, principal_id=principal_id)
-    items = detail.direct_grants if assignment_type == "direct" else detail.effective_access
-    page = paginate_items(
-        items,
-        key=(
-            (lambda item: (item.object_id, f"{item.grant_id:020d}"))
-            if assignment_type == "direct"
-            else (lambda item: (item.object_id, ""))
-        ),
-        limit=limit,
-        resource="admin_principal_assignments",
+    if assignment_type == "direct":
+        items = detail.direct_grants
+        key = _direct_assignment_key
+    else:
+        # A single effective object can have enough inherited grants to exceed
+        # the tool output limit even when the caller requests just one object.
+        # Repeat object metadata once per source so every source is pageable.
+        items = tuple(
+            replace(item, sources=(source,)) if item.sources else item
+            for item in detail.effective_access
+            for source in (item.sources or (None,))
+        )
+        key = _effective_assignment_key
+    page_args = dict(
+        key=key,
+        resource="admin_principal_assignments_v2",
         sort="object_id",
         direction="asc",
         query={
@@ -539,12 +545,48 @@ def query_principal_assignments(
         cursor=cursor,
         include_total=False,
     )
+    page = paginate_items(items, limit=limit, **page_args)
+    # MCP pretty-prints the API payload. Reserve the maximum cursor length and
+    # a little headroom below OpenClaw's 64 KiB output limit.
+    page_items = page.items
+    while page_items and _assignment_page_bytes(assignment_type, page_items) > 60 * 1024:
+        page_items = page_items[:-1]
+    if not page_items and page.items:
+        raise ValueError("single principal assignment exceeds the output budget")
+    if len(page_items) != len(page.items):
+        page = paginate_items(items, limit=len(page_items), **page_args)
     return PrincipalAssignmentPage(
         assignment_type=assignment_type,
         direct_grants=tuple(page.items) if assignment_type == "direct" else (),
         effective_access=tuple(page.items) if assignment_type == "effective" else (),
         next_cursor=page.next_cursor,
     )
+
+
+def _direct_assignment_key(item: DirectPrincipalGrantView) -> tuple[str, str]:
+    return item.object_id, f"{item.grant_id:020d}"
+
+
+def _effective_assignment_key(item: EffectivePrincipalGrantView) -> tuple[str, str]:
+    return (
+        item.object_id,
+        f"{item.sources[0].grant_id:020d}" if item.sources else "",
+    )
+
+
+def _assignment_page_bytes(
+    assignment_type: Literal["direct", "effective"],
+    items: list[DirectPrincipalGrantView] | list[EffectivePrincipalGrantView],
+) -> int:
+    payload = {
+        "assignment_type": assignment_type,
+        "direct_grants": [asdict(item) for item in items] if assignment_type == "direct" else [],
+        "effective_access": (
+            [asdict(item) for item in items] if assignment_type == "effective" else []
+        ),
+        "next_cursor": "x" * 2048,
+    }
+    return len(json.dumps(payload, indent=2, sort_keys=True).encode("utf-8"))
 
 
 def create_managed_principal_grant(
