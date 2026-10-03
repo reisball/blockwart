@@ -93,7 +93,7 @@ pydantic-settings==2.15.0
     # via
     #   blockwart (pyproject.toml)
     #   mcp
-pyjwt==2.13.0
+pyjwt==2.15.0
     # via mcp
 python-dotenv==1.2.2
     # via
