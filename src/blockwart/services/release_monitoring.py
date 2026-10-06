@@ -317,11 +317,13 @@ def synchronize_release_schedule(
             and target is not None
             and observation.target_key == target.cache_key
         )
-        desired = (
-            _naive(observation.next_due_at)
-            if observation_matches and observation.next_due_at is not None
-            else _naive(_initial_due(moment, *key, settings.jitter_seconds))
-        )
+        if observation_matches and observation.next_due_at is not None:
+            desired = _naive(observation.next_due_at)
+        else:
+            # Without a matching observation the lease keeps its already-scheduled
+            # due time: re-deriving jitter from each poll time would move it forward
+            # forever. A target change may only pull a later due time earlier.
+            desired = min(lease.due_at, _naive(_initial_due(moment, *key, settings.jitter_seconds)))
         if lease.due_at != desired and lease.lease_owner is None:
             lease.due_at = desired
             lease.updated_at = _naive(moment)
