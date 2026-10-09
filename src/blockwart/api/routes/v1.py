@@ -65,6 +65,7 @@ from blockwart.schemas.projects import (
 )
 from blockwart.schemas.v1 import (
     MAX_BATCH_RESPONSE_BYTES,
+    ActivityEventTypeValue,
     AttentionCategoryValue,
     AttentionItemSignalStateValue,
     AttentionReasonValue,
@@ -75,6 +76,7 @@ from blockwart.schemas.v1 import (
     ObjectSortField,
     SortDirection,
     SourceClassificationValue,
+    V1ActivityPageOut,
     V1AttachedDeviceCreateIn,
     V1AttentionPageOut,
     V1AuditPageOut,
@@ -107,8 +109,14 @@ from blockwart.schemas.v1 import (
     V1RelationshipPageOut,
     V1ReleaseCheckOut,
     V1ReleaseOverviewPageOut,
+    V1ServiceCredentialReferenceCreateIn,
+    V1ServiceCredentialReferenceOut,
     V1SourceCoveragePageOut,
     V1TopologyOut,
+)
+from blockwart.services.activity import (
+    ActivityQueryError,
+    query_activity_page,
 )
 from blockwart.services.agent import (
     get_agent_object_context,
@@ -126,6 +134,7 @@ from blockwart.services.commands import (
     create_catalog_root,
     create_child_object,
     create_object_relationship,
+    create_service_credential_reference,
     delete_catalog_object,
     delete_object_relationship,
     preview_catalog_object_update,
@@ -328,6 +337,73 @@ def get_v1_attention(
             "total": page.total,
             "generated_at": page.generated_at,
             "direction": direction,
+        }
+    )
+
+
+@router.get(
+    "/activity",
+    response_model=V1ActivityPageOut,
+    summary="Read the authorized catalog-wide agent activity feed",
+)
+def get_v1_activity(
+    session: Annotated[Session, Depends(get_session)],
+    access: Annotated[ReadAccess, Depends(require_api_read_access)],
+    since: Annotated[
+        str | None,
+        Query(description="Only events at or after this RFC3339 timestamp"),
+    ] = None,
+    event_type: ActivityEventTypeValue | None = None,
+    kind: ObjectKind | None = None,
+    parent: Annotated[
+        str | None,
+        Query(description="Include only the placement subtree of this object id"),
+    ] = None,
+    object_id: Annotated[
+        str | None,
+        Query(description="Include only events of this exact object id"),
+    ] = None,
+    limit: PageLimit = 50,
+    cursor: CursorParameter = None,
+    direction: SortDirection = "desc",
+    include_total: Annotated[
+        bool,
+        Query(
+            description=(
+                "Attempt an exact authorized total within the activity scan budget. "
+                "When the budget is exhausted, total is null and total_status "
+                "is budget_exhausted."
+            )
+        ),
+    ] = False,
+) -> V1ActivityPageOut:
+    """Read one classified audit-activity page; strictly pull and read-only."""
+    try:
+        page = query_activity_page(
+            session,
+            access,
+            since=since,
+            event_type=event_type,
+            kind=kind,
+            parent=parent,
+            object_id=object_id,
+            limit=limit,
+            cursor=cursor,
+            direction=direction,
+            include_total=include_total,
+        )
+    except InvalidCursor as exc:
+        raise _invalid_cursor() from exc
+    except ActivityQueryError as exc:
+        raise HTTPException(status_code=400, detail="Invalid activity request") from exc
+    return V1ActivityPageOut.model_validate(
+        {
+            "items": page.items,
+            "next_cursor": page.next_cursor,
+            "total": page.total,
+            "generated_at": page.generated_at,
+            "direction": direction,
+            "total_status": page.total_status,
         }
     )
 
@@ -1087,6 +1163,72 @@ def create_v1_catalog_root(
     return V1ObjectCommandOut(
         catalog_object=result.catalog_object,
         etag=result.etag,
+        changed=result.changed,
+        replayed=result.replayed,
+    )
+
+
+@router.post(
+    "/objects/{service_id}/credential-references",
+    response_model=V1ServiceCredentialReferenceOut,
+    status_code=201,
+    summary="Create one credential reference bound to one service access method",
+)
+def create_v1_service_credential_reference(
+    service_id: str,
+    payload: V1ServiceCredentialReferenceCreateIn,
+    request: Request,
+    response: Response,
+    session: Annotated[Session, Depends(get_session)],
+    access: Annotated[ReadAccess, Depends(require_api_read_access)],
+    if_match: Annotated[str | None, Header(alias="If-Match")] = None,
+    idempotency_key: Annotated[str | None, Header(alias="Idempotency-Key")] = None,
+) -> V1ServiceCredentialReferenceOut:
+    """Create one disconnected credential reference and link it to the service.
+
+    Requires the dedicated `create_credential_reference` permission on the
+    service (the `credential_reference_creator` role, `owner`, or
+    `catalog_owner`); neither `create_child`, `write`, nor any root-creation
+    authority is required or sufficient. The strong service `If-Match` ETag and
+    an `Idempotency-Key` are required. The new reference receives no placement
+    parent and no relationship; exactly one typed reference is appended to
+    `data.access_methods[access_method_index].credential_references`, the
+    service revision advances once, and the caller receives one direct
+    Owner/self grant on the new reference. Everything commits atomically.
+    """
+    if idempotency_key is None:
+        raise HTTPException(status_code=400, detail="Idempotency-Key is required")
+    context = api_write_context(request, access)
+    settings: Settings = request.app.state.settings
+    result = execute_api_command(
+        session,
+        context,
+        lambda: create_service_credential_reference(
+            session,
+            context,
+            service_id=service_id,
+            access_method_index=payload.access_method_index,
+            payload=payload.credential_reference,
+            expected_revision=if_match,
+            idempotency_key=idempotency_key,
+            idempotency_ttl_seconds=settings.idempotency_ttl_seconds,
+        ),
+    )
+    response.headers["ETag"] = result.etag
+    response.headers["Location"] = f"/api/v1/objects/{result.credential_reference.id}"
+    return V1ServiceCredentialReferenceOut(
+        credential_reference=result.credential_reference,
+        etag=result.etag,
+        service_id=result.service_id,
+        service_revision=result.service_revision,
+        service_etag=result.service_etag,
+        access_method_index=result.access_method_index,
+        link_path=result.link_path,
+        owner_grant={
+            "principal_id": result.owner_principal_id,
+            "role": "owner",
+            "scope": "self",
+        },
         changed=result.changed,
         replayed=result.replayed,
     )

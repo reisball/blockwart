@@ -144,6 +144,18 @@ after deployment, then verify each agent can create a root Project and receives
 only its own direct Owner/self grant. New-agent onboarding must request the same
 capability; this migration does not automatically grant it to human users.
 
+Revision `20260926_0025` again only expands the object-grant role constraint,
+for the new narrow `credential_reference_creator` value. It writes no grant and
+rewrites no existing row; `owner` and `catalog_owner` gain the
+`create_credential_reference` permission from the role they already store, and
+no other assignment is widened. After deployment, delegate service-bound
+credential-reference creation explicitly by granting
+`credential_reference_creator` on each service an agent may record references
+for, then verify the agent sees `create_credential_reference` in that service's
+capabilities and receives only its own Owner/self grant on a reference it
+creates. Before a downgrade to `20260925_0024`, revoke every
+`credential_reference_creator` grant; downgrade fails closed otherwise.
+
 The image healthcheck calls `/api/health/ready`. An unhealthy result therefore means the process
 may still be alive but must not receive normal traffic.
 

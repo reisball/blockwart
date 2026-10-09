@@ -173,7 +173,15 @@ class PolicySnapshot:
 def policy_for_principal(
     session: Session,
     principal_id: str,
+    *,
+    materialize_global_permissions: bool = True,
 ) -> PolicySnapshot:
+    """Build policy; activity may retain global authority without catalog IDs.
+
+    The non-materialized form is only for consumers that interpret
+    ``global_authorities`` directly. Generic per-object policy methods require
+    the default materialized form.
+    """
     global_authorities = _global_authorities_for_principal(session, principal_id)
     child = aliased(CatalogObject)
     object_ref = CatalogObject.kind + literal(":") + CatalogObject.id
@@ -256,7 +264,7 @@ def policy_for_principal(
         for authority in global_authorities
         for permission in authority.permissions
     )
-    if global_permissions:
+    if global_permissions and materialize_global_permissions:
         # Global authority is computed per request over the current catalog
         # instead of being materialized as wildcard or per-object grants. A
         # catalog role that carries no object permission — the project creator

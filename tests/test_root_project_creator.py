@@ -332,6 +332,7 @@ def test_service_project_creator_creates_root_project_with_owner_self(
     assert result.catalog_object.parent_path == []
     assert result.catalog_object.capabilities == [
         "create_child",
+        "create_credential_reference",
         "delete",
         "discover",
         "manage_access",
@@ -752,6 +753,7 @@ def test_project_creator_cannot_widen_its_own_authority_through_its_new_root(
     assert own.status_code == 200
     assert sorted(own.json()["capabilities"]) == [
         "create_child",
+        "create_credential_reference",
         "delete",
         "discover",
         "manage_access",

@@ -7,7 +7,7 @@ from ipaddress import ip_address
 import pytest
 from fastapi.testclient import TestClient
 from pydantic import ValidationError
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
 
 import blockwart.services.release_github as github_provider
 import blockwart.services.release_monitoring as release_service
@@ -1055,6 +1055,198 @@ def test_serial_pass_uses_a_fresh_lease_deadline_for_each_claim(
     assert len(competing_results) == 1
     assert competing_results[0].outcome == "skipped"
     assert competing_results[0].skipped_reason == "already_claimed_or_not_due"
+
+
+def _pin_jittered_instance(session, object_id: str, jitter_seconds: int) -> int:
+    """Give the service a fixed instance id whose initial jitter exceeds many polls."""
+
+    for number in range(10_000):
+        candidate = f"{number:032x}"
+        offset = int(
+            (
+                release_service._initial_due(NOW, object_id, candidate, jitter_seconds) - NOW
+            ).total_seconds()
+        )
+        if 600 <= offset <= 2000:
+            session.execute(
+                update(CatalogObject)
+                .where(CatalogObject.id == object_id)
+                .values(instance_id=candidate)
+            )
+            session.commit()
+            return offset
+    raise AssertionError("no deterministic jitter candidate")
+
+
+def _lease_due(session) -> datetime:
+    session.expire_all()
+    lease = session.scalar(select(ServiceReleaseCheckLease))
+    assert lease is not None
+    assert lease.lease_owner is None
+    return lease.due_at.replace(tzinfo=UTC)
+
+
+@pytest.mark.parametrize("outcome", ["observed", "error"])
+def test_unobserved_initial_due_survives_repeated_polls_until_checked(
+    alembic_session_factory,
+    monkeypatch,
+    outcome,
+) -> None:
+    settings = ReleaseMonitoringSettings(
+        enabled=True,
+        poller_enabled=True,
+        jitter_seconds=3600,
+        poll_interval_seconds=30,
+    )
+    with alembic_session_factory() as session:
+        upsert_object(session, _service("slow-start"))
+        session.commit()
+        offset = _pin_jittered_instance(session, "slow-start", settings.jitter_seconds)
+    assert offset > 10 * settings.poll_interval_seconds
+    clock = [NOW]
+    calls: list[datetime] = []
+
+    def acquire(_request):
+        calls.append(clock[0])
+        if outcome == "error":
+            return ReleaseObservation(
+                provider="github_releases",
+                outcome="error",
+                checked_at=clock[0],
+                error_code="http_server_error",
+                http_status=503,
+            )
+        return _observed(checked_at=clock[0])
+
+    monkeypatch.setattr(release_service, "_utcnow", lambda: clock[0])
+    monkeypatch.setattr(release_service, "fetch_latest_github_release", acquire)
+    original_due = NOW + timedelta(seconds=offset)
+
+    with alembic_session_factory() as session:
+        step = 0
+        while clock[0] < original_due:
+            clock[0] = NOW + timedelta(seconds=settings.poll_interval_seconds * step)
+            if clock[0] >= original_due:
+                break
+            result = run_due_release_checks(session, settings=settings, now=clock[0])
+            assert result.completed == 0
+            assert calls == []
+            assert _lease_due(session) == original_due
+            step += 1
+        assert step > 10
+        result = run_due_release_checks(session, settings=settings, now=clock[0])
+        assert result.completed == 1
+        assert calls == [clock[0]]
+        checked_at = clock[0]
+
+        observation = session.scalar(select(ServiceReleaseObservation))
+        assert observation is not None
+        failures = 1 if outcome == "error" else 0
+        expected_next = release_service.scheduled_release_due(
+            checked_at,
+            object_id="slow-start",
+            object_instance_id=observation.object_instance_id,
+            provider="github_releases",
+            interval_seconds=86400,
+            jitter_seconds=settings.jitter_seconds,
+            consecutive_failures=failures,
+        )
+        assert observation.consecutive_failures == failures
+        assert observation.error_code == ("http_server_error" if outcome == "error" else None)
+        assert observation.next_due_at == expected_next.replace(tzinfo=None)
+        assert expected_next >= checked_at + timedelta(seconds=86400 * 2**failures)
+        assert _lease_due(session) == expected_next
+
+        for _ in range(5):
+            clock[0] += timedelta(seconds=settings.poll_interval_seconds)
+            assert run_due_release_checks(session, settings=settings, now=clock[0]).completed == 0
+        assert len(calls) == 1
+        assert _lease_due(session) == expected_next
+
+        clock[0] = expected_next
+        assert run_due_release_checks(session, settings=settings, now=clock[0]).completed == 1
+        assert len(calls) == 2
+
+
+def test_target_change_reschedules_once_then_keeps_the_new_initial_due(
+    alembic_session_factory,
+    monkeypatch,
+) -> None:
+    settings = ReleaseMonitoringSettings(
+        enabled=True,
+        poller_enabled=True,
+        jitter_seconds=3600,
+        poll_interval_seconds=30,
+    )
+    with alembic_session_factory() as session:
+        upsert_object(session, _service("retarget-slow"))
+        session.commit()
+        offset = _pin_jittered_instance(session, "retarget-slow", settings.jitter_seconds)
+    clock = [NOW]
+    seen: list[tuple[str, str | None]] = []
+
+    def acquire(request):
+        seen.append((request.target.slug, request.etag))
+        return _observed(checked_at=clock[0])
+
+    monkeypatch.setattr(release_service, "_utcnow", lambda: clock[0])
+    monkeypatch.setattr(release_service, "fetch_latest_github_release", acquire)
+    with alembic_session_factory() as session:
+        assert run_due_release_checks(session, settings=settings, now=NOW).completed == 0
+        clock[0] = NOW + timedelta(seconds=offset)
+        assert run_due_release_checks(session, settings=settings, now=clock[0]).completed == 1
+        previous_due = _lease_due(session)
+        assert previous_due >= clock[0] + timedelta(seconds=86400)
+
+        changed = _service("retarget-slow")
+        changed.data["release_monitoring"]["github"]["repo"] = "other-service"
+        upsert_object(session, changed)
+        session.commit()
+
+        clock[0] += timedelta(seconds=60)
+        run_due_release_checks(session, settings=settings, now=clock[0])
+        rescheduled = _lease_due(session)
+        assert rescheduled < previous_due
+        assert clock[0] <= rescheduled <= clock[0] + timedelta(seconds=3600)
+
+        while clock[0] + timedelta(seconds=30) < rescheduled:
+            clock[0] += timedelta(seconds=30)
+            assert run_due_release_checks(session, settings=settings, now=clock[0]).completed == 0
+            assert _lease_due(session) == rescheduled
+        clock[0] = rescheduled
+        assert run_due_release_checks(session, settings=settings, now=clock[0]).completed == 1
+        assert seen[-1] == ("example-org/other-service", None)
+        assert len(seen) == 2
+
+
+def test_schedule_sync_preserves_active_lease_and_drops_disabled_unleased_service(
+    alembic_session_factory,
+) -> None:
+    settings = ReleaseMonitoringSettings(enabled=True, poller_enabled=True, jitter_seconds=3600)
+    with alembic_session_factory() as session:
+        upsert_object(session, _service("busy"))
+        upsert_object(session, _service("retired"))
+        session.commit()
+        assert synchronize_release_schedule(session, now=NOW, settings=settings) == 2
+        busy = session.scalar(
+            select(ServiceReleaseCheckLease).where(ServiceReleaseCheckLease.object_id == "busy")
+        )
+        assert busy is not None
+        busy_due = busy.due_at
+        busy.lease_owner = "other-process"
+        busy.lease_expires_at = (NOW + timedelta(seconds=60)).replace(tzinfo=None)
+        session.commit()
+        upsert_object(session, _service("retired", enabled=False))
+        session.commit()
+
+        synchronize_release_schedule(session, now=NOW + timedelta(seconds=30), settings=settings)
+        session.commit()
+        leases = {
+            row.object_id: row for row in session.scalars(select(ServiceReleaseCheckLease)).all()
+        }
+        assert set(leases) == {"busy"}
+        assert leases["busy"].due_at == busy_due
+        assert leases["busy"].lease_owner == "other-process"
 
 
 def test_overview_filters_after_authorization_without_hidden_counts(

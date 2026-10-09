@@ -1,14 +1,17 @@
 from __future__ import annotations
 
 import json
+from types import SimpleNamespace
 
 import pytest
 from sqlalchemy import select
 
 from blockwart.db.session import transaction
-from blockwart.domain.auth import CatalogRole, GrantScope, PlatformRole, Role
+from blockwart.domain.auth import CatalogRole, GrantScope, Permission, PlatformRole, Role
 from blockwart.models import BrowserSession, Principal, SecurityEvent, ServiceToken
+from blockwart.schemas.admin import PrincipalAssignmentPageOut
 from blockwart.schemas.catalog import CatalogObjectIn
+from blockwart.services import principal_management
 from blockwart.services.access import create_object_grant
 from blockwart.services.catalog import upsert_object
 from blockwart.services.identity import (
@@ -17,10 +20,14 @@ from blockwart.services.identity import (
     issue_browser_session,
 )
 from blockwart.services.principal_management import (
+    EffectivePrincipalGrantView,
     ManagedPrincipalConflict,
     ManagedPrincipalPreconditionFailed,
     PlatformAdminDenied,
+    PrincipalAssignmentPage,
+    PrincipalGrantSourceView,
     issue_managed_service_token,
+    query_principal_assignments,
     query_principal_detail,
     query_principals,
     revoke_managed_service_token,
@@ -435,3 +442,69 @@ def test_generic_principal_update_never_changes_the_catalog_role(
         assert stored.display_name == "Renamed Agent"
         assert stored.platform_role == PlatformRole.ADMIN
         assert stored.catalog_role == CatalogRole.CATALOG_OWNER
+
+
+def test_effective_assignment_sources_fit_mcp_output_and_page_without_loss(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    label = "😀" * 255
+    sources = tuple(
+        PrincipalGrantSourceView(
+            grant_id=grant_id,
+            anchor_object_id="host-" + "a" * 120,
+            anchor_object_kind="host",
+            anchor_object_label=label,
+            role=Role.VIEWER,
+            scope=GrantScope.SUBTREE,
+            direct=False,
+        )
+        for grant_id in range(1, 22)
+    )
+    effective = EffectivePrincipalGrantView(
+        object_id="service-" + "s" * 120,
+        object_kind="service",
+        object_label=label,
+        permissions=(Permission.DISCOVER, Permission.READ),
+        sources=sources,
+    )
+    oversized = PrincipalAssignmentPageOut.model_validate(
+        PrincipalAssignmentPage(
+            assignment_type="effective",
+            direct_grants=(),
+            effective_access=(effective,),
+            next_cursor=None,
+        )
+    ).model_dump(mode="json")
+    assert len(json.dumps(oversized, indent=2, sort_keys=True).encode()) > 64 * 1024
+    monkeypatch.setattr(
+        principal_management,
+        "query_principal_detail",
+        lambda *_args, **_kwargs: SimpleNamespace(
+            direct_grants=(),
+            effective_access=(effective,),
+        ),
+    )
+    access = SimpleNamespace(principal=SimpleNamespace(id="actor"))
+    cursor = None
+    seen: list[int] = []
+    page_count = 0
+    while True:
+        page = query_principal_assignments(
+            None,
+            access,
+            principal_id="target",
+            assignment_type="effective",
+            limit=50,
+            cursor=cursor,
+        )
+        payload = PrincipalAssignmentPageOut.model_validate(page).model_dump(mode="json")
+        assert len(json.dumps(payload, indent=2, sort_keys=True).encode()) < 64 * 1024
+        assert all(len(item["sources"]) == 1 for item in payload["effective_access"])
+        seen.extend(item["sources"][0]["grant_id"] for item in payload["effective_access"])
+        page_count += 1
+        assert page_count <= 21
+        cursor = payload["next_cursor"]
+        if cursor is None:
+            break
+    assert page_count > 1
+    assert seen == list(range(1, 22))
