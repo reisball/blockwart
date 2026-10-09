@@ -755,3 +755,54 @@ def test_the_read_only_mcp_tools_are_annotated_read_only() -> None:
 
     for name in ("blockwart.list_my_access_requests", "blockwart.list_pending_access_requests"):
         assert TOOL_DEFINITIONS[name]["annotations"]["readOnlyHint"] is True
+
+
+@pytest.mark.parametrize(("role", "scope"), [("discoverer", "subtree"), ("viewer", "subtree")])
+def test_managed_reassignment_ends_original_approval_without_rewriting_history(
+    backend, client, role, scope
+) -> None:
+    request_id = _create(client, backend, reason="original assignment").json()["request_id"]
+    assert _decide(client, backend, request_id).status_code == 200
+    original = _row(backend, request_id)
+    url = f"/api/v1/objects/ar-root/access/grants/{original.grant_id}"
+    headers = {**authorization(backend.tokens["owner"]), "If-Match": _etag(client, backend)}
+    unchanged = client.put(url, headers=headers, json={"role": "viewer", "scope": "self"})
+    assert unchanged.status_code == 200 and unchanged.json()["changed"] is False
+    assert _row(backend, request_id).status == "approved"
+    updated = client.put(url, headers=headers, json={"role": role, "scope": scope})
+    assert updated.status_code == 200 and updated.json()["changed"] is True
+    kept = _row(backend, request_id)
+    assert kept.status == "revoked" and kept.ended_at is not None
+    assert (kept.role, kept.scope, kept.reason) == ("viewer", "self", "original assignment")
+    assert kept.decided_at == original.decided_at
+    assert kept.decided_by_principal_id == original.decided_by_principal_id
+    assert kept.approved_expires_at == original.approved_expires_at
+    assert _audit_actions(backend).count("access_request_revoke") == 1
+    assert _mine(client, backend).json()["items"][0]["status"] == "revoked"
+    if role == "discoverer":
+        # The now non-reading assignment must permit a fresh legitimate application.
+        fresh = _create(client, backend)
+        assert fresh.status_code == 201 and fresh.json()["request_id"] != request_id
+
+
+@pytest.mark.parametrize("mutation", ["assignment", "longer_expiry"])
+def test_out_of_band_grant_changes_project_original_contract_without_writes(
+    backend, client, frozen, mutation
+) -> None:
+    request_id = _create(client, backend, ttl_seconds=600).json()["request_id"]
+    assert _decide(client, backend, request_id).status_code == 200
+    original = _row(backend, request_id)
+    with backend.session() as session, transaction(session):
+        grant = session.get(ObjectGrant, original.grant_id)
+        if mutation == "assignment":
+            grant.role = "discoverer"
+            grant.scope = "subtree"
+        else:
+            grant.expires_at = original.approved_expires_at + timedelta(hours=1)
+    if mutation == "longer_expiry":
+        frozen.advance(minutes=11)
+    before = snapshot_database(backend.engine)
+    items = _mine(client, backend).json()["items"]
+    assert items[0]["status"] == ("revoked" if mutation == "assignment" else "expired")
+    assert snapshot_database(backend.engine) == before
+    assert _row(backend, request_id).status == "approved"

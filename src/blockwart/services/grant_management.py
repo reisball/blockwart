@@ -7,6 +7,7 @@ from typing import Literal
 from sqlalchemy import func, or_, select, update
 from sqlalchemy.orm import Session
 
+from blockwart.domain.access_requests import AccessRequestStatus
 from blockwart.domain.auth import (
     CatalogRole,
     GrantScope,
@@ -25,6 +26,7 @@ from blockwart.services.access import (
     lock_owner_coverage_state,
 )
 from blockwart.services.access_request_state import (
+    end_requests_for_grant,
     end_requests_for_removed_grant,
     grant_is_lapsed,
     retire_lapsed_grant,
@@ -635,6 +637,18 @@ def update_managed_grant(
         session,
         object_id=object_id,
         expected_revision=revision,
+    )
+    # Reassigning a grant ends the original approved assignment. Keep its
+    # decision history intact even if this administrator grants broader access.
+    now = clock.utcnow()
+    lapsed = grant_is_lapsed(grant, now=now)
+    end_requests_for_grant(
+        session,
+        grant_id=grant.id,
+        status=AccessRequestStatus.EXPIRED if lapsed else AccessRequestStatus.REVOKED,
+        ended_at=grant.expires_at if lapsed else now,
+        actor=context.principal.id,
+        cause="grant_reassigned",
     )
     grant.role = resolved_role
     grant.scope = resolved_scope

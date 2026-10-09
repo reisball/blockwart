@@ -35,7 +35,7 @@ call:
 | --- | --- |
 | `pending` | not decided, and (if temporary) its requested window has not elapsed |
 | `expired` | a pending temporary request whose requested window elapsed (it can no longer be approved), **or** an approved request whose grant window elapsed |
-| `revoked` | an approved request whose grant was removed |
+| `revoked` | an approved request whose grant was removed or whose original assignment was changed |
 | `approved` / `denied` / `cancelled` | as decided |
 
 **Reads never write.** `GET /api/v1/me/access-requests`,
@@ -52,10 +52,15 @@ guarded `UPDATE ... WHERE status = <expected>` so parallel lifecycles cannot
 double-apply:
 
 - creating a request for the same requester and object;
-- revoking or replacing the grant (`DELETE .../access/grants/{id}` and the
-  grant-create path), which ends the approval at the moment of revocation;
+- revoking, reassigning or replacing the grant (the grant delete, update and
+  create paths), which ends the original approval in that same transaction;
 Deciding and cancelling check the projected state and reject a lapsed request;
 that rejection does not persist an expiry or revocation.
+
+A changed grant role or scope ends the original approved assignment; a no-op
+edit leaves it approved. Out-of-band assignment changes are also projected as
+revoked without a read write. A longer current grant expiry never extends the
+original request's approved window in its history.
 
 The original decision columns (`decided_by`, `decided_at`,
 `approved_expires_at`, `reason`) are never rewritten; `ended_at` records when an

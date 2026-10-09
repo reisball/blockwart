@@ -62,7 +62,13 @@ def effective_statuses(
             duration=row.duration,
             requested_expires_at=row.requested_expires_at,
             approved_expires_at=row.approved_expires_at,
-            grant_present=grant is not None,
+            grant_present=(
+                grant is not None
+                and grant.principal_id == row.requester_principal_id
+                and grant.object_id == row.object_id
+                and grant.role == row.role
+                and grant.scope == row.scope
+            ),
             grant_expires_at=grant.expires_at if grant is not None else None,
             now=now,
         )

@@ -69,7 +69,8 @@ def effective_access_request_status(
     if stored == AccessRequestStatus.APPROVED:
         if not grant_present:
             return AccessRequestStatus.REVOKED
-        window_end = grant_expires_at if grant_expires_at is not None else approved_expires_at
+        windows = [end for end in (grant_expires_at, approved_expires_at) if end is not None]
+        window_end = min(windows) if windows else None
         if window_end is not None and window_end <= now:
             return AccessRequestStatus.EXPIRED
         return AccessRequestStatus.APPROVED
