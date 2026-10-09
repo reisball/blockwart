@@ -89,7 +89,8 @@ Every service/provider observation and lease is bound to the immutable catalog
 object instance. SQLite and PostgreSQL use one conditional lease update, so
 manual and scheduled processes cannot check the same instance concurrently.
 Checks are serial and every pass is bounded. New schedules receive stable
-jitter; expired leases recover automatically. A manual UI or
+jitter, and that initial due time is kept across polls until the first check runs;
+only a target change may pull it earlier. Expired leases recover automatically. A manual UI or
 `POST /api/v1/objects/{id}/release-check` request requires object `write`, uses
 the same application function and lease, and observes a five-minute cooldown.
 

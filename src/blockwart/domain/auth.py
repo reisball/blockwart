@@ -32,6 +32,11 @@ class Permission(StrEnum):
     # be delegated without the general write authority over an object document.
     RENAME = "rename"
     CREATE_CHILD = "create_child"
+    # Creating one new credential-reference metadata object bound to one access
+    # method of this service. A credential reference is never a placement
+    # child and the link is a narrow data change, so neither `create_child`
+    # nor `write` implies it, and it implies neither of them.
+    CREATE_CREDENTIAL_REFERENCE = "create_credential_reference"
     MANAGE_ACCESS = "manage_access"
     DELETE = "delete"
 
@@ -42,6 +47,7 @@ class Role(StrEnum):
     RENAMER = "renamer"
     EDITOR = "editor"
     CREATOR = "creator"
+    CREDENTIAL_REFERENCE_CREATOR = "credential_reference_creator"
     ACCESS_MANAGER = "access_manager"
     OWNER = "owner"
 
@@ -81,6 +87,13 @@ ROLE_PERMISSIONS = MappingProxyType(
                 Permission.DISCOVER,
                 Permission.READ,
                 Permission.CREATE_CHILD,
+            }
+        ),
+        Role.CREDENTIAL_REFERENCE_CREATOR: frozenset(
+            {
+                Permission.DISCOVER,
+                Permission.READ,
+                Permission.CREATE_CREDENTIAL_REFERENCE,
             }
         ),
         Role.ACCESS_MANAGER: frozenset(

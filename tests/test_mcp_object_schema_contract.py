@@ -49,6 +49,7 @@ OBJECT_WRITE_INTENTS = (
     ("blockwart.create_root", "object"),
     ("blockwart.update_object", "object"),
     ("blockwart.create_attached_device", "device"),
+    ("blockwart.create_service_credential_reference", "credential_reference"),
 )
 
 

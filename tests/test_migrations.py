@@ -46,10 +46,13 @@ PROJECT_CHRONOLOGY_REVISION = "20260818_0018"
 CATALOG_VIEWER_REVISION = "20260822_0019"
 GATUS_SOURCE_REVISION = "20260824_0020"
 RELEASE_MONITORING_REVISION = "20260825_0021"
-ACCESS_REQUESTS_REVISION = "20260926_0026"
 OBJECT_RENAME_REVISION = "20260909_0022"
 PROJECT_CREATOR_REVISION = "20260909_0023"
 ADDITIVE_PROJECT_CREATOR_REVISION = "20260925_0024"
+CREDENTIAL_REFERENCE_CREATOR_REVISION = "20260926_0025"
+ACTIVITY_INDEX_REVISION = "20260926_0026"
+AGENT_NOTICES_REVISION = "20261009_0027"
+ACCESS_REQUESTS_REVISION = "20261009_0028"
 HEAD_REVISION = ACCESS_REQUESTS_REVISION
 _GUARD_TRIGGER_NAMES = (
     "ck_principals_last_active_admin_update",
@@ -268,6 +271,11 @@ def test_real_alembic_upgrade_creates_fresh_database_and_has_no_drift(
         assert set(inspect(engine).get_table_names()) == {
             "access_requests",
             "alembic_version",
+            "agent_delivery_attempts",
+            "agent_delivery_jobs",
+            "agent_delivery_targets",
+            "agent_notice_events",
+            "agent_notice_subscriptions",
             "audit_events",
             "browser_sessions",
             "catalog_objects",
@@ -294,6 +302,11 @@ def test_real_alembic_upgrade_creates_fresh_database_and_has_no_drift(
         engine.dispose()
     assert set(Base.metadata.tables) == {
         "access_requests",
+        "agent_delivery_attempts",
+        "agent_delivery_jobs",
+        "agent_delivery_targets",
+        "agent_notice_events",
+        "agent_notice_subscriptions",
         "audit_events",
         "browser_sessions",
         "catalog_objects",
@@ -1978,6 +1991,11 @@ def downgrade() -> None:
         assert set(inspect(engine).get_table_names()) == {
             "access_requests",
             "alembic_version",
+            "agent_delivery_attempts",
+            "agent_delivery_jobs",
+            "agent_delivery_targets",
+            "agent_notice_events",
+            "agent_notice_subscriptions",
             "audit_events",
             "browser_sessions",
             "catalog_objects",
@@ -3274,6 +3292,83 @@ def test_revision_check_rejects_database_before_head(tmp_path: Path) -> None:
     ):
         check_database_revision(database_url)
 
+
+def test_combined_migration_lineage_is_linear_with_one_head() -> None:
+    from alembic.script import ScriptDirectory
+
+    script = ScriptDirectory.from_config(build_alembic_config("sqlite://"))
+    assert script.get_heads() == [ACCESS_REQUESTS_REVISION]
+    chain = [
+        (CREDENTIAL_REFERENCE_CREATOR_REVISION, ADDITIVE_PROJECT_CREATOR_REVISION),
+        (ACTIVITY_INDEX_REVISION, CREDENTIAL_REFERENCE_CREATOR_REVISION),
+        (AGENT_NOTICES_REVISION, ACTIVITY_INDEX_REVISION),
+        (ACCESS_REQUESTS_REVISION, AGENT_NOTICES_REVISION),
+    ]
+    for revision_id, parent in chain:
+        revision = script.get_revision(revision_id)
+        assert revision is not None and revision.down_revision == parent
+        successors = [
+            item.revision
+            for item in script.walk_revisions()
+            if item.down_revision == parent
+        ]
+        assert successors == [revision_id]
+
+
+def test_agent_notice_migration_extends_current_main_without_changing_existing_data(
+    tmp_path: Path,
+) -> None:
+    database_url = _database_url(tmp_path / "agent-notices-upgrade.sqlite3")
+    config = build_alembic_config(database_url)
+    command.upgrade(config, ACTIVITY_INDEX_REVISION)
+    engine = create_engine(database_url)
+    try:
+        with engine.begin() as connection:
+            connection.execute(
+                text(
+                    "INSERT INTO principals (id, principal_type, login, display_name, "
+                    "active, platform_role, catalog_role, revision) VALUES "
+                    "('existing', 'human', 'existing', 'Existing', 1, 'admin', "
+                    "'catalog_owner', 1)"
+                )
+            )
+        command.upgrade(config, AGENT_NOTICES_REVISION)
+        with engine.connect() as connection:
+            assert connection.execute(
+                text(
+                    "SELECT login, catalog_role, project_creator "
+                    "FROM principals WHERE id='existing'"
+                )
+            ).one() == ("existing", "catalog_owner", False)
+            assert connection.execute(
+                text("SELECT COUNT(*) FROM agent_delivery_targets")
+            ).scalar_one() == 0
+            assert connection.execute(
+                text("SELECT COUNT(*) FROM agent_notice_subscriptions")
+            ).scalar_one() == 0
+        assert _revision(database_url) == AGENT_NOTICES_REVISION
+        inspector = inspect(engine)
+        assert {
+            index["name"]
+            for table in ("agent_delivery_targets", "agent_notice_subscriptions")
+            for index in inspector.get_indexes(table)
+            if index["unique"]
+        } >= {
+            "uq_agent_delivery_targets_active_route",
+            "uq_agent_notice_subscriptions_active_object",
+            "uq_agent_notice_subscriptions_active_catalog",
+        }
+
+        command.downgrade(config, ACTIVITY_INDEX_REVISION)
+        assert _revision(database_url) == ACTIVITY_INDEX_REVISION
+        assert "agent_delivery_targets" not in inspect(engine).get_table_names()
+        with engine.connect() as connection:
+            assert connection.execute(
+                text("SELECT login FROM principals WHERE id='existing'")
+            ).scalar_one() == "existing"
+    finally:
+        engine.dispose()
+
 def test_additive_project_creator_migration_preserves_roles_and_grants(
     tmp_path: Path,
 ) -> None:
@@ -3323,8 +3418,10 @@ def test_additive_project_creator_migration_preserves_roles_and_grants(
         command.downgrade(config, PROJECT_CREATOR_REVISION)
 
 
-def test_access_request_migration_preserves_populated_main_schema(tmp_path: Path) -> None:
-    database_path = tmp_path / "access-requests.sqlite3"
+def test_credential_reference_creator_migration_widens_only_the_role_vocabulary(
+    tmp_path: Path,
+) -> None:
+    database_path = tmp_path / "credential-reference-creator.sqlite3"
     database_url = _database_url(database_path)
     config = build_alembic_config(database_url)
     command.upgrade(config, ADDITIVE_PROJECT_CREATOR_REVISION)
@@ -3333,49 +3430,105 @@ def test_access_request_migration_preserves_populated_main_schema(tmp_path: Path
         connection.execute(
             "INSERT INTO principals (id, principal_type, login, display_name, "
             "active, platform_role, catalog_role, revision) VALUES "
-            "('request-owner', 'human', 'request-owner', 'Owner', 1, 'admin', "
-            "'catalog_owner', 3)"
+            "('kept-owner', 'human', 'kept.owner', 'Kept Owner', 1, 'admin', "
+            "'catalog_owner', 3), "
+            "('kept-agent', 'service_account', 'kept.agent', 'Kept Agent', 1, NULL, "
+            "NULL, 2)"
         )
         connection.execute(
             "INSERT INTO catalog_objects (id, kind, label, status, lifecycle, health, "
             "data_json, provenance_json, revision) VALUES "
-            "('request-root', 'host', 'Root', 'active', 'active', 'healthy', "
-            "'{\"schema_version\":1}', '{}', 5)"
+            "('kept-service', 'service', 'Kept Service', 'active', 'active', "
+            "'healthy', '{\"schema_version\":1}', '{}', 4)"
         )
         connection.execute(
             "INSERT INTO object_grants (principal_id, object_id, role, scope, "
             "created_by_principal_id) VALUES "
-            "('request-owner', 'request-root', 'owner', 'self', 'request-owner')"
+            "('kept-owner', 'kept-service', 'owner', 'self', 'kept-owner'), "
+            "('kept-agent', 'kept-service', 'creator', 'self', 'kept-owner'), "
+            "('kept-agent', 'kept-service', 'editor', 'self', 'kept-owner')"
         )
         connection.commit()
-        before = connection.execute(
-            "SELECT principal_id, object_id, role, scope FROM object_grants"
+        before_principals = connection.execute(
+            "SELECT * FROM principals ORDER BY id"
+        ).fetchall()
+        before_objects = connection.execute(
+            "SELECT * FROM catalog_objects ORDER BY id"
+        ).fetchall()
+        before_grants = connection.execute(
+            "SELECT id, principal_id, object_id, role, scope, created_by_principal_id "
+            "FROM object_grants ORDER BY id"
         ).fetchall()
     finally:
         connection.close()
 
-    command.upgrade(config, ACCESS_REQUESTS_REVISION)
+    command.upgrade(config, CREDENTIAL_REFERENCE_CREATOR_REVISION)
     connection = sqlite3.connect(database_path)
     try:
+        # No principal, object, or grant is rewritten and no role is granted.
         assert connection.execute(
-            "SELECT principal_id, object_id, role, scope FROM object_grants"
-        ).fetchall() == before
-        assert connection.execute("SELECT expires_at FROM object_grants").fetchall() == [(None,)]
-        assert connection.execute("SELECT COUNT(*) FROM access_requests").fetchone() == (0,)
+            "SELECT * FROM principals ORDER BY id"
+        ).fetchall() == before_principals
+        assert connection.execute(
+            "SELECT * FROM catalog_objects ORDER BY id"
+        ).fetchall() == before_objects
+        assert connection.execute(
+            "SELECT id, principal_id, object_id, role, scope, created_by_principal_id "
+            "FROM object_grants ORDER BY id"
+        ).fetchall() == before_grants
+        connection.execute(
+            "INSERT INTO object_grants (principal_id, object_id, role, scope, "
+            "created_by_principal_id) VALUES "
+            "('kept-agent', 'kept-service', 'credential_reference_creator', 'self', "
+            "'kept-owner')"
+        )
+        connection.commit()
+        with pytest.raises(sqlite3.IntegrityError, match="CHECK constraint failed"):
+            connection.execute(
+                "UPDATE object_grants SET role = 'credential_reference_editor' "
+                "WHERE role = 'credential_reference_creator'"
+            )
+        connection.rollback()
+        triggers = {
+            str(row[0])
+            for row in connection.execute(
+                "SELECT name FROM sqlite_master WHERE type = 'trigger'"
+            )
+        }
+        assert set(_GUARD_TRIGGER_NAMES) | set(_COUNTER_TRIGGER_NAMES) <= triggers
+        assert connection.execute("PRAGMA foreign_key_check").fetchall() == []
     finally:
         connection.close()
 
+    with pytest.raises(RuntimeError, match="explicitly revoked before downgrade"):
+        command.downgrade(config, ADDITIVE_PROJECT_CREATOR_REVISION)
+    assert _revision(database_url) == CREDENTIAL_REFERENCE_CREATOR_REVISION
+
+    connection = sqlite3.connect(database_path)
+    try:
+        connection.execute(
+            "DELETE FROM object_grants WHERE role = 'credential_reference_creator'"
+        )
+        connection.commit()
+    finally:
+        connection.close()
     command.downgrade(config, ADDITIVE_PROJECT_CREATOR_REVISION)
     connection = sqlite3.connect(database_path)
     try:
         assert connection.execute(
-            "SELECT principal_id, object_id, role, scope FROM object_grants"
-        ).fetchall() == before
-        assert "expires_at" not in {
-            row[1] for row in connection.execute("PRAGMA table_info(object_grants)")
-        }
+            "SELECT * FROM principals ORDER BY id"
+        ).fetchall() == before_principals
         assert connection.execute(
-            "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'access_requests'"
-        ).fetchone() is None
+            "SELECT id, principal_id, object_id, role, scope, created_by_principal_id "
+            "FROM object_grants ORDER BY id"
+        ).fetchall() == before_grants
+        with pytest.raises(sqlite3.IntegrityError, match="CHECK constraint failed"):
+            connection.execute(
+                "INSERT INTO object_grants (principal_id, object_id, role, scope) "
+                "VALUES ('kept-agent', 'kept-service', "
+                "'credential_reference_creator', 'self')"
+            )
+        connection.rollback()
+        assert connection.execute("PRAGMA foreign_key_check").fetchall() == []
     finally:
         connection.close()

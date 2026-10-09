@@ -79,7 +79,12 @@ SOURCE_COVERAGE_REVISION = "20260811_0016"
 PROJECT_CHRONOLOGY_REVISION = "20260818_0018"
 CATALOG_VIEWER_REVISION = "20260822_0019"
 OBJECT_RENAME_REVISION = "20260909_0022"
-HEAD_REVISION = "20260926_0026"
+ADDITIVE_PROJECT_CREATOR_REVISION = "20260925_0024"
+CREDENTIAL_REFERENCE_CREATOR_REVISION = "20260926_0025"
+ACTIVITY_INDEX_REVISION = "20260926_0026"
+AGENT_NOTICES_REVISION = "20261009_0027"
+ACCESS_REQUESTS_REVISION = "20261009_0028"
+HEAD_REVISION = ACCESS_REQUESTS_REVISION
 
 
 def _pg_url(database: str) -> str:
@@ -407,6 +412,214 @@ def test_postgresql_project_creator_migration_upgrade_and_safe_downgrade(
                         "WHERE id = '00000000-0000-0000-0000-000000000237'"
                     )
                 )
+    finally:
+        engine.dispose()
+
+
+@PG_SKIP
+def test_postgresql_credential_reference_creator_migration_round_trip(
+    pg_database_name: str,
+) -> None:
+    database_url = _pg_url(pg_database_name)
+    _upgrade_to(database_url, ADDITIVE_PROJECT_CREATOR_REVISION)
+    engine = build_engine(database_url)
+    try:
+        with engine.begin() as connection:
+            _insert_principal(
+                connection,
+                principal_id="00000000-0000-0000-0000-000000000236",
+                login="preserved-owner-236",
+                platform_role="admin",
+                catalog_role="catalog_owner",
+            )
+            connection.execute(
+                text(
+                    "INSERT INTO catalog_objects (id, kind, label, status, lifecycle, "
+                    "health, data_json, provenance_json, revision) VALUES "
+                    "('pg-kept-service', 'service', 'Kept', 'active', 'active', "
+                    "'healthy', :data_json, '{}', 3)"
+                ),
+                {"data_json": json.dumps({"schema_version": 1})},
+            )
+            connection.execute(
+                text(
+                    "INSERT INTO object_grants (principal_id, object_id, role, scope) "
+                    "VALUES ('00000000-0000-0000-0000-000000000236', "
+                    "'pg-kept-service', 'creator', 'self')"
+                )
+            )
+        tables = {"principals", "catalog_objects", "object_grants"}
+        before = _table_rows(engine, tables)
+    finally:
+        engine.dispose()
+
+    _upgrade_to(database_url, CREDENTIAL_REFERENCE_CREATOR_REVISION)
+    engine = build_engine(database_url)
+    try:
+        # Widening the constraint rewrites and grants nothing.
+        assert _table_rows(engine, tables) == before
+        with engine.begin() as connection:
+            connection.execute(
+                text(
+                    "INSERT INTO object_grants (principal_id, object_id, role, scope) "
+                    "VALUES ('00000000-0000-0000-0000-000000000236', "
+                    "'pg-kept-service', 'credential_reference_creator', 'self')"
+                )
+            )
+        with pytest.raises(IntegrityError):
+            with engine.begin() as connection:
+                connection.execute(
+                    text(
+                        "UPDATE object_grants SET role = 'credential_reference_editor' "
+                        "WHERE role = 'credential_reference_creator'"
+                    )
+                )
+    finally:
+        engine.dispose()
+
+    config = build_alembic_config(database_url)
+    with pytest.raises(RuntimeError, match="explicitly revoked before downgrade"):
+        command.downgrade(config, ADDITIVE_PROJECT_CREATOR_REVISION)
+
+    engine = build_engine(database_url)
+    try:
+        with engine.begin() as connection:
+            connection.execute(
+                text(
+                    "DELETE FROM object_grants "
+                    "WHERE role = 'credential_reference_creator'"
+                )
+            )
+    finally:
+        engine.dispose()
+    command.downgrade(config, ADDITIVE_PROJECT_CREATOR_REVISION)
+    engine = build_engine(database_url)
+    try:
+        assert _table_rows(engine, tables) == before
+        with pytest.raises(IntegrityError):
+            with engine.begin() as connection:
+                connection.execute(
+                    text(
+                        "INSERT INTO object_grants (principal_id, object_id, role, scope) "
+                        "VALUES ('00000000-0000-0000-0000-000000000236', "
+                        "'pg-kept-service', 'credential_reference_creator', 'self')"
+                    )
+                )
+    finally:
+        engine.dispose()
+
+
+@PG_SKIP
+def test_postgresql_agent_notice_migration_round_trip_and_database_invariants(
+    pg_database_name: str,
+) -> None:
+    database_url = _pg_url(pg_database_name)
+    _upgrade_to(database_url, ACTIVITY_INDEX_REVISION)
+    engine = build_engine(database_url)
+    try:
+        with engine.begin() as connection:
+            _insert_principal(
+                connection,
+                principal_id="00000000-0000-0000-0000-000000000106",
+                login="preserved-owner-106",
+                platform_role="admin",
+                catalog_role="catalog_owner",
+            )
+        tables = {"principals", "principal_invariant_counts"}
+        before = _table_rows(engine, tables)
+    finally:
+        engine.dispose()
+
+    _upgrade_to(database_url, AGENT_NOTICES_REVISION)
+    engine = build_engine(database_url)
+    try:
+        # The revision is additive: no pre-existing table changes.
+        assert _table_rows(engine, tables) == before
+        with engine.connect() as connection:
+            indexes = dict(
+                connection.execute(
+                    text(
+                        "SELECT indexname, indexdef FROM pg_indexes "
+                        "WHERE tablename LIKE 'agent_%'"
+                    )
+                ).all()
+            )
+        for name in (
+            "uq_agent_delivery_targets_active_route",
+            "uq_agent_notice_subscriptions_active_object",
+            "uq_agent_notice_subscriptions_active_catalog",
+        ):
+            assert "UNIQUE" in indexes[name] and "WHERE" in indexes[name]
+        principal = "00000000-0000-0000-0000-000000000106"
+        insert_target = text(
+            "INSERT INTO agent_delivery_targets (id, principal_id, label, route, transport, "
+            "active) VALUES (:id, :principal, 'l', 'openclaw-agent:pg', "
+            "'openclaw_test_gateway', :active)"
+        )
+        with engine.begin() as connection:
+            for target_id, active in (("t-1", True), ("t-2", False)):
+                connection.execute(
+                    insert_target,
+                    {"id": target_id, "principal": principal, "active": active},
+                )
+        with pytest.raises(IntegrityError):
+            with engine.begin() as connection:
+                connection.execute(
+                    insert_target, {"id": "t-3", "principal": principal, "active": True}
+                )
+        with pytest.raises(IntegrityError):
+            with engine.begin() as connection:
+                connection.execute(
+                    text(
+                        "INSERT INTO agent_notice_events (id, event_type, object_id, dedupe_key, "
+                        "occurred_at) VALUES ('e-1', 'release_update_available', 'o', 'k', now())"
+                    )
+                )
+                connection.execute(
+                    text(
+                        "INSERT INTO agent_notice_events (id, event_type, object_id, dedupe_key, "
+                        "occurred_at) VALUES ('e-2', 'release_update_available', 'o', 'k', now())"
+                    )
+                )
+        with engine.begin() as connection:
+            connection.execute(
+                text(
+                    "INSERT INTO agent_notice_events (id, event_type, object_id, dedupe_key, "
+                    "occurred_at) VALUES ('e-3', 'release_update_available', 'o', 'k3', now())"
+                )
+            )
+            connection.execute(
+                text(
+                    "INSERT INTO agent_notice_subscriptions (id, event_type, scope, principal_id, "
+                    "target_id, active) VALUES ('s-1', 'release_update_available', 'catalog', "
+                    ":principal, 't-1', true)"
+                ),
+                {"principal": principal},
+            )
+            connection.execute(
+                text(
+                    "INSERT INTO agent_delivery_jobs (event_id, target_id, subscription_id, "
+                    "next_attempt_at, expires_at) VALUES ('e-3', 't-1', 's-1', now(), now())"
+                )
+            )
+        # A terminal job can never carry a lease, and the lease pair is consistent.
+        for update_sql in (
+            "UPDATE agent_delivery_jobs SET status = 'delivered', lease_token = 'x', "
+            "lease_expires_at = now()",
+            "UPDATE agent_delivery_jobs SET lease_token = 'x'",
+        ):
+            with pytest.raises(IntegrityError):
+                with engine.begin() as connection:
+                    connection.execute(text(update_sql))
+    finally:
+        engine.dispose()
+
+    config = build_alembic_config(database_url)
+    command.downgrade(config, ACTIVITY_INDEX_REVISION)
+    engine = build_engine(database_url)
+    try:
+        assert "agent_delivery_targets" not in inspect(engine).get_table_names()
+        assert _table_rows(engine, tables) == before
     finally:
         engine.dispose()
 
@@ -2443,3 +2656,253 @@ def test_postgresql_noop_apply_rechecks_revision_after_competing_commit(
                 "WHERE id = 'pg-noop-race-target'"
             )
         ).scalar_one() == 2
+
+
+# ---------------------------------------------------------------------------
+# Issue #236: service-bound credential-reference creation under real row locks
+# ---------------------------------------------------------------------------
+
+
+@PG_SKIP
+@pytest.mark.parametrize(
+    ("contention", "second_service", "second_reference", "expected_error"),
+    [
+        (
+            "same service revision",
+            "pg-link-service-a",
+            "pg-link-reference-b",
+            "CommandPreconditionFailed",
+        ),
+        (
+            "same reference id",
+            "pg-link-service-b",
+            "pg-link-reference-a",
+            "CommandConflict:credential_reference_id_unavailable",
+        ),
+    ],
+)
+def test_postgresql_service_credential_reference_contention_has_one_winner(
+    migrated_pg_engine: Engine,
+    contention: str,
+    second_service: str,
+    second_reference: str,
+    expected_error: str,
+) -> None:
+    """A held first command deterministically decides the competing one.
+
+    The first command holds its transaction open after linking. The second one
+    must wait on a real PostgreSQL lock — the service row for the same base
+    revision, or the primary key for the same reference ID — and then fail
+    closed without creating, granting, or linking anything.
+    """
+    from blockwart.db.session import transaction as db_transaction
+    from blockwart.domain.auth import GrantScope, Role
+    from blockwart.schemas.catalog import CatalogObjectIn
+    from blockwart.services.access import create_object_grant
+    from blockwart.services.catalog import upsert_object
+    from blockwart.services.commands import (
+        CommandConflict,
+        WriteContext,
+        create_service_credential_reference,
+    )
+    from blockwart.services.identity import create_service_account, principal_context
+    from blockwart.services.read_access import read_access_for_principal
+
+    sessions = sessionmaker(bind=migrated_pg_engine, autoflush=False, autocommit=False)
+    service_data = {
+        "schema_version": 1,
+        "access_methods": [{"type": "ssh", "endpoint": "ssh://192.0.2.40:22"}],
+    }
+    principal_ids: list[str] = []
+    with sessions() as session:
+        with db_transaction(session):
+            for service_id in ("pg-link-service-a", "pg-link-service-b"):
+                upsert_object(
+                    session,
+                    CatalogObjectIn(
+                        id=service_id,
+                        kind="service",
+                        label=service_id,
+                        lifecycle="active",
+                        health="healthy",
+                        data=service_data,
+                    ),
+                )
+            for index in range(2):
+                delegate = create_service_account(
+                    session,
+                    login=f"pg-link-delegate-{index}",
+                    display_name=f"PG Link Delegate {index}",
+                )
+                principal_ids.append(delegate.id)
+                for service_id in ("pg-link-service-a", "pg-link-service-b"):
+                    create_object_grant(
+                        session,
+                        principal_id=delegate.id,
+                        object_id=service_id,
+                        role=Role.CREDENTIAL_REFERENCE_CREATOR,
+                        scope=GrantScope.SELF,
+                    )
+
+    def run_command(
+        session: Session,
+        principal_id: str,
+        *,
+        service_id: str,
+        reference_id: str,
+        key: str,
+    ) -> None:
+        from blockwart.models import Principal
+
+        row = session.get(Principal, principal_id)
+        assert row is not None
+        context = WriteContext.from_read_access(
+            read_access_for_principal(session, principal_context(row)),
+            channel="api",
+            request_id=f"pg-{key}",
+        )
+        create_service_credential_reference(
+            session,
+            context,
+            service_id=service_id,
+            access_method_index=0,
+            payload=CatalogObjectIn(
+                id=reference_id,
+                kind="credential_reference",
+                label=reference_id,
+                data={"schema_version": 1, "provider": "external"},
+            ),
+            expected_revision=base_revision,
+            idempotency_key=key,
+            idempotency_ttl_seconds=86400,
+        )
+
+    with migrated_pg_engine.connect() as connection:
+        # Both services share one base revision, so the second command names a
+        # current ETag in either contention.
+        base_revisions = connection.execute(
+            text("SELECT DISTINCT revision FROM catalog_objects WHERE kind = 'service'")
+        ).scalars().all()
+    assert len(base_revisions) == 1
+    base_revision = base_revisions[0]
+    first_linked = threading.Event()
+    release_first = threading.Event()
+    second_started = threading.Event()
+    outcomes: dict[str, str] = {}
+    application_name = f"bw-link-{uuid.uuid4().hex}"
+
+    def first_transaction() -> None:
+        try:
+            with sessions() as session:
+                with db_transaction(session):
+                    run_command(
+                        session,
+                        principal_ids[0],
+                        service_id="pg-link-service-a",
+                        reference_id="pg-link-reference-a",
+                        key="pg-link-first-key-0001",
+                    )
+                    first_linked.set()
+                    assert release_first.wait(timeout=10)
+            outcomes["first"] = "committed"
+        except Exception as exc:  # pragma: no cover - surfaced by assertions below
+            outcomes["first"] = f"error: {type(exc).__name__}"
+            first_linked.set()
+
+    def second_transaction() -> None:
+        assert first_linked.wait(timeout=10)
+        engine = create_engine(
+            migrated_pg_engine.url,
+            connect_args={"application_name": application_name},
+        )
+        try:
+            with Session(engine) as session:
+                with db_transaction(session):
+                    second_started.set()
+                    run_command(
+                        session,
+                        principal_ids[1],
+                        service_id=second_service,
+                        reference_id=second_reference,
+                        key="pg-link-second-key-001",
+                    )
+            outcomes["second"] = "committed"
+        except CommandConflict as exc:
+            outcomes["second"] = f"{type(exc).__name__}:{exc.code}"
+        except Exception as exc:
+            outcomes["second"] = type(exc).__name__
+        finally:
+            engine.dispose()
+
+    first = threading.Thread(target=first_transaction)
+    second = threading.Thread(target=second_transaction)
+    first.start()
+    assert first_linked.wait(timeout=10)
+    second.start()
+    assert second_started.wait(timeout=10)
+    deadline = time.monotonic() + 10
+    lock_wait_observed = False
+    while time.monotonic() < deadline:
+        with migrated_pg_engine.connect() as connection:
+            lock_wait_observed = (
+                connection.execute(
+                    text(
+                        "SELECT wait_event_type = 'Lock' FROM pg_stat_activity "
+                        "WHERE application_name = :application_name"
+                    ),
+                    {"application_name": application_name},
+                ).scalar_one_or_none()
+                is True
+            )
+        if lock_wait_observed:
+            break
+        time.sleep(0.02)
+    release_first.set()
+    first.join(timeout=10)
+    second.join(timeout=10)
+
+    assert lock_wait_observed, contention
+    assert not first.is_alive() and not second.is_alive()
+    assert outcomes["first"] == "committed"
+    assert outcomes["second"] == expected_error
+    with migrated_pg_engine.connect() as connection:
+        references = connection.execute(
+            text(
+                "SELECT id FROM catalog_objects "
+                "WHERE kind = 'credential_reference' ORDER BY id"
+            )
+        ).scalars().all()
+        grants = connection.execute(
+            text(
+                "SELECT principal_id, object_id, role, scope FROM object_grants "
+                "WHERE role = 'owner'"
+            )
+        ).all()
+        services = dict(
+            connection.execute(
+                text(
+                    "SELECT id, revision FROM catalog_objects "
+                    "WHERE kind = 'service' ORDER BY id"
+                )
+            ).all()
+        )
+        linked = connection.execute(
+            text("SELECT data_json FROM catalog_objects WHERE id = 'pg-link-service-a'")
+        ).scalar_one()
+        untouched = connection.execute(
+            text("SELECT data_json FROM catalog_objects WHERE id = 'pg-link-service-b'")
+        ).scalar_one()
+        idempotency_keys = connection.execute(
+            text("SELECT COUNT(*) FROM idempotency_records")
+        ).scalar_one()
+    assert references == ["pg-link-reference-a"]
+    assert grants == [(principal_ids[0], "pg-link-reference-a", "owner", "self")]
+    assert services == {
+        "pg-link-service-a": base_revision + 1,
+        "pg-link-service-b": base_revision,
+    }
+    assert json.loads(linked)["access_methods"][0]["credential_references"] == [
+        "credential_reference:pg-link-reference-a"
+    ]
+    assert json.loads(untouched) == service_data
+    assert idempotency_keys == 1

@@ -88,7 +88,11 @@ def require_api_read_access(
                     request_id=request_id,
                 )
             else:
-                access = read_access_for_principal(session, principal)
+                access = read_access_for_principal(
+                    session,
+                    principal,
+                    materialize_global_permissions=request.url.path != "/api/v1/activity",
+                )
     if principal is None:
         raise HTTPException(
             status_code=401,

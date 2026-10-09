@@ -47,6 +47,8 @@ deleted by this classification.
 - [Public GitHub release monitoring](release-monitoring.md), including the
   service-only opt-in, conservative comparison, fixed provider boundary,
   leased scheduling, authorized views, rate limits, and recovery
+- [Agent notices](agent-notices.md), the durable, fail-closed push channel
+  that delivers selected events (first: release updates) to approved agents
 - [Canonical Decision objects](decisions.md), including lifecycle, links, and
   dry-run-first legacy classification
 - [Canonical Project knowledge](projects.md), including category-specific results,
@@ -57,6 +59,7 @@ deleted by this classification.
   projections](agent-read-projections.md), and [service
   interfaces](service-interfaces.md)
 - [Needs attention](attention.md)
+- [Agent activity feed](activity-feed.md)
 - [Source coverage and import drift](source-coverage.md)
 - [Reviewed Knowledge source coverage](source-coverage-manifest.md), including
   the closed manifest, dry-run evidence, record gates, and recovery boundary

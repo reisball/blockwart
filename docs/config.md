@@ -51,6 +51,17 @@ Current local keys:
   scheduled and authorized manual public GitHub requests)
 - `BLOCKWART_RELEASE_MONITORING_POLLER_ENABLED` (default `false`; requires the
   master switch and starts periodic due checks)
+- `BLOCKWART_NOTICE_DELIVERY_POLLER_ENABLED` (default `false`; starts the agent
+  notice delivery poller, which needs the endpoint below; see
+  [Agent notices](agent-notices.md))
+- `BLOCKWART_NOTICE_DELIVERY_ENDPOINT_URL` (default empty = delivery off; must be
+  a loopback `http://127.0.0.1`, `localhost`, or `[::1]` test-gateway URL, any
+  other destination is refused)
+- `BLOCKWART_NOTICE_DELIVERY_POLL_INTERVAL_SECONDS` (default `30`, allowed
+  `5..300`) and `BLOCKWART_NOTICE_DELIVERY_MAX_PER_RUN` (default `50`, allowed
+  `1..500`)
+- `BLOCKWART_NOTICE_DELIVERY_TOKEN` (environment only; optional bearer for the
+  test gateway, never stored, logged, or audited)
 - `BLOCKWART_RELEASE_MONITORING_DEFAULT_INTERVAL_SECONDS` (default `86400`,
   allowed `3600..604800`)
 - `BLOCKWART_RELEASE_MONITORING_CONNECT_TIMEOUT_MS` (default `2000`, allowed

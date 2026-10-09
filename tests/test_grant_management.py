@@ -271,7 +271,7 @@ def test_access_view_is_minimized_and_preview_uses_only_canonical_placement(
     )
     serialized = root_access.text.casefold()
     assert all(
-        forbidden not in serialized
+        f'"{forbidden}"' not in serialized
         for forbidden in ("password_hash", "token_hash", "csrf_hash", "credential")
     )
     assert child_access.status_code == 200

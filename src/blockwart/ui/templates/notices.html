@@ -1,0 +1,162 @@
+<!doctype html>
+<html lang="{{ locale }}">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="referrer" content="no-referrer" />
+    <link rel="icon" href="data:," />
+    <title>{{ title }}</title>
+    <script>if (localStorage.getItem("blockwart-theme") === "light") document.documentElement.dataset.theme = "light";</script>
+    <link rel="stylesheet" href="/static/app.css?v=063" />
+    <script src="/static/theme.js?v=054" defer></script>
+  </head>
+  <body>
+    <header class="topbar">
+      <div class="topbar-inner">
+        <a class="breadcrumb" href="/settings">{{ t("settings.back") }}</a>
+        <div class="title-row">
+          <div>
+            <h1>{{ t("notices.title") }}</h1>
+            <div class="subtle">{{ t("notices.subtitle") }}</div>
+          </div>
+        </div>
+      </div>
+    </header>
+
+    <main class="page">
+      {% if error %}<div class="error" role="alert">{{ error }}</div>{% endif %}
+      <p class="meta">{{ t("notices.scope_note") }}</p>
+
+      <section class="panel" aria-labelledby="notices-delivery-title">
+        <h2 class="section-title" id="notices-delivery-title">{{ t("notices.delivery.title") }}</h2>
+        <p class="meta">{{ t("notices.delivery.help") }}</p>
+        <ul class="badge-row">
+          {% for status in statuses %}
+            <li><a href="/admin/notices?status={{ status }}"><span class="state-badge"><i></i>{{ t("notices.status." ~ status) }}: {{ counts[status] }}</span></a></li>
+          {% endfor %}
+        </ul>
+        <form class="form-grid" method="get" action="/admin/notices">
+          <label>{{ t("notices.delivery.filter") }}
+            <select name="status">
+              <option value="">{{ t("admin.filter.all") }}</option>
+              {% for status in statuses %}<option value="{{ status }}" {% if status_filter == status %}selected{% endif %}>{{ t("notices.status." ~ status) }}</option>{% endfor %}
+            </select>
+          </label>
+          <div class="button-row"><button type="submit">{{ t("search.submit") }}</button></div>
+        </form>
+        <div class="table-wrap">
+          <table>
+            <thead><tr>
+              <th>{{ t("notices.job.event") }}</th><th>{{ t("notices.job.object") }}</th><th>{{ t("notices.job.target") }}</th>
+              <th>{{ t("notices.job.status") }}</th><th>{{ t("notices.job.attempts") }}</th><th>{{ t("notices.job.last_attempt") }}</th>
+              <th>{{ t("notices.job.error") }}</th><th>{{ t("notices.job.next_attempt") }}</th><th>{{ t("notices.job.expires") }}</th>
+            </tr></thead>
+            <tbody>
+              {% for view in jobs %}
+                <tr>
+                  <td><code>{{ view.event.id }}</code></td>
+                  <td><code>{{ view.event.object_id }}</code></td>
+                  <td>{{ view.target_label or t("asset.no_value") }}</td>
+                  <td>{{ t("notices.status." ~ view.job.status) }}</td>
+                  <td>{{ view.job.attempts }}</td>
+                  <td>{{ view.last_attempt_outcome or t("asset.no_value") }}</td>
+                  <td>{{ view.job.last_error_code or t("asset.no_value") }}</td>
+                  <td>{{ view.job.next_attempt_at if view.job.status == "pending" else t("asset.no_value") }}</td>
+                  <td>{{ view.job.expires_at }}</td>
+                </tr>
+              {% else %}
+                <tr><td colspan="9" class="muted">{{ t("notices.delivery.empty") }}</td></tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="panel" aria-labelledby="notices-targets-title">
+        <h2 class="section-title" id="notices-targets-title">{{ t("notices.targets.title") }}</h2>
+        <p class="meta">{{ t("notices.targets.help") }}</p>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>{{ t("notices.targets.label") }}</th><th>{{ t("notices.targets.principal") }}</th><th>{{ t("notices.targets.route") }}</th><th>{{ t("notices.targets.transport") }}</th><th>{{ t("admin.principals.status") }}</th><th><span class="visually-hidden">{{ t("runbook.collection.actions") }}</span></th></tr></thead>
+            <tbody>
+              {% for view in targets %}
+                <tr>
+                  <td>{{ view.target.label }}</td>
+                  <td><code>{{ view.principal_login or view.target.principal_id }}</code></td>
+                  <td><code>{{ view.target.route }}</code></td>
+                  <td><code>{{ view.target.transport }}</code></td>
+                  <td>{{ t("admin.status.active" if view.target.active else "admin.status.inactive") }}</td>
+                  <td>{% if view.target.active %}<form method="post" action="/admin/notices/targets/{{ view.target.id }}/revoke"><input type="hidden" name="csrf_token" value="{{ csrf_token }}" /><button class="button-muted" type="submit">{{ t("notices.revoke") }}</button></form>{% endif %}</td>
+                </tr>
+              {% else %}
+                <tr><td colspan="6" class="muted">{{ t("notices.targets.empty") }}</td></tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+        <h3 class="section-title">{{ t("notices.targets.create_title") }}</h3>
+        <form class="form-grid" method="post" action="/admin/notices/targets" autocomplete="off">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+          <label>{{ t("notices.targets.principal") }}
+            <select name="principal_id" required>
+              {% for principal in service_accounts %}<option value="{{ principal.id }}">{{ principal.login }}</option>{% endfor %}
+            </select>
+          </label>
+          <label>{{ t("notices.targets.label") }}<input name="label" maxlength="128" required /></label>
+          <label>{{ t("notices.targets.route") }}<input name="route" maxlength="191" pattern="[a-z0-9][a-z0-9._:\-]*" required /></label>
+          <label>{{ t("notices.targets.transport") }}
+            <select name="transport" required>{% for transport in transports %}<option value="{{ transport }}">{{ transport }}</option>{% endfor %}</select>
+          </label>
+          <div class="button-row"><button type="submit">{{ t("notices.targets.create") }}</button></div>
+        </form>
+      </section>
+
+      <section class="panel" aria-labelledby="notices-subscriptions-title">
+        <h2 class="section-title" id="notices-subscriptions-title">{{ t("notices.subscriptions.title") }}</h2>
+        <p class="meta">{{ t("notices.subscriptions.help") }}</p>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>{{ t("notices.subscriptions.event") }}</th><th>{{ t("notices.subscriptions.scope") }}</th><th>{{ t("notices.job.object") }}</th><th>{{ t("notices.job.target") }}</th><th>{{ t("notices.targets.principal") }}</th><th>{{ t("admin.principals.status") }}</th><th><span class="visually-hidden">{{ t("runbook.collection.actions") }}</span></th></tr></thead>
+            <tbody>
+              {% for view in subscriptions %}
+                <tr>
+                  <td><code>{{ view.subscription.event_type }}</code></td>
+                  <td>{{ view.subscription.scope }}</td>
+                  <td>{% if view.subscription.object_id %}<code>{{ view.subscription.object_id }}</code>{% else %}{{ t("asset.no_value") }}{% endif %}</td>
+                  <td>{{ view.target_label or view.subscription.target_id }}</td>
+                  <td><code>{{ view.principal_login or view.subscription.principal_id }}</code></td>
+                  <td>{{ t("admin.status.active" if view.subscription.active else "admin.status.inactive") }}</td>
+                  <td>{% if view.subscription.active %}<form method="post" action="/admin/notices/subscriptions/{{ view.subscription.id }}/revoke"><input type="hidden" name="csrf_token" value="{{ csrf_token }}" /><button class="button-muted" type="submit">{{ t("notices.revoke") }}</button></form>{% endif %}</td>
+                </tr>
+              {% else %}
+                <tr><td colspan="7" class="muted">{{ t("notices.subscriptions.empty") }}</td></tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+        <h3 class="section-title">{{ t("notices.subscriptions.create_title") }}</h3>
+        <form class="form-grid" method="post" action="/admin/notices/subscriptions" autocomplete="off">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+          <label>{{ t("notices.job.target") }}
+            <select name="target_id" required>
+              {% for view in active_targets %}<option value="{{ view.target.id }}">{{ view.target.label }} ({{ view.principal_login or view.target.principal_id }})</option>{% endfor %}
+            </select>
+          </label>
+          <label>{{ t("notices.targets.principal") }}
+            <select name="principal_id" required>
+              {% for principal in service_accounts %}<option value="{{ principal.id }}">{{ principal.login }}</option>{% endfor %}
+            </select>
+          </label>
+          <label>{{ t("notices.subscriptions.event") }}
+            <select name="event_type" required>{% for event_type in event_types %}<option value="{{ event_type }}">{{ event_type }}</option>{% endfor %}</select>
+          </label>
+          <label>{{ t("notices.subscriptions.scope") }}
+            <select name="scope" required>{% for scope in scopes %}<option value="{{ scope }}">{{ scope }}</option>{% endfor %}</select>
+          </label>
+          <label>{{ t("notices.job.object") }}<input name="object_id" maxlength="128" /></label>
+          <div class="button-row"><button type="submit">{{ t("notices.subscriptions.create") }}</button></div>
+        </form>
+      </section>
+    </main>
+  </body>
+</html>

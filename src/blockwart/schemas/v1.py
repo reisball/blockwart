@@ -287,6 +287,56 @@ class V1AttentionPageOut(BaseModel):
     direction: SortDirection
 
 
+ActivityEventTypeValue = Literal[
+    "object_revision",
+    "relationship_mutation",
+    "comment_create",
+    "audit",
+]
+
+
+class V1ActivityObjectOut(BaseModel):
+    """The authorized visible-object reference of one activity event."""
+
+    model_config = ConfigDict(from_attributes=True, extra="forbid")
+
+    ref: str = Field(min_length=1, max_length=256)
+    object_id: str = Field(max_length=128)
+    kind: ObjectKind
+    label: str | None = Field(default=None, max_length=255)
+
+
+class V1ActivityItemOut(BaseModel):
+    """One classified activity envelope entry.
+
+    Comment bodies, audit diffs, and project state stay in their canonical
+    resources (#131/#143/#184); this envelope only carries a safe short
+    description plus the detail path into the resource that owns the details.
+    """
+
+    model_config = ConfigDict(from_attributes=True, extra="forbid")
+
+    event_id: str = Field(min_length=1, max_length=64)
+    event_type: ActivityEventTypeValue
+    occurred_at: str = Field(max_length=64)
+    object: V1ActivityObjectOut
+    summary: str = Field(max_length=512)
+    actor: str | None = Field(default=None, max_length=128)
+    detail_path: str = Field(max_length=512)
+
+
+class V1ActivityPageOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True, extra="forbid")
+
+    items: list[V1ActivityItemOut]
+    next_cursor: str | None = None
+    total: int | None = None
+    generated_at: str = Field(max_length=64)
+    sort: Literal["occurred_at"] = "occurred_at"
+    direction: SortDirection
+    total_status: Literal["not_requested", "exact", "budget_exhausted"]
+
+
 # The known-id batch surface is bounded to 20 ids. Each id follows the same
 # pattern as CatalogObjectIn so an obviously malformed id is rejected before
 # any authorization lookup; concealed and missing ids stay indistinguishable
@@ -567,6 +617,79 @@ class V1ObjectRenameOut(BaseModel):
     revision: int = Field(ge=1)
     etag: str = Field(pattern=r'^"rev-[1-9][0-9]*"$')
     changed: bool
+
+
+class V1CredentialReferenceObjectIn(CatalogObjectIn):
+    """One new credential-reference object for the service-bound command.
+
+    It is the canonical object write contract with `kind` pinned, so every
+    schema, normalization, reference, ACL-shaped-key, and secret-shaped-value
+    rule of object creation applies unchanged.
+    """
+
+    kind: Literal["credential_reference"]
+
+
+class V1ServiceCredentialReferenceCreateIn(BaseModel):
+    """The complete request body of one service-bound credential-reference creation.
+
+    The service is named by the path and its base revision by the strong
+    `If-Match` ETag. `access_method_index` names exactly one entry of that
+    revision's `data.access_methods`, as returned by the service read that
+    supplied the ETag. The body carries the new object and nothing else, so no
+    other service field, relationship, or grant can be smuggled into the
+    operation.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    access_method_index: int = Field(
+        ge=0,
+        strict=True,
+        description=(
+            "Zero-based position of the target entry in data.access_methods of "
+            "the service revision named by If-Match."
+        ),
+    )
+    credential_reference: V1CredentialReferenceObjectIn
+
+
+class V1CredentialReferenceOwnerGrantOut(BaseModel):
+    """The one direct grant the creator receives on the new reference."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    principal_id: str
+    role: Literal["owner"]
+    scope: Literal["self"]
+
+
+class V1ServiceCredentialReferenceOut(BaseModel):
+    """The applied result of one service-bound credential-reference creation.
+
+    It publishes the created object with its own ETag, the one link it received,
+    the service's resulting revision, and the explicit ownership of the new
+    object. An idempotent replay returns the original result unchanged, so its
+    service revision may be older than the current one.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    credential_reference: CatalogObjectOut
+    etag: str = Field(pattern=r'^"rev-[1-9][0-9]*"$')
+    service_id: str
+    service_revision: int = Field(ge=1)
+    service_etag: str = Field(pattern=r'^"rev-[1-9][0-9]*"$')
+    access_method_index: int = Field(ge=0)
+    link_path: str = Field(
+        description=(
+            "Canonical data path of the one list that received the new typed "
+            "reference."
+        ),
+    )
+    owner_grant: V1CredentialReferenceOwnerGrantOut
+    changed: bool
+    replayed: bool = False
 
 
 class V1DeleteCommandOut(BaseModel):

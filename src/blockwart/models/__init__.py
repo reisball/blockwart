@@ -1,4 +1,11 @@
 from blockwart.models.access import AccessRequest, ObjectGrant
+from blockwart.models.agent_notices import (
+    AgentDeliveryAttempt,
+    AgentDeliveryJob,
+    AgentDeliveryTarget,
+    AgentNoticeEvent,
+    AgentNoticeSubscription,
+)
 from blockwart.models.auth import (
     BrowserSession,
     IdempotencyRecord,
@@ -23,6 +30,11 @@ from blockwart.models.source_coverage import (
 
 __all__ = [
     "AccessRequest",
+    "AgentDeliveryAttempt",
+    "AgentDeliveryJob",
+    "AgentDeliveryTarget",
+    "AgentNoticeEvent",
+    "AgentNoticeSubscription",
     "AuditEvent",
     "BrowserSession",
     "CatalogObject",

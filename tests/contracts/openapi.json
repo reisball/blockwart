@@ -1261,6 +1261,521 @@
         "title": "AgentMonitoringTarget",
         "type": "object"
       },
+      "AgentNoticeAcknowledgeOut": {
+        "properties": {
+          "acknowledged": {
+            "title": "Acknowledged",
+            "type": "boolean"
+          },
+          "error_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error Code"
+          }
+        },
+        "required": [
+          "acknowledged"
+        ],
+        "title": "AgentNoticeAcknowledgeOut",
+        "type": "object"
+      },
+      "AgentNoticeDeliveryJobListOut": {
+        "properties": {
+          "count": {
+            "title": "Count",
+            "type": "integer"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/AgentNoticeDeliveryJobOut"
+            },
+            "title": "Items",
+            "type": "array"
+          }
+        },
+        "required": [
+          "count",
+          "items"
+        ],
+        "title": "AgentNoticeDeliveryJobListOut",
+        "type": "object"
+      },
+      "AgentNoticeDeliveryJobOut": {
+        "description": "Redacted delivery diagnostics. No payload, transport, lease, or token data.",
+        "properties": {
+          "acknowledged_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Acknowledged At"
+          },
+          "attempts": {
+            "title": "Attempts",
+            "type": "integer"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "delivered_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Delivered At"
+          },
+          "event_id": {
+            "title": "Event Id",
+            "type": "string"
+          },
+          "event_type": {
+            "title": "Event Type",
+            "type": "string"
+          },
+          "expires_at": {
+            "format": "date-time",
+            "title": "Expires At",
+            "type": "string"
+          },
+          "job_id": {
+            "title": "Job Id",
+            "type": "integer"
+          },
+          "last_attempt_outcome": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Attempt Outcome"
+          },
+          "last_error_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Error Code"
+          },
+          "next_attempt_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Attempt At"
+          },
+          "object_ref": {
+            "title": "Object Ref",
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "pending",
+              "delivered",
+              "failed",
+              "suppressed",
+              "expired",
+              "acknowledged"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "suppressed_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Suppressed At"
+          }
+        },
+        "required": [
+          "job_id",
+          "event_id",
+          "event_type",
+          "object_ref",
+          "status",
+          "attempts",
+          "next_attempt_at",
+          "expires_at",
+          "delivered_at",
+          "acknowledged_at",
+          "suppressed_at",
+          "last_error_code",
+          "created_at"
+        ],
+        "title": "AgentNoticeDeliveryJobOut",
+        "type": "object"
+      },
+      "AgentNoticeListOut": {
+        "properties": {
+          "count": {
+            "title": "Count",
+            "type": "integer"
+          },
+          "notices": {
+            "items": {
+              "$ref": "#/components/schemas/AgentNoticeOut"
+            },
+            "title": "Notices",
+            "type": "array"
+          }
+        },
+        "required": [
+          "count",
+          "notices"
+        ],
+        "title": "AgentNoticeListOut",
+        "type": "object"
+      },
+      "AgentNoticeOut": {
+        "description": "The agent-visible notice: minimal payload plus its delivery state.",
+        "properties": {
+          "acknowledged_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Acknowledged At"
+          },
+          "blockwart_reference": {
+            "title": "Blockwart Reference",
+            "type": "string"
+          },
+          "delivered_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Delivered At"
+          },
+          "event_id": {
+            "title": "Event Id",
+            "type": "string"
+          },
+          "event_type": {
+            "title": "Event Type",
+            "type": "string"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          },
+          "object_ref": {
+            "title": "Object Ref",
+            "type": "string"
+          },
+          "schema_version": {
+            "title": "Schema Version",
+            "type": "integer"
+          },
+          "status": {
+            "enum": [
+              "pending",
+              "delivered",
+              "failed",
+              "suppressed",
+              "expired",
+              "acknowledged"
+            ],
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "event_id",
+          "event_type",
+          "schema_version",
+          "object_ref",
+          "message",
+          "blockwart_reference",
+          "status",
+          "delivered_at"
+        ],
+        "title": "AgentNoticeOut",
+        "type": "object"
+      },
+      "AgentNoticeSubscriptionIn": {
+        "properties": {
+          "event_type": {
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Event Type",
+            "type": "string"
+          },
+          "object_id": {
+            "anyOf": [
+              {
+                "maxLength": 128,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Object Id"
+          },
+          "principal_id": {
+            "maxLength": 36,
+            "minLength": 1,
+            "title": "Principal Id",
+            "type": "string"
+          },
+          "scope": {
+            "pattern": "^(object|catalog)$",
+            "title": "Scope",
+            "type": "string"
+          },
+          "target_id": {
+            "maxLength": 36,
+            "minLength": 1,
+            "title": "Target Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "event_type",
+          "scope",
+          "principal_id",
+          "target_id"
+        ],
+        "title": "AgentNoticeSubscriptionIn",
+        "type": "object"
+      },
+      "AgentNoticeSubscriptionListOut": {
+        "properties": {
+          "count": {
+            "title": "Count",
+            "type": "integer"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/AgentNoticeSubscriptionOut"
+            },
+            "title": "Items",
+            "type": "array"
+          }
+        },
+        "required": [
+          "count",
+          "items"
+        ],
+        "title": "AgentNoticeSubscriptionListOut",
+        "type": "object"
+      },
+      "AgentNoticeSubscriptionOut": {
+        "properties": {
+          "active": {
+            "title": "Active",
+            "type": "boolean"
+          },
+          "event_type": {
+            "title": "Event Type",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "object_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Object Id"
+          },
+          "principal_id": {
+            "title": "Principal Id",
+            "type": "string"
+          },
+          "revoked_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Revoked At"
+          },
+          "scope": {
+            "title": "Scope",
+            "type": "string"
+          },
+          "target_id": {
+            "title": "Target Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "event_type",
+          "scope",
+          "object_id",
+          "principal_id",
+          "target_id",
+          "active",
+          "revoked_at"
+        ],
+        "title": "AgentNoticeSubscriptionOut",
+        "type": "object"
+      },
+      "AgentNoticeTargetIn": {
+        "properties": {
+          "label": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Label",
+            "type": "string"
+          },
+          "principal_id": {
+            "maxLength": 36,
+            "minLength": 1,
+            "title": "Principal Id",
+            "type": "string"
+          },
+          "route": {
+            "maxLength": 191,
+            "minLength": 1,
+            "title": "Route",
+            "type": "string"
+          },
+          "transport": {
+            "maxLength": 32,
+            "minLength": 1,
+            "title": "Transport",
+            "type": "string"
+          }
+        },
+        "required": [
+          "principal_id",
+          "label",
+          "route",
+          "transport"
+        ],
+        "title": "AgentNoticeTargetIn",
+        "type": "object"
+      },
+      "AgentNoticeTargetListOut": {
+        "properties": {
+          "count": {
+            "title": "Count",
+            "type": "integer"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/AgentNoticeTargetOut"
+            },
+            "title": "Items",
+            "type": "array"
+          }
+        },
+        "required": [
+          "count",
+          "items"
+        ],
+        "title": "AgentNoticeTargetListOut",
+        "type": "object"
+      },
+      "AgentNoticeTargetOut": {
+        "description": "An approved destination. The route is a non-secret identity, never a credential.",
+        "properties": {
+          "active": {
+            "title": "Active",
+            "type": "boolean"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "principal_id": {
+            "title": "Principal Id",
+            "type": "string"
+          },
+          "principal_login": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Principal Login"
+          },
+          "route": {
+            "title": "Route",
+            "type": "string"
+          },
+          "transport": {
+            "title": "Transport",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "principal_id",
+          "label",
+          "route",
+          "transport",
+          "active"
+        ],
+        "title": "AgentNoticeTargetOut",
+        "type": "object"
+      },
       "AgentProjectedObject": {
         "additionalProperties": false,
         "description": "One readable object under a non-default read projection.\n\nIdentity and state are always present, so a projected object publishes the\nsame id, ref, kind, revision, visibility decision, and effective\npermissions as the full contract. The effective permissions are published\nonce per distinct permission set in the response-level `capability_sets`\ntable, which `capability_set` keys into. A full read never carries that\nkey and a projected read never carries an inline capability list, so the\ntwo contracts can never be confused for one another.",
@@ -3669,6 +4184,63 @@
         "title": "McpContractMetadataOut",
         "type": "object"
       },
+      "OwnDirectGrantListOut": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/OwnDirectGrantOut"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Cursor"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "title": "OwnDirectGrantListOut",
+        "type": "object"
+      },
+      "OwnDirectGrantOut": {
+        "properties": {
+          "role": {
+            "$ref": "#/components/schemas/Role"
+          },
+          "scope": {
+            "$ref": "#/components/schemas/GrantScope"
+          },
+          "target_id": {
+            "title": "Target Id",
+            "type": "string"
+          },
+          "target_kind": {
+            "enum": [
+              "catalog_object",
+              "project"
+            ],
+            "title": "Target Kind",
+            "type": "string"
+          }
+        },
+        "required": [
+          "target_kind",
+          "target_id",
+          "role",
+          "scope"
+        ],
+        "title": "OwnDirectGrantOut",
+        "type": "object"
+      },
       "PasswordResetIn": {
         "properties": {
           "current_admin_password": {
@@ -3704,6 +4276,7 @@
           "write",
           "rename",
           "create_child",
+          "create_credential_reference",
           "manage_access",
           "delete"
         ],
@@ -3874,6 +4447,50 @@
           "updated_at"
         ],
         "title": "PrincipalAdminSummaryOut",
+        "type": "object"
+      },
+      "PrincipalAssignmentPageOut": {
+        "properties": {
+          "assignment_type": {
+            "enum": [
+              "direct",
+              "effective"
+            ],
+            "title": "Assignment Type",
+            "type": "string"
+          },
+          "direct_grants": {
+            "items": {
+              "$ref": "#/components/schemas/DirectPrincipalGrantOut"
+            },
+            "title": "Direct Grants",
+            "type": "array"
+          },
+          "effective_access": {
+            "items": {
+              "$ref": "#/components/schemas/EffectivePrincipalGrantOut"
+            },
+            "title": "Effective Access",
+            "type": "array"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Cursor"
+          }
+        },
+        "required": [
+          "assignment_type",
+          "direct_grants",
+          "effective_access"
+        ],
+        "title": "PrincipalAssignmentPageOut",
         "type": "object"
       },
       "PrincipalCreateIn": {
@@ -4791,6 +5408,7 @@
           "renamer",
           "editor",
           "creator",
+          "credential_reference_creator",
           "access_manager",
           "owner"
         ],
@@ -5115,6 +5733,189 @@
           "items"
         ],
         "title": "V1AccessRequestQueueOut",
+        "type": "object"
+      },
+      "V1ActivityItemOut": {
+        "additionalProperties": false,
+        "description": "One classified activity envelope entry.\n\nComment bodies, audit diffs, and project state stay in their canonical\nresources (#131/#143/#184); this envelope only carries a safe short\ndescription plus the detail path into the resource that owns the details.",
+        "properties": {
+          "actor": {
+            "anyOf": [
+              {
+                "maxLength": 128,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Actor"
+          },
+          "detail_path": {
+            "maxLength": 512,
+            "title": "Detail Path",
+            "type": "string"
+          },
+          "event_id": {
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Event Id",
+            "type": "string"
+          },
+          "event_type": {
+            "enum": [
+              "object_revision",
+              "relationship_mutation",
+              "comment_create",
+              "audit"
+            ],
+            "title": "Event Type",
+            "type": "string"
+          },
+          "object": {
+            "$ref": "#/components/schemas/V1ActivityObjectOut"
+          },
+          "occurred_at": {
+            "maxLength": 64,
+            "title": "Occurred At",
+            "type": "string"
+          },
+          "summary": {
+            "maxLength": 512,
+            "title": "Summary",
+            "type": "string"
+          }
+        },
+        "required": [
+          "event_id",
+          "event_type",
+          "occurred_at",
+          "object",
+          "summary",
+          "detail_path"
+        ],
+        "title": "V1ActivityItemOut",
+        "type": "object"
+      },
+      "V1ActivityObjectOut": {
+        "additionalProperties": false,
+        "description": "The authorized visible-object reference of one activity event.",
+        "properties": {
+          "kind": {
+            "enum": [
+              "host",
+              "system",
+              "network",
+              "device",
+              "service",
+              "credential_reference",
+              "runbook",
+              "decision",
+              "project"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "label": {
+            "anyOf": [
+              {
+                "maxLength": 255,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Label"
+          },
+          "object_id": {
+            "maxLength": 128,
+            "title": "Object Id",
+            "type": "string"
+          },
+          "ref": {
+            "maxLength": 256,
+            "minLength": 1,
+            "title": "Ref",
+            "type": "string"
+          }
+        },
+        "required": [
+          "ref",
+          "object_id",
+          "kind"
+        ],
+        "title": "V1ActivityObjectOut",
+        "type": "object"
+      },
+      "V1ActivityPageOut": {
+        "additionalProperties": false,
+        "properties": {
+          "direction": {
+            "enum": [
+              "asc",
+              "desc"
+            ],
+            "title": "Direction",
+            "type": "string"
+          },
+          "generated_at": {
+            "maxLength": 64,
+            "title": "Generated At",
+            "type": "string"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/V1ActivityItemOut"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Cursor"
+          },
+          "sort": {
+            "const": "occurred_at",
+            "default": "occurred_at",
+            "title": "Sort",
+            "type": "string"
+          },
+          "total": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Total"
+          },
+          "total_status": {
+            "enum": [
+              "not_requested",
+              "exact",
+              "budget_exhausted"
+            ],
+            "title": "Total Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "items",
+          "generated_at",
+          "direction",
+          "total_status"
+        ],
+        "title": "V1ActivityPageOut",
         "type": "object"
       },
       "V1ApproverAccessRequestOut": {
@@ -5916,6 +6717,123 @@
           "direction"
         ],
         "title": "V1ContextPageOut",
+        "type": "object"
+      },
+      "V1CredentialReferenceObjectIn": {
+        "description": "One new credential-reference object for the service-bound command.\n\nIt is the canonical object write contract with `kind` pinned, so every\nschema, normalization, reference, ACL-shaped-key, and secret-shaped-value\nrule of object creation applies unchanged.",
+        "properties": {
+          "data": {
+            "additionalProperties": true,
+            "description": "Kind-specific catalog data. The top-level x-blockwart-object-schema OpenAPI extension is generated from the same domain registry that validates writes.",
+            "title": "Data",
+            "type": "object"
+          },
+          "health": {
+            "anyOf": [
+              {
+                "enum": [
+                  "unknown",
+                  "healthy",
+                  "degraded",
+                  "down",
+                  "maintenance"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Health"
+          },
+          "id": {
+            "pattern": "^[a-z0-9][a-z0-9_-]*[a-z0-9]$|^[a-z0-9]$",
+            "title": "Id",
+            "type": "string"
+          },
+          "kind": {
+            "const": "credential_reference",
+            "title": "Kind",
+            "type": "string"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "lifecycle": {
+            "anyOf": [
+              {
+                "enum": [
+                  "planned",
+                  "active",
+                  "retired"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Lifecycle"
+          },
+          "provenance": {
+            "$ref": "#/components/schemas/CatalogProvenance"
+          },
+          "status": {
+            "default": "active",
+            "enum": [
+              "active",
+              "inactive",
+              "deleted"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "summary": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Summary"
+          }
+        },
+        "required": [
+          "id",
+          "kind",
+          "label"
+        ],
+        "title": "V1CredentialReferenceObjectIn",
+        "type": "object"
+      },
+      "V1CredentialReferenceOwnerGrantOut": {
+        "additionalProperties": false,
+        "description": "The one direct grant the creator receives on the new reference.",
+        "properties": {
+          "principal_id": {
+            "title": "Principal Id",
+            "type": "string"
+          },
+          "role": {
+            "const": "owner",
+            "title": "Role",
+            "type": "string"
+          },
+          "scope": {
+            "const": "self",
+            "title": "Scope",
+            "type": "string"
+          }
+        },
+        "required": [
+          "principal_id",
+          "role",
+          "scope"
+        ],
+        "title": "V1CredentialReferenceOwnerGrantOut",
         "type": "object"
       },
       "V1DeleteCommandOut": {
@@ -8299,6 +9217,90 @@
           "direct"
         ],
         "title": "V1ScopePreviewObjectOut",
+        "type": "object"
+      },
+      "V1ServiceCredentialReferenceCreateIn": {
+        "additionalProperties": false,
+        "description": "The complete request body of one service-bound credential-reference creation.\n\nThe service is named by the path and its base revision by the strong\n`If-Match` ETag. `access_method_index` names exactly one entry of that\nrevision's `data.access_methods`, as returned by the service read that\nsupplied the ETag. The body carries the new object and nothing else, so no\nother service field, relationship, or grant can be smuggled into the\noperation.",
+        "properties": {
+          "access_method_index": {
+            "description": "Zero-based position of the target entry in data.access_methods of the service revision named by If-Match.",
+            "minimum": 0.0,
+            "title": "Access Method Index",
+            "type": "integer"
+          },
+          "credential_reference": {
+            "$ref": "#/components/schemas/V1CredentialReferenceObjectIn"
+          }
+        },
+        "required": [
+          "access_method_index",
+          "credential_reference"
+        ],
+        "title": "V1ServiceCredentialReferenceCreateIn",
+        "type": "object"
+      },
+      "V1ServiceCredentialReferenceOut": {
+        "additionalProperties": false,
+        "description": "The applied result of one service-bound credential-reference creation.\n\nIt publishes the created object with its own ETag, the one link it received,\nthe service's resulting revision, and the explicit ownership of the new\nobject. An idempotent replay returns the original result unchanged, so its\nservice revision may be older than the current one.",
+        "properties": {
+          "access_method_index": {
+            "minimum": 0.0,
+            "title": "Access Method Index",
+            "type": "integer"
+          },
+          "changed": {
+            "title": "Changed",
+            "type": "boolean"
+          },
+          "credential_reference": {
+            "$ref": "#/components/schemas/CatalogObjectOut"
+          },
+          "etag": {
+            "pattern": "^\"rev-[1-9][0-9]*\"$",
+            "title": "Etag",
+            "type": "string"
+          },
+          "link_path": {
+            "description": "Canonical data path of the one list that received the new typed reference.",
+            "title": "Link Path",
+            "type": "string"
+          },
+          "owner_grant": {
+            "$ref": "#/components/schemas/V1CredentialReferenceOwnerGrantOut"
+          },
+          "replayed": {
+            "default": false,
+            "title": "Replayed",
+            "type": "boolean"
+          },
+          "service_etag": {
+            "pattern": "^\"rev-[1-9][0-9]*\"$",
+            "title": "Service Etag",
+            "type": "string"
+          },
+          "service_id": {
+            "title": "Service Id",
+            "type": "string"
+          },
+          "service_revision": {
+            "minimum": 1.0,
+            "title": "Service Revision",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "credential_reference",
+          "etag",
+          "service_id",
+          "service_revision",
+          "service_etag",
+          "access_method_index",
+          "link_path",
+          "owner_grant",
+          "changed"
+        ],
+        "title": "V1ServiceCredentialReferenceOut",
         "type": "object"
       },
       "V1SourceCoverageDetailOut": {
@@ -11099,6 +12101,1242 @@
         ]
       }
     },
+    "/api/v1/activity": {
+      "get": {
+        "description": "Read one classified audit-activity page; strictly pull and read-only.",
+        "operationId": "get_v1_activity_api_v1_activity_get",
+        "parameters": [
+          {
+            "description": "Only events at or after this RFC3339 timestamp",
+            "in": "query",
+            "name": "since",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Only events at or after this RFC3339 timestamp",
+              "title": "Since"
+            }
+          },
+          {
+            "in": "query",
+            "name": "event_type",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "object_revision",
+                    "relationship_mutation",
+                    "comment_create",
+                    "audit"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Event Type"
+            }
+          },
+          {
+            "in": "query",
+            "name": "kind",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "host",
+                    "system",
+                    "network",
+                    "device",
+                    "service",
+                    "credential_reference",
+                    "runbook",
+                    "decision",
+                    "project"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Kind"
+            }
+          },
+          {
+            "description": "Include only the placement subtree of this object id",
+            "in": "query",
+            "name": "parent",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Include only the placement subtree of this object id",
+              "title": "Parent"
+            }
+          },
+          {
+            "description": "Include only events of this exact object id",
+            "in": "query",
+            "name": "object_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Include only events of this exact object id",
+              "title": "Object Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Opaque cursor returned by the previous page",
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 2048,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Opaque cursor returned by the previous page",
+              "title": "Cursor"
+            }
+          },
+          {
+            "in": "query",
+            "name": "direction",
+            "required": false,
+            "schema": {
+              "default": "desc",
+              "enum": [
+                "asc",
+                "desc"
+              ],
+              "title": "Direction",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Attempt an exact authorized total within the activity scan budget. When the budget is exhausted, total is null and total_status is budget_exhausted.",
+            "in": "query",
+            "name": "include_total",
+            "required": false,
+            "schema": {
+              "default": false,
+              "description": "Attempt an exact authorized total within the activity scan budget. When the budget is exhausted, total is null and total_status is budget_exhausted.",
+              "title": "Include Total",
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ActivityPageOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Authentication required"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Permission denied"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Resource not found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "412": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Precondition failed"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Request validation failed"
+          },
+          "428": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Precondition required"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Internal server error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Service unavailable"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Read the authorized catalog-wide agent activity feed",
+        "tags": [
+          "api-v1-readonly"
+        ]
+      }
+    },
+    "/api/v1/admin/notices": {
+      "get": {
+        "operationId": "list_notice_subscription_rows_api_v1_admin_notices_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentNoticeSubscriptionListOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Authentication required"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Permission denied"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Resource not found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "412": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Precondition failed"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Request validation failed"
+          },
+          "428": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Precondition required"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Internal server error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Service unavailable"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List Notice Subscription Rows",
+        "tags": [
+          "api-v1-admin-notices"
+        ]
+      }
+    },
+    "/api/v1/admin/notices/jobs": {
+      "get": {
+        "description": "Redacted delivery diagnostics: states only, never transport details.",
+        "operationId": "list_notice_job_rows_api_v1_admin_notices_jobs_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "pending",
+                    "delivered",
+                    "failed",
+                    "suppressed",
+                    "expired",
+                    "acknowledged"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Status"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 100,
+              "maximum": 500,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentNoticeDeliveryJobListOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Authentication required"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Permission denied"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Resource not found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "412": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Precondition failed"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Request validation failed"
+          },
+          "428": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Precondition required"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Internal server error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Service unavailable"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List Notice Job Rows",
+        "tags": [
+          "api-v1-admin-notices"
+        ]
+      }
+    },
+    "/api/v1/admin/notices/subscriptions": {
+      "post": {
+        "operationId": "create_notice_subscription_api_v1_admin_notices_subscriptions_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AgentNoticeSubscriptionIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentNoticeSubscriptionOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Authentication required"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Permission denied"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Resource not found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "412": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Precondition failed"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Request validation failed"
+          },
+          "428": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Precondition required"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Internal server error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Service unavailable"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Create Notice Subscription",
+        "tags": [
+          "api-v1-admin-notices"
+        ]
+      }
+    },
+    "/api/v1/admin/notices/targets": {
+      "get": {
+        "operationId": "list_notice_target_rows_api_v1_admin_notices_targets_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentNoticeTargetListOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Authentication required"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Permission denied"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Resource not found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "412": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Precondition failed"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Request validation failed"
+          },
+          "428": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Precondition required"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Internal server error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Service unavailable"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List Notice Target Rows",
+        "tags": [
+          "api-v1-admin-notices"
+        ]
+      },
+      "post": {
+        "operationId": "create_notice_target_api_v1_admin_notices_targets_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AgentNoticeTargetIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentNoticeTargetOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Authentication required"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Permission denied"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Resource not found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "412": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Precondition failed"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Request validation failed"
+          },
+          "428": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Precondition required"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Internal server error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Service unavailable"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Create Notice Target",
+        "tags": [
+          "api-v1-admin-notices"
+        ]
+      }
+    },
+    "/api/v1/admin/notices/targets/{target_id}": {
+      "delete": {
+        "operationId": "deactivate_notice_target_api_v1_admin_notices_targets__target_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "target_id",
+            "required": true,
+            "schema": {
+              "title": "Target Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Authentication required"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Permission denied"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Resource not found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "412": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Precondition failed"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Request validation failed"
+          },
+          "428": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Precondition required"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Internal server error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Service unavailable"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Deactivate Notice Target",
+        "tags": [
+          "api-v1-admin-notices"
+        ]
+      }
+    },
+    "/api/v1/admin/notices/{subscription_id}": {
+      "delete": {
+        "operationId": "revoke_notice_subscription_api_v1_admin_notices__subscription_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "subscription_id",
+            "required": true,
+            "schema": {
+              "title": "Subscription Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Authentication required"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Permission denied"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Resource not found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "412": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Precondition failed"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Request validation failed"
+          },
+          "428": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Precondition required"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Internal server error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Service unavailable"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Revoke Notice Subscription",
+        "tags": [
+          "api-v1-admin-notices"
+        ]
+      }
+    },
     "/api/v1/admin/principals": {
       "get": {
         "operationId": "list_admin_principals_api_v1_admin_principals_get",
@@ -11734,6 +13972,189 @@
           }
         ],
         "summary": "Update Admin Principal",
+        "tags": [
+          "api-v1-admin"
+        ]
+      }
+    },
+    "/api/v1/admin/principals/{principal_id}/assignments": {
+      "get": {
+        "description": "Page direct grants or individual effective sources; detail remains unchanged.",
+        "operationId": "list_admin_principal_assignments_api_v1_admin_principals__principal_id__assignments_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "principal_id",
+            "required": true,
+            "schema": {
+              "title": "Principal Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "assignment_type",
+            "required": false,
+            "schema": {
+              "default": "effective",
+              "enum": [
+                "direct",
+                "effective"
+              ],
+              "title": "Assignment Type",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 20,
+              "maximum": 50,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Opaque cursor returned by the previous page",
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 2048,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Opaque cursor returned by the previous page",
+              "title": "Cursor"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PrincipalAssignmentPageOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Authentication required"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Permission denied"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Resource not found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "412": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Precondition failed"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Request validation failed"
+          },
+          "428": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Precondition required"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Internal server error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Service unavailable"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List Admin Principal Assignments",
         "tags": [
           "api-v1-admin"
         ]
@@ -13747,6 +16168,181 @@
         ]
       }
     },
+    "/api/v1/auth/me/direct-grants": {
+      "get": {
+        "operationId": "own_direct_grants_api_v1_auth_me_direct_grants_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "role",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/Role"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Role"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 100,
+              "maximum": 200,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Opaque cursor returned by the previous page",
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 2048,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Opaque cursor returned by the previous page",
+              "title": "Cursor"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OwnDirectGrantListOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Authentication required"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Permission denied"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Resource not found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "412": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Precondition failed"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Request validation failed"
+          },
+          "428": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Precondition required"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Internal server error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Service unavailable"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Own Direct Grants",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
     "/api/v1/context": {
       "get": {
         "operationId": "get_v1_context_api_v1_context_get",
@@ -14727,6 +17323,307 @@
         "summary": "Get V1 My Access Requests",
         "tags": [
           "api-v1-readonly"
+        ]
+      }
+    },
+    "/api/v1/notices": {
+      "get": {
+        "operationId": "list_own_notices_api_v1_notices_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 20,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "pending",
+                    "delivered",
+                    "failed",
+                    "suppressed",
+                    "expired",
+                    "acknowledged"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Status"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentNoticeListOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Authentication required"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Permission denied"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Resource not found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "412": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Precondition failed"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Request validation failed"
+          },
+          "428": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Precondition required"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Internal server error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Service unavailable"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List Own Notices",
+        "tags": [
+          "agent-notices"
+        ]
+      }
+    },
+    "/api/v1/notices/{event_id}/acknowledge": {
+      "post": {
+        "operationId": "acknowledge_notice_api_v1_notices__event_id__acknowledge_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "event_id",
+            "required": true,
+            "schema": {
+              "title": "Event Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentNoticeAcknowledgeOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Authentication required"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Permission denied"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Resource not found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "412": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Precondition failed"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Request validation failed"
+          },
+          "428": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Precondition required"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Internal server error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Service unavailable"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Acknowledge Notice",
+        "tags": [
+          "agent-notices"
         ]
       }
     },
@@ -19713,6 +22610,186 @@
           }
         ],
         "summary": "Create V1 Child Object",
+        "tags": [
+          "api-v1-readonly"
+        ]
+      }
+    },
+    "/api/v1/objects/{service_id}/credential-references": {
+      "post": {
+        "description": "Create one disconnected credential reference and link it to the service.\n\nRequires the dedicated `create_credential_reference` permission on the\nservice (the `credential_reference_creator` role, `owner`, or\n`catalog_owner`); neither `create_child`, `write`, nor any root-creation\nauthority is required or sufficient. The strong service `If-Match` ETag and\nan `Idempotency-Key` are required. The new reference receives no placement\nparent and no relationship; exactly one typed reference is appended to\n`data.access_methods[access_method_index].credential_references`, the\nservice revision advances once, and the caller receives one direct\nOwner/self grant on the new reference. Everything commits atomically.",
+        "operationId": "create_v1_service_credential_reference_api_v1_objects__service_id__credential_references_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "service_id",
+            "required": true,
+            "schema": {
+              "title": "Service Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "If-Match",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "If-Match"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Idempotency-Key"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/V1ServiceCredentialReferenceCreateIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ServiceCredentialReferenceOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Authentication required"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Permission denied"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Resource not found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "412": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Precondition failed"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Request validation failed"
+          },
+          "428": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Precondition required"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Internal server error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Service unavailable"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Create one credential reference bound to one service access method",
         "tags": [
           "api-v1-readonly"
         ]
@@ -30062,7 +33139,7 @@
       "raw_secret_values_rejected": true
     },
     "source": "blockwart.domain.object_schema",
-    "version": 8,
+    "version": 9,
     "violation_policy": {
       "description": "A rejected write names the canonical public data path, one violation code, and the published rule when a schema postcondition rejected it. Rejected values are never returned.",
       "detail_fields": [

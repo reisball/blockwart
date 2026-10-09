@@ -317,11 +317,13 @@ def synchronize_release_schedule(
             and target is not None
             and observation.target_key == target.cache_key
         )
-        desired = (
-            _naive(observation.next_due_at)
-            if observation_matches and observation.next_due_at is not None
-            else _naive(_initial_due(moment, *key, settings.jitter_seconds))
-        )
+        if observation_matches and observation.next_due_at is not None:
+            desired = _naive(observation.next_due_at)
+        else:
+            # Without a matching observation the lease keeps its already-scheduled
+            # due time: re-deriving jitter from each poll time would move it forward
+            # forever. A target change may only pull a later due time earlier.
+            desired = min(lease.due_at, _naive(_initial_due(moment, *key, settings.jitter_seconds)))
         if lease.due_at != desired and lease.lease_owner is None:
             lease.due_at = desired
             lease.updated_at = _naive(moment)
@@ -479,6 +481,7 @@ def check_service_release(
             ServiceReleaseObservation.provider == lease.provider,
         )
     )
+    previous_version = current.latest_version if current is not None else None
     request = GithubReleaseRequest(
         target=resolution.target,
         etag=(
@@ -513,6 +516,26 @@ def check_service_release(
         _delete_claim(session, lease.id, lease_owner)
         session.commit()
         return ReleaseCheckResult(object_id, "skipped", None, "changed")
+    # Issue #106: a genuinely new stable upstream version emits exactly one
+    # logical notice event; fan-out and delivery deduplication happen in the
+    # notice layer. Emission shares this transaction so event and observation
+    # stay consistent across process restarts.
+    if (
+        observed.outcome == "observed"
+        and previous_version is not None
+        and record.latest_version != previous_version
+    ):
+        from blockwart.services.agent_notices import record_release_notice_event
+
+        record_release_notice_event(
+            session,
+            object_id=row.id,
+            object_instance_id=row.instance_id,
+            provider=lease.provider,
+            latest_tag=record.latest_tag,
+            latest_version=record.latest_version,
+            observed_at=observed.checked_at,
+        )
     session.execute(
         update(ServiceReleaseCheckLease)
         .where(

@@ -160,7 +160,7 @@ def test_backup_restore_remains_readable_and_migratable(
     ):
         source_connection.backup(restored_connection)
 
-    assert upgrade_database(restored_url) == "20260926_0026"
+    assert upgrade_database(restored_url) == "20261009_0028"
     with pytest.raises(DatabaseReadinessError) as exc_info:
         check_database_readiness(Settings(database_url=restored_url))
     assert exc_info.value.code == "owner_coverage_incomplete"
@@ -193,5 +193,5 @@ def test_backup_restore_remains_readable_and_migratable(
     finally:
         restored_engine.dispose()
 
-    assert readiness.revision == "20260926_0026"
+    assert readiness.revision == "20261009_0028"
     assert set(readiness.checks.values()) == {"ok"}
