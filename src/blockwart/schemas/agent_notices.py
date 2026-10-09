@@ -1,6 +1,40 @@
 from datetime import datetime
+from typing import Literal
 
 from pydantic import BaseModel, Field
+
+NoticeStatus = Literal[
+    "pending",
+    "delivered",
+    "failed",
+    "suppressed",
+    "expired",
+    "acknowledged",
+]
+
+
+class AgentNoticeTargetIn(BaseModel):
+    principal_id: str = Field(min_length=1, max_length=36)
+    label: str = Field(min_length=1, max_length=128)
+    route: str = Field(min_length=1, max_length=191)
+    transport: str = Field(min_length=1, max_length=32)
+
+
+class AgentNoticeTargetOut(BaseModel):
+    """An approved destination. The route is a non-secret identity, never a credential."""
+
+    id: str
+    principal_id: str
+    principal_login: str | None = None
+    label: str
+    route: str
+    transport: str
+    active: bool
+
+
+class AgentNoticeTargetListOut(BaseModel):
+    count: int
+    items: list[AgentNoticeTargetOut]
 
 
 class AgentNoticeSubscriptionIn(BaseModel):
@@ -28,13 +62,13 @@ class AgentNoticeSubscriptionListOut(BaseModel):
 
 
 class AgentNoticeDeliveryJobOut(BaseModel):
-    """Redacted delivery diagnostics. No payload, transport, or token data."""
+    """Redacted delivery diagnostics. No payload, transport, lease, or token data."""
 
     job_id: int
     event_id: str
     event_type: str
     object_ref: str
-    status: str
+    status: NoticeStatus
     attempts: int
     next_attempt_at: datetime | None
     expires_at: datetime
@@ -42,6 +76,7 @@ class AgentNoticeDeliveryJobOut(BaseModel):
     acknowledged_at: datetime | None
     suppressed_at: datetime | None
     last_error_code: str | None
+    last_attempt_outcome: str | None = None
     created_at: datetime
 
 
@@ -59,8 +94,9 @@ class AgentNoticeOut(BaseModel):
     object_ref: str
     message: str
     blockwart_reference: str
-    status: str
+    status: NoticeStatus
     delivered_at: datetime | None
+    acknowledged_at: datetime | None = None
 
 
 class AgentNoticeListOut(BaseModel):

@@ -6,7 +6,12 @@ Revises: 20260926_0026
 The revision is purely additive. It creates four new tables (agent delivery
 targets, notice subscriptions, notice events, delivery jobs) plus one redacted
 attempt-audit table and touches no existing table, column, index, constraint,
-trigger, or row.
+trigger, or row. It follows the current ``20260926_0026`` head linearly.
+
+Database-backed invariants: one active registration per ``(transport, route)``
+and per routing rule (partial unique indexes, identical on SQLite and
+PostgreSQL), one job per ``(event, target)``, and a lease/fencing-token pair
+that must be consistent and can only be held by a ``pending`` job.
 
 No routing data is written by this migration: an upgraded catalog has zero
 agent targets and zero subscriptions, so no outbound agent notification can
@@ -39,9 +44,11 @@ _ERROR_CODES = (
     "'transport_timeout','transport_unavailable','rate_limited',"
     "'target_inactive','principal_inactive','subscription_revoked',"
     "'read_permission_lost','ttl_expired','attempt_limit_reached',"
-    "'storm_suppressed'"
+    "'storm_suppressed','delivery_error'"
 )
-_ATTEMPT_OUTCOMES = "'success','timeout','unavailable','rate_limited'"
+_ATTEMPT_OUTCOMES = (
+    "'success','confirmed_duplicate','timeout','unavailable','rate_limited','lease_expired'"
+)
 
 
 def upgrade() -> None:
@@ -79,6 +86,14 @@ def upgrade() -> None:
         "ix_agent_delivery_targets_principal",
         "agent_delivery_targets",
         ["principal_id", "active"],
+    )
+    op.create_index(
+        "uq_agent_delivery_targets_active_route",
+        "agent_delivery_targets",
+        ["transport", "route"],
+        unique=True,
+        sqlite_where=sa.text("active = true"),
+        postgresql_where=sa.text("active = true"),
     )
 
     op.create_table(
@@ -133,6 +148,22 @@ def upgrade() -> None:
         "ix_agent_notice_subscriptions_routing",
         "agent_notice_subscriptions",
         ["event_type", "active"],
+    )
+    op.create_index(
+        "uq_agent_notice_subscriptions_active_object",
+        "agent_notice_subscriptions",
+        ["event_type", "object_id", "target_id"],
+        unique=True,
+        sqlite_where=sa.text("active = true AND scope = 'object'"),
+        postgresql_where=sa.text("active = true AND scope = 'object'"),
+    )
+    op.create_index(
+        "uq_agent_notice_subscriptions_active_catalog",
+        "agent_notice_subscriptions",
+        ["event_type", "target_id"],
+        unique=True,
+        sqlite_where=sa.text("active = true AND scope = 'catalog'"),
+        postgresql_where=sa.text("active = true AND scope = 'catalog'"),
     )
 
     op.create_table(
@@ -191,6 +222,7 @@ def upgrade() -> None:
         sa.Column("expires_at", sa.DateTime(), nullable=False),
         sa.Column("claimed_by", sa.String(length=64), nullable=True),
         sa.Column("claimed_at", sa.DateTime(), nullable=True),
+        sa.Column("lease_token", sa.String(length=32), nullable=True),
         sa.Column("lease_expires_at", sa.DateTime(), nullable=True),
         sa.Column("delivered_at", sa.DateTime(), nullable=True),
         sa.Column("acknowledged_at", sa.DateTime(), nullable=True),
@@ -209,6 +241,14 @@ def upgrade() -> None:
             name="ck_agent_delivery_jobs_error_code",
         ),
         sa.CheckConstraint("attempts >= 0", name="ck_agent_delivery_jobs_attempts"),
+        sa.CheckConstraint(
+            "(lease_token IS NULL) = (lease_expires_at IS NULL)",
+            name="ck_agent_delivery_jobs_lease_pair",
+        ),
+        sa.CheckConstraint(
+            "status = 'pending' OR lease_token IS NULL",
+            name="ck_agent_delivery_jobs_terminal_unleased",
+        ),
         sa.PrimaryKeyConstraint("id"),
         sa.UniqueConstraint("event_id", "target_id", name="uq_agent_delivery_jobs_identity"),
     )
@@ -233,7 +273,7 @@ def upgrade() -> None:
             nullable=False,
         ),
         sa.Column("attempt_no", sa.Integer(), nullable=False),
-        sa.Column("outcome", sa.String(length=16), nullable=False),
+        sa.Column("outcome", sa.String(length=24), nullable=False),
         sa.Column("error_code", sa.String(length=32), nullable=True),
         sa.Column("attempted_at", sa.DateTime(), nullable=False),
         sa.CheckConstraint(
@@ -262,9 +302,21 @@ def downgrade() -> None:
     op.drop_index("ix_agent_notice_events_object", table_name="agent_notice_events")
     op.drop_table("agent_notice_events")
     op.drop_index(
+        "uq_agent_notice_subscriptions_active_catalog",
+        table_name="agent_notice_subscriptions",
+    )
+    op.drop_index(
+        "uq_agent_notice_subscriptions_active_object",
+        table_name="agent_notice_subscriptions",
+    )
+    op.drop_index(
         "ix_agent_notice_subscriptions_routing",
         table_name="agent_notice_subscriptions",
     )
     op.drop_table("agent_notice_subscriptions")
+    op.drop_index(
+        "uq_agent_delivery_targets_active_route",
+        table_name="agent_delivery_targets",
+    )
     op.drop_index("ix_agent_delivery_targets_principal", table_name="agent_delivery_targets")
     op.drop_table("agent_delivery_targets")

@@ -992,6 +992,25 @@ device without an uplink is incomplete. Traversal stops before an unreadable
 endpoint without disclosing its identity, category, metadata, path, or count.
 The existing `/topology` resource is unchanged.
 
+## Agent notices
+
+Agent notices (Issue #106; [details](agent-notices.md)) are a durable,
+fail-closed push channel proven against a loopback test gateway only.
+
+- `GET /api/v1/notices` (`status`, `limit`) and
+  `POST /api/v1/notices/{event_id}/acknowledge` are agent-scoped: they read and
+  acknowledge only the caller's own notices, hide notices on objects the caller
+  can no longer read (`404` on acknowledge, never a hint), and acknowledge
+  idempotently. Acknowledgement records receipt, not a business action.
+- Platform-admin resources manage routing and diagnostics:
+  `POST|GET /api/v1/admin/notices/targets`,
+  `DELETE /api/v1/admin/notices/targets/{target_id}`,
+  `GET|POST /api/v1/admin/notices[/subscriptions]`,
+  `DELETE /api/v1/admin/notices/{subscription_id}`, and
+  `GET /api/v1/admin/notices/jobs`. Diagnostics are redacted to states, counts,
+  and safe error codes. A route can be registered by one active target only and
+  a routing rule once; duplicates return `409` with the reason in `error.code`.
+
 ## Errors and boundary
 
 All v1 errors use the shared REST envelope and `X-Correlation-ID`. Missing

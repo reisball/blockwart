@@ -576,6 +576,22 @@ For compatibility, MCP output retains the established `results` and `objects`
 fields. It additionally returns v1 `next_cursor`, `total`, `sort`, and
 `direction` metadata.
 
+## Agent notices
+
+Two dedicated, agent-scoped tools expose the agent's own notice state
+(see [Agent notices](agent-notices.md)); neither accepts a principal id:
+
+- `blockwart.list_own_notices` (read-only; optional `status`, `limit`) forwards
+  to `GET /api/v1/notices`. It returns the fixed minimal notice (event id,
+  visible object reference, fixed message, back-reference path, delivery state)
+  and omits any notice whose object the caller can no longer read, without a
+  hint. It never returns release notes, transport endpoints, credentials, or
+  session data.
+- `blockwart.acknowledge_notice` (idempotent write; `event_id`) forwards to
+  `POST /api/v1/notices/{event_id}/acknowledge`. It records receipt only: it is
+  not an approval, grants nothing, and starts no action. An unknown notice and
+  one the caller cannot read are both reported as not found.
+
 ## Local Usage
 
 Start Blockwart separately, then run:

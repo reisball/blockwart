@@ -3289,6 +3289,22 @@ def test_revision_check_rejects_database_before_head(tmp_path: Path) -> None:
         check_database_revision(database_url)
 
 
+def test_agent_notice_migration_is_linear_on_the_current_main_head() -> None:
+    from alembic.script import ScriptDirectory
+
+    script = ScriptDirectory.from_config(build_alembic_config("sqlite://"))
+    assert script.get_heads() == [AGENT_NOTICES_REVISION]
+    revision = script.get_revision(AGENT_NOTICES_REVISION)
+    assert revision is not None and revision.down_revision == ACTIVITY_INDEX_REVISION
+    assert len(script.get_revisions(ACTIVITY_INDEX_REVISION)) == 1
+    successors = [
+        item.revision
+        for item in script.walk_revisions()
+        if item.down_revision == ACTIVITY_INDEX_REVISION
+    ]
+    assert successors == [AGENT_NOTICES_REVISION]
+
+
 def test_agent_notice_migration_extends_current_main_without_changing_existing_data(
     tmp_path: Path,
 ) -> None:
@@ -3321,6 +3337,17 @@ def test_agent_notice_migration_extends_current_main_without_changing_existing_d
                 text("SELECT COUNT(*) FROM agent_notice_subscriptions")
             ).scalar_one() == 0
         assert _revision(database_url) == AGENT_NOTICES_REVISION
+        inspector = inspect(engine)
+        assert {
+            index["name"]
+            for table in ("agent_delivery_targets", "agent_notice_subscriptions")
+            for index in inspector.get_indexes(table)
+            if index["unique"]
+        } >= {
+            "uq_agent_delivery_targets_active_route",
+            "uq_agent_notice_subscriptions_active_object",
+            "uq_agent_notice_subscriptions_active_catalog",
+        }
 
         command.downgrade(config, ACTIVITY_INDEX_REVISION)
         assert _revision(database_url) == ACTIVITY_INDEX_REVISION

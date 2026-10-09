@@ -496,6 +496,121 @@ def test_postgresql_credential_reference_creator_migration_round_trip(
 
 
 @PG_SKIP
+def test_postgresql_agent_notice_migration_round_trip_and_database_invariants(
+    pg_database_name: str,
+) -> None:
+    database_url = _pg_url(pg_database_name)
+    _upgrade_to(database_url, ACTIVITY_INDEX_REVISION)
+    engine = build_engine(database_url)
+    try:
+        with engine.begin() as connection:
+            _insert_principal(
+                connection,
+                principal_id="00000000-0000-0000-0000-000000000106",
+                login="preserved-owner-106",
+                platform_role="admin",
+                catalog_role="catalog_owner",
+            )
+        tables = {"principals", "principal_invariant_counts"}
+        before = _table_rows(engine, tables)
+    finally:
+        engine.dispose()
+
+    _upgrade_to(database_url, AGENT_NOTICES_REVISION)
+    engine = build_engine(database_url)
+    try:
+        # The revision is additive: no pre-existing table changes.
+        assert _table_rows(engine, tables) == before
+        with engine.connect() as connection:
+            indexes = dict(
+                connection.execute(
+                    text(
+                        "SELECT indexname, indexdef FROM pg_indexes "
+                        "WHERE tablename LIKE 'agent_%'"
+                    )
+                ).all()
+            )
+        for name in (
+            "uq_agent_delivery_targets_active_route",
+            "uq_agent_notice_subscriptions_active_object",
+            "uq_agent_notice_subscriptions_active_catalog",
+        ):
+            assert "UNIQUE" in indexes[name] and "WHERE" in indexes[name]
+        principal = "00000000-0000-0000-0000-000000000106"
+        insert_target = text(
+            "INSERT INTO agent_delivery_targets (id, principal_id, label, route, transport, "
+            "active) VALUES (:id, :principal, 'l', 'openclaw-agent:pg', "
+            "'openclaw_test_gateway', :active)"
+        )
+        with engine.begin() as connection:
+            for target_id, active in (("t-1", True), ("t-2", False)):
+                connection.execute(
+                    insert_target,
+                    {"id": target_id, "principal": principal, "active": active},
+                )
+        with pytest.raises(IntegrityError):
+            with engine.begin() as connection:
+                connection.execute(
+                    insert_target, {"id": "t-3", "principal": principal, "active": True}
+                )
+        with pytest.raises(IntegrityError):
+            with engine.begin() as connection:
+                connection.execute(
+                    text(
+                        "INSERT INTO agent_notice_events (id, event_type, object_id, dedupe_key, "
+                        "occurred_at) VALUES ('e-1', 'release_update_available', 'o', 'k', now())"
+                    )
+                )
+                connection.execute(
+                    text(
+                        "INSERT INTO agent_notice_events (id, event_type, object_id, dedupe_key, "
+                        "occurred_at) VALUES ('e-2', 'release_update_available', 'o', 'k', now())"
+                    )
+                )
+        with engine.begin() as connection:
+            connection.execute(
+                text(
+                    "INSERT INTO agent_notice_events (id, event_type, object_id, dedupe_key, "
+                    "occurred_at) VALUES ('e-3', 'release_update_available', 'o', 'k3', now())"
+                )
+            )
+            connection.execute(
+                text(
+                    "INSERT INTO agent_notice_subscriptions (id, event_type, scope, principal_id, "
+                    "target_id, active) VALUES ('s-1', 'release_update_available', 'catalog', "
+                    ":principal, 't-1', true)"
+                ),
+                {"principal": principal},
+            )
+            connection.execute(
+                text(
+                    "INSERT INTO agent_delivery_jobs (event_id, target_id, subscription_id, "
+                    "next_attempt_at, expires_at) VALUES ('e-3', 't-1', 's-1', now(), now())"
+                )
+            )
+        # A terminal job can never carry a lease, and the lease pair is consistent.
+        for update_sql in (
+            "UPDATE agent_delivery_jobs SET status = 'delivered', lease_token = 'x', "
+            "lease_expires_at = now()",
+            "UPDATE agent_delivery_jobs SET lease_token = 'x'",
+        ):
+            with pytest.raises(IntegrityError):
+                with engine.begin() as connection:
+                    connection.execute(text(update_sql))
+    finally:
+        engine.dispose()
+
+    config = build_alembic_config(database_url)
+    command.downgrade(config, ACTIVITY_INDEX_REVISION)
+    engine = build_engine(database_url)
+    try:
+        assert "agent_delivery_targets" not in inspect(engine).get_table_names()
+        assert _table_rows(engine, tables) == before
+    finally:
+        engine.dispose()
+
+
+@PG_SKIP
 def test_postgresql_catalog_viewer_migration_upgrade_and_safe_downgrade(
     pg_database_name: str,
 ) -> None:

@@ -2,7 +2,7 @@
 
 The authorized, catalog-wide activity feed answers one agent question: *"What
 changed since my last read?"* It is strictly a pull/read-only projection. Push
-delivery and notice state remain #106; comment timelines (#131), object audit
+delivery and notice state live in [Agent notices](agent-notices.md) (#106); comment timelines (#131), object audit
 (#143), and curated project chronology (#184) stay canonical for their own
 details.
 

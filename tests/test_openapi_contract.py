@@ -24,7 +24,7 @@ EXPECTED_OPERATIONS = {
     "/api/v1/admin/notices": {"get"},
     "/api/v1/admin/notices/jobs": {"get"},
     "/api/v1/admin/notices/subscriptions": {"post"},
-    "/api/v1/admin/notices/targets": {"post"},
+    "/api/v1/admin/notices/targets": {"get", "post"},
     "/api/v1/admin/notices/targets/{target_id}": {"delete"},
     "/api/v1/admin/notices/{subscription_id}": {"delete"},
     "/api/v1/admin/principals": {"get", "post"},

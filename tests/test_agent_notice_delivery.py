@@ -185,7 +185,7 @@ def test_new_version_creates_independent_event(session, service_env) -> None:
             assert s.query(AgentDeliveryJob).count() == 2
 
 
-def test_delivery_is_visible_at_most_once_per_logical_event(session, service_env) -> None:
+def test_confirmed_delivery_is_never_repeated_by_later_passes(session, service_env) -> None:
     transport = FakeNoticeTransport()
     with session() as s:
         with transaction(s):
@@ -194,7 +194,7 @@ def test_delivery_is_visible_at_most_once_per_logical_event(session, service_env
         _flush_and_commit(s)
         assert stats["delivered"] == 1
         assert len(transport.calls) == 1
-        # A repeated scheduler pass must never re-ping the delivered event.
+        # A repeated scheduler pass must never re-send a confirmed delivery.
         stats_again = deliver_due_agent_notices(s, transport, now=NOW, policy=POLICY)
         assert stats_again["delivered"] == 0
         assert len(transport.calls) == 1
@@ -503,6 +503,7 @@ def test_agent_reads_own_notices_and_acknowledges(
         "blockwart_reference",
         "status",
         "delivered_at",
+        "acknowledged_at",
     }
 
     acknowledged = client.post(f"/api/v1/notices/{event_id}/acknowledge")
@@ -622,50 +623,57 @@ def test_loopback_transport_refuses_non_loopback_destinations() -> None:
 
 def test_concurrent_claim_is_single_winner(db, service_env) -> None:
     """Two racing workers cannot both claim the same pending job."""
-    from blockwart.services.agent_notices import _claim_due_jobs
+    from blockwart.services.agent_notices import _claim_next_job
 
     with db.sessions() as first, db.sessions() as second:
         with transaction(first):
             _emit(first)
-        first.commit()
-        won_first = _claim_due_jobs(
-            first, worker_id="worker-a", policy=POLICY, moment=NOW
+        won_first = _claim_next_job(
+            first, worker_id="worker-a", policy=POLICY, moment=NOW, skip_ids=set()
         )
-        assert len(won_first) == 1
-        first.commit()
-        won_second = _claim_due_jobs(
-            second, worker_id="worker-b", policy=POLICY, moment=NOW
+        assert won_first is not None
+        won_second = _claim_next_job(
+            second, worker_id="worker-b", policy=POLICY, moment=NOW, skip_ids=set()
         )
-        assert won_second == []
+        assert won_second is None
 
 
 def test_expired_lease_is_reclaimable(db, service_env) -> None:
     """A crashed worker's expired lease lets another worker claim the job."""
-    from blockwart.services.agent_notices import _claim_due_jobs
+    from blockwart.services.agent_notices import _claim_next_job
 
     with db.sessions() as first, db.sessions() as second:
         with transaction(first):
             _emit(first)
-        first.commit()
-        won_first = _claim_due_jobs(
-            first, worker_id="worker-crashed", policy=POLICY, moment=NOW
+        crashed = _claim_next_job(
+            first, worker_id="worker-crashed", policy=POLICY, moment=NOW, skip_ids=set()
         )
-        assert len(won_first) == 1
-        first.commit()
+        assert crashed is not None
         # Within the lease window: no other worker can claim it.
-        still_held = _claim_due_jobs(
-            second, worker_id="worker-b", policy=POLICY, moment=NOW + timedelta(seconds=30)
+        assert (
+            _claim_next_job(
+                second,
+                worker_id="worker-b",
+                policy=POLICY,
+                moment=NOW + timedelta(seconds=30),
+                skip_ids=set(),
+            )
+            is None
         )
-        assert still_held == []
-        # After lease expiry the job is claimable again.
-        reclaimed = _claim_due_jobs(
+        # After lease expiry the job is claimable again, under a new fencing token.
+        reclaimed = _claim_next_job(
             second,
             worker_id="worker-b",
             policy=POLICY,
             moment=NOW + timedelta(seconds=61),
+            skip_ids=set(),
         )
-        assert len(reclaimed) == 1
-        assert reclaimed[0].claimed_by.startswith("worker-b:")
+        assert reclaimed is not None
+        assert reclaimed.token != crashed.token
+        assert reclaimed.attempt_no == 2
+        row = second.query(AgentDeliveryJob).one()
+        assert row.claimed_by == "worker-b"
+        assert row.lease_token == reclaimed.token
 
 
 def test_delivery_id_is_stable_across_retries(session, service_env) -> None:
@@ -743,10 +751,16 @@ def test_lifespan_poller_delivers_end_to_end(alembic_database) -> None:
         def do_POST(self) -> None:  # noqa: N802 - stdlib naming
             length = int(self.headers.get("Content-Length", "0"))
             body = json.loads(self.rfile.read(length).decode("utf-8"))
-            # Receiver-enforced idempotency: a repeated delivery_id is rejected.
+            # Receiver-enforced idempotency: a repeated delivery_id is answered
+            # with the duplicate confirmation, never a bare failure.
             if body["delivery_id"] in seen_delivery_ids:
+                confirmation = json.dumps(
+                    {"status": "duplicate", "delivery_id": body["delivery_id"]}
+                ).encode("utf-8")
                 self.send_response(409)
+                self.send_header("Content-Length", str(len(confirmation)))
                 self.end_headers()
+                self.wfile.write(confirmation)
                 return
             seen_delivery_ids.add(body["delivery_id"])
             received.append(body)
@@ -823,6 +837,70 @@ def test_lifespan_poller_delivers_end_to_end(alembic_database) -> None:
         server.shutdown()
         thread.join(timeout=5)
 
+
+
+def test_lifespan_poller_confirms_a_lost_response_as_prior_success(alembic_database) -> None:
+    """Poller path: a dropped response is retried and confirmed, never dead-lettered."""
+    import time as time_module
+    from datetime import UTC as DT_UTC
+
+    from notice_support import LoopbackReceiver
+    from sqlalchemy import select
+
+    from blockwart.main import create_app as create_notice_app
+    from blockwart.models import AgentDeliveryAttempt
+
+    with LoopbackReceiver() as receiver:
+        receiver.drop_responses = 1
+        live_now = datetime.now(DT_UTC).replace(tzinfo=None)
+        with alembic_database.sessions() as s:
+            with transaction(s):
+                _seed_service_principal_and_target(s)
+                record_agent_notice_event(
+                    s,
+                    event_type="release_update_available",
+                    object_id="svc-01",
+                    dedupe_key="inst-lifespan:github_releases:v9.9.9",
+                    latest_tag="v9.9.9",
+                    latest_version="9.9.9",
+                    occurred_at=live_now - timedelta(seconds=1),
+                    policy=NoticeDeliveryPolicy(ttl_seconds=86400, lease_seconds=60),
+                )
+                s.query(AgentDeliveryJob).update({"next_attempt_at": live_now})
+
+        settings = Settings(
+            database_url=alembic_database.database_url,
+            notice_delivery_poller_enabled=True,
+            notice_delivery_poll_interval_seconds=5,
+            notice_delivery_max_per_run=10,
+            notice_delivery_endpoint_url=receiver.url,
+        )
+        with TestClient(create_notice_app(settings)):
+            deadline = time_module.time() + 30
+            forced_retry = False
+            status = None
+            while time_module.time() < deadline:
+                with alembic_database.sessions() as s:
+                    job = s.query(AgentDeliveryJob).one()
+                    status = job.status
+                    if status == "pending" and job.attempts == 1 and not forced_retry:
+                        # Skip the 30 s backoff: the response was lost, retry now.
+                        job.next_attempt_at = datetime.now(DT_UTC).replace(tzinfo=None)
+                        s.commit()
+                        forced_retry = True
+                    if status in {"delivered", "failed"}:
+                        break
+                time_module.sleep(0.5)
+        assert forced_retry and status == "delivered", f"job ended as {status!r}"
+        assert len(receiver.visible) == 1
+        assert len(receiver.request_ids) == 2 and len(set(receiver.request_ids)) == 1
+        with alembic_database.sessions() as s:
+            outcomes = [
+                row.outcome
+                for row in s.scalars(select(AgentDeliveryAttempt).order_by(AgentDeliveryAttempt.id))
+            ]
+            assert outcomes == ["unavailable", "confirmed_duplicate"]
+            assert s.query(AgentDeliveryJob).one().last_error_code is None
 
 
 def _seed_service_principal_and_target(session: Session) -> None:

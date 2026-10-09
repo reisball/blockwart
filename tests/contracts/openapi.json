@@ -1299,7 +1299,7 @@
         "type": "object"
       },
       "AgentNoticeDeliveryJobOut": {
-        "description": "Redacted delivery diagnostics. No payload, transport, or token data.",
+        "description": "Redacted delivery diagnostics. No payload, transport, lease, or token data.",
         "properties": {
           "acknowledged_at": {
             "anyOf": [
@@ -1351,6 +1351,17 @@
             "title": "Job Id",
             "type": "integer"
           },
+          "last_attempt_outcome": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Attempt Outcome"
+          },
           "last_error_code": {
             "anyOf": [
               {
@@ -1379,6 +1390,14 @@
             "type": "string"
           },
           "status": {
+            "enum": [
+              "pending",
+              "delivered",
+              "failed",
+              "suppressed",
+              "expired",
+              "acknowledged"
+            ],
             "title": "Status",
             "type": "string"
           },
@@ -1437,6 +1456,18 @@
       "AgentNoticeOut": {
         "description": "The agent-visible notice: minimal payload plus its delivery state.",
         "properties": {
+          "acknowledged_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Acknowledged At"
+          },
           "blockwart_reference": {
             "title": "Blockwart Reference",
             "type": "string"
@@ -1474,6 +1505,14 @@
             "type": "integer"
           },
           "status": {
+            "enum": [
+              "pending",
+              "delivered",
+              "failed",
+              "suppressed",
+              "expired",
+              "acknowledged"
+            ],
             "title": "Status",
             "type": "string"
           }
@@ -1620,6 +1659,113 @@
           "revoked_at"
         ],
         "title": "AgentNoticeSubscriptionOut",
+        "type": "object"
+      },
+      "AgentNoticeTargetIn": {
+        "properties": {
+          "label": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Label",
+            "type": "string"
+          },
+          "principal_id": {
+            "maxLength": 36,
+            "minLength": 1,
+            "title": "Principal Id",
+            "type": "string"
+          },
+          "route": {
+            "maxLength": 191,
+            "minLength": 1,
+            "title": "Route",
+            "type": "string"
+          },
+          "transport": {
+            "maxLength": 32,
+            "minLength": 1,
+            "title": "Transport",
+            "type": "string"
+          }
+        },
+        "required": [
+          "principal_id",
+          "label",
+          "route",
+          "transport"
+        ],
+        "title": "AgentNoticeTargetIn",
+        "type": "object"
+      },
+      "AgentNoticeTargetListOut": {
+        "properties": {
+          "count": {
+            "title": "Count",
+            "type": "integer"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/AgentNoticeTargetOut"
+            },
+            "title": "Items",
+            "type": "array"
+          }
+        },
+        "required": [
+          "count",
+          "items"
+        ],
+        "title": "AgentNoticeTargetListOut",
+        "type": "object"
+      },
+      "AgentNoticeTargetOut": {
+        "description": "An approved destination. The route is a non-secret identity, never a credential.",
+        "properties": {
+          "active": {
+            "title": "Active",
+            "type": "boolean"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "principal_id": {
+            "title": "Principal Id",
+            "type": "string"
+          },
+          "principal_login": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Principal Login"
+          },
+          "route": {
+            "title": "Route",
+            "type": "string"
+          },
+          "transport": {
+            "title": "Transport",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "principal_id",
+          "label",
+          "route",
+          "transport",
+          "active"
+        ],
+        "title": "AgentNoticeTargetOut",
         "type": "object"
       },
       "AgentProjectedObject": {
@@ -11514,7 +11660,7 @@
     },
     "/api/v1/admin/notices": {
       "get": {
-        "operationId": "list_notice_subscriptions_api_v1_admin_notices_get",
+        "operationId": "list_notice_subscription_rows_api_v1_admin_notices_get",
         "responses": {
           "200": {
             "content": {
@@ -11632,7 +11778,7 @@
             "HTTPBearer": []
           }
         ],
-        "summary": "List Notice Subscriptions",
+        "summary": "List Notice Subscription Rows",
         "tags": [
           "api-v1-admin-notices"
         ]
@@ -11641,7 +11787,7 @@
     "/api/v1/admin/notices/jobs": {
       "get": {
         "description": "Redacted delivery diagnostics: states only, never transport details.",
-        "operationId": "list_notice_jobs_api_v1_admin_notices_jobs_get",
+        "operationId": "list_notice_job_rows_api_v1_admin_notices_jobs_get",
         "parameters": [
           {
             "in": "query",
@@ -11650,7 +11796,14 @@
             "schema": {
               "anyOf": [
                 {
-                  "maxLength": 16,
+                  "enum": [
+                    "pending",
+                    "delivered",
+                    "failed",
+                    "suppressed",
+                    "expired",
+                    "acknowledged"
+                  ],
                   "type": "string"
                 },
                 {
@@ -11790,7 +11943,7 @@
             "HTTPBearer": []
           }
         ],
-        "summary": "List Notice Jobs",
+        "summary": "List Notice Job Rows",
         "tags": [
           "api-v1-admin-notices"
         ]
@@ -11933,15 +12086,137 @@
       }
     },
     "/api/v1/admin/notices/targets": {
+      "get": {
+        "operationId": "list_notice_target_rows_api_v1_admin_notices_targets_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentNoticeTargetListOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Authentication required"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Permission denied"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Resource not found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "412": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Precondition failed"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Request validation failed"
+          },
+          "428": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Precondition required"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Internal server error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Service unavailable"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List Notice Target Rows",
+        "tags": [
+          "api-v1-admin-notices"
+        ]
+      },
       "post": {
         "operationId": "create_notice_target_api_v1_admin_notices_targets_post",
         "requestBody": {
           "content": {
             "application/json": {
               "schema": {
-                "additionalProperties": true,
-                "title": "Payload",
-                "type": "object"
+                "$ref": "#/components/schemas/AgentNoticeTargetIn"
               }
             }
           },
@@ -11952,9 +12227,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Create Notice Target Api V1 Admin Notices Targets Post",
-                  "type": "object"
+                  "$ref": "#/components/schemas/AgentNoticeTargetOut"
                 }
               }
             },
@@ -16209,6 +16482,30 @@
               "minimum": 1,
               "title": "Limit",
               "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "pending",
+                    "delivered",
+                    "failed",
+                    "suppressed",
+                    "expired",
+                    "acknowledged"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Status"
             }
           }
         ],

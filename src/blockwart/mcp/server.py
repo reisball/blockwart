@@ -26,6 +26,7 @@ from blockwart.config import Settings
 from blockwart.domain.activity import (
     ACTIVITY_EVENT_TYPES,
 )
+from blockwart.domain.agent_notices import DELIVERY_STATUS_VALUES as NOTICE_STATUS_VALUES
 from blockwart.domain.asset_state import ASSET_KINDS
 from blockwart.domain.attention import (
     ATTENTION_CATEGORY_VALUES,
@@ -918,6 +919,56 @@ TOOLS: list[JSON] = [
             "additionalProperties": False,
         },
         "annotations": READ_ONLY_ANNOTATIONS,
+    },
+    {
+        "name": "blockwart.list_own_notices",
+        "description": (
+            "List only the authenticated caller's own agent notices and their delivery "
+            "state (pending, delivered, failed, suppressed, expired, acknowledged), "
+            "newest first. A notice carries a fixed minimal message, a visible object "
+            "reference, and a path back into Blockwart - never release notes, "
+            "transport endpoints, credentials, or session data. A notice whose object "
+            "the caller can no longer read is omitted without any hint. Reading a "
+            "notice grants nothing and starts no action; the agent decides on its own "
+            "rules and approvals what to do with it."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "status": {
+                    "type": "string",
+                    "enum": list(NOTICE_STATUS_VALUES),
+                },
+                "limit": {"type": "integer", "minimum": 1, "maximum": 100, "default": 20},
+            },
+            "additionalProperties": False,
+        },
+        "annotations": READ_ONLY_ANNOTATIONS,
+    },
+    {
+        "name": "blockwart.acknowledge_notice",
+        "description": (
+            "Acknowledge receipt of one of the caller's own delivered agent notices by "
+            "event id. This records receipt only: it is not an approval, grants no "
+            "access, and starts no update, deployment, or other action. Repeating the "
+            "acknowledgement is a no-op. A notice that does not exist for the caller, "
+            "including one on an object the caller can no longer read, is reported as "
+            "not found."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "event_id": {"type": "string", "minLength": 1, "maxLength": 36},
+            },
+            "required": ["event_id"],
+            "additionalProperties": False,
+        },
+        "annotations": {
+            "readOnlyHint": False,
+            "destructiveHint": False,
+            "idempotentHint": True,
+            "openWorldHint": True,
+        },
     },
     {
         "name": "blockwart.get_source_coverage",
@@ -2162,6 +2213,19 @@ def call_tool(
                 "direction": args.get("direction", "desc"),
                 "include_total": args.get("include_total", False),
             },
+        )
+    elif name == "blockwart.list_own_notices":
+        payload = fetch(
+            "/api/v1/notices",
+            {"status": args.get("status"), "limit": args.get("limit", 20)},
+        )
+    elif name == "blockwart.acknowledge_notice":
+        event_id = _required_string(args, "event_id")
+        payload = request(
+            "POST",
+            f"/api/v1/notices/{quote(event_id, safe='')}/acknowledge",
+            {},
+            {},
         )
     elif name == "blockwart.get_source_coverage":
         payload = fetch(

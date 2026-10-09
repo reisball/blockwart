@@ -3,14 +3,24 @@
 The contract is intentionally narrow:
 
 - a transport receives one already data-minimized payload for one job;
-- it reports a coarse outcome, never provider or credential details; and
+- it reports a coarse outcome, never provider or credential details;
+- it is not told about transactions: callers never hold a database
+  transaction open while a transport runs; and
 - no implementation may take freely configurable callback URLs.
 
+Delivery is at-least-once on the wire. The stable ``delivery_id`` is the
+receiver-enforced idempotency key: a receiver that has already accepted that
+key answers with a *duplicate confirmation*, which Blockwart records as the
+prior success (``DeliveryOutcome.duplicate``), not as a failure. A lost
+response therefore never produces a second visible notice nor a false
+dead-letter.
+
 The only shipped real adapter targets an isolated OpenClaw test gateway. It
-refuses every non-loopback destination by construction, so CI and tests can
-exercise the full path without any productive gateway, agent turn, network,
-or credential configuration. Productive transports require a separate design
-and approval round.
+refuses every non-loopback destination by construction, never uses an
+environment proxy, and never follows a redirect, so CI and tests can exercise
+the full path without any productive gateway, agent turn, network, or
+credential configuration. Productive transports require a separate design and
+approval round.
 """
 
 from __future__ import annotations
@@ -23,13 +33,21 @@ from dataclasses import dataclass
 from typing import Any, Protocol
 from urllib.parse import urlsplit
 
+_RESPONSE_READ_LIMIT = 4096
+DUPLICATE_STATUS = "duplicate"
+
 
 @dataclass(frozen=True, slots=True)
 class DeliveryOutcome:
-    """Coarse transport verdict. ``error_code`` uses safe vocabulary only."""
+    """Coarse transport verdict. ``error_code`` uses safe vocabulary only.
+
+    ``duplicate`` is only meaningful with ``ok``: the receiver confirmed that it
+    had already accepted this ``delivery_id`` (typically after a lost response).
+    """
 
     ok: bool
     error_code: str | None = None  # transport_timeout | transport_unavailable | rate_limited
+    duplicate: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -48,6 +66,10 @@ class DeliveryRequest:
 
 
 class NoticeTransport(Protocol):
+    # Upper bound in seconds for one ``deliver`` call. The delivery lease must
+    # outlive it, otherwise a slow-but-live worker would be reclaimed.
+    timeout_seconds: float
+
     def deliver(self, request: DeliveryRequest) -> DeliveryOutcome: ...
 
 
@@ -64,20 +86,63 @@ def _require_loopback_url(url: str) -> None:
         raise TransportConfigError("openclaw test gateway refuses non-loopback destinations")
 
 
+class _RejectRedirectHandler(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):  # noqa: ANN001
+        return None
+
+
+def _read_limited(response: Any) -> bytes:
+    try:
+        return response.read(_RESPONSE_READ_LIMIT)
+    except Exception:  # noqa: BLE001 - body is advisory only
+        return b""
+
+
+def _confirms_duplicate(body: bytes, delivery_id: str) -> bool:
+    """Whether a receiver body is the duplicate confirmation for this key."""
+    try:
+        decoded = json.loads(body.decode("utf-8"))
+    except (UnicodeDecodeError, ValueError):
+        return False
+    return (
+        isinstance(decoded, dict)
+        and decoded.get("status") == DUPLICATE_STATUS
+        and decoded.get("delivery_id") == delivery_id
+    )
+
+
 class OpenClawTestGatewayTransport:
     """First OpenClaw delivery route, bound to an isolated test gateway.
 
     The endpoint is fixed at construction time and must be loopback HTTP.
-    The bearer token is passed per call by the operator harness; it is never
+    The bearer token is supplied by the operator harness; it is never
     persisted by Blockwart, never logged, and never placed into payloads or
     audit rows. This adapter exists so the delivery pipeline is provable end
     to end against a fake/test gateway; it performs no productive delivery.
+
+    Receiver contract: ``2xx`` accepts the delivery. A receiver that already
+    accepted the same ``delivery_id`` answers ``409`` (or ``2xx``) with the JSON
+    body ``{"status": "duplicate", "delivery_id": "<same id>"}``; that is a
+    confirmed prior success. Any other ``409`` is a failure.
     """
 
-    def __init__(self, *, endpoint_url: str, timeout_seconds: float = 5.0) -> None:
+    def __init__(
+        self,
+        *,
+        endpoint_url: str,
+        timeout_seconds: float = 5.0,
+        token: str | None = None,
+    ) -> None:
         _require_loopback_url(endpoint_url)
         self._endpoint_url = endpoint_url
-        self._timeout_seconds = timeout_seconds
+        self.timeout_seconds = timeout_seconds
+        self._token = token or None
+        # An empty proxy map plus a redirect refusal keep every request on the
+        # configured loopback socket regardless of the process environment.
+        self._opener = urllib.request.build_opener(
+            urllib.request.ProxyHandler({}),
+            _RejectRedirectHandler(),
+        )
 
     def deliver(
         self,
@@ -92,8 +157,9 @@ class OpenClawTestGatewayTransport:
         }
         body = json.dumps(envelope).encode("utf-8")
         headers = {"Content-Type": "application/json"}
-        if token:
-            headers["Authorization"] = f"Bearer {token}"
+        bearer = token or self._token
+        if bearer:
+            headers["Authorization"] = f"Bearer {bearer}"
         http_request = urllib.request.Request(
             self._endpoint_url,
             data=body,
@@ -101,39 +167,78 @@ class OpenClawTestGatewayTransport:
             method="POST",
         )
         try:
-            with urllib.request.urlopen(  # noqa: S310 - loopback enforced in constructor
+            with self._opener.open(  # noqa: S310 - loopback enforced in constructor
                 http_request,
-                timeout=self._timeout_seconds,
+                timeout=self.timeout_seconds,
             ) as response:
                 status = getattr(response, "status", 200)
+                response_body = _read_limited(response)
             if 200 <= status < 300:
-                return DeliveryOutcome(ok=True)
+                return DeliveryOutcome(
+                    ok=True,
+                    duplicate=_confirms_duplicate(response_body, request.delivery_id),
+                )
             return DeliveryOutcome(ok=False, error_code="transport_unavailable")
         except urllib.error.HTTPError as exc:
+            if exc.code == 409 and _confirms_duplicate(
+                _read_limited(exc),
+                request.delivery_id,
+            ):
+                return DeliveryOutcome(ok=True, duplicate=True)
             if exc.code == 429:
                 return DeliveryOutcome(ok=False, error_code="rate_limited")
             return DeliveryOutcome(ok=False, error_code="transport_unavailable")
         except TimeoutError:
             return DeliveryOutcome(ok=False, error_code="transport_timeout")
+        except urllib.error.URLError as exc:
+            if isinstance(exc.reason, TimeoutError):
+                return DeliveryOutcome(ok=False, error_code="transport_timeout")
+            return DeliveryOutcome(ok=False, error_code="transport_unavailable")
         except Exception:  # noqa: BLE001 - transport boundary stays coarse
             return DeliveryOutcome(ok=False, error_code="transport_unavailable")
 
 
 class FakeNoticeTransport:
-    """Deterministic in-memory transport for tests and diagnostics."""
+    """Deterministic in-memory transport for tests and diagnostics.
+
+    It also models an idempotent receiver: the first accepted ``delivery_id``
+    becomes one visible delivery, every repeat is answered with a duplicate
+    confirmation and never becomes a second visible delivery.
+    """
+
+    timeout_seconds = 0.0
 
     def __init__(self) -> None:
         self.calls: list[DeliveryRequest] = []
-        self._results: list[DeliveryOutcome] = []
+        self.visible: list[DeliveryRequest] = []
+        self._accepted: set[str] = set()
+        self._results: list[DeliveryOutcome | _LostResponse] = []
 
     def enqueue_result(self, *outcomes: DeliveryOutcome) -> None:
+        """Queue verdicts the receiver never acted on (nothing became visible)."""
         self._results.extend(outcomes)
+
+    def enqueue_lost_response(self) -> None:
+        """Receiver accepts the delivery but the response never reaches the sender."""
+        self._results.append(_LostResponse())
 
     def deliver(self, request: DeliveryRequest) -> DeliveryOutcome:
         self.calls.append(request)
-        if self._results:
-            return self._results.pop(0)
+        queued = self._results.pop(0) if self._results else None
+        if isinstance(queued, DeliveryOutcome):
+            return queued
+        if request.delivery_id in self._accepted:
+            return DeliveryOutcome(ok=True, duplicate=True)
+        self._accepted.add(request.delivery_id)
+        self.visible.append(request)
+        if isinstance(queued, _LostResponse):
+            return DeliveryOutcome(ok=False, error_code="transport_timeout")
         return DeliveryOutcome(ok=True)
+
+
+@dataclass(frozen=True, slots=True)
+class _LostResponse:
+    pass
 
 
 def build_notice_transport(settings) -> NoticeTransport | None:
@@ -147,12 +252,4 @@ def build_notice_transport(settings) -> NoticeTransport | None:
     if not endpoint:
         return None
     token = os.environ.get("BLOCKWART_NOTICE_DELIVERY_TOKEN") or None
-    transport = OpenClawTestGatewayTransport(endpoint_url=endpoint)
-    if token:
-        original_deliver = transport.deliver
-
-        def deliver_with_token(request: DeliveryRequest) -> DeliveryOutcome:
-            return original_deliver(request, token=token)
-
-        transport.deliver = deliver_with_token  # type: ignore[method-assign]
-    return transport
+    return OpenClawTestGatewayTransport(endpoint_url=endpoint, token=token)

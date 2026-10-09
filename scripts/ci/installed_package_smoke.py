@@ -268,6 +268,8 @@ async def check_mcp(
                 "blockwart.get_source_coverage",
                 "blockwart.get_attention",
                 "blockwart.get_activity",
+                "blockwart.list_own_notices",
+                "blockwart.acknowledge_notice",
                 "blockwart.create_child",
                 "blockwart.create_root",
                 "blockwart.update_object",
@@ -311,6 +313,7 @@ async def check_mcp(
                         "blockwart.get_source_coverage",
                         "blockwart.get_attention",
                         "blockwart.get_activity",
+                        "blockwart.list_own_notices",
                         "blockwart.get_object_access",
                         "blockwart.search_principals",
                         "blockwart.list_admin_principals",
@@ -500,12 +503,21 @@ async def check_mcp(
                     {"principal_id": grant_candidate_id},
                 ),
                 await session.call_tool("blockwart.get_activity", {"limit": 1}),
+                await session.call_tool("blockwart.list_own_notices", {"limit": 1}),
                 await session.call_tool(
                     "blockwart.list_admin_principal_assignments",
                     {"principal_id": grant_candidate_id, "limit": 1},
                 ),
             ]
             assert all(not result.isError for result in read_results)
+            notice_payload = _tool_payload(read_results[10])
+            assert notice_payload == {"count": 0, "notices": []}
+            # An unknown notice is indistinguishable from one the caller cannot read.
+            missing_notice = await session.call_tool(
+                "blockwart.acknowledge_notice",
+                {"event_id": "package-smoke-missing"},
+            )
+            assert missing_notice.isError
             assignment_page = _tool_payload(read_results[-1])
             assert assignment_page["assignment_type"] == "effective"
             assert len(assignment_page["effective_access"]) <= 1

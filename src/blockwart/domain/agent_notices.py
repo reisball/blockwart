@@ -39,7 +39,14 @@ DELIVERY_STATUS_VALUES = (
     "acknowledged",
 )
 
-ATTEMPT_OUTCOME_VALUES = ("success", "timeout", "unavailable", "rate_limited")
+ATTEMPT_OUTCOME_VALUES = (
+    "success",
+    "confirmed_duplicate",
+    "timeout",
+    "unavailable",
+    "rate_limited",
+    "lease_expired",
+)
 
 # Safe, coarse failure codes. They intentionally carry no provider, URL,
 # credential, prompt, session, or token material.
@@ -54,6 +61,7 @@ SAFE_ERROR_CODES = (
     "ttl_expired",
     "attempt_limit_reached",
     "storm_suppressed",
+    "delivery_error",
 )
 
 

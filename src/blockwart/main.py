@@ -22,6 +22,7 @@ from blockwart.services.release_monitoring import run_release_monitoring_poller
 from blockwart.ui.admin import router as admin_ui_router
 from blockwart.ui.auth import router as auth_router
 from blockwart.ui.i18n import persist_locale_cookie, validate_locale_catalogs
+from blockwart.ui.notices import router as notices_ui_router
 from blockwart.ui.paths import STATIC_DIR
 from blockwart.ui.routes import router as ui_router
 
@@ -60,6 +61,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(notices_agent_router, prefix="/api")
     app.include_router(auth_router)
     app.include_router(admin_ui_router)
+    app.include_router(notices_ui_router)
     app.include_router(ui_router)
     install_request_context(app)
     default_openapi = app.openapi
