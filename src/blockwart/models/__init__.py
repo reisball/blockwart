@@ -1,4 +1,8 @@
 from blockwart.models.access import AccessRequest, ObjectGrant
+from blockwart.models.access_request_notices import (
+    AccessRequestNotice,
+    AccessRequestNoticeAttempt,
+)
 from blockwart.models.agent_notices import (
     AgentDeliveryAttempt,
     AgentDeliveryJob,
@@ -30,6 +34,8 @@ from blockwart.models.source_coverage import (
 
 __all__ = [
     "AccessRequest",
+    "AccessRequestNotice",
+    "AccessRequestNoticeAttempt",
     "AgentDeliveryAttempt",
     "AgentDeliveryJob",
     "AgentDeliveryTarget",

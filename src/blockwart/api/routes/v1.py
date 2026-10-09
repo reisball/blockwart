@@ -121,6 +121,7 @@ from blockwart.schemas.v1 import (
     V1SourceCoveragePageOut,
     V1TopologyOut,
 )
+from blockwart.services.access_request_notices import notice_routing_from_settings
 from blockwart.services.access_requests import (
     cancel_access_request,
     create_access_request,
@@ -1775,6 +1776,7 @@ def create_v1_access_request(
     access: Annotated[ReadAccess, Depends(require_api_read_access)],
 ) -> V1AccessRequestCommandOut:
     context = api_write_context(request, access)
+    routing = notice_routing_from_settings(request.app.state.settings)
     result = execute_api_command(
         session,
         context,
@@ -1785,6 +1787,7 @@ def create_v1_access_request(
             duration=payload.duration,
             ttl_seconds=payload.ttl_seconds,
             reason=payload.reason,
+            routing=routing,
         ),
     )
     return V1AccessRequestCommandOut.model_validate(result)
@@ -1797,10 +1800,15 @@ def create_v1_access_request(
 def get_v1_my_access_requests(
     request: Request,
     session: Annotated[Session, Depends(get_session)],
-    access: Annotated[ReadAccess, Depends(require_api_read_access)],
+    access: Annotated[ReadAccess, Depends(require_api_read_only_access)],
 ) -> V1AccessRequestListOut:
+    """List the caller's requests with their current effective status.
+
+    Strictly read-only: expiry and revocation are projected, never persisted,
+    and no audit event, token timestamp or request row is written.
+    """
     context = api_write_context(request, access)
-    items = execute_api_command(
+    items = execute_api_read_only_command(
         session,
         context,
         lambda: list_my_access_requests(session, context),
@@ -1815,10 +1823,11 @@ def get_v1_my_access_requests(
 def get_v1_pending_access_requests(
     request: Request,
     session: Annotated[Session, Depends(get_session)],
-    access: Annotated[ReadAccess, Depends(require_api_read_access)],
+    access: Annotated[ReadAccess, Depends(require_api_read_only_access)],
 ) -> V1AccessRequestQueueOut:
+    """List open requests the caller may decide right now. Strictly read-only."""
     context = api_write_context(request, access)
-    items = execute_api_command(
+    items = execute_api_read_only_command(
         session,
         context,
         lambda: list_pending_access_requests(session, context),

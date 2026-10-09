@@ -1540,7 +1540,9 @@ TOOLS: list[JSON] = [
         "name": "blockwart.create_access_request",
         "description": (
             "Request temporary or permanent Viewer access on one discoverable object. "
-            "Retries with identical arguments are idempotent."
+            "Retrying while a request is still pending returns that same request "
+            "unchanged. Approvers may be hinted on approved agent routes; a hint "
+            "never approves anything."
         ),
         "inputSchema": {
             "type": "object",
@@ -1561,7 +1563,12 @@ TOOLS: list[JSON] = [
     },
     {
         "name": "blockwart.list_my_access_requests",
-        "description": "List your own access requests with their current status.",
+        "description": (
+            "List your own access requests with their current effective status "
+            "(pending, approved, denied, cancelled, expired, revoked). Read-only: "
+            "expiry and revocation are computed, never written. Requests on objects "
+            "you can no longer discover are omitted."
+        ),
         "inputSchema": {
             "type": "object",
             "properties": {},
@@ -1572,7 +1579,8 @@ TOOLS: list[JSON] = [
     {
         "name": "blockwart.list_pending_access_requests",
         "description": (
-            "List open access requests you are currently authorized to decide."
+            "List open access requests you are currently authorized to decide. "
+            "Read-only: nothing is written or expired by listing."
         ),
         "inputSchema": {
             "type": "object",

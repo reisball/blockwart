@@ -59,16 +59,6 @@ from blockwart.services.project_migration import (
 # ---------------------------------------------------------------------------
 
 
-def test_open_access_request_index_is_partial_on_both_dialects() -> None:
-    index = next(
-        index
-        for index in AccessRequest.__table__.indexes
-        if index.name == "uq_access_requests_open"
-    )
-    for dialect in (sqlite.dialect(), postgresql.dialect()):
-        statement = str(CreateIndex(index).compile(dialect=dialect))
-        assert "WHERE status IN ('pending', 'approved')" in statement
-
 PG_TEST_URL = os.environ.get(
     "BLOCKWART_TEST_PG_URL",
     "postgresql+psycopg2://postgres:test@127.0.0.1:5432/blockwart_test",
@@ -271,6 +261,19 @@ def test_scoped_relationship_endpoint_query_compiles_for_sqlite_and_postgresql()
         )
         assert "catalog_objects.id IN ('direct-endpoint', 'graph-endpoint')" in compiled
         assert "ORDER BY catalog_objects.id" in compiled
+
+
+def test_open_access_request_index_is_partial_on_both_dialects() -> None:
+    index = next(
+        index
+        for index in AccessRequest.__table__.indexes
+        if index.name == "uq_access_requests_open"
+    )
+    for dialect in (sqlite.dialect(), postgresql.dialect()):
+        statement = str(CreateIndex(index).compile(dialect=dialect))
+        # Only pending requests occupy the open slot: an approved request must
+        # never block a replacement after its grant expires or is revoked.
+        assert statement.endswith("WHERE status = 'pending'")
 
 
 def test_sqlite_fresh_migrations_match_model_schema(tmp_path: Path) -> None:
@@ -622,6 +625,257 @@ def test_postgresql_agent_notice_migration_round_trip_and_database_invariants(
         assert _table_rows(engine, tables) == before
     finally:
         engine.dispose()
+
+
+@PG_SKIP
+def test_postgresql_combined_chain_with_access_requests_round_trip_and_invariants(
+    pg_database_name: str,
+) -> None:
+    """main 0024 -> 0025 -> 0026 -> PR221 0027 -> access requests 0028 and back."""
+    database_url = _pg_url(pg_database_name)
+    owner = "00000000-0000-0000-0000-000000000100"
+    agent = "00000000-0000-0000-0000-000000000101"
+    _upgrade_to(database_url, ADDITIVE_PROJECT_CREATOR_REVISION)
+    engine = build_engine(database_url)
+    try:
+        with engine.begin() as connection:
+            _insert_principal(
+                connection,
+                principal_id=owner,
+                login="chain-owner-100",
+                platform_role="admin",
+                catalog_role="catalog_owner",
+            )
+            connection.execute(
+                text(
+                    "INSERT INTO principals (id, principal_type, login, display_name, active) "
+                    "VALUES (:id, 'service_account', 'chain-agent-100', 'Agent', true)"
+                ),
+                {"id": agent},
+            )
+            connection.execute(
+                text(
+                    "INSERT INTO catalog_objects (id, kind, label, status, lifecycle, "
+                    "health, data_json, provenance_json, revision) VALUES "
+                    "('pg-chain-root', 'host', 'Root', 'active', 'active', "
+                    "'healthy', :data_json, '{}', 3)"
+                ),
+                {"data_json": json.dumps({"schema_version": 1})},
+            )
+            connection.execute(
+                text(
+                    "INSERT INTO object_grants (principal_id, object_id, role, scope) VALUES "
+                    "(:owner, 'pg-chain-root', 'owner', 'self'), "
+                    "(:agent, 'pg-chain-root', 'viewer', 'self')"
+                ),
+                {"owner": owner, "agent": agent},
+            )
+        columns = {
+            "principals": ["id", "login", "catalog_role", "platform_role", "active"],
+            "catalog_objects": ["id", "kind", "label", "revision"],
+            "object_grants": ["id", "principal_id", "object_id", "role", "scope"],
+        }
+        before = _table_rows_for_columns(engine, columns)
+    finally:
+        engine.dispose()
+
+    for revision in (
+        CREDENTIAL_REFERENCE_CREATOR_REVISION,
+        ACTIVITY_INDEX_REVISION,
+        AGENT_NOTICES_REVISION,
+    ):
+        _upgrade_to(database_url, revision)
+        engine = build_engine(database_url)
+        try:
+            assert _table_rows_for_columns(engine, columns) == before
+        finally:
+            engine.dispose()
+    engine = build_engine(database_url)
+    try:
+        with engine.begin() as connection:
+            connection.execute(
+                text(
+                    "INSERT INTO agent_delivery_targets (id, principal_id, label, route, "
+                    "transport, active) VALUES ('chain-target', :agent, 'l', "
+                    "'openclaw-agent:chain', 'openclaw_test_gateway', true)"
+                ),
+                {"agent": agent},
+            )
+    finally:
+        engine.dispose()
+
+    _upgrade_to(database_url, ACCESS_REQUESTS_REVISION)
+    config = build_alembic_config(database_url)
+    command.check(config)  # metadata and migrations agree on PostgreSQL
+    engine = build_engine(database_url)
+    try:
+        assert _table_rows_for_columns(engine, columns) == before
+        with engine.connect() as connection:
+            assert connection.execute(
+                text("SELECT count(*) FROM object_grants WHERE expires_at IS NOT NULL")
+            ).scalar_one() == 0
+            assert connection.execute(
+                text("SELECT id FROM agent_delivery_targets")
+            ).scalars().all() == ["chain-target"]
+            indexes = dict(
+                connection.execute(
+                    text(
+                        "SELECT indexname, indexdef FROM pg_indexes "
+                        "WHERE tablename IN ('access_requests', 'access_request_notices')"
+                    )
+                ).all()
+            )
+        open_index = indexes["uq_access_requests_open"]
+        assert "UNIQUE" in open_index and "'pending'" in open_index
+        assert "approved" not in open_index
+
+        insert_request = text(
+            "INSERT INTO access_requests (id, requester_principal_id, object_id, status) "
+            "VALUES (:id, :principal, 'pg-chain-root', :status)"
+        )
+        with engine.begin() as connection:
+            # History never collides: any number of closed rows, one pending.
+            for request_id, status in (
+                ("r-approved", "approved"),
+                ("r-expired", "expired"),
+                ("r-revoked", "revoked"),
+                ("r-denied", "denied"),
+                ("r-cancelled", "cancelled"),
+                ("r-pending", "pending"),
+            ):
+                connection.execute(
+                    insert_request, {"id": request_id, "principal": agent, "status": status}
+                )
+        with pytest.raises(IntegrityError):
+            with engine.begin() as connection:
+                connection.execute(
+                    insert_request, {"id": "r-second", "principal": agent, "status": "pending"}
+                )
+        with pytest.raises(IntegrityError):
+            with engine.begin() as connection:
+                connection.execute(
+                    insert_request, {"id": "r-bogus", "principal": owner, "status": "bogus"}
+                )
+
+        insert_notice = text(
+            "INSERT INTO access_request_notices (id, request_id, target_id, "
+            "recipient_principal_id, next_attempt_at, expires_at) "
+            "VALUES (:id, 'r-pending', 'chain-target', :agent, now(), now())"
+        )
+        with engine.begin() as connection:
+            connection.execute(insert_notice, {"id": "n-1", "agent": agent})
+        with pytest.raises(IntegrityError):  # one notice per (request, target)
+            with engine.begin() as connection:
+                connection.execute(insert_notice, {"id": "n-2", "agent": agent})
+        for update_sql in (
+            "UPDATE access_request_notices SET status = 'delivered', lease_token = 'x', "
+            "lease_expires_at = now()",
+            "UPDATE access_request_notices SET lease_token = 'x'",
+            "UPDATE access_request_notices SET last_error_code = 'free text'",
+            "UPDATE access_request_notices SET status = 'bogus'",
+        ):
+            with pytest.raises(IntegrityError):
+                with engine.begin() as connection:
+                    connection.execute(text(update_sql))
+
+        # Deleting the grant behind an approval clears the link, never the request.
+        with engine.begin() as connection:
+            grant_id = connection.execute(
+                text(
+                    "INSERT INTO object_grants (principal_id, object_id, role, scope, "
+                    "expires_at) VALUES (:agent, 'pg-chain-root', 'discoverer', 'self', "
+                    "'2020-01-01') RETURNING id"
+                ),
+                {"agent": agent},
+            ).scalar_one()
+            connection.execute(
+                text("UPDATE access_requests SET grant_id = :g WHERE id = 'r-approved'"),
+                {"g": grant_id},
+            )
+    finally:
+        engine.dispose()
+
+    # A temporary grant (expired or not) makes the downgrade fail closed.
+    with pytest.raises(RuntimeError, match="Temporary grants must be explicitly revoked"):
+        command.downgrade(config, AGENT_NOTICES_REVISION)
+
+    engine = build_engine(database_url)
+    try:
+        with engine.begin() as connection:
+            connection.execute(text("DELETE FROM object_grants WHERE expires_at IS NOT NULL"))
+            assert connection.execute(
+                text("SELECT grant_id FROM access_requests WHERE id = 'r-approved'")
+            ).scalar_one() is None
+            assert connection.execute(
+                text("SELECT status FROM access_requests WHERE id = 'r-approved'")
+            ).scalar_one() == "approved"
+    finally:
+        engine.dispose()
+
+    command.downgrade(config, AGENT_NOTICES_REVISION)
+    engine = build_engine(database_url)
+    try:
+        names = set(inspect(engine).get_table_names())
+        assert not names & {
+            "access_requests",
+            "access_request_notices",
+            "access_request_notice_attempts",
+        }
+        assert "expires_at" not in {
+            column["name"] for column in inspect(engine).get_columns("object_grants")
+        }
+        assert _table_rows_for_columns(engine, columns) == before
+        with engine.connect() as connection:
+            assert connection.execute(
+                text("SELECT id FROM agent_delivery_targets")
+            ).scalars().all() == ["chain-target"]
+    finally:
+        engine.dispose()
+    command.downgrade(config, ACTIVITY_INDEX_REVISION)
+    command.upgrade(config, "head")
+    command.check(config)
+
+
+@PG_SKIP
+def test_postgresql_create_all_matches_the_migrated_access_request_indexes() -> None:
+    """``Base.metadata.create_all`` and Alembic must build identical access indexes."""
+    migrated = f"bw_test_{uuid.uuid4().hex[:12]}"
+    created = f"bw_test_{uuid.uuid4().hex[:12]}"
+    _create_pg_database(migrated)
+    _create_pg_database(created)
+    try:
+        _upgrade_to(_pg_url(migrated), HEAD_REVISION)
+        engine = build_engine(_pg_url(created))
+        try:
+            Base.metadata.create_all(engine)
+        finally:
+            engine.dispose()
+
+        def index_definitions(database: str) -> dict[str, str]:
+            engine = build_engine(_pg_url(database))
+            try:
+                with engine.connect() as connection:
+                    return dict(
+                        connection.execute(
+                            text(
+                                "SELECT indexname, indexdef FROM pg_indexes "
+                                "WHERE tablename IN ('access_requests', "
+                                "'access_request_notices', 'access_request_notice_attempts', "
+                                "'object_grants') ORDER BY indexname"
+                            )
+                        ).all()
+                    )
+            finally:
+                engine.dispose()
+
+        from_migrations = index_definitions(migrated)
+        from_metadata = index_definitions(created)
+        assert from_migrations == from_metadata
+        assert "WHERE" in from_metadata["uq_access_requests_open"]
+        assert "'pending'" in from_metadata["uq_access_requests_open"]
+    finally:
+        _drop_pg_database(migrated)
+        _drop_pg_database(created)
 
 
 @PG_SKIP

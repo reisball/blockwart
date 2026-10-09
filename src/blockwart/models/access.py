@@ -90,12 +90,20 @@ class AccessRequest(Base):
     The first delivery intentionally supports exactly Viewer/self requests.
     The role and scope columns are still materialized so later deliveries can
     widen the supported roles without another table redesign.
+
+    ``status`` is the *stored* lifecycle state and only changes through
+    explicit write lifecycles (create, decide, cancel, grant revocation).
+    Expiry of a requested or approved window is a fact that arrives without a
+    write, so readers project it with ``effective_access_request_status``
+    instead of writing it. Only ``pending`` is part of the open-request
+    uniqueness rule: an approved request never blocks a replacement because
+    the grant it created is what decides whether access still exists.
     """
 
     __tablename__ = "access_requests"
     __table_args__ = (
         CheckConstraint(
-            "status IN ('pending','approved','denied','cancelled','expired')",
+            "status IN ('pending','approved','denied','cancelled','expired','revoked')",
             name="ck_access_requests_status",
         ),
         CheckConstraint(
@@ -117,8 +125,8 @@ class AccessRequest(Base):
             "role",
             "scope",
             unique=True,
-            sqlite_where=text("status IN ('pending', 'approved')"),
-            postgresql_where=text("status IN ('pending', 'approved')"),
+            sqlite_where=text("status = 'pending'"),
+            postgresql_where=text("status = 'pending'"),
         ),
         Index(
             "ix_access_requests_object_status",
@@ -129,6 +137,10 @@ class AccessRequest(Base):
             "ix_access_requests_requester_created",
             "requester_principal_id",
             "created_at",
+        ),
+        Index(
+            "ix_access_requests_grant",
+            "grant_id",
         ),
     )
 
@@ -169,20 +181,11 @@ class AccessRequest(Base):
         ForeignKey("object_grants.id", ondelete="SET NULL"),
         nullable=True,
     )
-    notification_attempts: Mapped[int] = mapped_column(
-        Integer,
-        default=0,
-        server_default="0",
-        nullable=False,
-    )
-    last_notification_at: Mapped[datetime | None] = mapped_column(
-        DateTime,
-        nullable=True,
-    )
-    last_notification_outcome: Mapped[str | None] = mapped_column(
-        String(32),
-        nullable=True,
-    )
+    # When an approved request stopped carrying access (expiry or revocation)
+    # or a pending request lapsed. Written only by the explicit write
+    # lifecycle that materializes the end; the original decision columns above
+    # are never rewritten.
+    ended_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
         DateTime,

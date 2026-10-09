@@ -20,11 +20,6 @@ from blockwart.models import (
 )
 from blockwart.schemas.catalog import CatalogObjectIn
 from blockwart.services.access import create_object_grant
-from blockwart.services.access_notifications import (
-    NotificationError,
-    NullNotifier,
-    set_access_request_notifier,
-)
 from blockwart.services.catalog import create_relationship, upsert_object
 from blockwart.services.identity import create_service_account, issue_service_token
 from blockwart.services.policy import policy_for_principal
@@ -476,95 +471,6 @@ def test_temporary_grant_loses_effect_without_restart_and_request_expires(
     )
     statuses = {item["id"]: item["status"] for item in mine.json()["items"]}
     assert statuses[request_id] == "expired"
-
-
-@pytest.fixture
-def capturing_notifier():
-    captured: list[dict] = []
-
-    class Recorder:
-        def notify(self, notification) -> None:
-            from blockwart.services.access_notifications import build_notification_payload
-
-            captured.append(build_notification_payload(notification))
-
-    set_access_request_notifier(Recorder())
-    yield captured
-    set_access_request_notifier(NullNotifier())
-
-
-def test_notification_payload_is_minimal_and_failure_never_changes_status(
-    access_request_client: TestClient,
-    access_request_state,
-    capturing_notifier,
-) -> None:
-    requester = access_request_state["tokens"]["discoverer"]
-    approver = access_request_state["tokens"]["owner"]
-    created = _create_request(
-        access_request_client,
-        requester,
-        reason="secret-looking value and private details must not travel",
-    )
-    request_id = created.json()["request_id"]
-
-    assert len(capturing_notifier) == 1
-    payload = capturing_notifier[0]
-    assert set(payload) == {
-        "type",
-        "request_id",
-        "object_id",
-        "status",
-        "decision_reference",
-    }
-    assert "reason" not in payload
-    assert "secret-looking" not in str(payload)
-
-    decided = access_request_client.post(
-        f"/api/v1/access-requests/{request_id}/decision",
-        headers=_authorization(approver),
-        json={"decision": "approve"},
-    )
-    assert decided.status_code == 200
-    assert len(capturing_notifier) == 2
-    assert capturing_notifier[1]["status"] == "approved"
-
-
-class FailingNotifier:
-    def notify(self, notification) -> None:
-        raise NotificationError("sink down")
-
-
-@pytest.fixture
-def failing_notifier():
-    set_access_request_notifier(FailingNotifier())
-    yield
-    set_access_request_notifier(NullNotifier())
-
-
-def test_notification_failure_leaves_request_and_grants_untouched(
-    access_request_client: TestClient,
-    access_request_state,
-    failing_notifier,
-) -> None:
-    requester = access_request_state["tokens"]["discoverer"]
-    approver = access_request_state["tokens"]["owner"]
-    created = _create_request(access_request_client, requester)
-    assert created.status_code == 201
-    request_id = created.json()["request_id"]
-
-    decided = access_request_client.post(
-        f"/api/v1/access-requests/{request_id}/decision",
-        headers=_authorization(approver),
-        json={"decision": "approve"},
-    )
-    assert decided.status_code == 200
-
-    with access_request_state["session_factory"]() as session:
-        row = session.get(AccessRequest, request_id)
-        assert row.status == "approved"
-        assert row.grant_id is not None
-        assert 1 <= row.notification_attempts <= 3
-        assert row.last_notification_outcome == "failed"
 
 
 def test_approver_may_shorten_but_never_extend_temporary_requests(

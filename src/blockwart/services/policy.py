@@ -4,10 +4,10 @@ import hashlib
 import json
 from collections import defaultdict
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import datetime
 from enum import StrEnum
 
-from sqlalchemy import and_, literal, or_, select
+from sqlalchemy import ColumnElement, and_, literal, or_, select
 from sqlalchemy.orm import Session, aliased
 
 from blockwart.domain.auth import (
@@ -23,6 +23,18 @@ from blockwart.domain.auth import (
 from blockwart.domain.placement import CANONICAL_PLACEMENT_RELATION_TYPE
 from blockwart.models import CatalogObject, ObjectGrant, Principal, Relationship
 from blockwart.schemas.catalog import OBJECT_KINDS
+from blockwart.services import clock
+
+
+def grant_is_unexpired(moment: datetime) -> ColumnElement[bool]:
+    """SQL predicate for grants that still carry authority at ``moment``.
+
+    A null ``expires_at`` is a permanent grant. Everything that answers "what
+    can this principal do now" must apply this one predicate so a temporary
+    grant loses effect everywhere at the same instant, without any cache to
+    invalidate and without a write.
+    """
+    return or_(ObjectGrant.expires_at.is_(None), ObjectGrant.expires_at > moment)
 
 
 class AuthorizationDenied(PermissionError):
@@ -211,11 +223,7 @@ def policy_for_principal(
             # Temporary grants expire in the request path: an expired grant
             # stops contributing permissions on the next policy computation,
             # without a restart and without a cache to invalidate.
-            or_(
-                ObjectGrant.expires_at.is_(None),
-                ObjectGrant.expires_at
-                > datetime.now(UTC).replace(tzinfo=None),
-            ),
+            grant_is_unexpired(clock.utcnow()),
         )
     )
     reach = roots.cte("authorized_object_reach", recursive=True)

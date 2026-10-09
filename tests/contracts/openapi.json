@@ -9,6 +9,18 @@
         "title": "AccessRequestDuration",
         "type": "string"
       },
+      "AccessRequestStatus": {
+        "enum": [
+          "pending",
+          "approved",
+          "denied",
+          "cancelled",
+          "expired",
+          "revoked"
+        ],
+        "title": "AccessRequestStatus",
+        "type": "string"
+      },
       "AgentAssetNode": {
         "properties": {
           "capabilities": {
@@ -5532,8 +5544,7 @@
             "type": "string"
           },
           "status": {
-            "title": "Status",
-            "type": "string"
+            "$ref": "#/components/schemas/AccessRequestStatus"
           }
         },
         "required": [
@@ -5704,8 +5715,7 @@
             "$ref": "#/components/schemas/GrantScope"
           },
           "status": {
-            "title": "Status",
-            "type": "string"
+            "$ref": "#/components/schemas/AccessRequestStatus"
           }
         },
         "required": [
@@ -5988,8 +5998,7 @@
             "$ref": "#/components/schemas/GrantScope"
           },
           "status": {
-            "title": "Status",
-            "type": "string"
+            "$ref": "#/components/schemas/AccessRequestStatus"
           }
         },
         "required": [
@@ -11693,6 +11702,7 @@
     },
     "/api/v1/access-requests": {
       "get": {
+        "description": "List open requests the caller may decide right now. Strictly read-only.",
         "operationId": "get_v1_pending_access_requests_api_v1_access_requests_get",
         "responses": {
           "200": {
@@ -17202,6 +17212,7 @@
     },
     "/api/v1/me/access-requests": {
       "get": {
+        "description": "List the caller's requests with their current effective status.\n\nStrictly read-only: expiry and revocation are projected, never persisted,\nand no audit event, token timestamp or request row is written.",
         "operationId": "get_v1_my_access_requests_api_v1_me_access_requests_get",
         "responses": {
           "200": {

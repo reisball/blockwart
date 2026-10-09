@@ -8,7 +8,9 @@ from sqlalchemy.orm import Session
 
 from blockwart.domain.auth import GrantScope, Role
 from blockwart.models import CatalogObject, ObjectGrant
+from blockwart.services import clock
 from blockwart.services.pagination import CursorPage, paginate_items
+from blockwart.services.policy import grant_is_unexpired
 
 TargetKind = Literal["catalog_object", "project"]
 
@@ -43,7 +45,11 @@ def query_own_direct_grants(
     statement = (
         select(ObjectGrant.object_id, ObjectGrant.role, ObjectGrant.scope, CatalogObject.kind)
         .join(CatalogObject, CatalogObject.id == ObjectGrant.object_id)
-        .where(ObjectGrant.principal_id == principal_id)
+        .where(
+            ObjectGrant.principal_id == principal_id,
+            # An expired temporary grant carries no authority and is not reported.
+            grant_is_unexpired(clock.utcnow()),
+        )
     )
     if role is not None:
         statement = statement.where(ObjectGrant.role == role.value)

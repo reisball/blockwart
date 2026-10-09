@@ -29,6 +29,7 @@ from blockwart.models import (
     Principal,
     ServiceToken,
 )
+from blockwart.services import clock
 from blockwart.services.access import (
     LastCatalogOwnerError,
     LastOwnerError,
@@ -63,7 +64,7 @@ from blockwart.services.identity import (
     utc_now,
 )
 from blockwart.services.pagination import paginate_items
-from blockwart.services.policy import policy_for_principal
+from blockwart.services.policy import grant_is_unexpired, policy_for_principal
 from blockwart.services.read_access import ReadAccess
 
 
@@ -410,6 +411,7 @@ def query_principal_detail(
         .where(
             ObjectGrant.principal_id == principal.id,
             ObjectGrant.object_id.in_(manageable_ids),
+            grant_is_unexpired(clock.utcnow()),
         )
         .order_by(ObjectGrant.object_id, ObjectGrant.id)
     ).all() if manageable_ids else []

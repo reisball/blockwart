@@ -15,6 +15,7 @@ from blockwart.api.routes.notices import admin_router as notices_admin_router
 from blockwart.api.routes.notices import agent_router as notices_agent_router
 from blockwart.config import Settings, get_settings
 from blockwart.domain.schema_projection import object_schema_projection
+from blockwart.services.access_request_notices import run_access_request_notice_poller
 from blockwart.services.agent_notices import run_notice_delivery_poller
 from blockwart.services.login_protection import LoginProtector
 from blockwart.services.monitoring import run_monitoring_poller
@@ -90,6 +91,10 @@ def _monitoring_lifespan(
             tasks.append(asyncio.create_task(run_release_monitoring_poller(settings, stop_event)))
         if settings.notice_delivery_poller_enabled:
             tasks.append(asyncio.create_task(run_notice_delivery_poller(settings, stop_event)))
+        if settings.notice_delivery_poller_enabled and settings.access_request_notices_enabled:
+            tasks.append(
+                asyncio.create_task(run_access_request_notice_poller(settings, stop_event))
+            )
         try:
             yield
         finally:
@@ -121,6 +126,7 @@ def _is_principal_scoped_path(path: str) -> bool:
         or path.startswith("/settings/")
         or path.startswith("/api/objects")
         or path.startswith("/api/agent")
+        or path.startswith("/access-requests")
         or path.startswith("/api/v1")
     )
 

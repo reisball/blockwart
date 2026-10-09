@@ -10,7 +10,7 @@ from pydantic import (
     model_validator,
 )
 
-from blockwart.domain.access_requests import AccessRequestDuration
+from blockwart.domain.access_requests import AccessRequestDuration, AccessRequestStatus
 from blockwart.domain.attention import (
     ATTENTION_CATEGORY_VALUES,
     ATTENTION_DETAIL_CODE_VALUES,
@@ -1062,7 +1062,7 @@ class V1AccessRequestCommandOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     request_id: str
-    status: str
+    status: AccessRequestStatus
     changed: bool
 
 
@@ -1076,7 +1076,7 @@ class V1AccessRequestOut(BaseModel):
     role: Role
     scope: GrantScope
     duration: AccessRequestDuration
-    status: str
+    status: AccessRequestStatus
     reason: str | None = None
     requested_expires_at: str | None = None
     approved_expires_at: str | None = None
@@ -1102,7 +1102,7 @@ class V1ApproverAccessRequestOut(BaseModel):
     role: Role
     scope: GrantScope
     duration: AccessRequestDuration
-    status: str
+    status: AccessRequestStatus
     reason: str | None = None
     requested_expires_at: str | None = None
     created_at: str | None = None

@@ -16,12 +16,18 @@ from blockwart.domain.auth import (
 )
 from blockwart.domain.timestamps import format_rfc3339_utc
 from blockwart.models import CatalogObject, ObjectGrant, Principal
+from blockwart.services import clock
 from blockwart.services.access import (
     LastOwnerError,
     ensure_owner_coverage_preserved,
     grant_scope_object_ids,
     lock_grant_command_state,
     lock_owner_coverage_state,
+)
+from blockwart.services.access_request_state import (
+    end_requests_for_removed_grant,
+    grant_is_lapsed,
+    retire_lapsed_grant,
 )
 from blockwart.services.audit import add_audit_event
 from blockwart.services.commands import (
@@ -172,11 +178,14 @@ def query_object_access(
         for grant, principal in direct_rows
     )
 
+    # An IN subquery instead of DISTINCT + join: PostgreSQL rejects an ORDER BY
+    # expression (lower(login)) that is not in a SELECT DISTINCT list.
     active_principals = session.scalars(
         select(Principal)
-        .join(ObjectGrant, ObjectGrant.principal_id == Principal.id)
-        .where(Principal.active.is_(True))
-        .distinct()
+        .where(
+            Principal.active.is_(True),
+            Principal.id.in_(select(ObjectGrant.principal_id)),
+        )
         .order_by(func.lower(Principal.login), Principal.id)
     ).all()
     anchor_cache: dict[str, CatalogObject] = {}
@@ -483,13 +492,22 @@ def create_managed_grant(
             ObjectGrant.scope == resolved_scope,
         )
     )
-    if existing is not None:
+    if existing is not None and not grant_is_lapsed(existing, now=clock.utcnow()):
         return GrantCommandResult(
             object_id=object_id,
             revision=row.revision,
             etag=revision_etag(row.revision),
             changed=False,
             grant=_direct_grant_view(existing, target),
+        )
+    if existing is not None:
+        # An expired temporary grant is inert: replace it instead of
+        # reporting the dead row as the requested assignment.
+        retire_lapsed_grant(
+            session,
+            existing,
+            now=clock.utcnow(),
+            actor=context.principal.id,
         )
 
     new_revision = _claim_object_revision(
@@ -721,6 +739,12 @@ def revoke_managed_grant(
         session,
         object_id=object_id,
         expected_revision=revision,
+    )
+    end_requests_for_removed_grant(
+        session,
+        grant,
+        now=clock.utcnow(),
+        actor=context.principal.id,
     )
     session.delete(grant)
     session.flush()

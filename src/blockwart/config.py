@@ -291,6 +291,16 @@ class Settings(BaseSettings):
             " Empty disables delivery."
         ),
     )
+    access_request_notices_enabled: bool = Field(
+        default=False,
+        description=(
+            "Whether new access requests queue a minimal hint for currently authorized"
+            " approvers on their administrator-approved agent routes. Hints are only"
+            " queued and delivered while the notice delivery poller is enabled and a"
+            " loopback test-gateway endpoint is configured; otherwise requests record"
+            " notification state 'disabled'."
+        ),
+    )
 
     @model_validator(mode="after")
     def validate_monitoring_time_bounds(self) -> "Settings":

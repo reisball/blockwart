@@ -9,6 +9,12 @@ from sqlalchemy.orm import Session, aliased
 from blockwart.domain.auth import CatalogRole, GrantScope, Role
 from blockwart.domain.placement import CANONICAL_PLACEMENT_RELATION_TYPE
 from blockwart.models import CatalogObject, ObjectGrant, Principal, Relationship
+from blockwart.services import clock
+from blockwart.services.access_request_state import (
+    end_requests_for_removed_grant,
+    grant_is_lapsed,
+    retire_lapsed_grant,
+)
 from blockwart.services.audit import add_audit_event
 
 
@@ -97,7 +103,16 @@ def create_object_grant(
         )
     )
     if existing is not None:
-        return existing
+        if not grant_is_lapsed(existing, now=clock.utcnow()):
+            return existing
+        # An expired temporary grant is inert. Replace it explicitly instead
+        # of answering the new assignment with the dead row.
+        retire_lapsed_grant(
+            session,
+            existing,
+            now=clock.utcnow(),
+            actor=actor_principal_id or "system",
+        )
 
     old_revision = catalog_object.revision
     catalog_object.revision += 1
@@ -174,6 +189,14 @@ def revoke_object_grant(
         "old_revision": old_revision,
         "new_revision": catalog_object.revision,
     }
+    # Persist the end of the approval at the moment of revocation, in the
+    # same transaction, before the foreign key clears the request's grant id.
+    end_requests_for_removed_grant(
+        session,
+        grant,
+        now=clock.utcnow(),
+        actor=actor_principal_id or "system",
+    )
     session.delete(grant)
     add_audit_event(
         session,

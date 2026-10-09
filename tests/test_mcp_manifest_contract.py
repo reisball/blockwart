@@ -15,14 +15,15 @@ from blockwart.mcp.server import TOOLS, local_contract_metadata, validate_runtim
 
 
 def test_integrated_mcp_contract_has_reviewed_manifest_evidence() -> None:
-    metadata = contract_metadata(TOOLS, build_revision="issue-100-106-188-236-245-248-249-250-251")
+    build_revision = "issue-100-106-188-236-245-248-249-250-251"
+    metadata = contract_metadata(TOOLS, build_revision=build_revision)
 
-    # The access request and notice read and acknowledge tools join the reviewed activity, credential, grant,
-    # relationship and schema tools.
+    # The access request, notice read and acknowledge tools join the reviewed activity,
+    # credential, grant, relationship and schema tools.
     assert metadata == {
-        "build_revision": "issue-100-106-188-236-245-248-249-250-251",
+        "build_revision": build_revision,
         "contract_version": "1",
-        "manifest_digest": "2fee86d0bebbc88c9d3a70b67d75956b0b27a506cee0bc769cc91ae1178080b5",
+        "manifest_digest": "e151b3e088f2648dae76f5cacee6f86a3f203cc86f500362f1e3169ea81edc6a",
         "tool_count": 45,
     }
 

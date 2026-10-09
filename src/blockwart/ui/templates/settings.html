@@ -55,6 +55,16 @@
           </div>
         </section>
 
+        <section class="panel" aria-labelledby="settings-access-requests-title">
+          <div class="panel-head">
+            <div>
+              <h2 class="section-title" id="settings-access-requests-title">{{ t("access_requests.title") }}</h2>
+              <p class="meta">{{ t("settings.access_requests_description") }}</p>
+            </div>
+            <a class="button button-small" href="/access-requests">{{ t("settings.open") }}</a>
+          </div>
+        </section>
+
         {% if is_platform_admin %}
           <section class="panel" aria-labelledby="settings-principals-title">
             <div class="panel-head">

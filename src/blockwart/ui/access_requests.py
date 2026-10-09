@@ -8,7 +8,6 @@ or decide anything the current policy does not authorize.
 from __future__ import annotations
 
 from typing import Annotated, Any
-from urllib.parse import quote
 
 from fastapi import (
     APIRouter,
@@ -23,6 +22,7 @@ from sqlalchemy.orm import Session
 
 from blockwart.api.deps import get_session
 from blockwart.domain.access_requests import AccessRequestDuration
+from blockwart.services.access_request_notices import notice_routing_from_settings
 from blockwart.services.access_requests import (
     cancel_access_request as cancel_access_request_command,
 )
@@ -37,46 +37,65 @@ from blockwart.services.access_requests import (
     list_pending_access_requests,
 )
 from blockwart.services.commands import CommandError
+from blockwart.ui.i18n import translation_context
 from blockwart.ui.paths import TEMPLATE_DIR
 from blockwart.ui.security import (
+    AUTH_CSRF_COOKIE_NAME,
     read_access_from_request,
+    require_browser_read_access,
     require_browser_write_csrf,
 )
-from blockwart.ui.write_commands import execute_ui_command, ui_write_context
+from blockwart.ui.write_commands import (
+    execute_ui_command,
+    execute_ui_read_only_command,
+    ui_write_context,
+)
 
 templates = Jinja2Templates(directory=TEMPLATE_DIR)
+# Every route authenticates the browser session first: the page and the three
+# writes all act as the signed-in principal, never as an anonymous caller.
 router = APIRouter(
     tags=["ui"],
     include_in_schema=False,
+    dependencies=[Depends(require_browser_read_access)],
 )
 
 
+_ERROR_CODES = {403: "denied", 404: "not_found", 409: "conflict", 422: "invalid"}
+_NOTICE_CODES = frozenset({"created", "exists", "cancelled", "approved", "denied"})
+_ERROR_KEYS = frozenset({"denied", "not_found", "conflict", "invalid", "failed"})
+
+
 def _error_redirect(exc: Exception) -> RedirectResponse:
-    detail = getattr(exc, "detail", None) or str(exc) or "Request failed"
-    return RedirectResponse(
-        url=f"/access-requests?error={quote(str(detail)[:200])}",
-        status_code=303,
-    )
+    # Only a stable code travels in the URL; the page renders the localized
+    # text, so a crafted link can never inject a message into the page.
+    status_code = getattr(exc, "status_code", None)
+    code = _ERROR_CODES.get(status_code, "failed") if isinstance(status_code, int) else "failed"
+    return RedirectResponse(url=f"/access-requests?error={code}", status_code=303)
 
 
 def _page_context(request: Request, session: Session) -> dict[str, Any]:
     access = read_access_from_request(request)
     context = ui_write_context(request, access)
-    pending = execute_ui_command(
+    # The page is a GET: it reads the effective state and never writes.
+    pending = execute_ui_read_only_command(
         session,
         context,
         lambda: list_pending_access_requests(session, context),
     )
-    mine = execute_ui_command(
+    mine = execute_ui_read_only_command(
         session,
         context,
         lambda: list_my_access_requests(session, context),
     )
+    translated = translation_context(request)
     return {
-        "title": "Access requests",
+        "title": translated["t"]("access_requests.title"),
         "pending_requests": pending,
         "my_requests": mine,
         "durations": ("temporary", "permanent"),
+        "csrf_token": request.cookies.get(AUTH_CSRF_COOKIE_NAME, ""),
+        **translated,
     }
 
 
@@ -88,10 +107,11 @@ def access_requests_page(
     notice: str | None = None,
 ):
     context = _page_context(request, session)
-    if error:
-        context["form_error"] = error[:200]
-    if notice:
-        context["notice"] = notice[:200]
+    translate = context["t"]
+    if error in _ERROR_KEYS:
+        context["form_error"] = translate(f"access_requests.error.{error}")
+    if notice in _NOTICE_CODES:
+        context["notice"] = translate(f"access_requests.notice.{notice}")
     return templates.TemplateResponse(request, "access_requests.html", context=context)
 
 
@@ -133,14 +153,15 @@ def create_access_request_from_ui(
                 duration=resolved_duration,
                 ttl_seconds=parsed_ttl,
                 reason=reason,
+                routing=notice_routing_from_settings(request.app.state.settings),
             ),
         )
     except HTTPException as exc:
         return _error_redirect(exc)
     except CommandError as exc:
         return _error_redirect(exc)
-    notice = "Access request created." if result.changed else "Open request already exists."
-    return RedirectResponse(url=f"/access-requests?notice={quote(notice)}", status_code=303)
+    notice = "created" if result.changed else "exists"
+    return RedirectResponse(url=f"/access-requests?notice={notice}", status_code=303)
 
 
 @router.post(
@@ -169,10 +190,7 @@ def cancel_access_request_from_ui(
         return _error_redirect(exc)
     except CommandError as exc:
         return _error_redirect(exc)
-    return RedirectResponse(
-        url=f"/access-requests?notice={quote('Request cancelled.')}",
-        status_code=303,
-    )
+    return RedirectResponse(url="/access-requests?notice=cancelled", status_code=303)
 
 
 @router.post(
@@ -213,7 +231,5 @@ def decide_access_request_from_ui(
         return _error_redirect(exc)
     except CommandError as exc:
         return _error_redirect(exc)
-    return RedirectResponse(
-        url=f"/access-requests?notice={quote(f'Decision recorded ({decision}).')}",
-        status_code=303,
-    )
+    outcome = "approved" if decision == "approve" else "denied"
+    return RedirectResponse(url=f"/access-requests?notice={outcome}", status_code=303)

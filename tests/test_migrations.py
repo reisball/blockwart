@@ -269,6 +269,8 @@ def test_real_alembic_upgrade_creates_fresh_database_and_has_no_drift(
     engine = create_engine(database_url)
     try:
         assert set(inspect(engine).get_table_names()) == {
+            "access_request_notice_attempts",
+            "access_request_notices",
             "access_requests",
             "alembic_version",
             "agent_delivery_attempts",
@@ -301,6 +303,8 @@ def test_real_alembic_upgrade_creates_fresh_database_and_has_no_drift(
     finally:
         engine.dispose()
     assert set(Base.metadata.tables) == {
+        "access_request_notice_attempts",
+        "access_request_notices",
         "access_requests",
         "agent_delivery_attempts",
         "agent_delivery_jobs",
@@ -1989,6 +1993,8 @@ def downgrade() -> None:
     try:
         assert upgrade_database(database_url) == future_revision
         assert set(inspect(engine).get_table_names()) == {
+            "access_request_notice_attempts",
+            "access_request_notices",
             "access_requests",
             "alembic_version",
             "agent_delivery_attempts",
@@ -3532,3 +3538,190 @@ def test_credential_reference_creator_migration_widens_only_the_role_vocabulary(
         assert connection.execute("PRAGMA foreign_key_check").fetchall() == []
     finally:
         connection.close()
+
+
+def _access_chain_state(database_path: Path) -> dict[str, list[tuple]]:
+    """The pre-#100 rows that the access request revision must never rewrite."""
+    connection = sqlite3.connect(database_path)
+    try:
+        return {
+            "principals": connection.execute("SELECT * FROM principals ORDER BY id").fetchall(),
+            "catalog_objects": connection.execute(
+                "SELECT * FROM catalog_objects ORDER BY id"
+            ).fetchall(),
+            "object_grants": connection.execute(
+                "SELECT id, principal_id, object_id, role, scope, created_by_principal_id "
+                "FROM object_grants ORDER BY id"
+            ).fetchall(),
+        }
+    finally:
+        connection.close()
+
+
+def test_combined_chain_upgrades_incrementally_preserves_data_and_rolls_back(
+    tmp_path: Path,
+) -> None:
+    """main 0024 -> 0025 -> 0026 -> PR221 0027 -> access requests 0028, and back."""
+    database_path = tmp_path / "combined-chain.sqlite3"
+    database_url = _database_url(database_path)
+    config = build_alembic_config(database_url)
+    command.upgrade(config, ADDITIVE_PROJECT_CREATOR_REVISION)
+    connection = sqlite3.connect(database_path)
+    try:
+        connection.execute(
+            "INSERT INTO principals (id, principal_type, login, display_name, "
+            "active, platform_role, catalog_role, revision) VALUES "
+            "('chain-owner', 'human', 'chain.owner', 'Chain Owner', 1, 'admin', "
+            "'catalog_owner', 3), "
+            "('chain-agent', 'service_account', 'chain.agent', 'Chain Agent', 1, NULL, "
+            "NULL, 2)"
+        )
+        connection.execute(
+            "INSERT INTO catalog_objects (id, kind, label, status, lifecycle, health, "
+            "data_json, provenance_json, revision) VALUES "
+            "('chain-root', 'host', 'Root', 'active', 'active', 'healthy', "
+            "'{\"schema_version\":1}', '{}', 5)"
+        )
+        connection.execute(
+            "INSERT INTO object_grants (principal_id, object_id, role, scope, "
+            "created_by_principal_id) VALUES "
+            "('chain-owner', 'chain-root', 'owner', 'self', 'chain-owner'), "
+            "('chain-agent', 'chain-root', 'viewer', 'self', 'chain-owner')"
+        )
+        connection.commit()
+    finally:
+        connection.close()
+    baseline = _access_chain_state(database_path)
+
+    for revision in (
+        CREDENTIAL_REFERENCE_CREATOR_REVISION,
+        ACTIVITY_INDEX_REVISION,
+        AGENT_NOTICES_REVISION,
+    ):
+        command.upgrade(config, revision)
+        assert _revision(database_url) == revision
+        assert _access_chain_state(database_path) == baseline
+
+    # Data written by the notice revision before the access request revision.
+    connection = sqlite3.connect(database_path)
+    try:
+        connection.execute(
+            "INSERT INTO agent_delivery_targets (id, principal_id, label, route, transport, "
+            "active) VALUES ('chain-target', 'chain-agent', 'inbox', "
+            "'openclaw-agent:chain', 'openclaw_test_gateway', 1)"
+        )
+        connection.commit()
+    finally:
+        connection.close()
+
+    command.upgrade(config, "head")
+    assert _revision(database_url) == ACCESS_REQUESTS_REVISION
+    assert _access_chain_state(database_path) == baseline
+    connection = sqlite3.connect(database_path)
+    try:
+        assert connection.execute("SELECT expires_at FROM object_grants").fetchall() == [
+            (None,),
+            (None,),
+        ]
+        assert connection.execute(
+            "SELECT id, principal_id, route FROM agent_delivery_targets"
+        ).fetchall() == [("chain-target", "chain-agent", "openclaw-agent:chain")]
+        for table in (
+            "access_requests",
+            "access_request_notices",
+            "access_request_notice_attempts",
+        ):
+            assert connection.execute(f"SELECT COUNT(*) FROM {table}").fetchone() == (0,)
+        (open_index_sql,) = connection.execute(
+            "SELECT sql FROM sqlite_master WHERE name = 'uq_access_requests_open'"
+        ).fetchone()
+        assert "WHERE status = 'pending'" in open_index_sql
+        assert "approved" not in open_index_sql
+    finally:
+        connection.close()
+
+    # A live temporary grant (expired or not) makes the downgrade fail closed:
+    # dropping the column would silently turn it into a permanent grant.
+    connection = sqlite3.connect(database_path)
+    try:
+        connection.execute(
+            "INSERT INTO object_grants (principal_id, object_id, role, scope, expires_at) "
+            "VALUES ('chain-agent', 'chain-root', 'discoverer', 'self', '2020-01-01 00:00:00')"
+        )
+        connection.commit()
+    finally:
+        connection.close()
+    with pytest.raises(RuntimeError, match="Temporary grants must be explicitly revoked"):
+        command.downgrade(config, AGENT_NOTICES_REVISION)
+    assert _revision(database_url) == ACCESS_REQUESTS_REVISION
+
+    connection = sqlite3.connect(database_path)
+    try:
+        connection.execute("DELETE FROM object_grants WHERE expires_at IS NOT NULL")
+        connection.commit()
+    finally:
+        connection.close()
+    command.downgrade(config, AGENT_NOTICES_REVISION)
+    assert _revision(database_url) == AGENT_NOTICES_REVISION
+    assert _access_chain_state(database_path) == baseline
+    connection = sqlite3.connect(database_path)
+    try:
+        tables = {
+            row[0]
+            for row in connection.execute("SELECT name FROM sqlite_master WHERE type='table'")
+        }
+        assert not tables & {
+            "access_requests",
+            "access_request_notices",
+            "access_request_notice_attempts",
+        }
+        assert "expires_at" not in {
+            row[1] for row in connection.execute("PRAGMA table_info(object_grants)")
+        }
+        assert connection.execute("SELECT id FROM agent_delivery_targets").fetchall() == [
+            ("chain-target",)
+        ]
+    finally:
+        connection.close()
+
+    # The whole stack is reversible down to main's last revision and upgradable again.
+    command.downgrade(config, ACTIVITY_INDEX_REVISION)
+    command.upgrade(config, "head")
+    assert _revision(database_url) == ACCESS_REQUESTS_REVISION
+    assert _access_chain_state(database_path) == baseline
+
+
+def test_fresh_install_reaches_the_single_head_with_partial_index_parity(
+    tmp_path: Path,
+) -> None:
+    database_url = _database_url(tmp_path / "fresh-head.sqlite3")
+    assert upgrade_database(database_url) == ACCESS_REQUESTS_REVISION
+    engine = create_engine(database_url)
+    try:
+        index_sql = {
+            name: sql
+            for name, sql in engine.connect().execute(
+                text(
+                    "SELECT name, sql FROM sqlite_master "
+                    "WHERE type = 'index' AND name = 'uq_access_requests_open'"
+                )
+            )
+        }
+        assert "WHERE status = 'pending'" in index_sql["uq_access_requests_open"]
+        migrated = {
+            index["name"]: index
+            for index in inspect(engine).get_indexes("access_requests")
+        }
+        modeled = {
+            index.name: index for index in Base.metadata.tables["access_requests"].indexes
+        }
+        assert set(migrated) == set(modeled)
+        assert migrated["uq_access_requests_open"]["unique"] == 1
+        assert migrated["uq_access_requests_open"]["column_names"] == [
+            "requester_principal_id",
+            "object_id",
+            "role",
+            "scope",
+        ]
+    finally:
+        engine.dispose()
