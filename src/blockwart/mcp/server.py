@@ -2583,6 +2583,7 @@ def _http_json(
             translated.code,
             translated.public_message,
             request_headers["X-Correlation-ID"],
+            details=translated.details,
         ) from exc
     except URLError as exc:
         raise UpstreamError(
