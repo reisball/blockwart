@@ -2068,6 +2068,84 @@ def test_mcp_translates_stable_api_error_without_leaking_details() -> None:
     assert "must-not-leak" not in result.content[0].text
 
 
+def test_http_transport_re_raise_keeps_published_error_details(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The re-raise inside ``_http_json`` must carry the translated details.
+
+    Regression for a drop where ``_http_json`` re-raised ``UpstreamError``
+    without ``details=``, so every field-accurate upstream rejection reached
+    an MCP client with no ``details[]`` at all. The earlier coverage called
+    ``_translate_http_error`` and ``_tool_error_result`` directly and thus
+    bypassed the very re-raise that dropped the details.
+    """
+    runtime_token = "bwst_00000000-0000-0000-0000-000000000001.details-secret"
+    monkeypatch.setenv("BLOCKWART_API_TOKEN", runtime_token)
+    monkeypatch.delenv("BLOCKWART_API_TOKEN_FILE", raising=False)
+
+    upstream_payload = {
+        "error": {
+            "code": "validation_error",
+            "message": "Request validation failed.",
+            "correlation_id": "mcp-details-1",
+            "details": [
+                {
+                    "code": "value_not_allowed",
+                    "location": "body.data.endpoints[0].exposure",
+                    "path": "data.endpoints[0].exposure",
+                    "rule": None,
+                },
+                {"internal": "must-not-leak"},
+            ],
+        }
+    }
+
+    class RejectingHandler(BaseHTTPRequestHandler):
+        def do_POST(self) -> None:
+            length = int(self.headers.get("Content-Length", "0"))
+            self.rfile.read(length)
+            body = json.dumps(upstream_payload).encode()
+            self.send_response(422)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def log_message(self, format: str, *args: object) -> None:
+            pass
+
+    httpd = ThreadingHTTPServer(("127.0.0.1", 0), RejectingHandler)
+    thread = threading.Thread(target=httpd.serve_forever, daemon=True)
+    thread.start()
+    try:
+        host, port = httpd.server_address
+        with pytest.raises(mcp_server.UpstreamError) as exc_info:
+            mcp_server.request_json(
+                "POST",
+                "/api/v1/objects/lxc210/children",
+                {"id": "demo"},
+                {"Idempotency-Key": "details-key-1"},
+                base_url=f"http://{host}:{port}",
+            )
+    finally:
+        httpd.shutdown()
+        httpd.server_close()
+        thread.join(timeout=5)
+
+    assert exc_info.value.code == "validation_error"
+    assert re.fullmatch(r"[A-Za-z0-9._-]{1,64}", exc_info.value.correlation_id)
+    assert exc_info.value.details == [
+        {
+            "code": "value_not_allowed",
+            "location": "body.data.endpoints[0].exposure",
+            "message": "The value at this path is not one of the values this field allows.",
+            "path": "data.endpoints[0].exposure",
+            "rule": None,
+        }
+    ]
+    assert "must-not-leak" not in json.dumps(exc_info.value.details)
+
+
 def test_read_tools_forward_the_closed_projection_arguments() -> None:
     """The wrapper must pass a projection through, not reinterpret it."""
     calls: list[tuple[str, dict]] = []
