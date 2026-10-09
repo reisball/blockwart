@@ -60,6 +60,10 @@ Current local keys:
 - `BLOCKWART_NOTICE_DELIVERY_POLL_INTERVAL_SECONDS` (default `30`, allowed
   `5..300`) and `BLOCKWART_NOTICE_DELIVERY_MAX_PER_RUN` (default `50`, allowed
   `1..500`)
+- `BLOCKWART_ACCESS_REQUEST_NOTICES_ENABLED` (default `false`; also needs the
+  poller flag and a loopback endpoint above, otherwise new access requests record
+  `notification: "disabled"` and no hint is queued; see
+  [Access requests](access-requests.md))
 - `BLOCKWART_NOTICE_DELIVERY_TOKEN` (environment only; optional bearer for the
   test gateway, never stored, logged, or audited)
 - `BLOCKWART_RELEASE_MONITORING_DEFAULT_INTERVAL_SECONDS` (default `86400`,

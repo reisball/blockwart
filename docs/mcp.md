@@ -592,6 +592,25 @@ Two dedicated, agent-scoped tools expose the agent's own notice state
   not an approval, grants nothing, and starts no action. An unknown notice and
   one the caller cannot read are both reported as not found.
 
+## Access requests
+
+Five tools proxy the access request endpoints (see
+[Access requests](access-requests.md)); none accepts a principal id:
+
+- `blockwart.create_access_request` (`object_id`, `duration`, optional
+  `ttl_seconds` and `reason`) forwards to
+  `POST /api/v1/objects/{object_id}/access-requests`. Retrying while the request
+  is pending returns the same request unchanged. An approver hint, if any, only
+  points at the authenticated decision surface and never approves anything.
+- `blockwart.list_my_access_requests` and
+  `blockwart.list_pending_access_requests` are **read-only**: they forward to
+  the database-read-only `GET` resources and return the effective status.
+  Expiry and revocation are computed, never written; requests on objects the
+  caller can no longer discover are omitted.
+- `blockwart.cancel_access_request` and `blockwart.decide_access_request`
+  forward to the guarded cancellation and decision endpoints. Decisions require
+  the caller's current `manage_access`.
+
 ## Local Usage
 
 Start Blockwart separately, then run:

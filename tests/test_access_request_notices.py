@@ -747,6 +747,37 @@ def test_a_crashed_workers_lease_expires_and_its_late_write_is_fenced(
     assert (1, "lease_expired", None) in _attempts(backend)
 
 
+def test_a_stale_workers_write_cannot_overwrite_the_live_lease(backend, frozen) -> None:
+    _route(backend, "owner")
+    _file(backend)
+    with backend.session() as session:
+        stale = notices._claim_next(
+            session, worker_id="stale", policy=POLICY, moment=NOW, skip_ids=set()
+        )
+    with backend.session() as session:
+        live = notices._claim_next(
+            session,
+            worker_id="live",
+            policy=POLICY,
+            moment=NOW + timedelta(seconds=61),
+            skip_ids=set(),
+        )
+    assert stale is not None and live is not None and stale.token != live.token
+
+    with backend.session() as session:
+        assert not notices._finish_claim(
+            session, stale, uncount_attempt=False, status="failed", last_error_code="delivery_error"
+        )
+    (row,) = _notice_rows(backend)
+    assert row.status == "pending" and row.lease_token == live.token
+
+    with backend.session() as session:
+        assert notices._finish_claim(
+            session, live, uncount_attempt=False, status="delivered", last_error_code=None
+        )
+    assert _notice_rows(backend)[0].status == "delivered"
+
+
 def test_a_crash_loop_is_bounded_by_the_attempt_budget(backend, frozen) -> None:
     _route(backend, "owner")
     _file(backend)

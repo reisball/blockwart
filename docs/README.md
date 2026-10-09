@@ -49,6 +49,9 @@ deleted by this classification.
   leased scheduling, authorized views, rate limits, and recovery
 - [Agent notices](agent-notices.md), the durable, fail-closed push channel
   that delivers selected events (first: release updates) to approved agents
+- [Access requests and temporary grants](access-requests.md), including the
+  effective-status projection, read purity, replacement after expiry or
+  revocation, concealment, and the durable approver-hint outbox
 - [Canonical Decision objects](decisions.md), including lifecycle, links, and
   dry-run-first legacy classification
 - [Canonical Project knowledge](projects.md), including category-specific results,

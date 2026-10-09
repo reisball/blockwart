@@ -224,4 +224,8 @@ pytest tests/test_agent_notice_delivery.py tests/test_agent_notice_hardening.py 
 - No Telegram/e-mail delivery to humans (per issue out-of-scope).
 - No productive gateway, credential, or network path (separate approval).
 - Retry/TTL/lease knobs as environment settings.
-- Sharing the outbox contract with access requests (#100) stays decoupled.
+- Access request hints (#100) use their own outbox tables and states; they reuse
+  only the approved targets, the loopback transport and the poller flags
+  (see [Access requests](access-requests.md)). A target therefore also becomes a
+  possible recipient for hints about objects its principal can currently
+  manage, once `BLOCKWART_ACCESS_REQUEST_NOTICES_ENABLED` is set.

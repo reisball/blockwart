@@ -978,6 +978,20 @@ def main() -> None:
         token=api_token,
     )["objects"][0]
 
+    # Access requests: the installed package serves the read-only resources and
+    # the browser page (authenticated, CSRF-bearing) on the migrated schema.
+    assert fetch_json("/api/v1/me/access-requests", token=api_token) == {"items": []}
+    assert fetch_json("/api/v1/access-requests", token=api_token) == {"items": []}
+    with urlopen(
+        Request(
+            f"{BASE_URL}/access-requests",
+            headers={"Cookie": f"{AUTH_SESSION_COOKIE_NAME}={browser_session}"},
+        ),
+        timeout=7,
+    ) as response:
+        access_requests_page = response.read().decode()
+    assert 'name="csrf_token"' in access_requests_page
+
     assert readiness["revision"] == "20261009_0028"
     assert "Blockwart" in index
     assert static_content_type == "text/css"

@@ -50,6 +50,21 @@ revocation, stale-cookie clearing, and `no-store` response behavior. Redacted
 security events distinguish standard and remembered issuance and revocation
 without storing any session, cookie, CSRF, password, or hash value.
 
+Access requests (Issue #100; [details](access-requests.md)) keep the same
+fail-closed shape. A requester needs the current `discover` permission and an
+active identity on every list, status and cancel call, otherwise the answer is
+the uniform not-found of an unknown object; approvers need current
+`manage_access`. Temporary grants carry an expiry that policy computation
+enforces in the request path. Reads (REST `GET`, read-only MCP tools, the UI
+page) project the effective status and write nothing; expiry and revocation are
+persisted only by write lifecycles with one audit event each. Approver hints
+use a separate durable outbox: honest `disabled`/`no_route` states instead of a
+fake delivery, recipients limited to approved agent routes of principals that
+hold `manage_access` right now (re-checked before every attempt), bounded
+retries, a minimal closed payload without reason, identity, label or URL, and
+only the loopback test transport. A hint is a pointer to the authenticated
+decision surface and can never approve anything.
+
 Catalog reads are authenticated and object-authorized across UI, REST, Agent
 API, and MCP. No-discover objects are concealed and discover-only objects use
 a strict safe stub. Catalog and grant commands are also object-authorized.

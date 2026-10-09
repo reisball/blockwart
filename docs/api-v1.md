@@ -1011,6 +1011,32 @@ fail-closed push channel proven against a loopback test gateway only.
   and safe error codes. A route can be registered by one active target only and
   a routing rule once; duplicates return `409` with the reason in `error.code`.
 
+## Access requests
+
+Access requests (Issue #100; [details](access-requests.md)) let a principal that
+can `discover` an object ask for Viewer access on `self`, temporary or
+permanent, and let current `manage_access` holders decide.
+
+- `POST /api/v1/objects/{object_id}/access-requests` creates a request
+  (`201`; `changed: false` returns the still-pending request unchanged). The
+  response never reveals approver routing. Without `discover` the answer is the
+  uniform `404`; with `read` already granted it is `409`.
+- `GET /api/v1/me/access-requests` lists the caller's requests with their
+  **effective** status (`pending`, `approved`, `denied`, `cancelled`,
+  `expired`, `revoked`). Requests on objects the caller can no longer
+  `discover` are omitted entirely; an inactive caller gets `404`.
+- `GET /api/v1/access-requests` lists open requests the caller may decide now.
+- `POST /api/v1/access-requests/{request_id}/cancellation` and
+  `POST /api/v1/access-requests/{request_id}/decision` (`approve`|`deny`,
+  optional shortening `ttl_seconds`) are guarded transitions: exactly one of
+  any parallel set wins, the others get `409`. A missing, foreign or no longer
+  discoverable request is the same `404`.
+
+Both `GET` resources are strictly read-only (database-read-only authentication
+and transaction): expiry and revocation are projected, never persisted, and no
+audit event or token timestamp is written. `ObjectGrant`s carry an optional
+`expires_at`, which `GET .../access` and the grant commands report.
+
 ## Errors and boundary
 
 All v1 errors use the shared REST envelope and `X-Correlation-ID`. Missing
