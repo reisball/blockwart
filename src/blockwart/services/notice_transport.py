@@ -25,10 +25,13 @@ approval round.
 
 from __future__ import annotations
 
+import http.client
 import json
+import math
 import os
-import urllib.error
-import urllib.request
+import socket
+import threading
+import time
 from dataclasses import dataclass
 from typing import Any, Protocol
 from urllib.parse import urlsplit
@@ -86,16 +89,34 @@ def _require_loopback_url(url: str) -> None:
         raise TransportConfigError("openclaw test gateway refuses non-loopback destinations")
 
 
-class _RejectRedirectHandler(urllib.request.HTTPRedirectHandler):
-    def redirect_request(self, req, fp, code, msg, headers, newurl):  # noqa: ANN001
-        return None
+class _DeadlineConnection(http.client.HTTPConnection):
+    """Close the connected socket at the total deadline, including header reads."""
 
+    def __init__(self, host: str, port: int | None, timeout: float) -> None:
+        super().__init__(host, port, timeout=timeout)
+        self.deadline = time.monotonic() + timeout
+        self.expired = threading.Event()
+        self.timer: threading.Timer | None = None
 
-def _read_limited(response: Any) -> bytes:
-    try:
-        return response.read(_RESPONSE_READ_LIMIT)
-    except Exception:  # noqa: BLE001 - body is advisory only
-        return b""
+    def connect(self) -> None:
+        super().connect()
+        connected_socket = self.sock
+
+        def expire() -> None:
+            self.expired.set()
+            try:
+                connected_socket.shutdown(socket.SHUT_RDWR)
+            except OSError:
+                pass
+
+        self.timer = threading.Timer(max(0, self.deadline - time.monotonic()), expire)
+        self.timer.daemon = True
+        self.timer.start()
+
+    def finish(self) -> None:
+        if self.timer is not None:
+            self.timer.cancel()
+        super().close()
 
 
 def _confirms_duplicate(body: bytes, delivery_id: str) -> bool:
@@ -135,14 +156,10 @@ class OpenClawTestGatewayTransport:
     ) -> None:
         _require_loopback_url(endpoint_url)
         self._endpoint_url = endpoint_url
+        if not math.isfinite(timeout_seconds) or timeout_seconds <= 0:
+            raise TransportConfigError("transport timeout must be finite and positive")
         self.timeout_seconds = timeout_seconds
         self._token = token or None
-        # An empty proxy map plus a redirect refusal keep every request on the
-        # configured loopback socket regardless of the process environment.
-        self._opener = urllib.request.build_opener(
-            urllib.request.ProxyHandler({}),
-            _RejectRedirectHandler(),
-        )
 
     def deliver(
         self,
@@ -160,42 +177,35 @@ class OpenClawTestGatewayTransport:
         bearer = token or self._token
         if bearer:
             headers["Authorization"] = f"Bearer {bearer}"
-        http_request = urllib.request.Request(
-            self._endpoint_url,
-            data=body,
-            headers=headers,
-            method="POST",
-        )
+        parsed = urlsplit(self._endpoint_url)
+        path = parsed.path or "/"
+        if parsed.query:
+            path += "?" + parsed.query
+        connection = _DeadlineConnection(parsed.hostname, parsed.port, self.timeout_seconds)
         try:
-            with self._opener.open(  # noqa: S310 - loopback enforced in constructor
-                http_request,
-                timeout=self.timeout_seconds,
-            ) as response:
-                status = getattr(response, "status", 200)
-                response_body = _read_limited(response)
-            if 200 <= status < 300:
+            # Direct HTTPConnection uses no environment proxy and follows no redirects.
+            connection.request("POST", path, body=body, headers=headers)
+            response = connection.getresponse()
+            response_body = response.read(_RESPONSE_READ_LIMIT)
+            if connection.expired.is_set() or time.monotonic() >= connection.deadline:
+                return DeliveryOutcome(ok=False, error_code="transport_timeout")
+            if 200 <= response.status < 300:
                 return DeliveryOutcome(
                     ok=True,
                     duplicate=_confirms_duplicate(response_body, request.delivery_id),
                 )
-            return DeliveryOutcome(ok=False, error_code="transport_unavailable")
-        except urllib.error.HTTPError as exc:
-            if exc.code == 409 and _confirms_duplicate(
-                _read_limited(exc),
-                request.delivery_id,
-            ):
+            if response.status == 409 and _confirms_duplicate(response_body, request.delivery_id):
                 return DeliveryOutcome(ok=True, duplicate=True)
-            if exc.code == 429:
+            if response.status == 429:
                 return DeliveryOutcome(ok=False, error_code="rate_limited")
             return DeliveryOutcome(ok=False, error_code="transport_unavailable")
         except TimeoutError:
             return DeliveryOutcome(ok=False, error_code="transport_timeout")
-        except urllib.error.URLError as exc:
-            if isinstance(exc.reason, TimeoutError):
-                return DeliveryOutcome(ok=False, error_code="transport_timeout")
-            return DeliveryOutcome(ok=False, error_code="transport_unavailable")
         except Exception:  # noqa: BLE001 - transport boundary stays coarse
-            return DeliveryOutcome(ok=False, error_code="transport_unavailable")
+            code = "transport_timeout" if connection.expired.is_set() else "transport_unavailable"
+            return DeliveryOutcome(ok=False, error_code=code)
+        finally:
+            connection.finish()
 
 
 class FakeNoticeTransport:

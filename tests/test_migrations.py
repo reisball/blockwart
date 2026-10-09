@@ -3725,3 +3725,38 @@ def test_fresh_install_reaches_the_single_head_with_partial_index_parity(
         ]
     finally:
         engine.dispose()
+
+
+def test_sqlite_create_all_builds_the_same_access_indexes_as_the_migration(
+    tmp_path: Path,
+) -> None:
+    """Metadata and Alembic must not drift for the access request structures."""
+    migrated_url = _database_url(tmp_path / "migrated.sqlite3")
+    created_url = _database_url(tmp_path / "created.sqlite3")
+    upgrade_database(migrated_url)
+    engine = create_engine(created_url)
+    try:
+        Base.metadata.create_all(engine)
+    finally:
+        engine.dispose()
+
+    def index_sql(url: str) -> dict[str, str]:
+        engine = create_engine(url)
+        try:
+            with engine.connect() as connection:
+                rows = connection.execute(
+                    text(
+                        "SELECT name, sql FROM sqlite_master WHERE type = 'index' "
+                        "AND sql IS NOT NULL AND tbl_name IN ('access_requests', "
+                        "'access_request_notices', 'access_request_notice_attempts', "
+                        "'object_grants') ORDER BY name"
+                    )
+                ).all()
+        finally:
+            engine.dispose()
+        return {name: " ".join(sql.split()) for name, sql in rows}
+
+    migrated = index_sql(migrated_url)
+    created = index_sql(created_url)
+    assert migrated == created
+    assert migrated["uq_access_requests_open"].endswith("WHERE status = 'pending'")

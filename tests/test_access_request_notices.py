@@ -924,7 +924,7 @@ def test_planning_failure_rolls_back_with_the_request_never_half_creates(
 def test_a_hint_reaches_the_authorized_owner_and_never_approves_anything(
     backend, frozen
 ) -> None:
-    _route(backend, "manager", "openclaw-agent:manager-inbox")
+    _route(backend, "owner", "openclaw-agent:owner-inbox")
     _route(backend, "outsider", "openclaw-agent:outsider-inbox")
     settings = Settings(
         database_url=backend.url,
@@ -951,9 +951,9 @@ def test_a_hint_reaches_the_authorized_owner_and_never_approves_anything(
             stats = _deliver(backend, transport, NOW)
 
         assert stats["delivered"] == 1
-        # Exactly one hint, addressed to the authorized manager route only.
+        # Exactly one hint, addressed to the authorized owner route only.
         (envelope,) = receiver.visible
-        assert envelope["target"] == "openclaw-agent:manager-inbox"
+        assert envelope["target"] == "openclaw-agent:owner-inbox"
         notice = envelope["notice"]
         assert set(notice) == {
             "schema_version",
@@ -998,11 +998,11 @@ def test_a_hint_reaches_the_authorized_owner_and_never_approves_anything(
         assert forbidden.status_code == 403
 
         # Only the authenticated owner-side decision changes anything.
-        queue = client.get(reference, headers=authorization(backend.tokens["manager"]))
+        queue = client.get(reference, headers=authorization(backend.tokens["owner"]))
         assert [item["id"] for item in queue.json()["items"]] == [request_id]
         decided = client.post(
             f"{reference}/{request_id}/decision",
-            headers=authorization(backend.tokens["manager"]),
+            headers=authorization(backend.tokens["owner"]),
             json={"decision": "approve"},
         )
         assert decided.status_code == 200 and decided.json()["status"] == "approved"

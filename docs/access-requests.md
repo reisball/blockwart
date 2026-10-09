@@ -20,7 +20,8 @@ API and MCP; MCP tools proxy the identical REST endpoints.
    grant. Approvers may shorten but never extend a temporary window; a
    permanent request may be shortened to temporary. An approval is refused
    (`409`) if the requester is no longer active, can no longer `discover` the
-   object, or already holds `read`; a denial is always possible.
+   object, or already holds `read`. Denial still requires an active requester,
+   an active approver, current `manage_access` and an unexpired pending request.
 4. Everything is re-evaluated against current state on every call: nothing the
    caller held when authenticating, or when the request was created, is trusted.
 
@@ -53,7 +54,8 @@ double-apply:
 - creating a request for the same requester and object;
 - revoking or replacing the grant (`DELETE .../access/grants/{id}` and the
   grant-create path), which ends the approval at the moment of revocation;
-- deciding or cancelling.
+Deciding and cancelling check the projected state and reject a lapsed request;
+that rejection does not persist an expiry or revocation.
 
 The original decision columns (`decided_by`, `decided_at`,
 `approved_expires_at`, `reason`) are never rewritten; `ended_at` records when an
@@ -127,7 +129,8 @@ never a decision.
   most 20 pending notices per target (`storm_suppressed`). A claim commits a
   fenced lease **before** any network I/O, no transaction or lock is held while
   the transport runs, and the result is written by an update conditional on the
-  lease token, so a crashed or slow worker can neither duplicate nor overwrite.
+  lease token, so a late worker cannot overwrite a newer claim. Retries can repeat wire
+  delivery; the receiver must deduplicate the stable delivery id.
 - **Attempt-time authorization.** Before every attempt the target, the
   principal, a live token, the request (still effectively pending, requester
   active) and the recipient's current `manage_access` are re-checked. A lost
@@ -147,7 +150,9 @@ never a decision.
   OpenClaw test gateway of the agent notice channel (`openclaw_test_gateway`).
   There is no configurable callback URL, and the former unrestricted
   `WebhookNotifier` is gone. Delivery ids are `access-request-notice-<uuid>`,
-  globally unique, so a receiver can never confuse two different notices.
+  random UUIDs rather than database sequence ids. The shared transport uses
+  a total deadline across connect, headers and response body, closes the socket
+  at that deadline, ignores proxy environment and refuses redirects.
 - **Redacted diagnostics.** Attempts store a coarse outcome and a safe error
   code only (no payload, route, token or URL).
 
@@ -204,8 +209,7 @@ pre-upgrade database per the deployment recovery contract).
 ## Verification
 
 ```bash
-export NO_PROXY=127.0.0.1,localhost,::1 no_proxy=127.0.0.1,localhost,::1
-pytest tests/test_access_requests.py tests/test_access_request_hardening.py \
+NO_PROXY=127.0.0.1,localhost,::1 pytest tests/test_access_requests.py tests/test_access_request_hardening.py \
   tests/test_access_request_notices.py tests/test_access_request_ui.py \
   tests/test_migrations.py tests/test_postgresql_compat_regressions.py -rs
 ```
