@@ -85,8 +85,10 @@ agree). An approved request therefore never blocks a replacement:
 - The requester's list, status and cancellation re-check the active identity
   and the **current** `discover` on every call. After visibility is lost the
   list omits the request entirely (no object id, request id, status or grant
-  id) and cancel returns the same `404` as an unknown request id. An inactive
-  principal gets the same uniform `404` on every requester path.
+  id) and cancel returns the same `404` as an unknown request id. The service
+  also returns uniform not-found for an inactive identity in an already
+  authenticated context; credentials of an inactive principal are rejected
+  by the normal authentication boundary before reaching the service.
 - Approvers need current `manage_access` *and* an active identity; policy lost
   between listing and deciding yields `403` and changes nothing.
 
