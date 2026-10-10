@@ -32,6 +32,7 @@ from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import func, or_, select, update
 from sqlalchemy.exc import DBAPIError, IntegrityError
+from sqlalchemy.exc import TimeoutError as DBTimeoutError
 from sqlalchemy.orm import Session, sessionmaker
 
 from blockwart.config import Settings
@@ -482,7 +483,7 @@ def _process_claim(
 ) -> None:
     try:
         decision = _prepare_attempt(session, claim, policy, _naive_utc(moment_of()))
-    except DBAPIError:
+    except (DBAPIError, DBTimeoutError):
         # No send on an uncertain read. Consume the claim budget and retry
         # under the same fenced outcome transaction as a transport failure.
         session.rollback()

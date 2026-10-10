@@ -164,12 +164,17 @@ def test_delivery_ids_survive_replay_but_do_not_collide_after_db_recreation(back
         assert receiver.request_ids[2] != old_key
 
 
-def test_transient_prepare_db_error_retries_without_send_then_recovers(backend, monkeypatch):
+@pytest.mark.parametrize("error_kind", ["operational", "pool_timeout"])
+def test_transient_prepare_db_error_retries_without_send_then_recovers(
+    backend, monkeypatch, error_kind
+):
     _emit(backend)
     transport = FakeNoticeTransport()
     with monkeypatch.context() as patch:
 
         def fail(*args, **kwargs):
+            if error_kind == "pool_timeout":
+                raise notices.DBTimeoutError("secret pool detail")
             raise OperationalError("secret query", {}, RuntimeError("secret connection"))
 
         patch.setattr(notices, "check_delivery_authorization", fail)
