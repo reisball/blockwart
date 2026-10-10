@@ -46,15 +46,6 @@ def lock_principal_rows(
     include_owner_grant_principals: bool = False,
 ) -> dict[str, Principal]:
     """Lock and refresh principal state in deterministic principal-ID order."""
-    # SQLite ignores FOR UPDATE. Reserve its writer before reading protected
-    # state, rather than trying to upgrade a stale read snapshot later. The
-    # driver may not have begun a transaction despite Session autobegin (its
-    # legacy SELECT behavior); never start a nested transaction if it has.
-    connection = session.connection()
-    if connection.dialect.name == "sqlite":
-        driver = connection.connection.driver_connection
-        if not driver.in_transaction:
-            connection.exec_driver_sql("BEGIN IMMEDIATE")
     predicate = Principal.id.in_(sorted(frozenset(principal_ids)))
     if include_active_catalog_owners:
         predicate = or_(
@@ -437,6 +428,15 @@ def lock_grant_command_state(
     authority grants and every direct grant on the command object by grant ID.
     The object revision is claimed only after this helper returns.
     """
+    # SQLite ignores FOR UPDATE. Reserve its writer before reading protected
+    # state, rather than trying to upgrade a stale read snapshot later. The
+    # driver may not have begun a transaction despite Session autobegin (its
+    # legacy SELECT behavior); never start a nested transaction if it has.
+    connection = session.connection()
+    if connection.dialect.name == "sqlite":
+        driver = connection.connection.driver_connection
+        if not driver.in_transaction:
+            connection.exec_driver_sql("BEGIN IMMEDIATE")
     principal_ids = set(extra_principal_ids)
     if actor_principal_id is not None:
         principal_ids.add(actor_principal_id)
