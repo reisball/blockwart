@@ -47,7 +47,7 @@ from blockwart.domain.auth import GrantScope, Permission, Role
 from blockwart.domain.timestamps import format_rfc3339_utc
 from blockwart.models import AccessRequest, CatalogObject, Principal
 from blockwart.services import clock
-from blockwart.services.access import create_object_grant
+from blockwart.services.access import create_object_grant, lock_grant_command_state
 from blockwart.services.access_request_notices import (
     DISABLED_ROUTING,
     NoticeRouting,
@@ -178,6 +178,13 @@ def create_access_request(
     routing: NoticeRouting = DISABLED_ROUTING,
 ) -> AccessRequestCommandResult:
     resolved_duration = AccessRequestDuration(duration)
+    # The principal lock serializes the requester-wide count/insert and joins
+    # the grant/identity/placement write protocol before authorization is read.
+    lock_grant_command_state(
+        session,
+        actor_principal_id=context.principal.id,
+        object_id=object_id,
+    )
     now = clock.utcnow()
     principal = _active_principal(session, context)
     principal_id = context.principal.id
@@ -198,25 +205,26 @@ def create_access_request(
     if resolved_duration == AccessRequestDuration.TEMPORARY:
         requested_expires_at = now + _validate_temporary_duration(ttl_seconds)
 
-    # Persist elapsed windows / vanished grants of this requester and object
-    # first (an explicit write lifecycle), so a stale row can never be mistaken
-    # for an open request and nothing outside this transaction has to run.
-    materialize_lapsed_requests(
-        session,
-        requester_principal_id=principal.id,
-        object_ids=(object_id,),
-        now=now,
-        actor="system",
-    )
-
     existing = _pending_request(session, principal.id, object_id)
-    if existing is not None:
-        # A true retry: the original row and its history stay untouched.
+    if existing is not None and effective_statuses(session, [existing], now=now)[
+        existing.id
+    ] == AccessRequestStatus.PENDING:
+        # A true retry preserves all lifecycle history, including elapsed rows
+        # on other objects. It needs no new capacity and materializes nothing.
         return AccessRequestCommandResult(
             request_id=existing.id,
             status=str(existing.status),
             changed=False,
         )
+
+    # Materialize the requester's elapsed history across all objects inside
+    # this explicit write. Pure reads must not be needed to free global quota.
+    materialize_lapsed_requests(
+        session,
+        requester_principal_id=principal.id,
+        now=now,
+        actor="system",
+    )
 
     open_count = len(
         session.scalars(
@@ -326,6 +334,15 @@ def cancel_access_request(
     request = session.get(AccessRequest, request_id)
     if request is None or request.requester_principal_id != context.principal.id:
         raise CommandNotFound("access request not found")
+    lock_grant_command_state(
+        session,
+        actor_principal_id=context.principal.id,
+        object_id=request.object_id,
+    )
+    if _active_principal(session, context) is None:
+        raise CommandNotFound("access request not found")
+    now = clock.utcnow()
+    session.refresh(request)
     policy = policy_for_principal(session, context.principal.id)
     _hidden_unless_discoverable(policy, request.object_id)
     effective = effective_statuses(session, [request], now=now)[request.id]
@@ -450,6 +467,37 @@ def decide_access_request(
             approved_ttl_seconds=approved_ttl_seconds,
             now=now,
         )
+
+    # Stabilize authorization at the write boundary, in the same principal ->
+    # owner grants -> placements -> command grants order as revoke/reassign
+    # and identity changes. Policy below is recomputed from the database while
+    # those locks remain held through grant, request, outbox and audit commit.
+    lock_grant_command_state(
+        session,
+        actor_principal_id=context.principal.id,
+        object_id=request.object_id,
+        extra_principal_ids=(request.requester_principal_id,),
+    )
+    now = clock.utcnow()
+    policy = policy_for_principal(session, context.principal.id)
+    if _active_principal(session, context) is None or not policy.can(
+        Permission.MANAGE_ACCESS, request.object_id
+    ):
+        raise CommandAuthorizationDenied(
+            object_id=request.object_id, permission=Permission.MANAGE_ACCESS
+        )
+    requester = session.get(Principal, request.requester_principal_id)
+    if requester is None or not requester.active:
+        raise CommandConflict("requesting principal is no longer active")
+    session.refresh(request)
+    if effective_statuses(session, [request], now=now)[request.id] != AccessRequestStatus.PENDING:
+        raise CommandConflict("access request was already decided or its window has elapsed")
+    if approve:
+        requester_policy = policy_for_principal(session, requester.id)
+        if not requester_policy.can(Permission.DISCOVER, request.object_id):
+            raise CommandConflict("requesting principal can no longer discover the object")
+        if requester_policy.can(Permission.READ, request.object_id):
+            raise CommandConflict("read access is already granted for this object")
 
     new_status = AccessRequestStatus.APPROVED if approve else AccessRequestStatus.DENIED
     # Claim the request with one guarded UPDATE that also records the outcome:

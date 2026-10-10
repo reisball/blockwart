@@ -22,6 +22,11 @@ API and MCP; MCP tools proxy the identical REST endpoints.
    (`409`) if the requester is no longer active, can no longer `discover` the
    object, or already holds `read`. Denial still requires an active requester,
    an active approver, current `manage_access` and an unexpired pending request.
+   Write decisions share the grant-command lock order with revocation,
+   reassignment, identity changes and placement writes. Authorization is read
+   again under those locks and held through the request/grant/audit commit.
+   SQLite reserves its single writer before the protected reads; PostgreSQL
+   locks principal, grant and placement rows in the existing shared order.
 4. Everything is re-evaluated against current state on every call: nothing the
    caller held when authenticating, or when the request was created, is trusted.
 
@@ -51,7 +56,8 @@ one audit event (`access_request_expire`, `access_request_revoke`) and a
 guarded `UPDATE ... WHERE status = <expected>` so parallel lifecycles cannot
 double-apply:
 
-- creating a request for the same requester and object;
+- creating a request, which materializes elapsed requests for that requester
+  across all objects before enforcing the global quota;
 - revoking, reassigning or replacing the grant (the grant delete, update and
   create paths), which ends the original approval in that same transaction;
 Deciding and cancelling check the projected state and reject a lapsed request;
@@ -102,7 +108,10 @@ agree). An approved request therefore never blocks a replacement:
 - Conservative defaults (module constants in
   `blockwart.services.access_requests`, changed only by shipping code):
   temporary TTL between **5 minutes and 30 days**; at most **10 open requests
-  per requester**; list responses are capped at 200 items.
+  per requester**; list responses are capped at 200 items. Creation serializes
+  the count and insert under the requester principal lock, including requests
+  on different objects. Elapsed history does not consume quota, and an
+  identical pending retry returns the original request without a new audit.
 - Temporary grants carry `expires_at`. Policy computation, "my direct grants"
   and the principal grant views ignore expired grants, so access ends at the
   timestamp without a restart and without a cache to invalidate; the policy
