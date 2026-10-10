@@ -282,7 +282,7 @@ def test_unrelated_conflict_is_not_mistaken_for_a_duplicate(backend) -> None:
     _emit(backend)
     with LoopbackReceiver() as receiver:
         # A 409 that does not confirm *this* delivery_id must stay a failure.
-        receiver._accepted.add(f"agent-notice-job-{_job(backend).id}")
+        receiver._accepted.add(notices.delivery_id_for_job(_job(backend)))
         receiver._duplicate_body = {"status": "duplicate", "delivery_id": "someone-else"}
         transport = OpenClawTestGatewayTransport(endpoint_url=receiver.url, timeout_seconds=3)
         stats = _run(backend, transport)

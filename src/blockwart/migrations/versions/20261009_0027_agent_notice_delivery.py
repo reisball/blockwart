@@ -5,8 +5,9 @@ Revises: 20260926_0026
 
 The revision is purely additive. It creates four new tables (agent delivery
 targets, notice subscriptions, notice events, delivery jobs) plus one redacted
-attempt-audit table and touches no existing table, column, index, constraint,
-trigger, or row. It follows the current ``20260926_0026`` head linearly.
+attempt-audit table and adds a nullable notice high-water version to release
+observations, backfilled from their latest version. Historical revisions stay
+intact. It follows the current ``20260926_0026`` head linearly.
 
 Database-backed invariants: one active registration per ``(transport, route)``
 and per routing rule (partial unique indexes, identical on SQLite and
@@ -17,7 +18,7 @@ No routing data is written by this migration: an upgraded catalog has zero
 agent targets and zero subscriptions, so no outbound agent notification can
 occur until a platform administrator deliberately creates both.
 
-The downgrade drops exactly the five tables this revision created; it is a
+The downgrade drops the five new tables and the notice high-water column; it is a
 clean rollback of the schema. Only notice state — all of which is re-derivable
 from fresh release checks — is removed. Before a live rollback, stop Blockwart
 and restore the verified pre-upgrade database according to the deployment
@@ -52,6 +53,13 @@ _ATTEMPT_OUTCOMES = (
 
 
 def upgrade() -> None:
+    op.add_column(
+        "service_release_observations",
+        sa.Column("notice_highest_version", sa.String(64), nullable=True),
+    )
+    op.execute(
+        "UPDATE service_release_observations SET notice_highest_version = latest_version"
+    )
     op.create_table(
         "agent_delivery_targets",
         sa.Column("id", sa.String(length=36), nullable=False),
@@ -320,3 +328,5 @@ def downgrade() -> None:
     )
     op.drop_index("ix_agent_delivery_targets_principal", table_name="agent_delivery_targets")
     op.drop_table("agent_delivery_targets")
+
+    op.drop_column("service_release_observations", "notice_highest_version")

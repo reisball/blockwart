@@ -97,6 +97,8 @@ def _render(
         "notices.html",
         context={
             "title": "Blockwart · Agent notices",
+            "delivery_poller_enabled": request.app.state.settings.notice_delivery_poller_enabled,
+            "delivery_endpoint_state": _endpoint_state(request),
             "counts": count_notice_jobs_by_status(session),
             "statuses": DELIVERY_STATUS_VALUES,
             "status_filter": status_filter,
@@ -253,3 +255,16 @@ def revoke_subscription_from_ui(
             actor=_actor(request),
         ),
     )
+
+
+def _endpoint_state(request: Request) -> str:
+    from blockwart.services.notice_transport import TransportConfigError, _require_loopback_url
+
+    endpoint = request.app.state.settings.notice_delivery_endpoint_url
+    if not endpoint:
+        return "unconfigured"
+    try:
+        _require_loopback_url(endpoint)
+    except (TransportConfigError, ValueError):
+        return "invalid"
+    return "configured"

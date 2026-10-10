@@ -25,6 +25,7 @@ from blockwart.domain.release_monitoring import (
     RELEASE_STATUSES,
     ReleaseObservation,
     ReleaseRecord,
+    compare_versions,
     read_github_release_target,
     read_release_monitoring_config,
     release_monitoring_view,
@@ -481,7 +482,13 @@ def check_service_release(
             ServiceReleaseObservation.provider == lease.provider,
         )
     )
-    previous_version = current.latest_version if current is not None else None
+    previous_version = (
+        current.notice_highest_version or current.latest_version
+        if current is not None and current.target_key == resolution.target.cache_key
+        else None
+    )
+    if compare_versions("0", previous_version) == "unknown":
+        previous_version = None
     request = GithubReleaseRequest(
         target=resolution.target,
         etag=(
@@ -516,26 +523,44 @@ def check_service_release(
         _delete_claim(session, lease.id, lease_owner)
         session.commit()
         return ReleaseCheckResult(object_id, "skipped", None, "changed")
-    # Issue #106: a genuinely new stable upstream version emits exactly one
-    # logical notice event; fan-out and delivery deduplication happen in the
-    # notice layer. Emission shares this transaction so event and observation
-    # stay consistent across process restarts.
+    # Match attention's fresh update_available comparison. First observations
+    # count; subsequent observations must move forwards, never withdraw a release.
+    # Repeated checks are safe: event identity includes instance/provider/version.
+    projection = release_monitoring_view(
+        data=data,
+        object_id=object_id,
+        record=record,
+        now=observed.checked_at,
+        default_interval_seconds=settings.default_interval_seconds,
+        jitter_seconds=settings.jitter_seconds,
+    )
     if (
-        observed.outcome == "observed"
-        and previous_version is not None
-        and record.latest_version != previous_version
+        observed.outcome in {"observed", "not_modified"}
+        and record.error_code is None
+        and projection["status"] == "update_available"
+        and (
+            previous_version is None
+            or previous_version == record.latest_version
+            or compare_versions(previous_version, record.latest_version) == "update_available"
+        )
     ):
         from blockwart.services.agent_notices import record_release_notice_event
 
-        record_release_notice_event(
-            session,
-            object_id=row.id,
-            object_instance_id=row.instance_id,
-            provider=lease.provider,
-            latest_tag=record.latest_tag,
-            latest_version=record.latest_version,
-            observed_at=observed.checked_at,
-        )
+        try:
+            # Observation is flushed before this savepoint. Roll back every
+            # event/job/audit change on fan-out failure, preserving observation.
+            with session.begin_nested():
+                record_release_notice_event(
+                    session,
+                    object_id=row.id,
+                    object_instance_id=row.instance_id,
+                    provider=lease.provider,
+                    latest_tag=record.latest_tag,
+                    latest_version=record.latest_version,
+                    observed_at=observed.checked_at,
+                )
+        except Exception:  # noqa: BLE001 - optional notices cannot abort observation
+            logger.error("release_notice_error code=fanout_failed")
     session.execute(
         update(ServiceReleaseCheckLease)
         .where(
@@ -553,14 +578,7 @@ def check_service_release(
     return ReleaseCheckResult(
         object_id,
         observed.outcome,
-        release_monitoring_view(
-            data=data,
-            object_id=object_id,
-            record=record,
-            now=observed.checked_at,
-            default_interval_seconds=settings.default_interval_seconds,
-            jitter_seconds=settings.jitter_seconds,
-        ),
+        projection,
     )
 
 
@@ -604,6 +622,7 @@ def record_release_observation(
     elif row.target_key != target_key:
         row.latest_tag = None
         row.latest_version = None
+        row.notice_highest_version = None
         row.released_at = None
         row.release_etag = None
         row.http_status = None
@@ -615,6 +634,14 @@ def record_release_observation(
     row.target_key = target_key
     failures = (row.consecutive_failures or 0) + 1 if observation.outcome == "error" else 0
     if observation.outcome == "observed":
+        highest = row.notice_highest_version or row.latest_version
+        if compare_versions("0", highest) == "unknown":
+            highest = None
+        if compare_versions("0", observation.latest_version) != "unknown" and (
+            highest is None
+            or compare_versions(highest, observation.latest_version) == "update_available"
+        ):
+            row.notice_highest_version = observation.latest_version
         row.latest_tag = observation.latest_tag
         row.latest_version = observation.latest_version
         row.released_at = _naive(observation.released_at)

@@ -389,6 +389,9 @@ def test_notice_ui_is_admin_only_secret_free_and_shows_all_states(client, env) -
         ("Acknowledged", 1),
     ):
         assert f"{label}: {count}" in html
+    assert "Delivery poller disabled" in html
+    assert "Endpoint configured" in html
+    assert "Pending jobs will not be delivered by this application." in html
     assert "openclaw-agent:test-inbox" in html and "principal-agent" in html
     assert "transport_timeout" in html  # safe error code of the dead-lettered job
     for forbidden in (SECRET, "127.0.0.1:9", "Bearer", "lease_token", "token_hash", "Fuer Service"):
@@ -452,15 +455,19 @@ def test_notice_ui_manages_targets_and_rules_with_csrf_and_audit(client, env) ->
                 AgentNoticeSubscription.active.is_(True),
             )
         ).one()
-    assert client.post(
-        f"/admin/notices/subscriptions/{rule_id}/revoke", data=_csrf(client)
-    ).status_code == 200
-    assert client.post(
-        f"/admin/notices/targets/{target_id}/revoke", data=_csrf(client)
-    ).status_code == 200
-    assert client.post(
-        "/admin/notices/targets/missing/revoke", data=_csrf(client)
-    ).status_code == 404
+    assert (
+        client.post(
+            f"/admin/notices/subscriptions/{rule_id}/revoke", data=_csrf(client)
+        ).status_code
+        == 200
+    )
+    assert (
+        client.post(f"/admin/notices/targets/{target_id}/revoke", data=_csrf(client)).status_code
+        == 200
+    )
+    assert (
+        client.post("/admin/notices/targets/missing/revoke", data=_csrf(client)).status_code == 404
+    )
 
     with env["sessions"]() as session:
         assert session.get(AgentDeliveryTarget, target_id).active is False
@@ -570,3 +577,23 @@ def test_agent_job_state_never_leaks_other_agents_notices(client, env) -> None:
     assert client.get("/api/v1/notices").json()["count"] == 1
     with env["sessions"]() as session:
         assert {job.status for job in session.scalars(select(AgentDeliveryJob))} == {"delivered"}
+
+
+@pytest.mark.parametrize(
+    ("enabled", "endpoint", "labels"),
+    [
+        (False, "", ("Delivery poller disabled", "Endpoint unconfigured")),
+        (True, "http://203.0.113.9:9/private", ("Delivery poller enabled", "Endpoint refused")),
+        (True, "http://127.0.0.1:9/private", ("Delivery poller enabled", "Endpoint configured")),
+    ],
+)
+def test_admin_ui_reports_redacted_delivery_configuration(client, env, enabled, endpoint, labels):
+    _login(client, env["admin_session"])
+    client.app.state.settings.notice_delivery_poller_enabled = enabled
+    client.app.state.settings.notice_delivery_endpoint_url = endpoint
+    html = client.get("/admin/notices?lang=en").text
+    assert all(label in html for label in labels)
+    assert "private" not in html and "203.0.113.9" not in html and "127.0.0.1:9" not in html
+    assert ("Pending jobs will not be delivered by this application." in html) == (
+        not enabled or labels[1] != "Endpoint configured"
+    )

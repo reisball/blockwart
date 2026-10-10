@@ -5,8 +5,8 @@ Safety properties implemented here:
 - exactly one logical delivery job per ``(event, target)`` pair;
 - authorization (principal active, service-account type, token activity,
   object read permission, subscription/target state) is re-checked directly
-  before every delivery attempt and fails closed: a suppressed delivery
-  leaves neither payload nor existence hint behind;
+  before every delivery attempt and fails closed: no payload is sent on
+  denial; own-notice diagnostics still require current object read permission;
 - bounded retries with exponential backoff, TTL expiry, and dead-lettering;
 - a durable, fenced lease is committed *before* any network I/O and no
   database transaction is open while a transport runs;
@@ -31,7 +31,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import func, or_, select, update
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import DBAPIError, IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
 
 from blockwart.config import Settings
@@ -387,9 +387,13 @@ def _build_job_payload(session: Session, job: AgentDeliveryJob) -> dict | None:
     )
 
 
-def delivery_id_for_job(job_id: int) -> str:
-    """The stable receiver-side idempotency key of one logical job."""
-    return f"agent-notice-job-{job_id}"
+def delivery_id_for_job(job: AgentDeliveryJob) -> str:
+    """Globally unique logical identity, stable across retries and restored jobs.
+
+    Event and target UUIDs survive replay; integer primary keys are DB-local.
+    New events/targets after a restore or in another DB receive fresh UUIDs.
+    """
+    return f"agent-notice-job-{job.event_id}-{job.target_id}"
 
 
 @dataclass(frozen=True, slots=True)
@@ -401,6 +405,7 @@ class _Claim:
     attempt_no: int
     target_id: str
     expires_at: datetime
+    lease_expires_at: datetime
 
 
 def deliver_due_agent_notices(
@@ -477,6 +482,20 @@ def _process_claim(
 ) -> None:
     try:
         decision = _prepare_attempt(session, claim, policy, _naive_utc(moment_of()))
+    except DBAPIError:
+        # No send on an uncertain read. Consume the claim budget and retry
+        # under the same fenced outcome transaction as a transport failure.
+        session.rollback()
+        logger.error("notice_delivery_error code=prepare_retry job=%s", claim.job_id)
+        _record_outcome(
+            session,
+            claim,
+            DeliveryOutcome(False, "delivery_error"),
+            policy,
+            _naive_utc(moment_of()),
+            stats,
+        )
+        return
     except Exception:  # noqa: BLE001 - fail closed with a stable code
         session.rollback()
         logger.error("notice_delivery_error code=prepare_failed job=%s", claim.job_id)
@@ -484,6 +503,9 @@ def _process_claim(
     if isinstance(decision, DeliveryRequest):
         # End the read transaction: nothing is held open across the transport.
         session.rollback()
+        if _naive_utc(moment_of()) >= claim.lease_expires_at:
+            stats["lease_lost"] += 1
+            return
         try:
             outcome = transport.deliver(decision)
         except Exception:  # noqa: BLE001 - transport boundary stays coarse
@@ -495,7 +517,7 @@ def _process_claim(
     values: dict[str, object] = {"status": status, "last_error_code": code}
     if status == "suppressed":
         values["suppressed_at"] = moment
-    if _finish_claim(session, claim, uncount_attempt=True, **values):
+    if _finish_claim(session, claim, uncount_attempt=True, fence_at=moment, **values):
         stats[status] += 1
     else:
         stats["lease_lost"] += 1
@@ -529,7 +551,7 @@ def _prepare_attempt(
     return DeliveryRequest(
         target_id=job.target_id,
         target_route=target.route,
-        delivery_id=delivery_id_for_job(job.id),
+        delivery_id=delivery_id_for_job(job),
         payload=payload,
     )
 
@@ -564,7 +586,9 @@ def _record_outcome(
         else:
             values = {"last_error_code": error_code, "next_attempt_at": retry_due}
             stat = "retried"
-    if not _finish_claim(session, claim, uncount_attempt=False, commit=False, **values):
+    if not _finish_claim(
+        session, claim, uncount_attempt=False, commit=False, fence_at=moment, **values
+    ):
         # The lease was lost to a reclaiming worker: its result is the record.
         session.rollback()
         stats["lease_lost"] += 1
@@ -590,6 +614,7 @@ def _finish_claim(
     *,
     uncount_attempt: bool,
     commit: bool = True,
+    fence_at: datetime,
     **values: object,
 ) -> bool:
     """Write a result conditional on the fencing token and release the lease.
@@ -612,6 +637,7 @@ def _finish_claim(
         .where(
             AgentDeliveryJob.id == claim.job_id,
             AgentDeliveryJob.lease_token == claim.token,
+            AgentDeliveryJob.lease_expires_at > fence_at,
             AgentDeliveryJob.status == "pending",
         )
         .values(**assignments)
@@ -712,6 +738,7 @@ def _claim_next_job(
             attempt_no=prior_attempts + 1,
             target_id=target_id,
             expires_at=expires_at,
+            lease_expires_at=lease_end,
         )
     return None
 
@@ -829,9 +856,7 @@ def list_own_agent_notices(
         if current is None:
             order.append(event.id)
             best[event.id] = (job, event)
-        elif _JOB_STATUS_RANK.get(job.status, -1) > _JOB_STATUS_RANK.get(
-            current[0].status, -1
-        ):
+        elif _JOB_STATUS_RANK.get(job.status, -1) > _JOB_STATUS_RANK.get(current[0].status, -1):
             best[event.id] = (job, event)
     notices: list[OwnNotice] = []
     for event_id in order:
@@ -1156,7 +1181,11 @@ async def run_notice_delivery_poller(
 
     if not settings.notice_delivery_poller_enabled:
         return
-    transport = build_notice_transport(settings)
+    try:
+        transport = build_notice_transport(settings)
+    except (ValueError, RuntimeError):
+        logger.error("notice_delivery_poller_error code=transport_invalid")
+        return
     if transport is None:
         logger.error("notice_delivery_poller_error code=transport_unconfigured")
         return
@@ -1196,5 +1225,11 @@ def _run_delivery_pass(
             now=datetime.now(UTC),
             policy=policy,
             worker_id=f"poller-{uuid.uuid4().hex[:8]}",
-            clock=lambda: datetime.now(UTC),
+            clock=lambda: _database_now(sessions),
         )
+
+
+def _database_now(sessions: sessionmaker[Session]) -> datetime:
+    """Fresh DB time keeps production leases/retries independent of worker skew."""
+    with sessions() as session:
+        return _naive_utc(session.scalar(select(func.current_timestamp())))

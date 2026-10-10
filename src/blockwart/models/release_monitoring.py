@@ -91,6 +91,8 @@ class ServiceReleaseObservation(Base):
     target_key: Mapped[str] = mapped_column(String(64), nullable=False)
     latest_tag: Mapped[str | None] = mapped_column(String(128), nullable=True)
     latest_version: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    # Highest comparable observation for this repository, including withdrawals.
+    notice_highest_version: Mapped[str | None] = mapped_column(String(64), nullable=True)
     released_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     # The upstream validator for a conditional request. It is replayed only as
     # an ``If-None-Match`` value against the same compiled-in API origin, so it

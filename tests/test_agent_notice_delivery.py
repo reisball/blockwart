@@ -694,7 +694,7 @@ def test_delivery_id_is_stable_across_retries(session, service_env) -> None:
                 s, transport, now=NOW + timedelta(seconds=120), worker_id="w1"
             )
         assert len(transport.calls) == 2
-        expected = f"agent-notice-job-{job.id}"
+        expected = f"agent-notice-job-{job.event_id}-{job.target_id}"
         assert transport.calls[0].delivery_id == expected
         assert transport.calls[1].delivery_id == expected
         refreshed = s.query(AgentDeliveryJob).one()

@@ -26,6 +26,13 @@
     <main class="page">
       {% if error %}<div class="error" role="alert">{{ error }}</div>{% endif %}
       <p class="meta">{{ t("notices.scope_note") }}</p>
+      <p class="meta" role="status">
+        {{ t("notices.poller." ~ ("enabled" if delivery_poller_enabled else "disabled")) }}.
+        {{ t("notices.endpoint." ~ delivery_endpoint_state) }}.
+        {% if not delivery_poller_enabled or delivery_endpoint_state != "configured" %}
+          {{ t("notices.delivery.paused") }}
+        {% endif %}
+      </p>
 
       <section class="panel" aria-labelledby="notices-delivery-title">
         <h2 class="section-title" id="notices-delivery-title">{{ t("notices.delivery.title") }}</h2>

@@ -1297,5 +1297,11 @@
   "notices.error.principal_not_service_account": "Der Principal muss ein aktiver Service-Account sein.",
   "notices.error.target_inactive_or_unknown": "Das Ziel ist unbekannt oder widerrufen.",
   "notices.error.target_not_owned_by_principal": "Das Ziel gehört zu einem anderen Service-Account.",
-  "notices.error.unknown_object": "Das Objekt existiert nicht."
+  "notices.error.unknown_object": "Das Objekt existiert nicht.",
+  "notices.poller.enabled": "Zustellungs-Poller aktiviert",
+  "notices.poller.disabled": "Zustellungs-Poller deaktiviert",
+  "notices.endpoint.configured": "Endpunkt konfiguriert",
+  "notices.endpoint.unconfigured": "Endpunkt nicht konfiguriert",
+  "notices.endpoint.invalid": "Endpunkt abgelehnt",
+  "notices.delivery.paused": "Ausstehende Aufträge werden von dieser Anwendung nicht zugestellt."
 }

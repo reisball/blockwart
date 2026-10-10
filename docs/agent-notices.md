@@ -76,20 +76,33 @@ database write lock while another waits on the network:
    still active and matching the event, and current `read` on the object via
    the normal policy snapshot. Any miss — or any unexpected error — fails
    closed: the job becomes `suppressed`/`failed` with a safe code, the attempt
-   is handed back, and nothing leaves Blockwart, not even an existence hint.
+   is handed back, and nothing leaves Blockwart. Transient DB read failures
+   instead consume the bounded attempt budget and retry with `delivery_error`,
+   backoff and TTL; they never send on an uncertain authorization read.
 3. **Send.** The read transaction is ended; the transport runs with **no
    database transaction open**. The payload is closed and fixed (below).
 4. **Record (fenced).** The outcome is written by an UPDATE conditional on the
    `lease_token` and `status = 'pending'`, together with the attempt row, in one
-   transaction. A worker whose lease expired and was reclaimed finds a different
-   token and changes nothing (`lease_lost` in the pass statistics).
+   transaction. The lease must also remain unexpired. A worker whose lease
+   expired or was reclaimed changes nothing (`lease_lost` in the pass statistics).
 
 Database invariants back this: a lease token and expiry exist together, and
-only a `pending` job may hold a lease.
+only a `pending` job may hold a lease. The production poller uses fresh database
+time for claims, expiry and retries, avoiding worker wall-clock skew; callers
+using the inline delivery API must supply a shared clock (fixed `now` is for tests).
+The loopback adapter enforces a total wall-clock deadline through headers and
+body, closing the socket on expiry. Invalid/refused endpoints are logged only
+as `transport_invalid`; startup and shutdown remain safe. The admin UI shows
+poller and endpoint state without displaying URLs or tokens.
 
 ### Response loss and replay
 
-Every send of a job carries the same `delivery_id` (`agent-notice-job-<id>`).
+Every send carries `agent-notice-job-<event UUID>-<target UUID>`. The UUID pair
+is globally unique across new databases/instances and stable for the same logical
+job on retry or restore; local integer primary keys are never receiver keys.
+A gateway that accepted old integer keys before this repair cannot correlate
+them with the new UUID keys: drain pending retries before adopting this repair
+in such a test environment, or reconcile receiver receipts explicitly.
 If the response is lost after the receiver accepted the notice, the retry
 reaches a receiver that already holds that key. The receiver contract:
 
@@ -188,7 +201,13 @@ settings is a follow-up. Fan-out refuses more than 20 pending jobs per target
 
 - **Enable (test environment only):** as platform admin approve a target for an
   active service account and create a subscription (UI or REST); the next
-  matching release observation fans out automatically.
+  fresh observation with `update_available` fans out, including the first
+  observation of an outstanding update. Current, unknown and backwards releases
+  do not notify. A persisted highest-observed version prevents repeated checks
+  of a withdrawn release from later notifying, even after a fan-out failure. Repeated checks (including 304) dedupe by instance/provider/version.
+  A fan-out failure rolls back all notice changes, logs `fanout_failed`, and
+  preserves the observation; a later equal-version check may retry emission.
+  Enable the poller and configure a valid loopback test endpoint to deliver jobs.
 - **Rotate/revoke:** revoke the principal's service tokens (the activity check
   suppresses deliveries on the next attempt), revoke the target, or revoke the
   subscription; each suppresses pending work fail-closed.
@@ -199,10 +218,12 @@ settings is a follow-up. Fan-out refuses more than 20 pending jobs per target
   version observation) — failed jobs are terminal by design and never replay
   silently.
 - **Full channel shutdown:** unset the poller flag and/or revoke every target;
-  pending jobs suppress on their next due pass and fan-out creates
-  suppressed-only jobs.
+  disabling the poller pauses existing pending jobs without changing their
+  state. Revoked targets receive no new jobs; existing pending jobs suppress
+  only when a delivery pass runs. Only storm protection creates suppressed jobs
+  during fan-out.
 - **Rollback:** migration `20261009_0027` is additive (five new tables); its
-  downgrade drops them. Stop Blockwart and restore the verified pre-upgrade
+  downgrade drops them and the nullable notice high-water field. Stop Blockwart and restore the verified pre-upgrade
   database per the deployment recovery contract before any live rollback.
 
 ## Verification
@@ -225,3 +246,14 @@ pytest tests/test_agent_notice_delivery.py tests/test_agent_notice_hardening.py 
 - No productive gateway, credential, or network path (separate approval).
 - Retry/TTL/lease knobs as environment settings.
 - Sharing the outbox contract with access requests (#100) stays decoupled.
+
+Migration reconciliation for Issue #100: historical 0025/0026 remain unchanged.
+The single unmerged 0027 after 0026 now also adds nullable
+`service_release_observations.notice_highest_version` (String(64)), backfilled
+from `latest_version`, and removes it on downgrade. Issue #100’s 0028 must
+retain this revised 0027 predecessor and matching release-observation model.
+A test DB already stamped with the old unmerged 0027 must be rebuilt or
+rolled back to 0026 and upgraded with this revised migration; merely running
+upgrade on an already stamped DB does not add the column. Reconcile the shared
+adapter/deadline tests with
+`bfc5e80783e5dca99dcc32c81cc518fec68770df`; no access-request changes belong here.

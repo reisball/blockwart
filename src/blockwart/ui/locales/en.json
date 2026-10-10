@@ -1297,5 +1297,11 @@
   "notices.error.principal_not_service_account": "The principal must be an active service account.",
   "notices.error.target_inactive_or_unknown": "The target is unknown or revoked.",
   "notices.error.target_not_owned_by_principal": "The target belongs to a different service account.",
-  "notices.error.unknown_object": "The object does not exist."
+  "notices.error.unknown_object": "The object does not exist.",
+  "notices.poller.enabled": "Delivery poller enabled",
+  "notices.poller.disabled": "Delivery poller disabled",
+  "notices.endpoint.configured": "Endpoint configured",
+  "notices.endpoint.unconfigured": "Endpoint unconfigured",
+  "notices.endpoint.invalid": "Endpoint refused",
+  "notices.delivery.paused": "Pending jobs will not be delivered by this application."
 }
