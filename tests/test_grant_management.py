@@ -6,7 +6,8 @@ from concurrent.futures import ThreadPoolExecutor
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import func, select
+from sqlalchemy import event, func, select
+from sqlalchemy.dialects import postgresql
 from sqlalchemy.orm import Session
 
 from blockwart.api.deps import get_session
@@ -229,6 +230,98 @@ def grant_management_client(
 
 def _authorization(token: str) -> dict[str, str]:
     return {"Authorization": f"Bearer {token}"}
+
+
+def test_access_distinct_principal_order_is_postgresql_compatible(
+    grant_management_client: TestClient,
+    grant_management_state,
+) -> None:
+    """Validate the actual access query; SQLite accepts invalid PostgreSQL SQL."""
+    engine = grant_management_state["session_factory"].kw["bind"]
+    statements = []
+
+    def capture(_connection, statement, _multiparams, _params, _options):
+        sql = str(statement.compile(dialect=postgresql.dialect()))
+        if sql.startswith("SELECT DISTINCT principals."):
+            statements.append(statement)
+
+    event.listen(engine, "before_execute", capture)
+    try:
+        response = grant_management_client.get(
+            "/api/v1/objects/grant-child/access",
+            headers=_authorization(grant_management_state["tokens"]["owner"]),
+        )
+    finally:
+        event.remove(engine, "before_execute", capture)
+
+    assert response.status_code == 200, response.text
+    assert len(statements) == 1
+    statement = statements[0]
+    selected = {
+        str(column.compile(dialect=postgresql.dialect()))
+        for column in statement.selected_columns
+    }
+    for expression in statement._order_by_clauses:
+        ordered = str(expression.compile(dialect=postgresql.dialect()))
+        assert ordered in selected, (
+            f"PostgreSQL SELECT DISTINCT requires ORDER BY expression {ordered} "
+            f"in the select list: {statement.compile(dialect=postgresql.dialect())}"
+        )
+
+
+def test_access_groups_sources_and_preserves_principal_order(
+    grant_management_client: TestClient,
+    grant_management_state,
+) -> None:
+    state = grant_management_state
+    with state["session_factory"]() as session:
+        with transaction(session):
+            # One principal has both an inherited and a direct source.
+            create_object_grant(
+                session,
+                principal_id=state["principals"]["owner"],
+                object_id="grant-child",
+                role=Role.VIEWER,
+                scope=GrantScope.SELF,
+            )
+            candidate = create_service_account(
+                session, login="  Candidate.EARLY  ", display_name="Early Candidate"
+            )
+            assert session.get(Principal, candidate.id).login == "candidate.early"
+            create_object_grant(
+                session,
+                principal_id=candidate.id,
+                object_id="grant-child",
+                role=Role.VIEWER,
+                scope=GrantScope.SELF,
+            )
+            # Active but unrelated grant holders must still be omitted.
+            create_object_grant(
+                session,
+                principal_id=state["principals"]["outsider"],
+                object_id="grant-unrelated",
+                role=Role.VIEWER,
+                scope=GrantScope.SELF,
+            )
+
+    response = grant_management_client.get(
+        "/api/v1/objects/grant-child/access",
+        headers=_authorization(state["tokens"]["owner"]),
+    )
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    effective = payload["effective_access"]
+    assert [item["principal"]["login"] for item in effective] == [
+        "candidate.early", "grant.manager", "grant.owner",
+    ]
+    owner = effective[-1]
+    assert set(owner["permissions"]) == {permission.value for permission in Permission}
+    assert [(source["anchor_object_id"], source["direct"]) for source in owner["sources"]] == [
+        ("grant-child", True), ("grant-root", False),
+    ]
+    assert [item["principal"]["login"] for item in payload["direct_grants"]] == [
+        "candidate.early", "candidate.inactive", "grant.owner",
+    ]
 
 
 def test_access_view_is_minimized_and_preview_uses_only_canonical_placement(

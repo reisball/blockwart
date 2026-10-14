@@ -176,7 +176,7 @@ def query_object_access(
         .join(ObjectGrant, ObjectGrant.principal_id == Principal.id)
         .where(Principal.active.is_(True))
         .distinct()
-        .order_by(func.lower(Principal.login), Principal.id)
+        .order_by(Principal.login, Principal.id)
     ).all()
     anchor_cache: dict[str, CatalogObject] = {}
     effective_access: list[EffectivePrincipalAccess] = []

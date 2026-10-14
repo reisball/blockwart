@@ -829,6 +829,10 @@ active state. Credential, session, token, password, and hash fields are never
 part of this projection. Undiscoverable objects return `404`; discoverable
 objects without `manage_access` return `403`.
 
+Effective entries contain each principal once, ordered by stored login and ID.
+The identity creation services normalize logins to lowercase ASCII. Direct
+grants retain case-insensitive login ordering, then principal ID and grant ID.
+
 ### `GET /api/v1/objects/{object_id}/access/principals`
 
 Searches active principals by login or display name for a grant form. Query
