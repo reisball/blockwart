@@ -362,6 +362,7 @@ def _log_request_failure(*, code: str, channel: str, correlation_id: str) -> Non
         code,
         channel,
         correlation_id,
+        exc_info=code == "internal_error",
     )
 
 

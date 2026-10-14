@@ -1,6 +1,7 @@
 from collections.abc import Generator
 from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
+from uuid import UUID
 
 import pytest
 from fastapi import HTTPException
@@ -310,3 +311,70 @@ def test_invalid_correlation_id_is_replaced(
     correlation_id = response.headers["X-Correlation-ID"]
     assert correlation_id != "contains spaces and is invalid"
     assert response.json()["error"]["correlation_id"] == correlation_id
+
+
+@pytest.mark.parametrize("channel", ["api", "ui"])
+@pytest.mark.parametrize("supplied_id", ["traceback-proof-47", "invalid correlation id"])
+def test_unexpected_failure_logs_original_traceback_once(
+    channel: str,
+    supplied_id: str,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    app = create_app()
+    path = "/api/test-traceback" if channel == "api" else "/test-traceback"
+    failure = RuntimeError("exception-detail-must-not-leak")
+
+    @app.post(path)
+    def injected_failure() -> None:
+        raise failure
+
+    with caplog.at_level("ERROR", logger="blockwart.api.errors"):
+        with TestClient(app) as client:
+            response = client.post(
+                path,
+                headers={
+                    "X-Correlation-ID": supplied_id,
+                    "Authorization": "Bearer synthetic-token-marker",
+                    "X-Test-Private": "synthetic-header-marker",
+                },
+                json={"payload": "synthetic-payload-marker"},
+            )
+
+    assert response.status_code == 500
+    correlation_id = response.headers["X-Correlation-ID"]
+    if supplied_id == "traceback-proof-47":
+        assert correlation_id == supplied_id
+    else:
+        assert correlation_id != supplied_id
+        assert str(UUID(correlation_id)) == correlation_id
+    if channel == "api":
+        assert response.json() == {
+            "error": {
+                "code": "internal_error",
+                "message": "Request processing failed.",
+                "correlation_id": correlation_id,
+            }
+        }
+    else:
+        assert response.text == "Request processing failed."
+    assert str(failure) not in response.text
+
+    records = [record for record in caplog.records if record.name == "blockwart.api.errors"]
+    assert len(records) == 1
+    record = records[0]
+    assert record.getMessage() == (
+        f"request_failure operation=http_request code=internal_error "
+        f"channel={channel} correlation_id={correlation_id}"
+    )
+    assert record.exc_info is not None
+    assert record.exc_info[0] is RuntimeError
+    assert record.exc_info[1] is failure
+    traceback = record.exc_info[2]
+    frames = []
+    while traceback is not None:
+        frames.append(traceback.tb_frame.f_code.co_name)
+        traceback = traceback.tb_next
+    assert "injected_failure" in frames
+    assert "Traceback" in caplog.text
+    for marker in ("synthetic-token-marker", "synthetic-header-marker", "synthetic-payload-marker"):
+        assert marker not in caplog.text

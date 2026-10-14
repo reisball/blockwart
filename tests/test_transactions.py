@@ -215,6 +215,7 @@ def test_ui_object_and_relationship_are_one_transaction(
     session_factory,
     install_unrestricted_read_access,
     monkeypatch,
+    caplog,
 ) -> None:
     with session_factory() as session:
         _add_object(session, object_id="target", kind="host")
@@ -226,11 +227,6 @@ def test_ui_object_and_relationship_are_one_transaction(
     monkeypatch.setattr(
         "blockwart.services.commands.create_relationship",
         fail_relationship,
-    )
-    error_records: list[str] = []
-    monkeypatch.setattr(
-        "blockwart.api.errors.logger.error",
-        lambda message, *args: error_records.append(message % args),
     )
 
     with _authorized_client(
@@ -252,12 +248,16 @@ def test_ui_object_and_relationship_are_one_transaction(
             follow_redirects=False,
         )
 
-    rendered_errors = " ".join(error_records)
+    error_records = [record for record in caplog.records if record.name == "blockwart.api.errors"]
+    rendered_errors = " ".join(record.getMessage() for record in error_records)
     assert response.status_code == 500
     assert "forced relationship failure" not in response.text
     assert "forced relationship failure" not in rendered_errors
     assert "Traceback" not in rendered_errors
     assert "code=internal_error channel=ui" in rendered_errors
+    assert len(error_records) == 1
+    assert error_records[0].exc_info is not None
+    assert str(error_records[0].exc_info[1]) == "forced relationship failure"
 
     with session_factory() as session:
         assert session.get(CatalogObject, "ui-partial") is None
