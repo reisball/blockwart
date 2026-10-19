@@ -71,7 +71,7 @@ markupsafe==3.0.3
     # via
     #   jinja2
     #   mako
-mcp==1.29.0
+mcp==1.30.0
     # via blockwart (pyproject.toml)
 mdurl==0.1.2
     # via markdown-it-py
