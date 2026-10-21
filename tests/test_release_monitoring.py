@@ -624,6 +624,128 @@ def test_provider_http_failures_are_stable(monkeypatch, status, headers, expecte
         assert result.retry_after_seconds == 600
 
 
+@pytest.mark.parametrize(
+    ("upstream_status", "headers", "payload", "expected_error"),
+    [
+        (404, [], {"message": "Not Found"}, "not_found"),
+        (
+            200,
+            [],
+            {
+                "tag_name": "v9.0.0",
+                "draft": False,
+                "prerelease": True,
+                "published_at": "2026-08-24T12:00:00Z",
+            },
+            "not_a_stable_release",
+        ),
+        (
+            301,
+            [("Location", "https://api.github.com/repos/canonical-org/service/releases/latest")],
+            {},
+            "redirect_not_supported",
+        ),
+    ],
+    ids=["prerelease-only-404", "prerelease-flag-on-stable-looking-tag", "renamed-repository"],
+)
+def test_stable_only_failures_record_attempt_backoff_and_recover(
+    alembic_session_factory,
+    monkeypatch,
+    upstream_status,
+    headers,
+    payload,
+    expected_error,
+) -> None:
+    clock = [NOW]
+
+    class Clock(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return clock[0].astimezone(tz)
+
+    monkeypatch.setattr(github_provider, "datetime", Clock)
+    monkeypatch.setattr(
+        github_provider,
+        "_resolve",
+        lambda *_args, **_kwargs: [ip_address("140.82.121.6")],
+    )
+    paths = []
+    stable = {
+        "tag_name": "v1.2.0",
+        "draft": False,
+        "prerelease": False,
+        "published_at": "2026-08-24T12:00:00Z",
+    }
+
+    def acquire(**kwargs):
+        paths.append(kwargs["path"])
+        if len(paths) == 1:
+            return upstream_status, headers, json.dumps(payload).encode()
+        # A prerelease-only repository can expose stable-looking tags on its
+        # listing endpoint. Never select one as a fallback for latest's 404.
+        if kwargs["path"] != "/repos/example-org/example-service/releases/latest":
+            pytest.fail("no release-list, repository lookup, or redirect fallback is permitted")
+        return 200, [], json.dumps(stable).encode()
+
+    monkeypatch.setattr(github_provider, "_request", acquire)
+    settings = ReleaseMonitoringSettings(enabled=True, jitter_seconds=0)
+    with alembic_session_factory() as session:
+        upsert_object(session, _service("stable-only"))
+        session.commit()
+        row = session.get(CatalogObject, "stable-only")
+        original = (row.revision, row.updated_at, row.data_json, row.health)
+        audit_count = session.scalar(select(func.count(AuditEvent.id)))
+        synchronize_release_schedule(session, now=NOW, settings=settings)
+        session.commit()
+        first = check_service_release(
+            session, object_id="stable-only", settings=settings, manual=False, now=NOW
+        )
+        assert paths == ["/repos/example-org/example-service/releases/latest"]
+        assert first.outcome == "error"
+        assert first.projection["status"] == "error"
+        assert first.projection["error_code"] == expected_error
+        assert first.projection["http_status"] == upstream_status
+        assert first.projection["last_checked_at"] == "2026-08-25T12:00:00.000000Z"
+        assert first.projection["last_success_at"] is None
+        assert first.projection["latest_tag"] is None
+        assert first.projection["freshness"] == "pending"
+        observation = session.scalar(select(ServiceReleaseObservation))
+        assert observation.consecutive_failures == 1
+        assert observation.last_checked_at == NOW.replace(tzinfo=None)
+        assert observation.last_success_at is None
+        due = NOW + timedelta(days=2)
+        assert _lease_due(session) == due
+        assert observation.next_due_at == due.replace(tzinfo=None)
+        # Reconciliation must preserve failure backoff; no tight retry loop.
+        synchronize_release_schedule(session, now=NOW + timedelta(seconds=30), settings=settings)
+        skipped = check_service_release(
+            session,
+            object_id="stable-only",
+            settings=settings,
+            manual=False,
+            now=due - timedelta(seconds=1),
+        )
+        assert skipped.skipped_reason == "already_claimed_or_not_due"
+        assert len(paths) == 1
+        assert _lease_due(session) == due
+        clock[0] = due
+        recovered = check_service_release(
+            session, object_id="stable-only", settings=settings, manual=False, now=due
+        )
+        assert paths == ["/repos/example-org/example-service/releases/latest"] * 2
+        assert recovered.outcome == "observed"
+        assert recovered.projection["status"] == "update_available"
+        assert recovered.projection["error_code"] is None
+        assert recovered.projection["consecutive_failures"] == 0
+        assert recovered.projection["latest_tag"] == "v1.2.0"
+        assert recovered.projection["freshness"] == "fresh"
+        assert _lease_due(session) == due + timedelta(days=1)
+        session.expire_all()
+        row = session.get(CatalogObject, "stable-only")
+        assert (row.revision, row.updated_at, row.data_json, row.health) == original
+        assert session.scalar(select(func.count(AuditEvent.id))) == audit_count
+
+
 def test_provider_rejects_private_dns_before_socket(monkeypatch) -> None:
     monkeypatch.setattr(
         github_provider,
