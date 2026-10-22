@@ -572,11 +572,7 @@ def release_freshness_for(
 
     if record is None or record.last_success_at is None:
         return "pending"
-    expires_at = (
-        _aware(record.next_due_at)
-        if record.next_due_at is not None
-        else _aware(record.last_success_at) + timedelta(seconds=interval_seconds)
-    )
+    expires_at = _aware(record.last_success_at) + timedelta(seconds=interval_seconds)
     return "stale" if _aware(now) > expires_at else "fresh"
 
 
