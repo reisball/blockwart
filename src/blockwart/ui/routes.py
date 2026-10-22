@@ -112,6 +112,7 @@ from blockwart.services.project_chronology import (
     query_project_chronology_page,
     query_project_overview_page,
 )
+from blockwart.services.project_workspace import item_summary
 from blockwart.services.queries import (
     CatalogBrowseReadModel,
     RelatedRelationshipReadModel,
@@ -151,6 +152,7 @@ from blockwart.ui.project_forms import (
     safe_project_form_rows,
     safe_project_form_values,
     split_form_lines,
+    submitted_project_controls,
 )
 from blockwart.ui.runbook_forms import (
     RUNBOOK_CHANGE_FALLBACK_OPTIONS,
@@ -1078,14 +1080,13 @@ def _project_workspace_response(
         }
     else:
         can_write = Permission.WRITE in project.capabilities
-        chronology_page = query_project_chronology_page(
-            session,
-            access,
-            object_id=object_id,
-            limit=100,
-            cursor=None,
-            include_total=False,
-        )
+        try:
+            chronology_page = query_project_chronology_page(
+                session, access, object_id=object_id, limit=100,
+                cursor=request.query_params.get("chronology_cursor"), include_total=False,
+            )
+        except InvalidCursor as exc:
+            raise HTTPException(400, "Invalid pagination cursor") from exc
         chronology = (
             []
             if chronology_page is None
@@ -1118,6 +1119,9 @@ def _project_workspace_response(
             "project_source_types": PROJECT_SOURCE_TYPE_OPTIONS,
             "project_reference_kinds": PROJECT_REFERENCE_KIND_OPTIONS,
             "chronology": chronology,
+            "item_summary": item_summary(session, access, object_id),
+            "chronology_next_cursor": chronology_page.next_cursor if chronology_page else None,
+            "project_statuses": PROJECT_STATUS_OPTIONS,
             "chronology_kinds": (
                 "intent",
                 "implementation",
@@ -1168,6 +1172,7 @@ def update_project_workspace(
     object_id: str,
     session: Annotated[Session, Depends(get_session)],
     project_form: Annotated[ProjectForm, Depends()],
+    submitted_controls: Annotated[frozenset[str], Depends(submitted_project_controls)],
     if_match: Annotated[str, Form()] = "",
 ):
     access = read_access_from_request(request)
@@ -1190,6 +1195,7 @@ def update_project_workspace(
         apply_project_workspace_form_data(
             data,
             project_form,
+            submitted_controls=submitted_controls,
             concealed_references=_concealed_project_references(data, access),
             preserve_legacy_sources=project_has_legacy_rows(data, "sources"),
         )

@@ -41,7 +41,7 @@ from blockwart.domain.relationships import (
 )
 from blockwart.domain.runbooks import validate_runbook_integrity
 from blockwart.domain.timestamps import format_rfc3339_utc
-from blockwart.models import AuditEvent, CatalogObject, Relationship
+from blockwart.models import AuditEvent, CatalogObject, ProjectRecord, Relationship
 from blockwart.schemas.catalog import (
     CatalogAssetNode,
     CatalogObjectIn,
@@ -1135,7 +1135,7 @@ def typed_reference_holders(session: Session, object_ref: str) -> list[str]:
             continue
         if object_ref in iter_typed_reference_strings(data):
             holders.append(f"catalog_object:{row.id}")
-    return holders
+    return holders + _workspace_reference_holders(session, object_ref)
 
 
 def _reference_blockers(session: Session, object_ref: str) -> list[str]:
@@ -1156,4 +1156,18 @@ def _reference_blockers(session: Session, object_ref: str) -> list[str]:
             continue
         if object_ref in iter_typed_reference_strings(data):
             blockers.append(f"catalog_object:{row.id}")
-    return blockers
+    return blockers + _workspace_reference_holders(session, object_ref)
+
+
+def _workspace_reference_holders(session: Session, object_ref: str) -> list[str]:
+    """Current records of live projects participate in catalog reference integrity."""
+    candidates = session.scalars(
+        select(ProjectRecord)
+        .join(CatalogObject, CatalogObject.instance_id == ProjectRecord.project_instance_id)
+        .where(ProjectRecord.data_json.contains(json.dumps(object_ref), autoescape=True))
+    ).all()
+    return [
+        f"project_record:{row.id}"
+        for row in candidates
+        if object_ref in iter_typed_reference_strings(json.loads(row.data_json))
+    ]
