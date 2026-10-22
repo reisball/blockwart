@@ -325,6 +325,7 @@ class MonitoringRecord:
     next_due_at: datetime | None
     object_instance_id: str | None = None
     last_received_at: datetime | None = None
+    target_fingerprint: str | None = None
 
     @property
     def acquired_at(self) -> datetime | None:

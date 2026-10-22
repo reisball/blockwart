@@ -77,6 +77,7 @@ class ProviderCheckRequest:
     diagnostic: str | None
     limits: ProbeLimits
     pull_source: PullSourceRequest | None = None
+    target_fingerprint: str | None = None
 
 
 MonitoringAcquire = Callable[[ProviderCheckRequest], MonitoringObservation]
