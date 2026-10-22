@@ -681,31 +681,133 @@ def test_reference_creation_rolls_back_if_history_write_fails(project, root_clie
     before = snapshot()
     etag = _etag(client, state)
 
+    injected = False
+
     def fail_insert(*args):
+        nonlocal injected
+        injected = True
         raise RuntimeError("injected history write failure")
 
     event.listen(ProjectRecordVersion, "before_insert", fail_insert)
     try:
-        with pytest.raises(RuntimeError, match="injected history"):
-            _save(
-                client,
-                state,
-                {
-                    "kind": "access",
-                    "title": "Atomic external",
-                    "new_credential_reference": {
-                        "id": "atomic-ref",
-                        "kind": "credential_reference",
-                        "label": "Atomic",
-                        "data": {
-                            "schema_version": 1,
-                            "provider": "vaultwarden",
-                            "reference": {"item_hint": "Fictional item"},
-                        },
+        response = _save(
+            client,
+            state,
+            {
+                "kind": "access",
+                "title": "Atomic external",
+                "new_credential_reference": {
+                    "id": "atomic-ref",
+                    "kind": "credential_reference",
+                    "label": "Atomic",
+                    "data": {
+                        "schema_version": 1,
+                        "provider": "vaultwarden",
+                        "reference": {"item_hint": "Fictional item"},
                     },
                 },
-            )
+            },
+        )
     finally:
         event.remove(ProjectRecordVersion, "before_insert", fail_insert)
+    assert injected
+    assert response.status_code == 500
+    assert "injected history" not in response.text
     assert snapshot() == before
     assert _etag(client, state) == etag
+
+
+@pytest.mark.parametrize("control", ["completed_at", "review_after", "managed_by_kind", None])
+def test_workspace_empty_controls_clear_but_omitted_controls_preserve(
+    project, root_client, root_state, control
+):
+    client, state = root_client, root_state
+    _browser(client, state)
+    lifecycle = {
+        "project_status": "completed",
+        "started_at": "2026-10-20T09:00:00Z",
+        "completed_at": "2026-10-21T09:00:00Z",
+        "review_after": "2026-11-01T09:00:00Z",
+        "managed_by": {"kind": "team", "label": "Example team"},
+    }
+    with state["session_factory"]() as session, transaction(session):
+        row = session.get(CatalogObject, project)
+        row.data_json = json.dumps({**json.loads(row.data_json), **lifecycle})
+    form = {
+        "csrf_token": state["owner_session"].csrf_token,
+        "if_match": _etag(client, state),
+        "objective": "Reviewed scope",
+    }
+    if control is not None:
+        form[control] = ""
+    if control == "completed_at":
+        form["project_status"] = "active"
+    response = client.post("/projects/work/work", data=form, follow_redirects=False)
+    assert response.status_code == 303, response.text
+    with state["session_factory"]() as session:
+        stored = json.loads(session.get(CatalogObject, project).data_json)
+    cleared = "managed_by" if control == "managed_by_kind" else control
+    for field, value in lifecycle.items():
+        if field == cleared:
+            assert field not in stored
+        else:
+            expected = (
+                "active" if control == "completed_at" and field == "project_status" else value
+            )
+            assert stored[field] == expected
+
+
+@pytest.mark.parametrize(
+    ("token_name", "headers"),
+    [("owner_token", {"X-Blockwart-Channel": "mcp"}), ("owner_mcp_token", {})],
+)
+def test_record_history_rejects_untrusted_origin_before_mutation_or_replay(
+    project, root_client, root_state, token_name, headers
+):
+    client, state = root_client, root_state
+    payload = {"kind": "page", "title": "Trusted page", "body": "Version one"}
+    etag = _etag(client, state)
+    key = "trusted-record-origin-0001"
+    valid = _save(client, state, payload, etag=etag, key=key)
+    assert valid.status_code == 201, valid.text
+    record_id = valid.json()["record"]["id"]
+    history_path = f"/api/v1/projects/work/workspace/history/{record_id}"
+    before = client.get(history_path, headers=_auth(state["owner_token"])).json()
+    for attempt_key in ("forged-record-origin-0001", key):
+        denied = client.post(
+            "/api/v1/projects/work/workspace/page",
+            json=payload,
+            headers={
+                **_auth(state[token_name]),
+                **headers,
+                "If-Match": etag,
+                "Idempotency-Key": attempt_key,
+            },
+        )
+        assert denied.status_code == 403, denied.text
+    assert client.get(history_path, headers=_auth(state["owner_token"])).json() == before
+    listed = client.get(
+        "/api/v1/projects/work/workspace/page", headers=_auth(state["owner_token"])
+    )
+    assert listed.json()["total"] == 1
+    assert listed.headers["etag"] == valid.headers["etag"]
+
+
+@pytest.mark.parametrize("field", ["description", "body", "purpose"])
+def test_mcp_record_kind_is_required_before_rest_request(field):
+    from blockwart.mcp.server import ToolInputError
+
+    def unexpected_request(*args):
+        pytest.fail("Invalid MCP arguments must not reach REST")
+
+    with pytest.raises(ToolInputError):
+        call_tool(
+            "blockwart.save_project_record",
+            {
+                "object_id": "work",
+                "record": {"title": "Missing kind", field: "Documentation"},
+                "if_match": '"rev-1"',
+                "idempotency_key": "missing-record-kind-0001",
+            },
+            requester=unexpected_request,
+        )

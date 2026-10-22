@@ -30,6 +30,8 @@ instance.
 ## Records and workflows
 
 All record payloads are closed, validated models in `schemas/project_workspace.py`.
+The `kind` discriminator is mandatory for every REST/MCP record input; omitted kinds are
+rejected during argument validation, before any REST request or mutation.
 
 - **Item:** title, Markdown description, `item_type` (`task`, `question`, `blocker`), `status`
   (`open`, `in_progress`, `blocked`, `done`), responsibility label, optional timezone-aware
@@ -49,7 +51,9 @@ All record payloads are closed, validated models in `schemas/project_workspace.p
 
 Each record exposes creation/update times, version number, current completion time and overdue
 state. Every version retains its safe payload, author ID/display-name snapshot, origin and
-server timestamp. History is read-only and guarded against SQL UPDATE/DELETE on SQLite and
+server timestamp. The origin is bound to the authenticated token audience (`api`/`mcp`)
+or a browser session (`ui`), and mismatches fail before mutation or idempotent replay.
+History is read-only and guarded against SQL UPDATE/DELETE on SQLite and
 PostgreSQL. Technical audit stores only record identity/kind/version/revision metadata, never
 page bodies or a second credential payload. No delete-record operation is provided; completed
 items remain available, and pages/accesses retain their history.
@@ -125,7 +129,9 @@ Example item payload:
 The focused Project view shows pending/overdue counts and a five-item preview, links to all three
 record collections, and edits canonical lifecycle status, responsibility and timestamps with the
 existing Project validator and optimistic concurrency. Omitted controls in older form clients do
-not erase these fields. Category-specific fields and additive extensions remain untouched.
+not erase these fields. Submitted empty date/responsibility controls explicitly clear their
+stored values, so completed Projects can be reopened without retaining a completion timestamp.
+Category-specific fields and additive extensions remain untouched.
 
 Chronology retains its existing 100-entry API page and immutable seven-kind contract. The browser
 now follows `chronology_cursor` to every older page. Invalid or cross-resource cursors fail;
@@ -143,6 +149,8 @@ matching and stable `(kind,id)` pagination are deterministic; there is no model/
 `tests/test_project_records.py` covers lifecycles/reopening, stable IDs, status history, deadlines,
 filters, hierarchy cycles and cross-Project isolation, pages/version pagination, search,
 optimistic concurrency, idempotency, delegated writes, credential creation isolation, metadata
-rejection, rendered browser creation and safe Markdown, MCP-to-real-API calls, and a populated
+rejection, empty-versus-omitted browser controls, trusted history origins (including replay),
+required MCP record discriminators, rendered browser creation and safe Markdown,
+MCP-to-real-API calls, and a populated
 0026→0027 table-for-table compatibility snapshot. Existing Project/Research, chronology,
 authorization, migration and machine-contract suites remain regression requirements.

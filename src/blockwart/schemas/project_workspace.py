@@ -27,7 +27,7 @@ class RecordBase(BaseModel):
 
 
 class ProjectItemIn(RecordBase):
-    kind: Literal["item"] = "item"
+    kind: Literal["item"]
     description: str = Field(default="", max_length=4000)
     item_type: ItemType = "task"
     status: ItemStatus = "open"
@@ -49,7 +49,7 @@ class ProjectItemIn(RecordBase):
 
 
 class ProjectPageIn(RecordBase):
-    kind: Literal["page"] = "page"
+    kind: Literal["page"]
     body: str = Field(default="", max_length=4000)
     review_after: str | None = None
     related_objects: list[str] = Field(default_factory=list, max_length=50)
@@ -61,7 +61,7 @@ class ProjectPageIn(RecordBase):
 
 
 class ProjectAccessIn(RecordBase):
-    kind: Literal["access"] = "access"
+    kind: Literal["access"]
     url: str | None = Field(default=None, max_length=2048)
     purpose: str = Field(default="", max_length=2000)
     account: str = Field(default="", max_length=255)

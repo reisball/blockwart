@@ -36,6 +36,7 @@ from blockwart.services.access import lock_principal_rows
 from blockwart.services.audit import add_audit_event
 from blockwart.services.catalog import typed_reference_holders, upsert_object
 from blockwart.services.commands import (
+    CommandAuthorizationDenied,
     CommandConflict,
     CommandNotFound,
     CommandPreconditionFailed,
@@ -235,6 +236,16 @@ def save_record(
     idempotency_ttl_seconds: int,
 ) -> ProjectRecordCommandOut:
     authorize_object_command(session, context, object_id=object_id, permission=Permission.WRITE)
+    # History provenance follows the same audience binding as project chronology.
+    # Check before idempotency replay as well as before any durable mutation.
+    trusted_origin = (
+        context.principal.service_token_audience is None
+        if context.channel == "ui"
+        else context.channel in {"api", "mcp"}
+        and context.principal.service_token_audience == context.channel
+    )
+    if not trusted_origin:
+        raise CommandAuthorizationDenied(object_id=object_id, permission=Permission.WRITE)
     access = ReadAccess(context.principal, context.policy)
     project = read_project(session, access, object_id)
     expected = parse_if_match(expected_revision)

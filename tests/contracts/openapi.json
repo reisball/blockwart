@@ -4388,7 +4388,6 @@
           },
           "kind": {
             "const": "access",
-            "default": "access",
             "title": "Kind",
             "type": "string"
           },
@@ -4428,7 +4427,8 @@
           }
         },
         "required": [
-          "title"
+          "title",
+          "kind"
         ],
         "title": "ProjectAccessIn",
         "type": "object"
@@ -4754,7 +4754,6 @@
           },
           "kind": {
             "const": "item",
-            "default": "item",
             "title": "Kind",
             "type": "string"
           },
@@ -4798,7 +4797,8 @@
           }
         },
         "required": [
-          "title"
+          "title",
+          "kind"
         ],
         "title": "ProjectItemIn",
         "type": "object"
@@ -4983,7 +4983,6 @@
           },
           "kind": {
             "const": "page",
-            "default": "page",
             "title": "Kind",
             "type": "string"
           },
@@ -5014,7 +5013,8 @@
           }
         },
         "required": [
-          "title"
+          "title",
+          "kind"
         ],
         "title": "ProjectPageIn",
         "type": "object"

@@ -152,6 +152,7 @@ from blockwart.ui.project_forms import (
     safe_project_form_rows,
     safe_project_form_values,
     split_form_lines,
+    submitted_project_controls,
 )
 from blockwart.ui.runbook_forms import (
     RUNBOOK_CHANGE_FALLBACK_OPTIONS,
@@ -1171,6 +1172,7 @@ def update_project_workspace(
     object_id: str,
     session: Annotated[Session, Depends(get_session)],
     project_form: Annotated[ProjectForm, Depends()],
+    submitted_controls: Annotated[frozenset[str], Depends(submitted_project_controls)],
     if_match: Annotated[str, Form()] = "",
 ):
     access = read_access_from_request(request)
@@ -1193,6 +1195,7 @@ def update_project_workspace(
         apply_project_workspace_form_data(
             data,
             project_form,
+            submitted_controls=submitted_controls,
             concealed_references=_concealed_project_references(data, access),
             preserve_legacy_sources=project_has_legacy_rows(data, "sources"),
         )

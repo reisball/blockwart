@@ -316,6 +316,8 @@ def test_real_alembic_upgrade_creates_fresh_database_and_has_no_drift(
         "source_entries",
         "source_entry_mappings",
         "source_snapshots",
+        "project_records",
+        "project_record_versions",
     }
     assert _revision(database_url) == HEAD_REVISION
 
@@ -2000,6 +2002,8 @@ def downgrade() -> None:
             "source_entries",
             "source_entry_mappings",
             "source_snapshots",
+            "project_records",
+            "project_record_versions",
         }
         with engine.connect() as connection:
             assert connection.execute(
