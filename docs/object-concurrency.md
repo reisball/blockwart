@@ -9,8 +9,8 @@ ID no longer restarts at 1. No client should assume that creation means `rev-1`.
 
 Migration `20261022_0028` introduces `object_revision_clocks`, a durable per-ID
 high-water mark without a foreign key to the catalog. Database triggers allocate
-a revision above the retained floor on every INSERT and retain at least the last
-revision on DELETE. This covers ORM, command and direct SQL writes. PostgreSQL
+a revision above the retained floor on every INSERT, retain every UPDATE high-water
+mark, and retain at least the last revision on DELETE. This covers ORM, command and direct SQL writes. PostgreSQL
 uses an atomic UPSERT/RETURNING to serialize allocation; SQLite uses its serialized
 writer transaction and an AFTER INSERT trigger. The normal post-insert refresh
 reads the allocated revision before returning a response.
@@ -37,3 +37,35 @@ are unchanged. No deployment or issue closure is implied by this change.
 
 Monitoring's target binding is separate from the catalog revision clock. A
 monitoring observation does not claim or advance an object's business revision.
+
+## UPDATE enforcement and delayed imports
+
+Every representation-changing database UPDATE now retains its high-water mark,
+not only creation/deletion. If a legacy ORM importer or maintenance helper writes
+a lower revision (or changes stored fields without advancing the revision), the
+database allocates a revision above the current row instead. An exact SQL no-op
+retains its revision. This keeps the namespace monotone even for helpers that do
+not use the public command CAS and may hold an old ORM snapshot. These existing
+unversioned import operations keep their replacement semantics; they cannot lower
+the concurrency counter or cause a later incarnation to reuse an issued token.
+
+SQLite performs the correction in an AFTER UPDATE trigger with a conditional
+inner revision write; it terminates with recursive triggers either enabled or
+disabled. PostgreSQL normalizes NEW before UPDATE and serializes the clock UPSERT.
+Application response paths refresh stored rows before publishing the resulting
+ETag; public expected-revision/CAS and true no-op behavior remain unchanged.
+The migration and model-create definitions contain the same UPDATE guard.
+
+The independent review's real seed-import/REST interleaving is covered on both
+databases: import reads1, REST publishes2/3/4, delayed import cannot lower the
+stored revision, delete/recreate cannot reuse4, and the original rev4 PUT is412.
+Raw lower/equal/omitted increments, exact SQL no-op, clock retention and subsequent
+recreation are checked separately. This corrects a review finding; initial CI
+success alone did not establish this cross-write-path invariant.
+
+Relationship commands synchronize an already persisted SQL-CAS revision into the
+ORM identity map as committed state. A plain attribute assignment would emit a
+redundant UPDATE at flush (including a new timestamp) after the response token was
+computed; the new monotonic guard correctly exposed that double-write. Create,
+metadata replacement and delete therefore avoid scheduling that redundant write,
+retaining one revision increment and the same response ETag/audit semantics.
