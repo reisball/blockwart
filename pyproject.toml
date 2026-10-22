@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "blockwart"
-version = "0.1.0"
+dynamic = ["version"]
 description = "Infrastructure knowledge and credential-reference platform."
 readme = "README.md"
 license = "Apache-2.0"
@@ -52,6 +52,9 @@ blockwart-seed = "blockwart.cli.seed:main"
 blockwart-schema-overrides = "blockwart.cli.schema_overrides:main"
 blockwart-source-coverage = "blockwart.cli.source_coverage:main"
 blockwart-release = "blockwart.cli.release:main"
+
+[tool.setuptools.dynamic]
+version = {attr = "blockwart.__version__"}
 
 [tool.setuptools.packages.find]
 where = ["src"]

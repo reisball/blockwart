@@ -5,6 +5,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request
 from fastapi.staticfiles import StaticFiles
 
+from blockwart import __version__
 from blockwart.api.errors import (
     install_api_error_contract,
     install_batch_request_bound,
@@ -29,7 +30,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     resolved_settings = settings or get_settings()
     app = FastAPI(
         title="Blockwart",
-        version="0.1.0",
+        version=__version__,
         lifespan=_monitoring_lifespan(resolved_settings),
     )
     app.state.settings = resolved_settings

@@ -8,6 +8,7 @@ import sysconfig
 import tempfile
 import time
 from datetime import timedelta
+from importlib.metadata import version
 from pathlib import Path
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
@@ -17,6 +18,7 @@ from mcp.client.stdio import stdio_client
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from blockwart import __version__
 from blockwart.db.session import build_engine, transaction
 from blockwart.domain.attention import (
     ATTENTION_CATEGORY_VALUES,
@@ -248,6 +250,7 @@ async def check_mcp(
             read_timeout_seconds=timedelta(seconds=10),
         ) as session:
             initialized = await session.initialize()
+            assert initialized.serverInfo.version == __version__
             await session.send_ping()
             listed = await session.list_tools()
             tools = {tool.name: tool for tool in listed.tools}
@@ -956,7 +959,10 @@ def prove_contract_drift_fail_fast(mcp_entrypoint: Path, api_token: str) -> None
 
 
 def main() -> None:
+    assert version("blockwart") == __version__
     readiness = wait_until_ready()
+    assert readiness["version"] == __version__
+    assert fetch_json("/api/health/live")["version"] == __version__
     (
         api_token,
         browser_session,
@@ -974,6 +980,7 @@ def main() -> None:
     with urlopen(f"{BASE_URL}/static/app.css", timeout=7) as response:
         static_content_type = response.headers.get_content_type()
     openapi = fetch_json("/openapi.json")
+    assert openapi["info"]["version"] == __version__
     mcp_entrypoint = Path(sysconfig.get_path("scripts")) / "blockwart-mcp"
     wrapper_metadata = json.loads(
         subprocess.check_output([str(mcp_entrypoint), "--metadata"], text=True)

@@ -1,5 +1,10 @@
 # Atomic Container Release Workflow
 
+This is the **instance deployment** workflow. Publishing a product version,
+Git tag or GitHub release is a separate process described in
+[Versioning and software releases](versioning.md); it never invokes this
+controller automatically.
+
 `blockwart-release` is the packaged host-side release controller for one
 containerized, SQLite-backed Blockwart service. It is host-neutral: the
 operator supplies absolute host paths and a local Docker or Podman runtime in

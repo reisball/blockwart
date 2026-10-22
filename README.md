@@ -26,6 +26,9 @@ automatically.
   reviews as structured reviewed knowledge with safe evidence and typed links;
 - manage standalone or related Projects in a focused overview/workspace with a
   seven-kind append-only professional chronology;
+- track Project items (tasks, questions and blockers), versioned Markdown knowledge
+  pages, and external accesses with credential references in the
+  [Project workspace](docs/project-workspace.md);
 - keep canonical Runbook operating and recovery contracts with inert exact commands,
   explicit verification, distinct rollback/recovery, and cycle-safe typed links;
 - opt services into provider-neutral health observations through bounded,
@@ -69,6 +72,14 @@ automatically.
 | Knowledge plan CLI | Deterministic private-source classification with no catalog writes | [Knowledge planning](docs/knowledge-planning.md) |
 | Knowledge apply CLI | Offline digest-bound reviewed apply and paired SQLite rollback | [Knowledge apply](docs/knowledge-apply.md) |
 | Release CLI | Dry-run-first container release with restored-copy proof and verified automatic rollback | [Atomic release workflow](docs/release-workflow.md) |
+
+## Versions and releases
+
+Product versions follow the [versioning and release rules](docs/versioning.md).
+See the [changelog](CHANGELOG.md) and
+[GitHub releases](https://github.com/reisball/blockwart/releases) for published
+versions. A software release does not automatically deploy an instance or
+change the Development/Staging pilot status.
 
 ## Agent quick start
 
