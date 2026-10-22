@@ -2282,7 +2282,7 @@ def save_object(
         "idempotency_key": idempotency_key,
     }
     try:
-        data = json.loads(data_json or "{}")
+        data = _parse_object_form_data(data_json)
         _reject_secret_shaped_form_data(data)
         ui_schema = get_ui_schema(kind)
         label_values = _split_label_values(labels)
@@ -3019,7 +3019,7 @@ def update_object(
             raise HTTPException(status_code=404, detail="Catalog object not found")
         target_kind = kind or existing_object.kind
         data = _editable_data_copy(
-            existing_object.data if data_json is None else json.loads(data_json or "{}")
+            existing_object.data if data_json is None else _parse_object_form_data(data_json)
         )
         ui_schema = get_ui_schema(target_kind)
         primary_value = None
@@ -5275,6 +5275,13 @@ def _access_methods(
         }
         for index, method in enumerate(methods)
     ]
+
+
+def _parse_object_form_data(value: str) -> dict[str, Any]:
+    data = json.loads(value or "{}")
+    if not isinstance(data, dict):
+        raise ValueError("Object data must be a JSON object.")
+    return data
 
 
 def _editable_data_copy(data: Mapping[str, Any]) -> dict[str, Any]:
