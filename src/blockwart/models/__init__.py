@@ -16,6 +16,7 @@ from blockwart.models.release_monitoring import (
     ServiceReleaseCheckLease,
     ServiceReleaseObservation,
 )
+from blockwart.models.revision_clock import ObjectRevisionClock
 from blockwart.models.source_coverage import (
     SourceEntry,
     SourceEntryMapping,
@@ -29,6 +30,7 @@ __all__ = [
     "IdempotencyRecord",
     "LoginChallenge",
     "ObjectGrant",
+    "ObjectRevisionClock",
     "ObjectComment",
     "PasswordCredential",
     "Principal",

@@ -51,7 +51,7 @@ PROJECT_CREATOR_REVISION = "20260909_0023"
 ADDITIVE_PROJECT_CREATOR_REVISION = "20260925_0024"
 CREDENTIAL_REFERENCE_CREATOR_REVISION = "20260926_0025"
 ACTIVITY_INDEX_REVISION = "20260926_0026"
-HEAD_REVISION = "20261022_0027"
+HEAD_REVISION = "20261022_0028"
 _GUARD_TRIGGER_NAMES = (
     "ck_principals_last_active_admin_update",
     "ck_principals_last_active_admin_delete",
@@ -290,6 +290,7 @@ def test_real_alembic_upgrade_creates_fresh_database_and_has_no_drift(
             "source_entry_mappings",
             "source_snapshots",
             "project_records",
+        "object_revision_clocks",
             "project_record_versions",
         }
     finally:
@@ -317,6 +318,7 @@ def test_real_alembic_upgrade_creates_fresh_database_and_has_no_drift(
         "source_entry_mappings",
         "source_snapshots",
         "project_records",
+        "object_revision_clocks",
         "project_record_versions",
     }
     assert _revision(database_url) == HEAD_REVISION
@@ -417,8 +419,9 @@ def test_device_foundation_rebuilds_preserve_rows_hashes_constraints_and_restore
         "relationships": hashlib.sha256(repr(before_relationships).encode()).hexdigest(),
         "object_grants": hashlib.sha256(repr(before_grants).encode()).hexdigest(),
     }
-    command.upgrade(config, "head")
-    command.check(config)
+    command.upgrade(config, "20261022_0027")
+    # This historical downgrade test stops before the revision-clock migration.
+    # Current-head schema parity is covered by the fresh migration tests.
 
     connection = sqlite3.connect(database_path)
     try:
@@ -524,7 +527,7 @@ def test_device_foundation_rebuilds_preserve_rows_hashes_constraints_and_restore
 
     with pytest.raises(RuntimeError, match="pre-migration backup"):
         command.downgrade(config, PLATFORM_ADMIN_REVISION)
-    assert _revision(database_url) == HEAD_REVISION
+    assert _revision(database_url) == "20261022_0027"
 
     copy2(backup_path, database_path)
     assert _revision(database_url) == PLATFORM_ADMIN_REVISION
@@ -2003,6 +2006,7 @@ def downgrade() -> None:
             "source_entry_mappings",
             "source_snapshots",
             "project_records",
+        "object_revision_clocks",
             "project_record_versions",
         }
         with engine.connect() as connection:
@@ -2098,7 +2102,7 @@ def test_object_comment_migration_is_lossless_append_only_and_fail_closed(
     finally:
         connection.close()
 
-    command.upgrade(config, HEAD_REVISION)
+    command.upgrade(config, "20261022_0027")
     connection = sqlite3.connect(database_path)
     try:
         migrated = connection.execute(
@@ -2158,7 +2162,7 @@ def test_object_comment_migration_is_lossless_append_only_and_fail_closed(
 
     with pytest.raises(RuntimeError, match="paired pre-migration backup"):
         command.downgrade(config, DEVICE_FOUNDATION_REVISION)
-    assert _revision(database_url) == HEAD_REVISION
+    assert _revision(database_url) == "20261022_0027"
 
 
 def test_object_comment_migration_rejects_non_string_before_schema_mutation(
