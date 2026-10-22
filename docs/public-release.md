@@ -1,7 +1,11 @@
-# Public Release Readiness
+# Public Repository Publication Checklist
 
-This document defines the gate for changing the canonical GitHub repository
-from private to public. A successful code review or CI run does not itself
+The canonical GitHub repository is already public. The initial visibility
+transition is complete; this document retains its reusable publication gate
+and ongoing public-content review requirements, not a pending visibility change.
+For product versions, tags and GitHub releases, see [Versioning](versioning.md).
+
+This checklist defines the gate for changing a repository from private to public. A successful code review or CI run does not itself
 authorize that visibility change.
 
 ## Maintained tree

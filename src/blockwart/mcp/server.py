@@ -22,6 +22,7 @@ from jsonschema.protocols import Validator
 from jsonschema.validators import validator_for
 from mcp.server.lowlevel import NotificationOptions, Server
 
+from blockwart import __version__
 from blockwart.config import Settings
 from blockwart.domain.activity import (
     ACTIVITY_EVENT_TYPES,
@@ -108,6 +109,7 @@ from blockwart.mcp.manifest import (
     runtime_catalog_evidence,
 )
 from blockwart.schemas.catalog import OBJECT_LABEL_MAX_LENGTH, ObjectKind
+from blockwart.schemas.project_workspace import RECORD_ADAPTER
 from blockwart.schemas.projects import ProjectChronologyKind
 
 ALL_OBJECT_KINDS: tuple[str, ...] = get_args(ObjectKind)
@@ -116,7 +118,7 @@ DEFAULT_BASE_URL = "http://127.0.0.1:8000"
 API_TOKEN_ENV = "BLOCKWART_API_TOKEN"
 API_TOKEN_FILE_ENV = "BLOCKWART_API_TOKEN_FILE"
 SERVER_NAME = "blockwart-mcp"
-SERVER_VERSION = "0.1.0"
+SERVER_VERSION = __version__
 JSON = dict[str, Any]
 Fetcher = Callable[[str, dict[str, Any]], JSON]
 Requester = Callable[[str, str, JSON, dict[str, str]], JSON]
@@ -1486,6 +1488,107 @@ TOOLS: list[JSON] = [
         "annotations": WRITE_ANNOTATIONS,
     },
 ]
+# Record payload schemas are generated from the same models as REST and the UI.
+TOOLS.extend(
+    [
+        {
+            "name": "blockwart.list_project_records",
+            "description": (
+                "List authorized project items, knowledge pages or external accesses. Detail "
+                "visibility required; filters and cursor are project scoped."
+            ),
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "object_id": {"type": "string", "minLength": 1},
+                    "kind": {"type": "string", "enum": ["item", "page", "access"]},
+                    "status": {
+                        "type": "string",
+                        "enum": ["open", "in_progress", "blocked", "done"],
+                    },
+                    "item_type": {"type": "string", "enum": ["task", "question", "blocker"]},
+                    "overdue": {"type": "boolean"},
+                    "limit": {"type": "integer", "minimum": 1, "maximum": 100},
+                    "cursor": {"type": "string", "maxLength": 2048},
+                },
+                "required": ["object_id", "kind"],
+                "additionalProperties": False,
+            },
+            "annotations": READ_ONLY_ANNOTATIONS,
+        },
+        {
+            "name": "blockwart.save_project_record",
+            "description": (
+                "Create or fully replace one project item, page or external access; requires "
+                "write on the project, its If-Match ETag and an idempotency key. Optional "
+                "record_id selects an update. A new credential reference additionally requires "
+                "create_credential_reference on this project; existing references require read "
+                "permission. Stores metadata only, never secret values. Existing project lists "
+                "are not migrated or removed."
+            ),
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "object_id": {"type": "string", "minLength": 1},
+                    "record_id": {"type": "string", "minLength": 1, "maxLength": 36},
+                    "record": RECORD_ADAPTER.json_schema(),
+                    "if_match": {"type": "string", "pattern": '^"rev-[1-9][0-9]*"$'},
+                    "idempotency_key": {"type": "string", "minLength": 16, "maxLength": 128},
+                },
+                "required": ["object_id", "record", "if_match", "idempotency_key"],
+                "additionalProperties": False,
+            },
+            "annotations": WRITE_ANNOTATIONS,
+        },
+        {
+            "name": "blockwart.list_project_record_history",
+            "description": (
+                "Read immutable versions of an authorized project record, newest first, with "
+                "author and status history."
+            ),
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "object_id": {"type": "string", "minLength": 1},
+                    "record_id": {"type": "string", "minLength": 1, "maxLength": 36},
+                    "limit": {"type": "integer", "minimum": 1, "maximum": 100},
+                    "cursor": {"type": "string", "maxLength": 2048},
+                },
+                "required": ["object_id", "record_id"],
+                "additionalProperties": False,
+            },
+            "annotations": READ_ONLY_ANNOTATIONS,
+        },
+        {
+            "name": "blockwart.search_project_workspace",
+            "description": (
+                "Search all curated project fields, current items/pages/access metadata and the "
+                "complete chronology within one authorized project. Credential locations and "
+                "secret values are not indexed."
+            ),
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "object_id": {"type": "string", "minLength": 1},
+                    "q": {"type": "string", "minLength": 1, "maxLength": 200},
+                    "limit": {"type": "integer", "minimum": 1, "maximum": 100},
+                    "cursor": {"type": "string", "maxLength": 2048},
+                },
+                "required": ["object_id", "q"],
+                "additionalProperties": False,
+            },
+            "annotations": READ_ONLY_ANNOTATIONS,
+        },
+    ]
+)
+
+
+for _tool in TOOLS:
+    if _tool["name"] == "blockwart.save_project_record":
+        _record_schema = _tool["inputSchema"]["properties"]["record"]
+        _tool["inputSchema"]["$defs"] = _record_schema.pop("$defs", {})
+
+
 TOOL_DEFINITIONS: dict[str, JSON] = {tool["name"]: tool for tool in TOOLS}
 
 
@@ -2080,6 +2183,40 @@ def call_tool(
                 "sort": args.get("sort", "last_activity"),
                 "direction": args.get("direction", "desc"),
                 "include_total": args.get("include_total", False),
+            },
+        )
+    elif name in {
+        "blockwart.list_project_records",
+        "blockwart.list_project_record_history",
+        "blockwart.search_project_workspace",
+    }:
+        root = f"/api/v1/projects/{quote(args['object_id'], safe='')}/workspace"
+        if name == "blockwart.list_project_records":
+            suffix = args["kind"]
+        elif name == "blockwart.list_project_record_history":
+            suffix = f"history/{quote(args['record_id'], safe='')}"
+        else:
+            suffix = "search"
+        payload = fetch(
+            f"{root}/{suffix}",
+            {
+                key: value
+                for key, value in args.items()
+                if key not in {"object_id", "record_id", "kind"}
+            },
+        )
+    elif name == "blockwart.save_project_record":
+        root = f"/api/v1/projects/{quote(args['object_id'], safe='')}/workspace"
+        record = args["record"]
+        suffix = f"/{quote(args['record_id'], safe='')}" if args.get("record_id") else ""
+        payload = request(
+            "PUT" if suffix else "POST",
+            f"{root}/{record['kind']}{suffix}",
+            record,
+            {
+                "If-Match": args["if_match"],
+                "Idempotency-Key": args["idempotency_key"],
+                "X-Blockwart-Channel": "mcp",
             },
         )
     elif name == "blockwart.list_project_chronology":

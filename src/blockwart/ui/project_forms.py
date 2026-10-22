@@ -13,7 +13,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Annotated, Any
 
-from fastapi import Form
+from fastapi import Form, Request
 from pydantic import ValidationError
 
 from blockwart.domain.object_schema import (
@@ -313,10 +313,16 @@ def apply_project_form_data(
     _drop_foreign_category_fields(data, form.category)
 
 
+async def submitted_project_controls(request: Request) -> frozenset[str]:
+    """Retain control presence before FastAPI normalizes empty strings to None."""
+    return frozenset(await request.form())
+
+
 def apply_project_workspace_form_data(
     data: dict[str, Any],
     form: ProjectForm,
     *,
+    submitted_controls: frozenset[str],
     concealed_references: Mapping[str, list[str]] | None = None,
     preserve_legacy_sources: bool = False,
 ) -> None:
@@ -327,6 +333,15 @@ def apply_project_workspace_form_data(
     cannot safely confirm or remove a target they cannot discover.
     """
     data["schema_version"] = 1
+    for field_name in ("project_status", *PROJECT_TIMESTAMP_FIELDS):
+        if field_name in submitted_controls:
+            _assign(data, field_name, str(form.values[field_name] or "").strip())
+    manager = form.groups["managed_by"]
+    if "managed_by_kind" in submitted_controls:
+        if manager["kind"]:
+            data["managed_by"] = {key: value.strip() for key, value in manager.items() if value}
+        else:
+            data.pop("managed_by", None)
     for field_name in ("objective", "current_summary"):
         _assign(data, field_name, str(form.values.get(field_name) or "").strip())
     for field_name in (

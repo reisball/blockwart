@@ -4,6 +4,11 @@ Blockwart targets Python 3.12 on Linux. Runtime and development dependency graph
 exact constraints in `requirements/runtime.txt` and `requirements/dev.txt`. The Docker base image
 is pinned by digest, and the Python build backend versions are exact.
 
+The package version is read statically from `blockwart.__version__` by
+setuptools. The installed-wheel smoke checks that distribution metadata,
+OpenAPI, liveness/readiness and the MCP initialization handshake agree.
+See [Versioning](versioning.md) for release gates and version bumps.
+
 ## Install From The Committed Locks
 
 For development:
@@ -80,8 +85,8 @@ docker build \
 
 The package smoke builds a wheel, installs it into a clean virtual environment, changes to a
 directory outside the repository, starts `blockwart-start`, loads packaged templates and static
-assets, runs the relationship-integrity diagnostic, and exercises all 38
-tools through 43 read/write, preview, Project-workspace, coverage, attention,
+assets, runs the relationship-integrity diagnostic, and exercises all 42
+tools through 47 read/write, preview, Project-workspace, coverage, attention,
 activity, comment, audit, grant-management, and ownerless-adoption calls to the
 installed `blockwart-mcp` console command. It also proves identical same-commit
 wrapper/API metadata and a fail-fast incompatible diagnosis for a deliberately

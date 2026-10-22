@@ -8,6 +8,7 @@ import sysconfig
 import tempfile
 import time
 from datetime import timedelta
+from importlib.metadata import version
 from pathlib import Path
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
@@ -17,6 +18,7 @@ from mcp.client.stdio import stdio_client
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from blockwart import __version__
 from blockwart.db.session import build_engine, transaction
 from blockwart.domain.attention import (
     ATTENTION_CATEGORY_VALUES,
@@ -224,9 +226,7 @@ def check_root_project_creator(token: str) -> None:
 
     # The role grants no catalog-wide read: only the created root is visible.
     visible = fetch_json("/api/v1/objects", token=token)
-    assert [item["id"] for item in visible["items"]] == [
-        "package-smoke-delegated-project"
-    ]
+    assert [item["id"] for item in visible["items"]] == ["package-smoke-delegated-project"]
 
 
 async def check_mcp(
@@ -250,6 +250,7 @@ async def check_mcp(
             read_timeout_seconds=timedelta(seconds=10),
         ) as session:
             initialized = await session.initialize()
+            assert initialized.serverInfo.version == __version__
             await session.send_ping()
             listed = await session.list_tools()
             tools = {tool.name: tool for tool in listed.tools}
@@ -292,6 +293,10 @@ async def check_mcp(
                 "blockwart.update_grant",
                 "blockwart.revoke_grant",
                 "blockwart.adopt_ownerless_object",
+                "blockwart.list_project_records",
+                "blockwart.save_project_record",
+                "blockwart.list_project_record_history",
+                "blockwart.search_project_workspace",
             }
             assert all(
                 tool.annotations
@@ -304,6 +309,9 @@ async def check_mcp(
                         "blockwart.get_object_context",
                         "blockwart.get_object_contexts",
                         "blockwart.list_projects",
+                        "blockwart.list_project_records",
+                        "blockwart.list_project_record_history",
+                        "blockwart.search_project_workspace",
                         "blockwart.list_project_chronology",
                         "blockwart.list_comments",
                         "blockwart.list_audit_events",
@@ -409,9 +417,7 @@ async def check_mcp(
                 "blockwart.create_service_credential_reference",
             }
             relationships = schema_contract["relationships"]
-            relationship_types = {
-                entry["relation_type"]: entry for entry in relationships["types"]
-            }
+            relationship_types = {entry["relation_type"]: entry for entry in relationships["types"]}
             assert relationships["relation_types"] == [
                 "hosts",
                 "depends_on",
@@ -427,8 +433,7 @@ async def check_mcp(
             assert set(relationship_types) == set(relationships["relation_types"])
             assert relationship_types["depends_on"]["metadata"]["fields"] == []
             assert [
-                field["name"]
-                for field in relationship_types["uplinks_to"]["metadata"]["fields"]
+                field["name"] for field in relationship_types["uplinks_to"]["metadata"]["fields"]
             ] == [
                 "source_interface",
                 "target_interface_or_port",
@@ -438,8 +443,7 @@ async def check_mcp(
                 "mode",
             ]
             assert "mode" not in {
-                field["name"]
-                for field in relationship_types["attached_to"]["metadata"]["fields"]
+                field["name"] for field in relationship_types["attached_to"]["metadata"]["fields"]
             }
             rejected_relationship = await session.call_tool(
                 "blockwart.create_relationship",
@@ -455,9 +459,7 @@ async def check_mcp(
             assert rejected_relationship.isError
             rejection = json.loads(rejected_relationship.content[0].text)["error"]
             assert rejection["code"] == "invalid_arguments"
-            assert [detail["path"] for detail in rejection["details"]] == [
-                "metadata.link_kind"
-            ]
+            assert [detail["path"] for detail in rejection["details"]] == ["metadata.link_kind"]
             admin_first_page = await session.call_tool(
                 "blockwart.list_admin_principals",
                 {"query": "package-smoke", "limit": 1},
@@ -474,9 +476,9 @@ async def check_mcp(
                 },
             )
             admin_second_payload = _tool_payload(admin_second_page)
-            assert {
-                item["id"] for item in admin_first_payload["items"]
-            }.isdisjoint(item["id"] for item in admin_second_payload["items"])
+            assert {item["id"] for item in admin_first_payload["items"]}.isdisjoint(
+                item["id"] for item in admin_second_payload["items"]
+            )
             read_results = [
                 await session.call_tool("blockwart.search", {"limit": 1}),
                 await session.call_tool(
@@ -513,18 +515,12 @@ async def check_mcp(
             # vocabulary the application resolver owns, not a wrapper-local copy.
             attention_payload = _tool_payload(read_results[5])
             assert attention_payload["sort"] == "priority"
-            assert set(attention_payload["summary"]["signals"]) == set(
-                ATTENTION_CATEGORY_VALUES
-            )
-            assert set(attention_payload["summary"]["by_reason"]) == set(
-                ATTENTION_REASON_VALUES
-            )
+            assert set(attention_payload["summary"]["signals"]) == set(ATTENTION_CATEGORY_VALUES)
+            assert set(attention_payload["summary"]["by_reason"]) == set(ATTENTION_REASON_VALUES)
             assert set(attention_payload["summary"]["by_severity"]) == set(
                 ATTENTION_SEVERITY_VALUES
             )
-            assert attention_payload["summary"]["coverage_snapshot_state"] == (
-                "not_collected"
-            )
+            assert attention_payload["summary"]["coverage_snapshot_state"] == ("not_collected")
             batch_payload = _tool_payload(read_results[2])
             assert batch_payload["count"] == 1
             assert batch_payload["objects"][0]["id"] == object_id
@@ -580,6 +576,45 @@ async def check_mcp(
                 item["id"] == "package-smoke-project"
                 for item in _tool_payload(project_overview)["items"]
             )
+            project_record = _tool_payload(
+                await session.call_tool(
+                    "blockwart.save_project_record",
+                    {
+                        "object_id": "package-smoke-project",
+                        "record": {
+                            "kind": "page",
+                            "title": "Installed knowledge",
+                            "body": "PackageWorkspaceEvidence",
+                        },
+                        "if_match": _tool_payload(project_entry)["etag"],
+                        "idempotency_key": "package-smoke-project-record-0001",
+                    },
+                )
+            )
+            project_records = _tool_payload(
+                await session.call_tool(
+                    "blockwart.list_project_records",
+                    {"object_id": "package-smoke-project", "kind": "page"},
+                )
+            )
+            assert project_records["total"] == 1
+            project_history = _tool_payload(
+                await session.call_tool(
+                    "blockwart.list_project_record_history",
+                    {
+                        "object_id": "package-smoke-project",
+                        "record_id": project_record["record"]["id"],
+                    },
+                )
+            )
+            assert project_history["items"][0]["origin"] == "mcp"
+            project_search = _tool_payload(
+                await session.call_tool(
+                    "blockwart.search_project_workspace",
+                    {"object_id": "package-smoke-project", "q": "PackageWorkspaceEvidence"},
+                )
+            )
+            assert project_search["total"] == 1
             comment_created = await session.call_tool(
                 "blockwart.add_comment",
                 {
@@ -618,18 +653,15 @@ async def check_mcp(
                 },
             )
             principal_search_payload = _tool_payload(principal_search)
-            assert {
-                principal["id"]
-                for principal in principal_search_payload["items"]
-            } == {grant_candidate_id}
+            assert {principal["id"] for principal in principal_search_payload["items"]} == {
+                grant_candidate_id
+            }
             preview = await session.call_tool(
                 "blockwart.preview_grant_scope",
                 {"object_id": object_id, "scope": "self"},
             )
             preview_payload = _tool_payload(preview)
-            assert [item["id"] for item in preview_payload["affected_objects"]] == [
-                object_id
-            ]
+            assert [item["id"] for item in preview_payload["affected_objects"]] == [object_id]
             grant_created = await session.call_tool(
                 "blockwart.create_grant",
                 {
@@ -716,9 +748,7 @@ async def check_mcp(
                 "role": "owner",
                 "scope": "self",
             }
-            assert created_payload["revision"] == (
-                created_payload["catalog_object"]["revision"]
-            )
+            assert created_payload["revision"] == (created_payload["catalog_object"]["revision"])
             assert created_payload["etag"] == f'"rev-{created_payload["revision"]}"'
             assert created_payload["changed"] is True
             assert created_payload["replayed"] is False
@@ -823,8 +853,9 @@ async def check_mcp(
                 "role": "owner",
                 "scope": "self",
             }
-            assert attached_device_payload["revision"] == (
-                attached_device_payload["catalog_object"]["revision"]
+            assert (
+                attached_device_payload["revision"]
+                == (attached_device_payload["catalog_object"]["revision"])
             )
             assert attached_device_payload["etag"] == (
                 f'"rev-{attached_device_payload["revision"]}"'
@@ -858,9 +889,7 @@ async def check_mcp(
                 {"object_id": "package-smoke-device"},
             )
             network_topology_payload = _tool_payload(network_topology)
-            assert network_topology_payload["object_ref"] == (
-                "device:package-smoke-device"
-            )
+            assert network_topology_payload["object_ref"] == ("device:package-smoke-device")
             assert network_topology_payload["status"] == "unconnected"
             assert network_topology_payload["paths"] == []
             device_detached = await session.call_tool(
@@ -930,7 +959,10 @@ def prove_contract_drift_fail_fast(mcp_entrypoint: Path, api_token: str) -> None
 
 
 def main() -> None:
+    assert version("blockwart") == __version__
     readiness = wait_until_ready()
+    assert readiness["version"] == __version__
+    assert fetch_json("/api/health/live")["version"] == __version__
     (
         api_token,
         browser_session,
@@ -948,6 +980,7 @@ def main() -> None:
     with urlopen(f"{BASE_URL}/static/app.css", timeout=7) as response:
         static_content_type = response.headers.get_content_type()
     openapi = fetch_json("/openapi.json")
+    assert openapi["info"]["version"] == __version__
     mcp_entrypoint = Path(sysconfig.get_path("scripts")) / "blockwart-mcp"
     wrapper_metadata = json.loads(
         subprocess.check_output([str(mcp_entrypoint), "--metadata"], text=True)
@@ -959,12 +992,11 @@ def main() -> None:
         token=api_token,
     )["objects"][0]
 
-    assert readiness["revision"] == "20260926_0026"
+    assert readiness["revision"] == "20261022_0027"
     assert "Blockwart" in index
     assert static_content_type == "text/css"
     assert not any(
-        path.startswith(("/admin", "/objects", "/settings"))
-        for path in openapi["paths"]
+        path.startswith(("/admin", "/objects", "/settings")) for path in openapi["paths"]
     )
     assert search["count"] == 1
     assert service["endpoints"]
@@ -988,7 +1020,7 @@ def main() -> None:
     print(
         "installed_package=ok "
         f"cwd={Path.cwd()} revision={readiness['revision']} "
-        f"openapi_paths={len(openapi['paths'])} mcp_protocol={protocol} mcp_calls=43 "
+        f"openapi_paths={len(openapi['paths'])} mcp_protocol={protocol} mcp_calls=47 "
         "mcp_contract=compatible mcp_contract_drift=fail_fast"
     )
 

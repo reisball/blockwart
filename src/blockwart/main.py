@@ -5,6 +5,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request
 from fastapi.staticfiles import StaticFiles
 
+from blockwart import __version__
 from blockwart.api.errors import (
     install_api_error_contract,
     install_batch_request_bound,
@@ -20,6 +21,7 @@ from blockwart.ui.admin import router as admin_ui_router
 from blockwart.ui.auth import router as auth_router
 from blockwart.ui.i18n import persist_locale_cookie, validate_locale_catalogs
 from blockwart.ui.paths import STATIC_DIR
+from blockwart.ui.project_workspace import router as project_records_ui_router
 from blockwart.ui.routes import router as ui_router
 
 
@@ -28,7 +30,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     resolved_settings = settings or get_settings()
     app = FastAPI(
         title="Blockwart",
-        version="0.1.0",
+        version=__version__,
         lifespan=_monitoring_lifespan(resolved_settings),
     )
     app.state.settings = resolved_settings
@@ -56,6 +58,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(auth_router)
     app.include_router(admin_ui_router)
     app.include_router(ui_router)
+    app.include_router(project_records_ui_router)
     install_request_context(app)
     default_openapi = app.openapi
 

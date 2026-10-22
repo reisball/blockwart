@@ -127,6 +127,35 @@ failures. Diagnose a problem in this order:
 5. enable the master switch, and the poller only if periodic execution is
    explicitly approved.
 
+### No stable release and renamed repositories
+
+GitHub's `/releases/latest` can return HTTP 404 for an existing public
+repository when it has no published stable full release, including when all
+its releases are marked `prerelease=true`. A tag that looks stable does not
+override that flag. Blockwart records `status=error`, `error_code=not_found`,
+and `http_status=404`; it does not fall back to `/releases`, tags, drafts, or
+prereleases. Prerelease tracking is not supported by the v1 configuration.
+
+The failed attempt records `last_checked_at`, increments the failure count,
+releases its lease, and schedules the normal bounded failure backoff. With no
+earlier successful check, `last_success_at` stays null and `freshness` remains
+`pending` (no confirmed release evidence), but `status=error` and the recorded
+attempt distinguish this from a check that never ran. A later successful
+stable-release check clears the diagnostic and failure count and resumes the
+ordinary interval. A failed check never changes the documented running
+version, service health, or catalog revision.
+
+A 404 alone does not prove that a repository is prerelease-only: a missing,
+private, or incorrectly named repository can give the same answer. Verify
+the public repository identity separately, then inspect its published release
+flags. For a renamed or transferred repository, verify the canonical
+`owner/repo` independently and update the service through the normal
+authorized configuration/ETag path. The provider does not look up repository
+metadata, follow redirects (even within GitHub), or silently rewrite the
+configured identity. A redirect is recorded as `redirect_not_supported`, not
+as evidence of a missing stable release. Do not enable a prerelease fallback
+or force repeated checks to work around either diagnostic.
+
 Migration `20260825_0021` adds only `service_release_observations` and
 `service_release_check_leases`; it rewrites no catalog JSON and therefore opts
 in no service. Downgrade removes exactly those re-derivable release/cache rows.

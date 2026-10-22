@@ -13,6 +13,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from blockwart import __version__
 from blockwart.api.deps import get_session
 from blockwart.config import Settings
 from blockwart.db.migrations import BASELINE_REVISION, build_alembic_config, upgrade_database
@@ -94,7 +95,7 @@ def test_liveness_endpoints_do_not_depend_on_database(tmp_path: Path) -> None:
             "ok": True,
             "status": "alive",
             "service": "blockwart",
-            "version": "0.1.0",
+            "version": __version__,
             "build_revision": "test-commit",
         }
     assert not missing_database.exists()
@@ -137,7 +138,7 @@ def test_readiness_checks_database_revision_and_sqlite_runtime(tmp_path: Path) -
         "ok": True,
         "status": "ready",
         "service": "blockwart",
-        "version": "0.1.0",
+        "version": __version__,
         "build_revision": "test-commit",
         "checks": {
             "database": "ok",
@@ -146,7 +147,7 @@ def test_readiness_checks_database_revision_and_sqlite_runtime(tmp_path: Path) -
             "writable": "ok",
             "sqlite": "ok",
         },
-        "revision": "20260926_0026",
+        "revision": "20261022_0027",
         "error_code": None,
     }
     assert after == before

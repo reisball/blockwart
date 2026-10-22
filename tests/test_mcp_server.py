@@ -440,6 +440,10 @@ def test_mcp_client_completes_handshake_and_calls_every_read_only_tool() -> None
         "blockwart.update_grant",
         "blockwart.revoke_grant",
         "blockwart.adopt_ownerless_object",
+        "blockwart.list_project_records",
+        "blockwart.save_project_record",
+        "blockwart.list_project_record_history",
+        "blockwart.search_project_workspace",
     }
     assert all(
         tools[name].annotations and tools[name].annotations.readOnlyHint
@@ -1297,9 +1301,13 @@ def test_mcp_tools_publish_explicit_read_write_and_delete_hints() -> None:
         "blockwart.get_object_contexts",
         "blockwart.list_comments",
         "blockwart.list_projects",
+        "blockwart.list_project_records",
+        "blockwart.list_project_record_history",
+        "blockwart.search_project_workspace",
         "blockwart.list_project_chronology",
         "blockwart.list_audit_events",
         "blockwart.add_comment",
+        "blockwart.save_project_record",
         "blockwart.append_project_chronology",
         "blockwart.get_context",
         "blockwart.get_attention",
