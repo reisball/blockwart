@@ -209,3 +209,19 @@ that binds to the current configuration, not a safe way to submit queued results
 Polling and invalidation update only monitoring tables, never catalog revisions,
 business timestamps or audit events. Deploying this additive schema requires the
 usual separate rollout decision; this change does not modify live configuration.
+
+### Atomic target validation and reconciliation
+
+Observation ingestion revalidates the catalog instance and revision inside its
+`INSERT ... SELECT` statement. SQLite does not implement `SELECT FOR UPDATE`;
+Python-side validation alone could therefore let late target-A ingestion replace
+already committed target-B evidence. If the validated catalog snapshot changed,
+the statement writes nothing and ingestion returns `None`. A concurrent label or
+interval edit may conservatively discard one in-flight result; the next check
+recovers normally without changing the catalog revision or audit trail.
+
+Lease rebinding is a conditional database update, guarded by the previously read
+provider/target and an expiry check evaluated at write time. A stale reconciler
+cannot clear a live claim committed by another worker after candidate selection.
+Deterministic two-session regressions cover late SQLite ingestion and live-lease
+preservation on both SQLite and PostgreSQL (`test_monitoring_target_races.py`).

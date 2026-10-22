@@ -28,7 +28,7 @@ from hashlib import sha256
 from types import MappingProxyType
 from typing import Any
 
-from sqlalchemy import case, delete, select, update
+from sqlalchemy import case, delete, exists, literal, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.orm import Session, sessionmaker
@@ -418,7 +418,21 @@ def record_service_observation(
     newer_acquisition = changed_target | table.c.last_received_at.is_(None) | (
         excluded.last_received_at > table.c.last_received_at
     )
-    statement = insert.values(**values).on_conflict_do_update(
+    # SQLite ignores FOR UPDATE. Validate the catalog snapshot again inside
+    # the write statement so a target edit between validation and INSERT cannot
+    # replace the new target's evidence. This writes only observation storage;
+    # it never locks by mutating the catalog or advancing its revision.
+    live_snapshot = exists(select(CatalogObject.id).where(
+        CatalogObject.id == object_id,
+        CatalogObject.instance_id == object_instance_id,
+        CatalogObject.revision == catalog_object.revision,
+        CatalogObject.kind == "service",
+    ))
+    statement = insert.from_select(
+        list(values),
+        select(*[literal(value, type_=table.c[key].type) for key, value in values.items()])
+        .where(live_snapshot),
+    ).on_conflict_do_update(
         index_elements=["object_id", "object_instance_id", "provider"],
         set_={
             "target_fingerprint": excluded.target_fingerprint,
@@ -457,7 +471,8 @@ def record_service_observation(
             ),
         },
     )
-    session.execute(statement)
+    if session.execute(statement).rowcount != 1:
+        return None
     row = session.scalars(
         select(ServiceObservation).where(
             ServiceObservation.object_id == object_id,
@@ -524,23 +539,40 @@ def synchronize_check_schedule(
                 session.delete(row)
             continue
         selected_provider, interval_seconds, selected_target = wanted[key]
-        if (row.provider != selected_provider or row.target_fingerprint != selected_target) and (
-            row.lease_expires_at is None or row.lease_expires_at <= _naive(moment)
-        ):
-            row.provider = selected_provider
-            row.target_fingerprint = selected_target
-            row.due_at = _naive(
-                _initial_due(
-                    moment,
-                    object_id=row.object_id,
-                    object_instance_id=row.object_instance_id,
-                    provider=selected_provider,
-                    jitter_seconds=resolved.jitter_seconds,
+        if row.provider != selected_provider or row.target_fingerprint != selected_target:
+            # A SELECT is only a candidate snapshot: another reconciler may
+            # have rebound and claimed this lease before our first write.
+            # Re-evaluate expiry in the UPDATE, just like claim_due_checks.
+            result = session.execute(
+                update(ServiceCheckLease)
+                .where(
+                    ServiceCheckLease.id == row.id,
+                    (ServiceCheckLease.lease_expires_at.is_(None))
+                    | (ServiceCheckLease.lease_expires_at <= _naive(moment)),
+                    ServiceCheckLease.provider == row.provider,
+                    ServiceCheckLease.target_fingerprint.is_not_distinct_from(
+                        row.target_fingerprint
+                    ),
                 )
+                .values(
+                    provider=selected_provider,
+                    target_fingerprint=selected_target,
+                    due_at=_naive(_initial_due(
+                        moment,
+                        object_id=row.object_id,
+                        object_instance_id=row.object_instance_id,
+                        provider=selected_provider,
+                        jitter_seconds=resolved.jitter_seconds,
+                    )),
+                    lease_owner=None,
+                    lease_expires_at=None,
+                    updated_at=_naive(moment),
+                )
+                .execution_options(synchronize_session=False)
             )
-            row.lease_owner = None
-            row.lease_expires_at = None
-            row.updated_at = _naive(moment)
+            if result.rowcount != 1:
+                continue
+            session.refresh(row)
         if row.provider != selected_provider or row.target_fingerprint != selected_target:
             continue
         observation = observations.get((*key, selected_provider))
