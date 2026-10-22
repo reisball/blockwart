@@ -46,12 +46,15 @@ SQLITE_DELETE = """CREATE TRIGGER catalog_revision_retain AFTER DELETE ON catalo
     ON CONFLICT(object_id) DO UPDATE SET revision = MAX(revision, OLD.revision);
 END"""
 PG_FUNCTION = """CREATE FUNCTION blockwart_catalog_revision() RETURNS TRIGGER AS $$
+DECLARE allocated_revision integer;
 BEGIN
     IF TG_OP = 'INSERT' THEN
         INSERT INTO object_revision_clocks(object_id, revision) VALUES(NEW.id, NEW.revision)
         ON CONFLICT(object_id) DO UPDATE
             SET revision = GREATEST(object_revision_clocks.revision + 1, NEW.revision)
-        RETURNING revision INTO NEW.revision;
+        RETURNING revision INTO allocated_revision;
+        UPDATE catalog_objects SET revision = allocated_revision
+        WHERE id = NEW.id AND revision < allocated_revision;
         RETURN NEW;
     ELSIF TG_OP = 'UPDATE' THEN
         IF NEW.revision <= OLD.revision AND NEW IS DISTINCT FROM OLD THEN
@@ -71,7 +74,7 @@ BEGIN
         RETURN OLD;
     END IF;
 END; $$ LANGUAGE plpgsql"""
-PG_INSERT = """CREATE TRIGGER catalog_revision_allocate BEFORE INSERT ON catalog_objects
+PG_INSERT = """CREATE TRIGGER catalog_revision_allocate AFTER INSERT ON catalog_objects
 FOR EACH ROW EXECUTE FUNCTION blockwart_catalog_revision()"""
 PG_UPDATE = """CREATE TRIGGER catalog_revision_advance BEFORE UPDATE ON catalog_objects
 FOR EACH ROW EXECUTE FUNCTION blockwart_catalog_revision()"""
