@@ -1118,6 +1118,8 @@ def test_structured_ui_create_detail_noop_edit_and_supersession_round_trip(
         stored["legacy_extension"] = {"preserve": "verbatim"}
         row.data_json = json.dumps(stored, sort_keys=True)
         session.commit()
+        # Fixture setup changes stored representation and therefore its revision.
+        fixture_revision = row.revision
         initial_audits = session.scalar(
             select(func.count()).select_from(AuditEvent).where(
                 AuditEvent.object_id == "deploy-blue-green"
@@ -1129,7 +1131,7 @@ def test_structured_ui_create_detail_noop_edit_and_supersession_round_trip(
         for key, value in decision_form.items()
         if key not in {"idempotency_key", "object_id", "kind", "primary_name", "status", "summary"}
     }
-    edit_form["if_match"] = '"rev-1"'
+    edit_form["if_match"] = f'"rev-{fixture_revision}"'
     no_op = root_client.post(
         "/objects/deploy-blue-green",
         data=edit_form,
@@ -1139,7 +1141,7 @@ def test_structured_ui_create_detail_noop_edit_and_supersession_round_trip(
     with root_state["session_factory"]() as session:
         unchanged = session.get(CatalogObject, "deploy-blue-green")
         assert unchanged is not None
-        assert unchanged.revision == 1
+        assert unchanged.revision == fixture_revision
         assert json.loads(unchanged.data_json)["legacy_extension"] == {
             "preserve": "verbatim"
         }
@@ -1161,7 +1163,7 @@ def test_structured_ui_create_detail_noop_edit_and_supersession_round_trip(
     assert comment.status_code == 303
     with root_state["session_factory"]() as session:
         unchanged = session.get(CatalogObject, "deploy-blue-green")
-        assert unchanged is not None and unchanged.revision == 2
+        assert unchanged is not None and unchanged.revision == fixture_revision + 1
         assert session.scalar(
             select(func.count()).select_from(AuditEvent).where(
                 AuditEvent.object_id == "deploy-blue-green",
@@ -1186,7 +1188,7 @@ def test_structured_ui_create_detail_noop_edit_and_supersession_round_trip(
         {
             "decision_status": "superseded",
             "superseded_by": "decision:deploy-progressive",
-            "if_match": '"rev-2"',
+            "if_match": f'"rev-{fixture_revision + 1}"',
         }
     )
     superseded = root_client.post(
@@ -1197,7 +1199,7 @@ def test_structured_ui_create_detail_noop_edit_and_supersession_round_trip(
     assert superseded.status_code == 303, superseded.text
     with root_state["session_factory"]() as session:
         updated = session.get(CatalogObject, "deploy-blue-green")
-        assert updated is not None and updated.revision == 3
+        assert updated is not None and updated.revision == fixture_revision + 2
         updated_data = json.loads(updated.data_json)
         assert updated_data["decision_status"] == "superseded"
         assert updated_data["superseded_by"] == "decision:deploy-progressive"
