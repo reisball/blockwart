@@ -59,3 +59,10 @@ stored revision, delete/recreate cannot reuse4, and the original rev4 PUT is412.
 Raw lower/equal/omitted increments, exact SQL no-op, clock retention and subsequent
 recreation are checked separately. This corrects a review finding; initial CI
 success alone did not establish this cross-write-path invariant.
+
+Relationship commands synchronize an already persisted SQL-CAS revision into the
+ORM identity map as committed state. A plain attribute assignment would emit a
+redundant UPDATE at flush (including a new timestamp) after the response token was
+computed; the new monotonic guard correctly exposed that double-write. Create,
+metadata replacement and delete therefore avoid scheduling that redundant write,
+retaining one revision increment and the same response ETag/audit semantics.

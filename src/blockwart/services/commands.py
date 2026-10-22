@@ -14,6 +14,7 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
+from sqlalchemy.orm.attributes import set_committed_value
 
 from blockwart.domain.auth import (
     CatalogRole,
@@ -1768,7 +1769,8 @@ def create_object_relationship(
             "affected_revisions": {peer.id: peer_revision},
         },
     )
-    target.revision = new_revision
+    # The SQL CAS already persisted this revision; do not schedule a second ORM UPDATE.
+    set_committed_value(target, "revision", new_revision)
     return _relationship_result(
         target,
         from_ref=from_ref,
@@ -1869,7 +1871,8 @@ def _replace_relationship_metadata(
             "affected_revisions": {peer.id: peer_revision},
         },
     )
-    target.revision = new_revision
+    # The SQL CAS already persisted this revision; do not schedule a second ORM UPDATE.
+    set_committed_value(target, "revision", new_revision)
     return _relationship_result(
         target,
         from_ref=relationship.from_ref,
@@ -1982,7 +1985,8 @@ def delete_object_relationship(
             "affected_revisions": {peer.id: peer_revision},
         },
     )
-    target.revision = new_revision
+    # The SQL CAS already persisted this revision; do not schedule a second ORM UPDATE.
+    set_committed_value(target, "revision", new_revision)
     return _relationship_result(
         target,
         from_ref=from_ref,
