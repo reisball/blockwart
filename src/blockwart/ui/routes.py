@@ -112,6 +112,7 @@ from blockwart.services.project_chronology import (
     query_project_chronology_page,
     query_project_overview_page,
 )
+from blockwart.services.project_workspace import item_summary
 from blockwart.services.queries import (
     CatalogBrowseReadModel,
     RelatedRelationshipReadModel,
@@ -1078,14 +1079,13 @@ def _project_workspace_response(
         }
     else:
         can_write = Permission.WRITE in project.capabilities
-        chronology_page = query_project_chronology_page(
-            session,
-            access,
-            object_id=object_id,
-            limit=100,
-            cursor=None,
-            include_total=False,
-        )
+        try:
+            chronology_page = query_project_chronology_page(
+                session, access, object_id=object_id, limit=100,
+                cursor=request.query_params.get("chronology_cursor"), include_total=False,
+            )
+        except InvalidCursor as exc:
+            raise HTTPException(400, "Invalid pagination cursor") from exc
         chronology = (
             []
             if chronology_page is None
@@ -1118,6 +1118,9 @@ def _project_workspace_response(
             "project_source_types": PROJECT_SOURCE_TYPE_OPTIONS,
             "project_reference_kinds": PROJECT_REFERENCE_KIND_OPTIONS,
             "chronology": chronology,
+            "item_summary": item_summary(session, access, object_id),
+            "chronology_next_cursor": chronology_page.next_cursor if chronology_page else None,
+            "project_statuses": PROJECT_STATUS_OPTIONS,
             "chronology_kinds": (
                 "intent",
                 "implementation",

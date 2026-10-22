@@ -11,6 +11,7 @@ from blockwart.models.auth import (
 )
 from blockwart.models.catalog import AuditEvent, CatalogObject, ObjectComment, Relationship
 from blockwart.models.monitoring import ServiceCheckLease, ServiceObservation
+from blockwart.models.project_workspace import ProjectRecord, ProjectRecordVersion
 from blockwart.models.release_monitoring import (
     ServiceReleaseCheckLease,
     ServiceReleaseObservation,
@@ -31,6 +32,8 @@ __all__ = [
     "ObjectComment",
     "PasswordCredential",
     "Principal",
+    "ProjectRecord",
+    "ProjectRecordVersion",
     "Relationship",
     "SecurityEvent",
     "ServiceCheckLease",

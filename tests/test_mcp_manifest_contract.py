@@ -21,8 +21,8 @@ def test_integrated_mcp_contract_has_reviewed_manifest_evidence() -> None:
     assert metadata == {
         "build_revision": "issue-188-236-245-248-249-250-251",
         "contract_version": "1",
-        "manifest_digest": "da326b838ad775dc02fc90bd8524ffcf8f99b8f386ec3775e9598a63badccd1e",
-        "tool_count": 38,
+        "manifest_digest": "e3b694c94c4a3fda55c8e1f5f77e53d27937e35abd5e1910e89957876d36d68d",
+        "tool_count": 42,
     }
 
 
@@ -53,7 +53,7 @@ def test_reduced_catalog_is_incompatible_before_normal_tool_use() -> None:
 
     diagnosis = diagnose_contract(local, api=reduced)
 
-    assert local["tool_count"] == 38
+    assert local["tool_count"] == 42
     assert reduced["tool_count"] == 22
     assert diagnosis["status"] == "incompatible"
     assert diagnosis["classification"] == "wrapper_drift"

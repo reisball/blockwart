@@ -327,6 +327,15 @@ def apply_project_workspace_form_data(
     cannot safely confirm or remove a target they cannot discover.
     """
     data["schema_version"] = 1
+    for field_name in ("project_status", *PROJECT_TIMESTAMP_FIELDS):
+        if form.values.get(field_name) is not None:
+            _assign(data, field_name, str(form.values[field_name] or "").strip())
+    manager = form.groups["managed_by"]
+    if manager.get("kind") is not None:
+        if manager["kind"]:
+            data["managed_by"] = {key: value.strip() for key, value in manager.items() if value}
+        else:
+            data.pop("managed_by", None)
     for field_name in ("objective", "current_summary"):
         _assign(data, field_name, str(form.values.get(field_name) or "").strip())
     for field_name in (

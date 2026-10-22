@@ -81,6 +81,10 @@ It wraps the object-authorized v1 API:
 - blockwart.get_object_context -> GET /api/v1/objects/{object_id}
 - blockwart.get_object_contexts -> POST /api/v1/object-contexts
 - blockwart.list_projects -> GET /api/v1/projects
+- blockwart.list_project_records -> GET /api/v1/projects/{object_id}/workspace/{kind}
+- blockwart.save_project_record -> POST or PUT /api/v1/projects/{object_id}/workspace/{kind}[/{record_id}]
+- blockwart.list_project_record_history -> GET /api/v1/projects/{object_id}/workspace/history/{record_id}
+- blockwart.search_project_workspace -> GET /api/v1/projects/{object_id}/workspace/search
 - blockwart.list_project_chronology -> GET /api/v1/projects/{object_id}/chronology
 - blockwart.append_project_chronology -> POST /api/v1/projects/{object_id}/chronology
 - blockwart.list_comments -> GET /api/v1/objects/{object_id}/comments
@@ -662,3 +666,6 @@ internal validation types, and database diagnostics are never forwarded; an upst
 does not name a published violation code is dropped, and unknown violations fall back to the
 generic `invalid_value` code. Upstream errors without a recognized structured error body remain
 the generic `upstream_http_error` without `details`.
+
+Project record permissions, shared payload schemas, ETag/idempotency requirements and
+compatibility are specified in [Project workspace](project-workspace.md).

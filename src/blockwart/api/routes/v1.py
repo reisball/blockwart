@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 
 from blockwart.api.deps import get_session
 from blockwart.api.errors import API_ERROR_RESPONSES
+from blockwart.api.routes.project_workspace import router as project_workspace_router
 from blockwart.api.security import require_api_read_access, require_api_read_only_access
 from blockwart.api.write_commands import (
     api_request_channel,
@@ -184,6 +185,8 @@ router = APIRouter(
     responses=API_ERROR_RESPONSES,
 )
 
+
+router.include_router(project_workspace_router)
 
 @router.get(
     "/mcp-contract",

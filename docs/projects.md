@@ -115,7 +115,7 @@ do not appear or contribute a timestamp, count, relationship, or filter match.
 
 `/projects/{id}` is the focused work view for objective, in/out of scope, current summary, open
 questions, blockers, next actions, canonical typed object links, and safe external sources. Its
-editor changes only those reviewed canonical fields and preserves category-specific and additive
+editor changes those reviewed canonical fields plus lifecycle status, responsibility and dates and preserves category-specific and additive
 extension fields. Catalog owners can create an unplaced Project through the normal root-creation
 form or `POST /api/v1/roots`, then manage it here without adding a parent.
 
@@ -380,3 +380,10 @@ preserve IDs and unknown fields, increment the existing revision exactly once, a
 `project_normalize` audit event. There is no table-shape change, so #145 adds no Alembic revision;
 SQLite and PostgreSQL 16 use the same data-only workflow without changing unrelated rows,
 relationships, grants, comments, audit history, sequences, or foreign keys.
+
+
+## Project management extension
+
+The additive record layer, its non-destructive compatibility contract, rights, REST/MCP APIs,
+versioned knowledge pages, external accesses, search and browser workflows are specified in
+[Project workspace](project-workspace.md). Existing text lists are never converted implicitly.

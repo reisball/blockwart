@@ -80,8 +80,8 @@ docker build \
 
 The package smoke builds a wheel, installs it into a clean virtual environment, changes to a
 directory outside the repository, starts `blockwart-start`, loads packaged templates and static
-assets, runs the relationship-integrity diagnostic, and exercises all 38
-tools through 43 read/write, preview, Project-workspace, coverage, attention,
+assets, runs the relationship-integrity diagnostic, and exercises all 42
+tools through 47 read/write, preview, Project-workspace, coverage, attention,
 activity, comment, audit, grant-management, and ownerless-adoption calls to the
 installed `blockwart-mcp` console command. It also proves identical same-commit
 wrapper/API metadata and a fail-fast incompatible diagnosis for a deliberately
