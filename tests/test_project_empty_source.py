@@ -62,9 +62,9 @@ def test_rendered_starter_and_new_source_defaults_save_without_sources(root_clie
     ],
 )
 def test_entered_incomplete_source_still_rejects_without_writes(
-    root_client,
-    root_state,
-    source,  # noqa: F811
+    root_client,  # noqa: F811
+    root_state,  # noqa: F811
+    source,
 ):
     _create_project(root_client, root_state["owner_token"], "incomplete-source")
     csrf = _browser(root_client, root_state)
