@@ -6,6 +6,7 @@ deleted by this classification.
 
 ## Active Operating Documentation
 
+- [Product versioning, changelog and GitHub releases](versioning.md)
 - [Configuration](config.md) and [deployment readiness](deployment.md)
 - [Reproducible builds and CI](ci.md), including the host-neutral parity
   contract for `.gitea/workflows/ci.yml` and `.github/workflows/ci.yml`
@@ -33,7 +34,8 @@ deleted by this classification.
 - [Authentication and object authorization](auth-rbac.md)
 - [Security policy](security.md)
 - [Catalog object validation](object-validation.md)
-- [Public release readiness](public-release.md)
+- [Public repository publication checklist](public-release.md) (reusable visibility
+  gate; the canonical repository is already public)
 
 ## Active Architecture And Data Documentation
 
@@ -51,6 +53,9 @@ deleted by this classification.
   dry-run-first legacy classification
 - [Canonical Project knowledge](projects.md), including category-specific results,
   evidence, typed links, and reviewed migration
+- [Project workspace](project-workspace.md): items (tasks, questions, blockers),
+  versioned knowledge pages and external accesses, with shared UI/REST/MCP
+  authorization and append-only history
 - [Canonical Runbook contracts / Kanonische Runbook-Verträge](runbooks.md), including
   operating, rollback, recovery, authorization, and reviewed legacy migration
 - [Application read models](read-models.md), [agent read

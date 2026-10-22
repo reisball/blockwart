@@ -22,6 +22,7 @@ from jsonschema.protocols import Validator
 from jsonschema.validators import validator_for
 from mcp.server.lowlevel import NotificationOptions, Server
 
+from blockwart import __version__
 from blockwart.config import Settings
 from blockwart.domain.activity import (
     ACTIVITY_EVENT_TYPES,
@@ -117,7 +118,7 @@ DEFAULT_BASE_URL = "http://127.0.0.1:8000"
 API_TOKEN_ENV = "BLOCKWART_API_TOKEN"
 API_TOKEN_FILE_ENV = "BLOCKWART_API_TOKEN_FILE"
 SERVER_NAME = "blockwart-mcp"
-SERVER_VERSION = "0.1.0"
+SERVER_VERSION = __version__
 JSON = dict[str, Any]
 Fetcher = Callable[[str, dict[str, Any]], JSON]
 Requester = Callable[[str, str, JSON, dict[str, str]], JSON]
