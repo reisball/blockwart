@@ -27,7 +27,9 @@ identities or revision history already deleted before upgrade. Clocks are part o
 the database backup and must not be pruned or reset while old tokens may exist.
 They contain only an object ID and integer, not deleted object contents.
 Downgrade refuses to discard nonempty clock history. Restore the complete database
-(including clocks); a partial catalog-only restore does not preserve concurrency.
+(including clocks); a partial catalog-only restore does not preserve concurrency. A point-in-time
+restore also cannot retain tokens/revisions issued after that backup; handling
+stale client state across such an operational rollback remains a separate gate.
 
 Regression coverage includes REST delete/recreate followed by stale PUT and
 DELETE (412), a valid replacement token, changed and no-op stale plans at the
@@ -69,3 +71,18 @@ redundant UPDATE at flush (including a new timestamp) after the response token w
 computed; the new monotonic guard correctly exposed that double-write. Create,
 metadata replacement and delete therefore avoid scheduling that redundant write,
 retaining one revision increment and the same response ETag/audit semantics.
+
+## Allocation follows successful insertion
+
+Both database dialects allocate from an AFTER INSERT trigger. In PostgreSQL a
+BEFORE INSERT trigger also runs for an INSERT later skipped by `ON CONFLICT DO
+NOTHING`; reserving there would move the clock without changing the live row.
+That could make a subsequent command's computed token differ from the stored one
+and would turn a later SQL no-op into a revision change. Allocating only after an
+actual insertion keeps ignored inserts and no-op upserts inert on both databases.
+The reused-ID correction occurs before transaction completion; application create
+paths refresh the inserted row before issuing a token (an INSERT RETURNING value
+alone can precede AFTER-trigger corrections). PostgreSQL conflict resolution and
+the atomic clock UPSERT serialize successful ID reuse without reserving skipped
+attempts. The regression checks ignored inserts, no-op upserts/updates and a real
+REST relationship create/GET/delete using the returned ETag on both databases.

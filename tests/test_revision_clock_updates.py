@@ -218,3 +218,85 @@ def test_sqlite_recursive_update_guard_terminates_and_preserves_noop(alembic_dat
             connection.scalar(text("SELECT revision FROM catalog_objects WHERE id='recursive'"))
             == 2
         )
+
+
+def test_ignored_insert_and_noop_upsert_do_not_reserve_revisions(db):
+    """PostgreSQL conflict resolution must not publish an invisible clock advance."""
+    url, engine, sessions = db
+    with sessions() as session, transaction(session):
+        owner = create_service_account(
+            session,
+            login="conflict.owner",
+            display_name="Owner",
+            catalog_role=CatalogRole.CATALOG_OWNER,
+        )
+        token = issue_service_token(session, principal_id=owner.id, name="conflict").value
+    app = create_app(
+        Settings(
+            _env_file=None,
+            database_url=url,
+            monitoring_poller_enabled=False,
+            release_monitoring_poller_enabled=False,
+        )
+    )
+
+    def dep():
+        with sessions() as session:
+            yield session
+
+    app.dependency_overrides[get_session] = dep
+    auth = {"Authorization": "Bearer " + token}
+    with TestClient(app) as client:
+        for name in ("target", "peer"):
+            made = client.post(
+                "/api/v1/roots",
+                headers={**auth, "Idempotency-Key": "root-" + name + "-conflict-01"},
+                json={"id": name, "kind": "host", "label": name, "data": {"schema_version": 1}},
+            )
+            assert made.status_code == 201, made.text
+        target = client.get("/api/v1/objects/target", headers=auth)
+        with engine.begin() as connection:
+            for _ in range(2):
+                connection.execute(
+                    text(
+                        "INSERT INTO catalog_objects SELECT * FROM catalog_objects "
+                        "WHERE id='target' ON CONFLICT(id) DO NOTHING"
+                    )
+                )
+            connection.execute(
+                text(
+                    "INSERT INTO catalog_objects SELECT * FROM catalog_objects "
+                    "WHERE id='target' ON CONFLICT(id) DO UPDATE SET label=excluded.label"
+                )
+            )
+            connection.execute(text("UPDATE catalog_objects SET label=label WHERE id='target'"))
+            assert (
+                connection.scalar(text("SELECT revision FROM catalog_objects WHERE id='target'"))
+                == 1
+            )
+            assert (
+                connection.scalar(
+                    text("SELECT revision FROM object_revision_clocks WHERE object_id='target'")
+                )
+                == 1
+            )
+        relationship = {
+            "from_ref": "host:target",
+            "relation_type": "related_to",
+            "to_ref": "host:peer",
+        }
+        created = client.post(
+            "/api/v1/objects/target/relationships",
+            headers={**auth, "If-Match": target.headers["etag"]},
+            json=relationship,
+        )
+        assert created.status_code == 200, created.text
+        current = client.get("/api/v1/objects/target", headers=auth)
+        assert created.headers["etag"] == current.headers["etag"]
+        deleted = client.request(
+            "DELETE",
+            "/api/v1/objects/target/relationships",
+            headers={**auth, "If-Match": created.headers["etag"]},
+            json=relationship,
+        )
+        assert deleted.status_code == 200, deleted.text
