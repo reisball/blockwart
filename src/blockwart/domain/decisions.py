@@ -155,8 +155,7 @@ def validate_decision_integrity(
                 if predecessor is not None:
                     _add_edge(edges, predecessor, owner_id, projected_id=object_id)
 
-    cycle = _first_cycle(edges)
-    if cycle is not None and object_id in cycle:
+    if _cycle_involving(edges, object_id):
         raise DecisionIntegrityError(
             "decision_supersession_cycle",
             "decision supersession links would create a cycle",
@@ -223,33 +222,23 @@ def _add_edge(
     edges.setdefault(source, set()).add(target)
 
 
-def _first_cycle(edges: Mapping[str, set[str]]) -> tuple[str, ...] | None:
-    visited: set[str] = set()
-    active: set[str] = set()
-    path: list[str] = []
+def _cycle_involving(edges: Mapping[str, set[str]], object_id: str) -> bool:
+    """A cycle matters to this write only if it returns to its projected node.
 
-    def visit(node: str) -> tuple[str, ...] | None:
-        if node in active:
-            start = path.index(node)
-            return (*path[start:], node)
-        if node in visited:
-            return None
-        visited.add(node)
-        active.add(node)
-        path.append(node)
-        for target in sorted(edges.get(node, set())):
-            cycle = visit(target)
-            if cycle is not None:
-                return cycle
-        path.pop()
-        active.remove(node)
-        return None
-
-    for node in sorted(set(edges) | {target for targets in edges.values() for target in targets}):
-        cycle = visit(node)
-        if cycle is not None:
-            return cycle
-    return None
+    Unrelated or merely reachable historical cycles must neither block this
+    write nor hide a second cycle that actually includes the projected node.
+    Iterate rather than recurse so long legacy chains remain safe to inspect.
+    """
+    pending = list(edges.get(object_id, set()))
+    visited = {object_id}
+    while pending:
+        node = pending.pop()
+        if node == object_id:
+            return True
+        if node not in visited:
+            visited.add(node)
+            pending.extend(edges.get(node, set()))
+    return False
 
 
 def _record_value(record: Any, field: str) -> Any:

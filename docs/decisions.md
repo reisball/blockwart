@@ -176,3 +176,11 @@ Apply fails if any blocker remains or any row changed after planning. Successful
 the existing revision and add a `decision_normalize` audit event. The implementation changes no
 table shape, so no Alembic revision is required; the same workflow operates on SQLite and
 PostgreSQL 16 while preserving catalog IDs, foreign-key/sequence state, and unrelated rows.
+
+Supersession integrity checks every path that could return to the projected
+Decision, rather than taking the first cycle anywhere in the catalog. An
+unrelated historical cycle cannot mask a new cycle, and merely linking toward
+historical damage without a return path does not block an otherwise valid write.
+Both `superseded_by` and inverse `supersedes` links participate. Traversal is
+iterative and independent of row order. The same rule applies to Runbooks.
+Refs #271.
