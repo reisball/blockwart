@@ -24,6 +24,7 @@ from typing import Any
 from blockwart.domain.input_validation import INPUT_RULES, InputRuleError
 from blockwart.domain.object_schema import (
     BUILTIN_SCHEMAS,
+    FORBIDDEN_DATA_VALUE_KEYS,
     GENERIC_SCHEMA_VIOLATION,
     PUBLIC_SCHEMA_RULE_CONTRACTS,
     SCHEMA_VIOLATION_CONTRACTS,
@@ -39,6 +40,7 @@ from blockwart.domain.object_schema import (
 )
 from blockwart.domain.relationships import (
     RELATIONSHIP_PATH_ROOTS,
+    RELATIONSHIP_RULES,
     RelationshipIntegrityError,
 )
 
@@ -111,6 +113,41 @@ _INPUT_PATH_KEYS = frozenset(
     {
         *INPUT_PATH_ROOTS,
         *RELATIONSHIP_PATH_ROOTS,
+        *FORBIDDEN_DATA_VALUE_KEYS,
+        *(field.name for rule in RELATIONSHIP_RULES.values() for field in rule.metadata_fields),
+        "query",
+        "path",
+        "header",
+        "cookie",
+        "arguments",
+        "unknown",
+        "limit",
+        "cursor",
+        "q",
+        "include_total",
+        "sort",
+        "direction",
+        "parent",
+        "match",
+        "filters",
+        "ip",
+        "port",
+        "protocol",
+        "exposure",
+        "endpoint_type",
+        "operational_only",
+        "project_category",
+        "project_status",
+        "decision_status",
+        "runbook_status",
+        "runbook_risk",
+        "related_object",
+        "stale",
+        "source_type",
+        "applies_to",
+        "if-match",
+        "idempotency-key",
+        "x-correlation-id",
         "principal_type",
         "login",
         "display_name",
@@ -141,7 +178,6 @@ _INPUT_PATH_KEYS = frozenset(
         "access",
         "repository",
         "extensions",
-        "source_type",
         "source_ref",
         "managed_by",
         "observed_at",
@@ -176,7 +212,6 @@ _INPUT_PATH_KEYS = frozenset(
         "apikey",
         "bearer",
         "client_secret",
-        "cookie",
         "private_key",
         "secret",
         "session",
@@ -286,7 +321,10 @@ def public_path(
         return None
     published = [root]
     for segment in segments[1:_MAX_PATH_SEGMENTS]:
-        if not _SEGMENT_PATTERN.fullmatch(segment):
+        if (
+            not _SEGMENT_PATTERN.fullmatch(segment)
+            or segment.split("[", 1)[0] not in _INPUT_PATH_KEYS
+        ):
             break
         published.append(segment)
     return ".".join(published)
@@ -299,6 +337,10 @@ def public_location(location: object) -> str:
     published: list[str] = []
     for segment in location.split(".")[:_MAX_PATH_SEGMENTS]:
         if not _SEGMENT_PATTERN.fullmatch(segment):
+            break
+        if not (segment.isascii() and segment.isdigit() and len(segment) <= 6) and (
+            segment.split("[", 1)[0] not in _INPUT_PATH_KEYS
+        ):
             break
         published.append(segment)
     return ".".join(published) if published else UNKNOWN_LOCATION

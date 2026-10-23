@@ -436,3 +436,79 @@ def test_unknown_create_key_is_also_sanitized(probe):
     assert response.status_code == 422
     assert marker not in response.text
     assert response.json()["error"]["details"][0]["location"] == "body"
+
+
+def test_domain_paths_and_untrusted_upstream_details_use_closed_vocabulary():
+    from blockwart.domain.object_schema import ObjectSchemaError
+    from blockwart.domain.relationships import (
+        RelationshipIntegrityError,
+        validate_relationship_metadata,
+    )
+    from blockwart.domain.validation_errors import (
+        detail_from_object_schema_error,
+        detail_from_relationship_error,
+        sanitize_public_details,
+    )
+
+    marker = "ghp_" + "D" * 24
+    object_detail = detail_from_object_schema_error(
+        ObjectSchemaError(f"data.reference.{marker}.value", "internal", violation="forbidden_key"),
+        location="body",
+    )
+    assert object_detail["path"] == "data.reference"
+    assert object_detail["location"] == "body.data.reference"
+    with pytest.raises(RelationshipIntegrityError) as caught:
+        validate_relationship_metadata("hosts", {marker: "ordinary metadata"})
+    relationship_detail = detail_from_relationship_error(caught.value, location="body")
+    assert relationship_detail["path"] == "metadata"
+    assert relationship_detail["location"] == "body.metadata"
+    upstream = sanitize_public_details(
+        [
+            {
+                "code": "forbidden_key",
+                "location": f"body.data.reference.{marker}.value",
+                "path": f"data.reference.{marker}.value",
+                "rule": "reject_credential_value_keys",
+            }
+        ]
+    )
+    assert upstream[0]["location"] == "body.data.reference"
+    assert upstream[0]["path"] == "data.reference"
+    assert marker not in json.dumps([object_detail, relationship_detail, upstream])
+
+
+def test_project_patch_domain_paths_never_reflect_dictionary_keys(write_client, root_state):  # noqa: F811
+    from test_project_records import _save
+    from test_project_workspace import _create_project
+
+    _create_project(write_client, root_state["owner_token"], "work")
+    record = _save(write_client, root_state, {"kind": "access", "title": "Diagnostic"}).json()[
+        "record"
+    ]
+    marker = "ghp_" + "Z" * 24
+    response = write_client.post(
+        f"/api/v1/projects/work/workspace/actions/{record['id']}",
+        headers={
+            "Authorization": "Bearer " + root_state["owner_token"],
+            "If-Match": record["record_etag"],
+            "Idempotency-Key": "diagnostic-domain-path-299",
+        },
+        json={
+            "action": "patch",
+            "changes": {
+                "new_credential_reference": {
+                    "id": "diagnostic-ref",
+                    "kind": "credential_reference",
+                    "label": "Diagnostic",
+                    "data": {marker: {"value": "ordinary metadata"}},
+                }
+            },
+        },
+    )
+    assert response.status_code == 422
+    assert marker not in response.text
+    detail = response.json()["error"]["details"][0]
+    assert detail["path"] == "data"
+    assert detail["location"] == "body.access.new_credential_reference.data"
+    assert detail["rule"] == "reject_credential_value_keys"
+    assert mcp_server._upstream_details(response.json()["error"]) == [detail]

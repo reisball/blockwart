@@ -71,6 +71,10 @@ Recursive security scans retain distinct findings, deduplicate and sort the
 public results, and return at most 20 details. Scanner paths use only published
 field vocabulary; unknown or unsafe dictionary-key segments truncate to their
 nearest safe scope, even when the arbitrary key resembles a valid identifier.
+The common public detail projection applies this vocabulary to all domain
+paths and locations too, including object-schema and relationship failures and
+untrusted MCP upstream details. Grammar validation alone is not sufficient for
+user-controlled dictionary keys.
 All Pydantic body locations, including unknown extra keys in project patches,
 use this closed field vocabulary; extra field names are not echoed. Nested
 command wrappers keep their request location without replacing the canonical
