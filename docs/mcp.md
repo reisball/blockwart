@@ -669,3 +669,26 @@ the generic `upstream_http_error` without `details`.
 
 Project record permissions, shared payload schemas, ETag/idempotency requirements and
 compatibility are specified in [Project workspace](project-workspace.md).
+
+## SDK 1.30 compatibility (Refs #284, PR #266)
+
+The runtime/dev locks select MCP SDK 1.30.0. Blockwart uses the low-level
+`mcp.server.Server` over stdio; its HTTP calls to Blockwart's REST API are its own
+client, not the SDK's Streamable HTTP/SSE client. The canonical registry, manifest
+digest, tool schemas and version handshake remain the integration contract (42
+tools at the v0.1.0 baseline), not a claim based only on dependency installation.
+
+SDK 1.30's same-origin HTTP redirect policy does not change this stdio transport.
+Its FastMCP Streamable HTTP idle-session expiry/cap defaults likewise do not apply
+to the low-level stdio server. Blockwart does not instantiate SDK OAuth client
+providers or `AuthSettings`, so issuer discovery/resource-validation defaults and
+related deprecations are not new Blockwart auth settings. Do not disable those
+SDK protections or invent deployment overrides for an unused transport. If a
+future transport uses these APIs, explicitly review redirect origin, session
+reinitialization/limits and issuer/resource verification at that time.
+
+The upgrade is checked against the current main integration, locked runtime/dev
+parity, actual MCP tests/handshake, Project workspace tools and package version
+surfaces. Installed-wheel checks run outside the source tree, followed by
+container build/smoke and exact-revision independent review. A dependency PR does
+not itself refresh OpenClaw runtimes, deploy wrappers or close tracking issues.
