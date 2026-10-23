@@ -1310,7 +1310,7 @@ def test_the_digest_never_distinguishes_two_redacted_values(
     """The digest covers the safe contract only, so it is not a secret oracle."""
     session_factory = preview_state["session_factory"]
     object_id = _kind_object_id("service")
-    digests = []
+    bodies = []
     for stored_secret in (
         "ghp_aaaaaaaaaaaaaaaaaaaaaaaaa",
         "ghp_bbbbbbbbbbbbbbbbbbbbbbbbb",
@@ -1330,10 +1330,24 @@ def test_the_digest_never_distinguishes_two_redacted_values(
             _object(object_id, summary="cleaned").model_dump(mode="json"),
             if_match=etag,
         ).json()
-        digests.append(body["preview_digest"])
+        bodies.append(body)
         assert stored_secret not in json.dumps(body)
 
-    assert digests[0] == digests[1]
+    # The direct fixture write correctly advances the public concurrency token.
+    # Its digest binding must change, but no secret-dependent semantic material
+    # may differ after excluding those explicitly public revision fields.
+    assert bodies[1]["base_revision"] == bodies[0]["base_revision"] + 1
+    assert bodies[0]["preview_digest"] != bodies[1]["preview_digest"]
+    revision_fields = {
+        "base_etag", "base_revision", "expected_result_etag", "expected_result_revision",
+        "preview_digest",
+    }
+    semantic_bodies = [
+        {key: value for key, value in body.items() if key not in revision_fields}
+        for body in bodies
+    ]
+    assert semantic_bodies[0] == semantic_bodies[1]
+    assert preview_digest(semantic_bodies[0]) == preview_digest(semantic_bodies[1])
 
 
 def test_digest_covers_safe_value_suffixes_and_changes_omitted_from_the_diff(
