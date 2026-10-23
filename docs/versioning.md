@@ -45,9 +45,17 @@ Git tags. Python distribution versions omit the `v` prefix.
    Keep an `Unreleased` section and update comparison links.
 2. Update related README/API/operating docs. Product publication does not bypass
    the [public-content checklist](public-release.md).
-3. Regenerate `tests/contracts/openapi.json` with
-   `python scripts/update_openapi_contract.py` when its product version changes;
-   review the resulting diff. Dependency locks change only when dependencies do.
+3. Run from the repository root. Regenerate `tests/contracts/openapi.json` with
+   `PYTHONPATH=src python scripts/update_openapi_contract.py` when its product
+   version changes, then verify with
+   `PYTHONPATH=src python scripts/update_openapi_contract.py --check` and review
+   the diff. Confirm the imported source with
+   `PYTHONPATH=src python -c 'import blockwart; print(blockwart.__file__, blockwart.__version__)'`:
+   it must name this checkout's `src/blockwart/__init__.py` and the bumped version.
+   The development install is non-editable; an old installed wheel can otherwise
+   generate and approve its own old version. Dependency locks change only when
+   dependencies do. Keep the installed-wheel proof in step 4 outside the checkout
+   **without** this source-path override so it still tests the installed artifact.
 4. Run the [CI proof](ci.md), including dependency-lock parity, lint, PostgreSQL
    tests, OpenAPI, installed-wheel and container smokes. The installed-wheel
    smoke checks metadata, OpenAPI, health and the actual MCP handshake together.
