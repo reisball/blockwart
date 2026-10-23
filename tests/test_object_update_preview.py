@@ -1332,6 +1332,10 @@ def test_the_digest_never_distinguishes_two_redacted_values(
         ).json()
         bodies.append(body)
         assert stored_secret not in json.dumps(body)
+        # Bind the actual returned digest to the complete published contract
+        # for EACH secret-bearing response, not just a separate ordinary case.
+        digest_body = {key: value for key, value in body.items() if key != "preview_digest"}
+        assert body["preview_digest"] == preview_digest(digest_body)
 
     # The direct fixture write correctly advances the public concurrency token.
     # Its digest binding must change, but no secret-dependent semantic material
@@ -1347,7 +1351,6 @@ def test_the_digest_never_distinguishes_two_redacted_values(
         for body in bodies
     ]
     assert semantic_bodies[0] == semantic_bodies[1]
-    assert preview_digest(semantic_bodies[0]) == preview_digest(semantic_bodies[1])
 
 
 def test_digest_covers_safe_value_suffixes_and_changes_omitted_from_the_diff(
