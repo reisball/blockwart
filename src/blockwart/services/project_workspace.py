@@ -138,6 +138,8 @@ def list_records(
     overdue: bool = False,
     priority: str | None = None,
     archived: bool | None = None,
+    depends_on: str | None = None,
+    blocked: bool | None = None,
     limit: int = 50,
     cursor: str | None = None,
 ) -> ProjectRecordPageOut:
@@ -148,6 +150,11 @@ def list_records(
             ProjectRecord.kind == kind,
         )
     ).all()
+    if depends_on is not None:
+        dependency = _record(session, project, depends_on)
+        if dependency.kind != "item":
+            raise CommandNotFound(depends_on)
+        depends_on = dependency.id
     items = [record_out(session, access, row) for row in rows]
     items = [
         item
@@ -157,6 +164,22 @@ def list_records(
         and (not overdue or item.overdue)
         and (priority is None or item.data.get("priority", "normal") == priority)
         and (archived is None or item.data.get("archived", False) == archived)
+        and (
+            depends_on is None
+            or any(
+                edge["relation"] == "depends_on" and edge["target_id"] == depends_on
+                for edge in item.data.get("relations", [])
+            )
+        )
+        and (
+            blocked is None
+            or bool(
+                item.context.get("blockers")
+                or item.effective_status == "blocked"
+                or item.data.get("blocked_reason")
+            )
+            == blocked
+        )
     ]
     page = paginate_items(
         items,
@@ -173,6 +196,8 @@ def list_records(
             "overdue": overdue,
             "priority": priority,
             "archived": archived,
+            "depends_on": depends_on,
+            "blocked": blocked,
         },
         cursor=cursor,
         include_total=True,
@@ -233,6 +258,9 @@ def _validate_refs(session, context, data):
 
 def _validate_parent(session, project, record_id, data):
     parent_id = data.get("parent_id")
+    if parent_id:
+        parent_id = _record(session, project, parent_id).id
+        data["parent_id"] = parent_id
     visited = {record_id}
     while parent_id:
         if parent_id in visited:
@@ -293,19 +321,17 @@ def save_record(
         ttl_seconds=idempotency_ttl_seconds,
         now=now,
     )
-    if replay is not None:
-        result = ProjectRecordCommandOut.model_validate(replay)
-        # References may have become concealed since the original response.
-        result.record.data = _projected_data(session, access, json.dumps(result.record.data))
-        result.replayed = True
-        return result
     lock_principal_rows(session, (context.principal.id,))
     locked = session.scalar(
         select(CatalogObject)
         .where(
             CatalogObject.id == object_id,
             CatalogObject.instance_id == project.instance_id,
-            *([CatalogObject.revision == expected] if expected is not None else []),
+            *(
+                [CatalogObject.revision == expected]
+                if expected is not None and replay is None
+                else []
+            ),
         )
         .with_for_update()
         .execution_options(populate_existing=True)
@@ -316,6 +342,12 @@ def save_record(
     context = replace(context, policy=policy_for_principal(session, context.principal.id))
     access = ReadAccess(context.principal, context.policy)
     authorize_object_command(session, context, object_id=object_id, permission=Permission.WRITE)
+    if replay is not None:
+        result = ProjectRecordCommandOut.model_validate(replay)
+        # References may have become concealed since the original response.
+        result.record.data = _projected_data(session, access, json.dumps(result.record.data))
+        result.replayed = True
+        return result
     row = _record(session, project, record_id) if record_id else None
     if record_expected is not None and (row is None or record_etag(row) != record_expected):
         raise CommandPreconditionFailed("Record version changed")
@@ -345,6 +377,23 @@ def save_record(
         for field in set(type(payload).model_fields) - original_fields - payload.model_fields_set:
             if field in prior:
                 data[field] = prior[field]
+    if (
+        row
+        and "item_type" not in payload.model_fields_set
+        and prior.get("item_type")
+        in {"requirement", "requirement_group", "use_case", "decision", "evidence"}
+    ):
+        data["item_type"] = prior["item_type"]
+    # Validate the actual merged representation, not only defaults supplied by
+    # an old client. This prevents persisting a schema-invalid hybrid.
+    from pydantic import ValidationError
+
+    from blockwart.schemas.project_workspace import RECORD_ADAPTER
+
+    try:
+        data = RECORD_ADAPTER.validate_python(data).model_dump(mode="json")
+    except ValidationError as exc:
+        raise CommandValidationFailed("Invalid merged record") from exc
     if row and row.kind != payload.kind:
         raise CommandValidationFailed("Record kind cannot be changed")
     # A hidden existing link must not be silently erased by an authorized projected edit.

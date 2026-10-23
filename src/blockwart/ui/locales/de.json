@@ -1498,5 +1498,10 @@
   "project.pm.source_revision": "Quellrevision",
   "project.pm.source_fingerprint": "Quellfingerabdruck",
   "project.pm.authority": "Maßgebliche Quelle",
-  "project.records.option.structured_record": "Strukturierte Einträge"
+  "project.records.option.structured_record": "Strukturierte Einträge",
+  "project.pm.blocked_filter": "Blockierungszustand",
+  "project.pm.blocked_only": "Blockiert",
+  "project.pm.depends_on_filter": "Hängt ab von",
+  "project.pm.legacy_reconcile": "Identische Altbestandseinträge sind nach einer Quelländerung nicht eindeutig zuzuordnen. Bitte die Herkunft klären; es wird keine doppelte Aufgabe angelegt.",
+  "project.pm.unblocked_only": "Nicht blockiert"
 }

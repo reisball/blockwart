@@ -166,7 +166,10 @@ finishes. Search/list/detail reads never contact GitHub.
 
 Public anonymous access is explicit when no credential reference is configured. Private access
 uses an operator-managed JSON mapping `BLOCKWART_PROJECT_GITHUB_CREDENTIAL_FILES`, from exact
-`credential_reference:<id>` to a protected runtime token file. Catalog metadata never supplies a
+`PROJECT_INSTANCE_ID/REPOSITORY_RECORD_UUID/GITHUB_NUMERIC_ID/credential_reference:<id>`
+to a protected runtime token file. There is no global-reference fallback. A new project instance,
+other repository record, upstream repository retarget or credential change needs a new explicit
+operator binding; catalog-reference readability alone never enables credential use. Catalog metadata never supplies a
 file path or secret value. Reading a reference is not permission to fetch its value: the operator
 must separately configure the integration binding. The requesting actor must also be allowed to
 read the reference. Required/unreadable credentials fail closed; no anonymous or inherited-token
@@ -206,3 +209,29 @@ compare every original table/column before and after migration, including record
 versions. The live application is not stopped or changed for that rehearsal. Private instance
 metadata and backup contents stay outside the repository. Technical test commands and outcomes
 belong in the PR and [implementation plan](planning/project-management-287.md).
+
+### Legacy occurrence reconciliation
+
+An imported entry retains its original field, position, text, source revision,
+source fingerprint and occurrence count. A unique text occurrence remains linked
+to that same structured record after a source-list reorder; its historical
+origin is not rewritten. Identical text occurrences can initially be imported
+separately while the source fingerprint is unchanged. If their source changes
+and occurrence identity is ambiguous, overview returns
+`authority: reconciliation_required` and import refuses with a conflict. Resolve
+the source provenance explicitly before importing; no duplicate is guessed.
+Older provenance without an occurrence count remains valid at its exact source
+fingerprint but requires reconciliation after an ambiguous source change.
+
+Acceptance considers unresolved `depends_on` and `blocked_by` predecessors,
+not order-only `precedes`. GitHub-led work uses the fresh leading issue's
+observed state, never a locally stored `done` fallback. A failure observing a
+secondary issue/PR does not override a successful, current leading issue.
+Use-case acceptance becomes stale when a mandatory child's selected proof or
+assessment is no longer current. Decisions remain visible traceability but are
+not counted as implementation tasks in coverage.
+
+Record listing supports `depends_on` (direct predecessor UUID or local short
+code) and `blocked` (unresolved dependency/blocker, explicit blocked state or
+reason) on REST, MCP and UI. Pagination tokens are bound to the normalized
+filters, project instance and authenticated principal.

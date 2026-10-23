@@ -1498,5 +1498,10 @@
   "project.pm.source_revision": "Source revision",
   "project.pm.source_fingerprint": "Source fingerprint",
   "project.pm.authority": "Authoritative source",
-  "project.records.option.structured_record": "Structured records"
+  "project.records.option.structured_record": "Structured records",
+  "project.pm.blocked_filter": "Dependency blocker state",
+  "project.pm.blocked_only": "Blocked",
+  "project.pm.depends_on_filter": "Depends on",
+  "project.pm.legacy_reconcile": "Identical legacy entries cannot be matched unambiguously after a source change. Reconcile their provenance first; no duplicate task is created.",
+  "project.pm.unblocked_only": "Not blocked"
 }

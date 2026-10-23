@@ -21,7 +21,7 @@ from blockwart.schemas.project_workspace import (
     ProjectSearchPageOut,
     RecordKind,
 )
-from blockwart.services.commands import CommandNotFound
+from blockwart.services.commands import CommandNotFound, CommandValidationFailed
 from blockwart.services.pagination import InvalidCursor
 from blockwart.services.project_management import (
     apply_action,
@@ -53,6 +53,8 @@ def _read(command):
         raise HTTPException(404, "Resource not found") from exc
     except InvalidCursor as exc:
         raise HTTPException(400, "Invalid cursor") from exc
+    except CommandValidationFailed as exc:
+        raise HTTPException(422, "Invalid filter") from exc
 
 
 @router.get("/search", response_model=ProjectSearchPageOut)
@@ -208,6 +210,8 @@ def get_project_records(
     overdue: bool = False,
     priority: str | None = None,
     archived: bool | None = None,
+    depends_on: Annotated[str | None, Query(min_length=1, max_length=36)] = None,
+    blocked: bool | None = None,
     limit: Limit = 50,
     cursor: Cursor = None,
 ):
@@ -224,6 +228,8 @@ def get_project_records(
             overdue=overdue,
             priority=priority,
             archived=archived,
+            depends_on=depends_on,
+            blocked=blocked,
             limit=limit,
             cursor=cursor,
         )

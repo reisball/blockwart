@@ -232,7 +232,7 @@ def test_markdown_create_schema_uses_alembic(
     engine = create_engine(database_url)
     with engine.connect() as connection:
         assert connection.execute(text("SELECT version_num FROM alembic_version")).scalar_one() == (
-            "20261022_0029"
+            "20261023_0030"
         )
     engine.dispose()
 

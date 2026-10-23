@@ -292,6 +292,7 @@ def test_real_alembic_upgrade_creates_fresh_database_and_has_no_drift(
             "project_records",
         "object_revision_clocks",
             "project_record_versions",
+        "project_record_events",
         }
     finally:
         engine.dispose()
@@ -320,6 +321,7 @@ def test_real_alembic_upgrade_creates_fresh_database_and_has_no_drift(
         "project_records",
         "object_revision_clocks",
         "project_record_versions",
+        "project_record_events",
     }
     assert _revision(database_url) == HEAD_REVISION
 
@@ -2008,6 +2010,7 @@ def downgrade() -> None:
             "project_records",
         "object_revision_clocks",
             "project_record_versions",
+        "project_record_events",
         }
         with engine.connect() as connection:
             assert connection.execute(

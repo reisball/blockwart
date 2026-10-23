@@ -84,13 +84,19 @@ def _github_get(path, token, *, timeout):
         raise ObservationError("invalid_response") from None
 
 
-def _credential(settings, session, context, repository):
+def _credential(
+    settings, session, context, repository, *, project_instance_id, repository_record_id
+):
     ref = repository.get("credential_reference")
     if not ref:
         return None  # explicitly anonymous public-only access
     if not _visible_ref(session, ReadAccess(context.principal, context.policy), ref):
         raise ObservationError("credential_not_accessible")
-    filename = settings.project_github_credential_files.get(ref)
+    # Metadata readability is not authority to use a deployment credential.
+    # Bind the operator's approval to the immutable project/repository instance,
+    # numeric upstream repository and exact credential reference. No global-ref fallback.
+    source = f"{project_instance_id}/{repository_record_id}/{repository['github_id']}/{ref}"
+    filename = settings.project_github_credential_files.get(source)
     if not filename:
         raise ObservationError("credential_not_configured")
     try:
@@ -116,7 +122,8 @@ def sync_record(session, context, project, row):
     for ref in refs:
         observed = {"reference": ref, "ok": False}
         try:
-            repository = json.loads(_record(session, project, ref["repository_id"]).data_json)
+            repo_row = _record(session, project, ref["repository_id"])
+            repository = json.loads(repo_row.data_json)
             if not settings.project_github_sync_enabled or not repository.get("sync_enabled"):
                 raise ObservationError("sync_disabled")
             if not repository.get("github_id"):
@@ -125,7 +132,14 @@ def sync_record(session, context, project, row):
                 raise ObservationError("budget_exhausted")
             identity = ref["repository_id"]
             if identity not in metadata:
-                token = _credential(settings, session, context, repository)
+                token = _credential(
+                    settings,
+                    session,
+                    context,
+                    repository,
+                    project_instance_id=project.instance_id,
+                    repository_record_id=repo_row.id,
+                )
                 meta = _github_get(
                     f"/repositories/{repository['github_id']}",
                     token,

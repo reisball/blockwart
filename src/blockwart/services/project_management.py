@@ -14,7 +14,13 @@ from uuid import uuid4
 from sqlalchemy import select
 
 from blockwart.domain.timestamps import format_rfc3339_utc
-from blockwart.models import IdempotencyRecord, Principal, ProjectRecord, ProjectRecordEvent
+from blockwart.models import (
+    IdempotencyRecord,
+    Principal,
+    ProjectRecord,
+    ProjectRecordEvent,
+    ProjectRecordVersion,
+)
 from blockwart.schemas.project_workspace import (
     RECORD_ADAPTER,
     ProjectActionIn,
@@ -135,6 +141,17 @@ def validate_record(session, context, project, identity, data, previous):
             ev["requirement_id"] not in graph or _type(graph[ev["requirement_id"]]) != "requirement"
         ):
             raise CommandValidationFailed("Existing evidence requires a requirement target")
+    for value in graph.values():
+        for edge in value.get("relations", []):
+            target = graph[edge["target_id"]]
+            if edge["relation"] == "supersedes" and _type(value) != _type(target):
+                raise CommandValidationFailed("Supersession requires the same semantic type")
+            version = edge.get("target_version")
+            if version is not None:
+                if edge["relation"] not in {"documents", "informed_by"}:
+                    raise CommandValidationFailed("Only narrative references carry target versions")
+                if session.get(ProjectRecordVersion, (edge["target_id"], version)) is None:
+                    raise CommandValidationFailed("Referenced record version does not exist")
     # Dependency, ordering and supersession are separate DAGs. Hierarchy is
     # checked independently; reference-only links need not be acyclic.
     for family in ({"depends_on", "blocked_by"}, {"precedes"}, {"supersedes"}):
@@ -180,13 +197,13 @@ def validate_record(session, context, project, identity, data, previous):
         )
     for ref in data.get("github_references", []):
         target = _record(session, project, ref["repository_id"])
-        if target.kind != "repository":
+        if target.id != ref["repository_id"] or target.kind != "repository":
             raise CommandValidationFailed("GitHub reference must target a repository")
     evidence = data.get("evidence")
     if evidence:
         requirement = _record(session, project, evidence["requirement_id"])
         target = json.loads(requirement.data_json)
-        if target.get("item_type") != "requirement":
+        if requirement.id != evidence["requirement_id"] or target.get("item_type") != "requirement":
             raise CommandValidationFailed("Evidence must target a requirement")
         if evidence["requirement_revision"] > requirement.requirement_revision:
             raise CommandValidationFailed("Unknown future requirement revision")
@@ -216,14 +233,14 @@ def _requirement_at_revision(session, row, revision):
         .where(ProjectRecordVersion.entry_id == row.id)
         .order_by(ProjectRecordVersion.version)
     ).all()
-    last, current = None, 0
+    last, current = None, 1
     for version in versions:
         data = json.loads(version.data_json)
         content = [data.get(k) for k in ("title", "description", "criteria", "requirement")]
-        if content != last:
+        if last is not None and data.get("item_type") == "requirement" and content != last:
             current += 1
-            last = content
-        if current == revision:
+        last = content
+        if data.get("item_type") == "requirement" and current == revision:
             return data.get("criteria", [])
     if revision == row.requirement_revision:
         return json.loads(row.data_json).get("criteria", [])
@@ -249,7 +266,7 @@ def record_events(session, access, *, object_id, record_id, kind=None, limit=50,
             id=r.id,
             record_id=r.record_id,
             kind=r.kind,
-            data=json.loads(r.data_json),
+            data=_event_projection(session, access, r),
             author_id=r.author_id,
             author_label=r.author_label,
             origin=r.origin,
@@ -316,6 +333,8 @@ def _assessment(session, project, row, action):
     rows = _rows(session, project)
     graph = {r.id: json.loads(r.data_json) for r in rows}
     descendants = _scope(graph, row.id)
+    events = _all_events(session, project)
+    by_id = {r.id: r for r in rows}
     required = {c["id"] for c in data.get("criteria", []) if c.get("required", True)}
     covered, snapshots = set(), []
     for identity in action.evidence_ids:
@@ -345,7 +364,7 @@ def _assessment(session, project, row, action):
         key
         for key in descendants - {row.id}
         if graph[key].get("mandatory", True)
-        and graph[key].get("status") != "done"
+        and _work_status(by_id[key], rows, events) != "done"
         and graph[key].get("item_type") in {"task", "question", "blocker", "decision"}
     )
     events = _all_events(session, project)
@@ -353,7 +372,7 @@ def _assessment(session, project, row, action):
         r.id
         for r in rows
         if r.id in descendants - {row.id}
-        and graph[r.id].get("item_type") == "requirement"
+        and graph[r.id].get("item_type") in {"requirement", "use_case"}
         and graph[r.id].get("mandatory", True)
         and (
             not (latest := _last_assessment(events, r.id, r.requirement_revision))
@@ -435,6 +454,14 @@ def apply_action(
     )
     if result.replayed:
         return result
+    from dataclasses import replace
+
+    from blockwart.services.policy import policy_for_principal
+
+    # save_record acquired the principal/project locks and reauthorized. Do not
+    # reuse the pre-lock policy for credential access or response projection.
+    context = replace(context, policy=policy_for_principal(session, context.principal.id))
+    access = ReadAccess(context.principal, context.policy)
     event_data = payload.model_dump(mode="json")
     if payload.action == "assess":
         event_data = _assessment(session, project, row, payload)
@@ -483,7 +510,8 @@ def project_overview(session, access, *, object_id):
         implementations = [
             key
             for key, value in graph.items()
-            if any(
+            if value.get("item_type") == "task"
+            and any(
                 e["relation"] == "implements" and e["target_id"] == row.id
                 for e in value.get("relations", [])
             )
@@ -509,8 +537,9 @@ def project_overview(session, access, *, object_id):
                 "blocked_by": [
                     e["target_id"]
                     for e in data.get("relations", [])
-                    if e["relation"] == "blocked_by"
-                    and graph[e["target_id"]].get("status") != "done"
+                    if e["relation"] in {"blocked_by", "depends_on"}
+                    and _work_status(next(r for r in rows if r.id == e["target_id"]), rows, events)
+                    != "done"
                 ],
             }
         )
@@ -519,11 +548,20 @@ def project_overview(session, access, *, object_id):
     for field in ("open_questions", "blockers", "next_actions"):
         for index, value in enumerate(project_data.get(field, [])):
             origin = {"field": field, "index": index, "text": value}
-            migrated = next(
-                (key for key, data in graph.items() if data.get("legacy_origin") == origin), None
+            migrated, ambiguous = _legacy_match(
+                rows, events, field, project_data.get(field, []), index
             )
             legacy.append(
-                {**origin, "record_id": migrated, "authority": "record" if migrated else "legacy"}
+                {
+                    **origin,
+                    "record_id": migrated.id if migrated else None,
+                    "authority": "reconciliation_required"
+                    if ambiguous
+                    else "record"
+                    if migrated
+                    else "legacy",
+                    "reconciliation_required": ambiguous,
+                }
             )
     mandatory = [r for r in requirements if r["mandatory"]]
     return {
@@ -552,6 +590,38 @@ def project_overview(session, access, *, object_id):
         "work_authority": "structured_records",
         "project_revision": project.revision,
     }
+
+
+def _legacy_match(rows, events, field, values, index):
+    """Unique text survives reordering; identical occurrences need exact provenance.
+
+    Never guess an occurrence after duplicate source text was added/reordered.
+    The immutable import snapshot remains untouched.
+    """
+    text = values[index]
+    candidates = [
+        row
+        for row in rows
+        if (origin := json.loads(row.data_json).get("legacy_origin"))
+        and origin["field"] == field
+        and origin["text"] == text
+    ]
+    if not candidates:
+        return None, False
+    if values.count(text) == 1 and len(candidates) == 1:
+        return candidates[0], False
+    fingerprint = hashlib.sha256(json.dumps(values).encode()).hexdigest()
+    imported = {
+        event.record_id: json.loads(event.data_json)
+        for event in events
+        if event.kind == "import_legacy"
+    }
+    if any(imported.get(row.id, {}).get("source_fingerprint") != fingerprint for row in candidates):
+        return None, True
+    matches = [
+        row for row in candidates if json.loads(row.data_json)["legacy_origin"]["index"] == index
+    ]
+    return (matches[0], False) if len(matches) == 1 else (None, len(matches) > 1)
 
 
 def import_legacy(
@@ -588,14 +658,16 @@ def import_legacy(
     origin = {"field": field, "index": index, "text": text}
     command = {"import": origin}
     expected = parse_if_match(expected_revision)
-    existing = next(
-        (
-            r
-            for r in _rows(session, project)
-            if json.loads(r.data_json).get("legacy_origin") == origin
-        ),
-        None,
+    current = json.loads(project.data_json).get(field, [])
+    if index >= len(current) or current[index] != text:
+        raise CommandPreconditionFailed("Legacy entry changed")
+    existing, ambiguous = _legacy_match(
+        _rows(session, project), _all_events(session, project), field, current, index
     )
+    if ambiguous:
+        raise CommandConflict(
+            "Legacy occurrence is ambiguous; reconcile source provenance before importing"
+        )
     if existing:
         idem, replay = reserve_idempotency_record(
             session,
@@ -606,21 +678,31 @@ def import_legacy(
             ttl_seconds=idempotency_ttl_seconds,
             now=datetime.now(UTC).replace(tzinfo=None),
         )
-        if replay:
-            result = ProjectRecordCommandOut.model_validate(replay)
-            result.record.data = _projected_data(session, access, json.dumps(result.record.data))
-            result.replayed = True
-            return result
         lock_principal_rows(session, (context.principal.id,))
         locked = session.scalar(
             select(CatalogObject)
             .where(CatalogObject.id == object_id, CatalogObject.instance_id == project.instance_id)
             .with_for_update()
+            .execution_options(populate_existing=True)
         )
         if locked is None:
             raise CommandPreconditionFailed("Project instance changed")
         context = replace(context, policy=policy_for_principal(session, context.principal.id))
         authorize_object_command(session, context, object_id=object_id, permission=Permission.WRITE)
+        access = ReadAccess(context.principal, context.policy)
+        if replay:
+            result = ProjectRecordCommandOut.model_validate(replay)
+            result.record.data = _projected_data(session, access, json.dumps(result.record.data))
+            result.replayed = True
+            return result
+        current = json.loads(locked.data_json).get(field, [])
+        if index >= len(current) or current[index] != text:
+            raise CommandPreconditionFailed("Legacy entry changed")
+        existing, ambiguous = _legacy_match(
+            _rows(session, locked), _all_events(session, locked), field, current, index
+        )
+        if ambiguous or existing is None:
+            raise CommandConflict("Legacy occurrence changed; review source provenance")
         result = ProjectRecordCommandOut(
             record=record_out(session, access, existing),
             revision=locked.revision,
@@ -682,7 +764,7 @@ def _scope(graph, identity):
             e["target_id"]
             for key in scope
             for e in graph[key].get("relations", [])
-            if e["relation"] == "blocked_by"
+            if e["relation"] in {"blocked_by", "depends_on"}
         }
         if found <= scope:
             return scope
@@ -697,9 +779,17 @@ def _review_basis(row, rows, events):
     for key in sorted(scope):
         value = graph[key]
         typ = value.get("item_type")
-        if key == row.id or typ in {"requirement", "task", "question", "blocker", "decision"}:
+        if key == row.id or typ in {
+            "requirement",
+            "use_case",
+            "task",
+            "question",
+            "blocker",
+            "decision",
+        }:
             basis[key] = {k: value.get(k) for k in ("status", "mandatory", "archived", "item_type")}
-            if typ == "requirement":
+            basis[key]["status"] = _work_status(by_id[key], rows, events)
+            if typ in {"requirement", "use_case"}:
                 basis[key]["requirement_revision"] = by_id[key].requirement_revision
                 if key != row.id:
                     last = next(
@@ -714,14 +804,55 @@ def _review_basis(row, rows, events):
     return basis
 
 
-def _review_current(assessment, row, rows, events):
-    if assessment.get("basis") != _review_basis(row, rows, events):
+def _review_current(assessment, row, rows, events, seen=None):
+    seen = set() if seen is None else seen
+    if row.id in seen or assessment.get("basis") != _review_basis(row, rows, events):
         return False
+    seen = seen | {row.id}
     by_id = {r.id: r for r in rows}
-    return all(
+    if not all(
         item["id"] in by_id and by_id[item["id"]].version == item["version"]
         for item in assessment.get("evidence", [])
-    )
+    ):
+        return False
+    graph = {r.id: json.loads(r.data_json) for r in rows}
+    for key in _scope(graph, row.id) - {row.id}:
+        data = graph[key]
+        if data.get("item_type") not in {"requirement", "use_case"} or not data.get(
+            "mandatory", True
+        ):
+            continue
+        child = by_id[key]
+        latest = _last_assessment(events, key, child.requirement_revision)
+        if (
+            not latest
+            or latest["result"] not in {"accepted", "exception"}
+            or not _review_current(latest, child, rows, events, seen)
+        ):
+            return False
+    return True
+
+
+def _external_for(row, rows, events):
+    from blockwart.services.project_github import external_state
+
+    data = json.loads(row.data_json)
+    external = external_state([e for e in events if e.record_id == row.id], data)
+    by_id = {r.id: r for r in rows}
+    leading = data.get("leading_reference")
+    for observation in (external.get("last_attempt") or {}).get("observations", []):
+        if data.get("status_authority") == "github" and observation["reference"] != leading:
+            continue
+        repo = by_id.get(observation["reference"]["repository_id"])
+        if repo is None or repo.version != observation.get("repository_record_version"):
+            external["fresh"] = False
+            if data.get("status_authority") == "github":
+                external["effective_status"] = None
+    return external
+
+
+def _work_status(row, rows, events):
+    return _external_for(row, rows, events)["effective_status"]
 
 
 def record_context(session, row):
@@ -736,7 +867,6 @@ def record_context(session, row):
         .where(ProjectRecordEvent.project_instance_id == row.project_instance_id)
         .order_by(ProjectRecordEvent.created_at, ProjectRecordEvent.id)
     ).all()
-    own_events = [e for e in events if e.record_id == row.id]
     assessment = _last_assessment(events, row.id, row.requirement_revision)
     if assessment:
         assessment = {**assessment, "stale": not _review_current(assessment, row, rows, events)}
@@ -747,7 +877,10 @@ def record_context(session, row):
         if target is None:
             continue
         target_data = json.loads(target.data_json)
-        if edge["relation"] in {"depends_on", "blocked_by"} and target_data.get("status") != "done":
+        if (
+            edge["relation"] in {"depends_on", "blocked_by"}
+            and _work_status(target, rows, events) != "done"
+        ):
             blockers.append(
                 {
                     "id": target.id,
@@ -758,15 +891,7 @@ def record_context(session, row):
             )
         if edge.get("target_version") and target.version != edge["target_version"]:
             stale_links.append(edge["target_id"])
-    from blockwart.services.project_github import external_state
-
-    external = external_state(own_events, data)
-    for observation in (external.get("last_attempt") or {}).get("observations", []):
-        repo = by_id.get(observation["reference"]["repository_id"])
-        if repo is None or repo.version != observation.get("repository_record_version"):
-            external["fresh"] = False
-            if data.get("status_authority") == "github":
-                external["effective_status"] = None
+    external = _external_for(row, rows, events)
     return {
         "assessment": assessment,
         "fulfillment": _fulfillment(row, rows, events)
@@ -835,3 +960,15 @@ def _fulfillment(row, rows, events):
         "evidence_ids": [identity for identity, _ in evidence],
         "requirement_revision": row.requirement_revision,
     }
+
+
+def _event_projection(session, access, row):
+    """Apply the same live reference concealment as current/history reads."""
+    from blockwart.services.project_workspace import _projected_data
+
+    data = json.loads(row.data_json)
+    if row.kind == "patch":
+        changes = data.get("changes", {})
+        changes.pop("new_credential_reference", None)
+        data["changes"] = _projected_data(session, access, json.dumps(changes))
+    return data

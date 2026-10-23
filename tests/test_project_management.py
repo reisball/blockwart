@@ -6,7 +6,7 @@ from uuid import uuid4
 
 import pytest
 from sqlalchemy import text
-from test_catalog_root_creation import root_client, root_state  # noqa: F401
+from test_catalog_root_creation import _asset, root_client, root_state  # noqa: F401
 from test_project_records import (  # noqa: F401  # noqa: F401
     _auth,
     _create_project,
@@ -18,8 +18,12 @@ from test_project_records import (  # noqa: F401  # noqa: F401
     project,
 )
 
+from blockwart.db.session import transaction
+from blockwart.domain.auth import GrantScope, Role
 from blockwart.mcp.server import call_tool
 from blockwart.models import CatalogObject
+from blockwart.services.access import create_object_grant
+from blockwart.services.catalog import upsert_object
 
 
 def make(client, state, title, **kw):
@@ -741,3 +745,172 @@ def test_github_transport_rejects_private_or_mixed_dns_without_connecting(monkey
         )
         with pytest.raises(github.ObservationError, match="policy_denied"):
             github._github_get("/repositories/123", None, timeout=1)
+
+
+def test_targeted_event_must_apply_current_reference_projection(project, root_client, root_state):
+    c, s = root_client, root_state
+    with s["session_factory"]() as session, transaction(session):
+        upsert_object(
+            session,
+            _asset(
+                "private-event-ref",
+                kind="credential_reference",
+                label="Private reference",
+                data={
+                    "schema_version": 1,
+                    "provider": "vaultwarden",
+                    "reference": {"item_hint": "Private metadata"},
+                },
+            ),
+        )
+        create_object_grant(
+            session,
+            principal_id=s["owner_id"],
+            object_id="private-event-ref",
+            role=Role.OWNER,
+            scope=GrantScope.SELF,
+        )
+        create_object_grant(
+            session,
+            principal_id=s["scoped_id"],
+            object_id="work",
+            role=Role.EDITOR,
+            scope=GrantScope.SELF,
+        )
+    made = _save(c, s, {"kind": "access", "title": "External"}).json()["record"]
+    changed = act(
+        c, s, made, changes={"credential_reference": "credential_reference:private-event-ref"}
+    )
+    assert changed.status_code == 200, changed.text
+    headers = _auth(s["scoped_token"])
+    assert (
+        "private-event-ref"
+        not in c.get("/api/v1/projects/work/workspace/access", headers=headers).text
+    )
+    events = c.get("/api/v1/projects/work/workspace/events/" + made["id"], headers=headers)
+    assert events.status_code == 200, events.text
+    assert "private-event-ref" not in events.text
+
+
+def test_supersession_must_not_cross_requirement_page_types(project, root_client, root_state):
+    c, s = root_client, root_state
+    req = make(c, s, "Requirement", item_type="requirement")
+    page = _save(c, s, {"kind": "page", "title": "Page"}).json()["record"]
+    changed = act(
+        c, s, req, changes={"relations": [{"relation": "supersedes", "target_id": page["id"]}]}
+    )
+    assert changed.status_code == 422, changed.text
+
+
+def test_documentation_version_must_exist(project, root_client, root_state):
+    c, s = root_client, root_state
+    item = make(c, s, "Target")
+    made = _save(
+        c,
+        s,
+        {
+            "kind": "page",
+            "title": "Future claim",
+            "relations": [
+                {"relation": "documents", "target_id": item["id"], "target_version": 9000}
+            ],
+        },
+    )
+    assert made.status_code == 422, made.text
+
+
+def test_parent_short_codes_must_normalize_before_cycle_and_coverage_checks(
+    project, root_client, root_state
+):
+    c, s = root_client, root_state
+    parent = make(c, s, "Stable parent")
+    child = make(c, s, "Child by short code", parent_id=parent["short_code"])
+    assert child["data"]["parent_id"] == parent["id"]
+    assert act(c, s, parent, changes={"parent_id": parent["short_code"]}).status_code == 409
+
+
+def test_github_credential_binding_must_be_scoped_to_project_instance_and_repository(
+    project, root_client, root_state, monkeypatch, tmp_path
+):
+    import json
+
+    c, s = root_client, root_state
+    with s["session_factory"]() as session, transaction(session):
+        upsert_object(
+            session,
+            _asset(
+                "github-binding",
+                kind="credential_reference",
+                label="Integration reference",
+                data={
+                    "schema_version": 1,
+                    "provider": "vaultwarden",
+                    "reference": {"item_hint": "Metadata only"},
+                },
+            ),
+        )
+        create_object_grant(
+            session,
+            principal_id=s["owner_id"],
+            object_id="github-binding",
+            role=Role.OWNER,
+            scope=GrantScope.SELF,
+        )
+    file = tmp_path / "integration-token"
+    file.write_text("synthetic-test-credential")
+    file.chmod(0o600)
+    monkeypatch.setenv("BLOCKWART_PROJECT_GITHUB_SYNC_ENABLED", "true")
+    monkeypatch.setenv(
+        "BLOCKWART_PROJECT_GITHUB_CREDENTIAL_FILES",
+        json.dumps({"credential_reference:github-binding": str(file)}),
+    )
+    repo = _save(
+        c,
+        s,
+        {
+            "kind": "repository",
+            "title": "Not operator-bound",
+            "owner": "example",
+            "name": "private",
+            "github_id": 123,
+            "sync_enabled": True,
+            "credential_reference": "credential_reference:github-binding",
+        },
+    ).json()["record"]
+    ref = {"repository_id": repo["id"], "kind": "issue", "number": 7}
+    task = make(c, s, "Observation", github_references=[ref])
+    calls = []
+
+    def get(path, token, timeout):
+        calls.append(path)
+        return (
+            {"id": 123, "full_name": "example/private", "private": True}
+            if path.startswith("/repositories/")
+            else {"number": 7, "state": "closed"}
+        )
+
+    monkeypatch.setattr("blockwart.services.project_github._github_get", get)
+    result = act(c, s, task, "sync_github")
+    assert result.status_code == 200, result.text
+    assert calls == [], (
+        "A readable credential reference alone must not enable arbitrary project/repository use"
+    )
+
+    with s["session_factory"]() as session:
+        instance = session.get(CatalogObject, "work").instance_id
+    source = f"{instance}/{repo['id']}/123/credential_reference:github-binding"
+    monkeypatch.setenv("BLOCKWART_PROJECT_GITHUB_CREDENTIAL_FILES", json.dumps({source: str(file)}))
+    task = result.json()["record"]
+    allowed = act(c, s, task, "sync_github")
+    assert allowed.status_code == 200, allowed.text
+    assert calls == ["/repositories/123", "/repos/example/private/issues/7"]
+    assert allowed.json()["record"]["context"]["external"]["last_attempt"]["observations"][0]["ok"]
+    calls.clear()
+    assert act(c, s, repo, changes={"github_id": 456}).status_code == 200
+    denied = act(c, s, allowed.json()["record"], "sync_github")
+    assert denied.status_code == 200, denied.text
+    assert calls == []
+    assert (
+        denied.json()["record"]["context"]["external"]["last_attempt"]["observations"][0]["error"]
+        == "credential_not_configured"
+    )

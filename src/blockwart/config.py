@@ -163,7 +163,10 @@ class Settings(BaseSettings):
     )
     project_github_credential_files: dict[str, str] = Field(
         default_factory=dict,
-        description="Operator-managed credential-reference to protected token-file mapping.",
+        description=(
+            "Operator-approved project-instance/repository-record/GitHub-id/"
+            "credential-reference to protected token-file mapping."
+        ),
     )
     monitoring_poller_enabled: bool = Field(
         default=False,

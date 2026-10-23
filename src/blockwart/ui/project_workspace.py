@@ -3,7 +3,7 @@
 from typing import Annotated
 from uuid import uuid4
 
-from fastapi import APIRouter, Depends, Form, HTTPException, Request
+from fastapi import APIRouter, Depends, Form, HTTPException, Query, Request
 from fastapi.responses import RedirectResponse
 from fastapi.templating import Jinja2Templates
 from pydantic import ValidationError
@@ -170,6 +170,8 @@ def project_records_ui(
     overdue: bool = False,
     priority: str | None = None,
     archived: str = "active",
+    depends_on: Annotated[str | None, Query(max_length=36)] = None,
+    blocked: str = "",
     cursor: str | None = None,
     edit_id: str | None = None,
     parent_id: str | None = None,
@@ -180,10 +182,11 @@ def project_records_ui(
 ):
     access = read_access_from_request(request)
     status, item_type, priority = status or None, item_type or None, priority or None
+    depends_on = depends_on or None
     if any(
         value and value not in CHOICES[field]
         for field, value in (("status", status), ("item_type", item_type), ("priority", priority))
-    ) or archived not in {"active", "archived", "all"}:
+    ) or archived not in {"active", "archived", "all"} or blocked not in {"", "true", "false"}:
         raise HTTPException(422, "Invalid filter")
     try:
         project = read_project(session, access, object_id)
@@ -197,6 +200,8 @@ def project_records_ui(
             priority=priority,
             archived=None if archived == "all" else archived == "archived",
             overdue=overdue,
+            depends_on=depends_on,
+            blocked=None if not blocked else blocked == "true",
             cursor=cursor,
         )
         editing = (
@@ -224,6 +229,8 @@ def project_records_ui(
         raise HTTPException(404, "Resource not found") from exc
     except InvalidCursor as exc:
         raise HTTPException(400, "Invalid cursor") from exc
+    except CommandValidationFailed as exc:
+        raise HTTPException(422, "Invalid filter") from exc
     values = dict(editing.data) if editing else ({"parent_id": parent_id} if parent_id else {})
     ctx.update(
         {
@@ -241,6 +248,8 @@ def project_records_ui(
             "priority": priority,
             "archived": archived,
             "overdue": overdue,
+            "depends_on": depends_on,
+            "blocked": blocked,
             "overview": overview,
             "hierarchy": _hierarchy(ctx["items"], {r.id for r in page.items}),
             "rendered": {

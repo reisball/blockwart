@@ -1678,6 +1678,19 @@ for _tool in TOOLS:
             _props[_field]["enum"] = list(_get_type_args(_literal))
         _props["priority"] = {"type": "string", "enum": ["low", "normal", "high", "urgent"]}
         _props["archived"] = {"type": "boolean"}
+        _props["depends_on"] = {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 36,
+            "description": "Direct depends_on target UUID or short code within this project.",
+        }
+        _props["blocked"] = {
+            "type": "boolean",
+            "description": (
+                "Filter effective blockers: blocked status, reason, or unresolved depends_on/"
+                "blocked_by relations. Ordering-only precedes relations do not block."
+            ),
+        }
 
 
 for _tool in TOOLS:
