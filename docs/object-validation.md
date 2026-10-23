@@ -151,3 +151,9 @@ This keeps one field-rule registry without duplicating richer domain logic.
 - no editable storage paths or field types
 - no schema-driven UI generation
 - no API v1 relationship-metadata commands or device-graph endpoints in this slice
+
+UI object create/update forms validate the root JSON shape before applying any
+field transformations: only JSON objects are accepted. Arrays, `null`, strings,
+numbers and booleans return a controlled 422 form error, without reserving an
+idempotency key or writing an object/audit event. Valid object documents retain
+the normal schema and authorization checks. Refs #270.
