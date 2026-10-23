@@ -50,3 +50,32 @@ PM records/events.
 
 The PR contains revision-bound test/review outcomes; an earlier result must not
 be presented as verification of a later commit.
+
+## Native independent review R2
+
+Exact reviewed revision: `072bbd9b1cb06d20a7cece893169fe2a944514c5`.
+Quality-route admission was unavailable because Nova's Kutscher MCP was not
+connected. An independent native reviewer examined the immutable checkout;
+this is **not** a second Quality-route review success.
+
+Three P2 findings were independently reproduced by the parent on both SQLite
+and PostgreSQL (six desired-behavior failures before correction):
+
+1. After deleting one of two identical legacy source entries, unique current
+   text did not establish unique historical identity. The import event now
+   persists original occurrence cardinality, and only originally and currently
+   unique occurrences qualify for reorder matching. Ambiguous deletion remains
+   reconciliation-required; original provenance is preserved.
+2. Requirement overview listed only direct blockers while acceptance correctly
+   rejected blockers on implementation work. Overview now derives unresolved
+   `depends_on`/`blocked_by` predecessors from the same relevant work scope,
+   without including unrelated project blockers.
+3. Overview displayed a historical accepted result without its stale flag.
+   It now explicitly renders current/review-required assessment state, matching
+   the record detail view; derived coverage still excludes stale acceptance.
+
+The three independently authored desired-behavior reproductions are retained
+in `tests/test_project_review_regressions.py`. Subsequent PR evidence names the
+corrected exact revision and its own checks; R2 is not approval of the fixes.
+
+The full 072bbd9 suite additionally exposed two legacy network-classification CLI assertions still expecting schema 0029. The isolated reproductions confirmed that classification behavior was correct and only the exact schema-head expectation needed updating to 0030. These assertions remain strict rather than dropping the revision check.

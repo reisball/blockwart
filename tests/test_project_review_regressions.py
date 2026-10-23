@@ -2,6 +2,7 @@
 
 # ruff: noqa: F401, F811
 import json
+from uuid import uuid4
 
 import pytest
 from conftest import alembic_database_factory
@@ -19,7 +20,7 @@ from test_project_management import (
     root_client,
     root_state,
 )
-from test_project_records import _auth, _save
+from test_project_records import _auth, _etag, _save
 
 from blockwart.db.session import transaction
 from blockwart.domain.auth import GrantScope, Role
@@ -428,3 +429,97 @@ def test_legacy_duplicate_occurrences_require_reconciliation_after_source_change
     assert adopt(2).status_code == 409
     response = c.get("/api/v1/projects/work/workspace/item", headers=_auth(s["owner_token"]))
     assert response.json()["total"] == 2
+
+
+def source(s, values):
+    with s["session_factory"]() as session, transaction(session):
+        row = session.get(CatalogObject, "work")
+        data = json.loads(row.data_json)
+        data["next_actions"] = values
+        row.data_json = json.dumps(data)
+        row.revision += 1
+
+
+def adopt(c, s, index):
+    return c.post(
+        "/api/v1/projects/work/workspace/import-legacy",
+        headers={
+            **_auth(s["owner_token"]),
+            "If-Match": _etag(c, s),
+            "Idempotency-Key": "r2-" + uuid4().hex,
+        },
+        json={"field": "next_actions", "index": index, "text": "Same words"},
+    )
+
+
+def test_duplicate_removal_requires_reconciliation(project, root_client, root_state):
+    c, s = root_client, root_state
+    source(s, ["Same words", "Same words"])
+    first = adopt(c, s, 0)
+    assert first.status_code == 200, first.text
+    source(s, ["Same words"])
+    entry = next(e for e in overview(c, s)["legacy"] if e["text"] == "Same words")
+    repeated = adopt(c, s, 0)
+    assert entry["authority"] == "reconciliation_required" and repeated.status_code == 409, (
+        entry,
+        repeated.status_code,
+        repeated.json()["record"]["id"] == first.json()["record"]["id"],
+    )
+
+
+def test_requirement_overview_exposes_implementation_blocker(project, root_client, root_state):
+    c, s = root_client, root_state
+    req = requirement(c, s)
+    blocker = make(c, s, "Missing external prerequisite", item_type="blocker")
+    task = make(
+        c,
+        s,
+        "Implementation",
+        status="done",
+        relations=[
+            {"relation": "implements", "target_id": req["id"]},
+            {"relation": "blocked_by", "target_id": blocker["id"]},
+        ],
+    )
+    assert read(c, s, task)["context"]["blockers"]
+    proof = evidence(c, s, req, criteria=["component", "e2e"])
+    blocked = act(
+        c,
+        s,
+        req,
+        "assess",
+        result="accepted",
+        reason="Synthetic review",
+        evidence_ids=[proof["id"]],
+    )
+    assert blocked.status_code == 409, blocked.text
+    entry = next(r for r in overview(c, s)["requirements"] if r["record"]["id"] == req["id"])
+    assert blocker["id"] in entry["blocked_by"], entry
+
+
+def test_overview_marks_stale_acceptance_in_browser(project, root_client, root_state):
+    from test_project_records import _browser
+
+    c, s = root_client, root_state
+    req = requirement(c, s)
+    proof = evidence(c, s, req, criteria=["component", "e2e"])
+    accepted = act(
+        c,
+        s,
+        req,
+        "assess",
+        result="accepted",
+        reason="Synthetic review",
+        evidence_ids=[proof["id"]],
+    )
+    assert accepted.status_code == 200, accepted.text
+    updated = act(
+        c, s, proof, changes={"evidence": {**proof["data"]["evidence"], "outcome": "fail"}}
+    )
+    assert updated.status_code == 200, updated.text
+    assert read(c, s, req)["context"]["assessment"]["stale"]
+    _browser(c, s)
+    page = c.get("/projects/work/workspace", headers={"Accept-Language": "en"})
+    assert page.status_code == 200, page.text
+    section = page.text.split('id="overview"', 1)[1].split("</section>", 1)[0]
+    assert "Assessment needs review after changes" in section, section

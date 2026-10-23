@@ -502,6 +502,7 @@ def project_overview(session, access, *, object_id):
     rows = _rows(session, project)
     graph = {r.id: json.loads(r.data_json) for r in rows}
     events = _all_events(session, project)
+    by_id = {row.id: row for row in rows}
     requirements = []
     for row in rows:
         data = graph[row.id]
@@ -534,13 +535,15 @@ def project_overview(session, access, *, object_id):
                 "without_implementation": not implementations,
                 "without_verification": not _fulfillment(row, rows, events)["evidence_ids"],
                 "mandatory": data.get("mandatory", True),
-                "blocked_by": [
-                    e["target_id"]
-                    for e in data.get("relations", [])
-                    if e["relation"] in {"blocked_by", "depends_on"}
-                    and _work_status(next(r for r in rows if r.id == e["target_id"]), rows, events)
-                    != "done"
-                ],
+                "blocked_by": sorted(
+                    {
+                        edge["target_id"]
+                        for key in _scope(graph, row.id)
+                        for edge in graph[key].get("relations", [])
+                        if edge["relation"] in {"blocked_by", "depends_on"}
+                        and _work_status(by_id[edge["target_id"]], rows, events) != "done"
+                    }
+                ),
             }
         )
     legacy = []
@@ -608,14 +611,18 @@ def _legacy_match(rows, events, field, values, index):
     ]
     if not candidates:
         return None, False
-    if values.count(text) == 1 and len(candidates) == 1:
-        return candidates[0], False
     fingerprint = hashlib.sha256(json.dumps(values).encode()).hexdigest()
     imported = {
         event.record_id: json.loads(event.data_json)
         for event in events
         if event.kind == "import_legacy"
     }
+    if (
+        values.count(text) == 1
+        and len(candidates) == 1
+        and imported.get(candidates[0].id, {}).get("source_occurrences") == 1
+    ):
+        return candidates[0], False
     if any(imported.get(row.id, {}).get("source_fingerprint") != fingerprint for row in candidates):
         return None, True
     matches = [
@@ -741,6 +748,7 @@ def import_legacy(
                 "origin": origin,
                 "source_revision": expected,
                 "source_fingerprint": hashlib.sha256(json.dumps(current).encode()).hexdigest(),
+                "source_occurrences": current.count(text),
                 "authority": "structured_record",
             },
         )
