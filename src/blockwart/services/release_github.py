@@ -151,7 +151,16 @@ def _request(
     connect_timeout: float,
     total_timeout: float,
     max_response_bytes: int,
+    bearer_token: str | None = None,
 ) -> tuple[int, list[tuple[str, str]], bytes]:
+    # Optional auth is used only by the opt-in project observer. The release
+    # monitor never supplies it. Keep the fixed TLS host and bounded wire path.
+    if bearer_token is not None and (
+        not bearer_token
+        or len(bearer_token) > 4096
+        or any(ord(c) < 33 or ord(c) > 126 for c in bearer_token)
+    ):
+        raise _GithubFailure("credential_unavailable")
     deadline = monotonic() + total_timeout
     sock: socket.socket | None = None
     try:
@@ -177,13 +186,14 @@ def _request(
         except OSError as exc:
             raise _GithubFailure("connect_failed") from exc
         conditional = f"If-None-Match: {etag}\r\n" if etag else ""
+        authorization = f"Authorization: Bearer {bearer_token}\r\n" if bearer_token else ""
         wire = (
             f"GET {path} HTTP/1.1\r\n"
             f"Host: {GITHUB_API_HOST}\r\n"
             f"User-Agent: {_USER_AGENT}\r\n"
             f"Accept: {_ACCEPT}\r\n"
             f"X-GitHub-Api-Version: {_API_VERSION}\r\n"
-            f"{conditional}"
+            f"{conditional}{authorization}"
             "Connection: close\r\n\r\n"
         ).encode("ascii")
         try:

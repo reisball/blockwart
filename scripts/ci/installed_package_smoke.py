@@ -297,6 +297,11 @@ async def check_mcp(
                 "blockwart.save_project_record",
                 "blockwart.list_project_record_history",
                 "blockwart.search_project_workspace",
+                "blockwart.get_project_record",
+                "blockwart.get_project_overview",
+                "blockwart.list_project_record_events",
+                "blockwart.act_on_project_record",
+                "blockwart.import_project_legacy",
             }
             assert all(
                 tool.annotations
@@ -312,6 +317,9 @@ async def check_mcp(
                         "blockwart.list_project_records",
                         "blockwart.list_project_record_history",
                         "blockwart.search_project_workspace",
+                        "blockwart.get_project_record",
+                        "blockwart.get_project_overview",
+                        "blockwart.list_project_record_events",
                         "blockwart.list_project_chronology",
                         "blockwart.list_comments",
                         "blockwart.list_audit_events",
@@ -547,6 +555,7 @@ async def check_mcp(
                             "category": "implementation",
                             "project_status": "planned",
                             "objective": "Prove the installed standalone Project path.",
+                            "next_actions": ["Explicit installed legacy adoption"],
                         },
                     },
                 },
@@ -615,6 +624,77 @@ async def check_mcp(
                 )
             )
             assert project_search["total"] == 1
+            pm_task = _tool_payload(
+                await session.call_tool(
+                    "blockwart.save_project_record",
+                    {
+                        "object_id": "package-smoke-project",
+                        "record": {
+                            "kind": "item",
+                            "title": "Installed targeted task",
+                            "description": "Preserve this description",
+                        },
+                        "if_match": project_record["etag"],
+                        "idempotency_key": "package-pm-task-create-0001",
+                    },
+                )
+            )
+            pm_record = _tool_payload(
+                await session.call_tool(
+                    "blockwart.get_project_record",
+                    {
+                        "object_id": "package-smoke-project",
+                        "record_id": pm_task["record"]["short_code"],
+                    },
+                )
+            )
+            assert pm_record["id"] == pm_task["record"]["id"]
+            pm_comment = _tool_payload(
+                await session.call_tool(
+                    "blockwart.act_on_project_record",
+                    {
+                        "object_id": "package-smoke-project",
+                        "record_id": pm_record["id"],
+                        "action": {"action": "comment", "body": "Installed task discussion"},
+                        "if_match": pm_record["record_etag"],
+                        "idempotency_key": "package-pm-comment-0001",
+                    },
+                )
+            )
+            assert pm_comment["record"]["data"]["description"] == "Preserve this description"
+            pm_events = _tool_payload(
+                await session.call_tool(
+                    "blockwart.list_project_record_events",
+                    {
+                        "object_id": "package-smoke-project",
+                        "record_id": pm_record["id"],
+                        "kind": "comment",
+                    },
+                )
+            )
+            assert pm_events["total"] == 1 and pm_events["items"][0]["origin"] == "mcp"
+            adoption_args = {
+                "object_id": "package-smoke-project",
+                "field": "next_actions",
+                "index": 0,
+                "text": "Explicit installed legacy adoption",
+                "if_match": pm_comment["etag"],
+                "idempotency_key": "package-pm-adoption-0001",
+            }
+            pm_import = _tool_payload(
+                await session.call_tool("blockwart.import_project_legacy", adoption_args)
+            )
+            pm_replay = _tool_payload(
+                await session.call_tool("blockwart.import_project_legacy", adoption_args)
+            )
+            assert pm_replay["replayed"] and pm_replay["record"]["id"] == pm_import["record"]["id"]
+            pm_overview = _tool_payload(
+                await session.call_tool(
+                    "blockwart.get_project_overview", {"object_id": "package-smoke-project"}
+                )
+            )
+            assert pm_overview["legacy"][0]["record_id"] == pm_import["record"]["id"]
+            assert pm_overview["coverage"]["denominator"] == 0
             comment_created = await session.call_tool(
                 "blockwart.add_comment",
                 {
@@ -992,7 +1072,7 @@ def main() -> None:
         token=api_token,
     )["objects"][0]
 
-    assert readiness["revision"] == "20261022_0029"
+    assert readiness["revision"] == "20261023_0030"
     assert "Blockwart" in index
     assert static_content_type == "text/css"
     assert not any(

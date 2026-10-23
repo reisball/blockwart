@@ -3,6 +3,10 @@
 The focused Project view links to `/projects/{id}/workspace`. This is a deliberately small
 project-management layer, not an issue-tracker replacement. It supports English and German.
 
+The typed PM extension (#287) is described in [project-management.md](project-management.md).
+It adds semantic requirements, safe single-record actions, task discussion, explicit acceptance,
+legacy adoption and opt-in repository observations while preserving the original contracts below.
+
 ## Compatibility and persistence
 
 Revision `20261022_0027` creates only `project_records`, their instance/kind index, and
@@ -16,11 +20,11 @@ reusable catalog ID. Deleting and recreating a Project ID cannot expose the form
 items or history. Records are not placement children or independently grantable catalog assets.
 Existing generic APIs and Project/Research fields keep their contracts.
 
-Old `open_questions`, `blockers` and `next_actions` lists remain the original canonical lists.
-Adoption is **explicit manual copying** into new items; no automatic conversion, synchronization,
-list removal or interpretation of old chronology occurs. Keep the original source text when
-copying; record the adoption in the chronology if it matters to the project. This permits an
-incremental transition without losing or inventing history.
+Old `open_questions`, `blockers` and `next_actions` remain authoritative for **non-adopted**
+entries. The PM extension provides explicit, deduplicated adoption into structured records with
+source provenance. The original list text remains a historical/reference source; the adopted
+record leads current work state. There is no automatic conversion, synchronization, list removal
+or interpretation of chronology. See the canonical-home table in the PM extension.
 
 Downgrade refuses while either new table contains data. It never silently discards pages or
 status history. Export and explicitly reconcile that data before attempting an older application;
@@ -78,9 +82,10 @@ read access and never cause an implicit grant. A reference ID already used or he
 reference cannot be claimed. The reference, its Owner grant, record, history, revision, audit and
 idempotency result commit together or roll back together.
 
-Every record write requires the current **Project** `If-Match: "rev-N"` and an
+Legacy full-record POST/PUT requires the current **Project** `If-Match: "rev-N"` and an
 `Idempotency-Key` (16–128 visible ASCII characters). A successful mutation advances the Project
-revision once; concurrent writes with the same revision have one winner and a 412 loser.
+revision once; concurrent full writes with the same revision have one winner and a 412 loser.
+Targeted PM actions instead require a record-scoped ETag while retaining atomic project invariants.
 Authorization is refreshed after acquiring the shared principal/project locks. Identical retries
 return the same record/version; changed retries conflict. Keys are bound to the Project instance,
 so an ID reused for a different Project cannot replay old records. Current visibility is applied

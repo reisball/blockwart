@@ -11,15 +11,25 @@ from blockwart.api.write_commands import api_write_context, execute_api_command
 from blockwart.schemas.project_workspace import (
     ItemStatus,
     ItemType,
+    ProjectActionIn,
+    ProjectEventPageOut,
     ProjectHistoryPageOut,
     ProjectRecordCommandOut,
     ProjectRecordIn,
+    ProjectRecordOut,
     ProjectRecordPageOut,
     ProjectSearchPageOut,
     RecordKind,
 )
-from blockwart.services.commands import CommandNotFound
+from blockwart.services.commands import CommandNotFound, CommandValidationFailed
 from blockwart.services.pagination import InvalidCursor
+from blockwart.services.project_management import (
+    apply_action,
+    get_record,
+    import_legacy,
+    project_overview,
+    record_events,
+)
 from blockwart.services.project_workspace import (
     list_records,
     read_project,
@@ -43,6 +53,8 @@ def _read(command):
         raise HTTPException(404, "Resource not found") from exc
     except InvalidCursor as exc:
         raise HTTPException(400, "Invalid cursor") from exc
+    except CommandValidationFailed as exc:
+        raise HTTPException(422, "Invalid filter") from exc
 
 
 @router.get("/search", response_model=ProjectSearchPageOut)
@@ -77,6 +89,115 @@ def get_project_record_history(
     )
 
 
+@router.get("/overview")
+def get_project_overview(object_id: str, session: Db, access: Access):
+    return _read(lambda: project_overview(session, access, object_id=object_id))
+
+
+@router.get("/record/{record_id}", response_model=ProjectRecordOut)
+def get_project_record(
+    object_id: str, record_id: str, session: Db, access: Access, response: Response
+):
+    result = _read(lambda: get_record(session, access, object_id=object_id, record_id=record_id))
+    response.headers["ETag"] = result.record_etag
+    return result
+
+
+@router.get("/events/{record_id}", response_model=ProjectEventPageOut)
+def get_project_events(
+    object_id: str,
+    record_id: str,
+    session: Db,
+    access: Access,
+    kind: str | None = None,
+    limit: Limit = 50,
+    cursor: Cursor = None,
+):
+    return _read(
+        lambda: record_events(
+            session,
+            access,
+            object_id=object_id,
+            record_id=record_id,
+            kind=kind,
+            limit=limit,
+            cursor=cursor,
+        )
+    )
+
+
+@router.post("/actions/{record_id}", response_model=ProjectRecordCommandOut)
+def run_project_action(
+    object_id: str,
+    record_id: str,
+    payload: ProjectActionIn,
+    request: Request,
+    response: Response,
+    session: Db,
+    access: Access,
+    if_match: Annotated[str | None, Header()] = None,
+    idempotency_key: Annotated[str | None, Header()] = None,
+):
+    if not idempotency_key:
+        raise HTTPException(400, "Idempotency-Key is required")
+    context = api_write_context(request, access)
+    result = execute_api_command(
+        session,
+        context,
+        lambda: apply_action(
+            session,
+            context,
+            object_id=object_id,
+            record_id=record_id,
+            payload=payload,
+            expected_record=if_match,
+            idempotency_key=idempotency_key,
+            idempotency_ttl_seconds=request.app.state.settings.idempotency_ttl_seconds,
+        ),
+    )
+    response.headers["ETag"] = result.record.record_etag
+    return result
+
+
+@router.post("/import-legacy", response_model=ProjectRecordCommandOut)
+def import_project_legacy(
+    object_id: str,
+    payload: dict,
+    request: Request,
+    response: Response,
+    session: Db,
+    access: Access,
+    if_match: Annotated[str | None, Header()] = None,
+    idempotency_key: Annotated[str | None, Header()] = None,
+):
+    from pydantic import ValidationError
+
+    from blockwart.schemas.project_workspace import LegacyOriginIn
+
+    try:
+        origin = LegacyOriginIn.model_validate(payload)
+    except ValidationError as exc:
+        raise HTTPException(422, "Invalid legacy reference") from exc
+    if not idempotency_key:
+        raise HTTPException(400, "Idempotency-Key is required")
+    context = api_write_context(request, access)
+    result = execute_api_command(
+        session,
+        context,
+        lambda: import_legacy(
+            session,
+            context,
+            object_id=object_id,
+            **origin.model_dump(),
+            expected_revision=if_match,
+            idempotency_key=idempotency_key,
+            idempotency_ttl_seconds=request.app.state.settings.idempotency_ttl_seconds,
+        ),
+    )
+    response.headers["ETag"] = result.etag
+    return result
+
+
 @router.get("/{kind}", response_model=ProjectRecordPageOut)
 def get_project_records(
     object_id: str,
@@ -87,6 +208,10 @@ def get_project_records(
     status: ItemStatus | None = None,
     item_type: ItemType | None = None,
     overdue: bool = False,
+    priority: str | None = None,
+    archived: bool | None = None,
+    depends_on: Annotated[str | None, Query(min_length=1, max_length=36)] = None,
+    blocked: bool | None = None,
     limit: Limit = 50,
     cursor: Cursor = None,
 ):
@@ -101,6 +226,10 @@ def get_project_records(
             status=status,
             item_type=item_type,
             overdue=overdue,
+            priority=priority,
+            archived=archived,
+            depends_on=depends_on,
+            blocked=blocked,
             limit=limit,
             cursor=cursor,
         )

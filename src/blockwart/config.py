@@ -157,6 +157,17 @@ class Settings(BaseSettings):
         le=604800,
         description="Retention and replay window for create-command idempotency keys.",
     )
+    project_github_sync_enabled: bool = Field(
+        default=False,
+        description="Allow explicit opt-in GET-only project GitHub observations.",
+    )
+    project_github_credential_files: dict[str, str] = Field(
+        default_factory=dict,
+        description=(
+            "Operator-approved project-instance/repository-record/GitHub-id/"
+            "credential-reference to protected token-file mapping."
+        ),
+    )
     monitoring_poller_enabled: bool = Field(
         default=False,
         description="Whether this deployment may run built-in service health checks.",

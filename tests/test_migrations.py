@@ -51,7 +51,7 @@ PROJECT_CREATOR_REVISION = "20260909_0023"
 ADDITIVE_PROJECT_CREATOR_REVISION = "20260925_0024"
 CREDENTIAL_REFERENCE_CREATOR_REVISION = "20260926_0025"
 ACTIVITY_INDEX_REVISION = "20260926_0026"
-HEAD_REVISION = "20261022_0029"
+HEAD_REVISION = "20261023_0030"
 _GUARD_TRIGGER_NAMES = (
     "ck_principals_last_active_admin_update",
     "ck_principals_last_active_admin_delete",
@@ -292,6 +292,7 @@ def test_real_alembic_upgrade_creates_fresh_database_and_has_no_drift(
             "project_records",
         "object_revision_clocks",
             "project_record_versions",
+        "project_record_events",
         }
     finally:
         engine.dispose()
@@ -320,6 +321,7 @@ def test_real_alembic_upgrade_creates_fresh_database_and_has_no_drift(
         "project_records",
         "object_revision_clocks",
         "project_record_versions",
+        "project_record_events",
     }
     assert _revision(database_url) == HEAD_REVISION
 
@@ -2008,6 +2010,7 @@ def downgrade() -> None:
             "project_records",
         "object_revision_clocks",
             "project_record_versions",
+        "project_record_events",
         }
         with engine.connect() as connection:
             assert connection.execute(

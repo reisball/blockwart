@@ -444,6 +444,11 @@ def test_mcp_client_completes_handshake_and_calls_every_read_only_tool() -> None
         "blockwart.save_project_record",
         "blockwart.list_project_record_history",
         "blockwart.search_project_workspace",
+        "blockwart.get_project_record",
+        "blockwart.get_project_overview",
+        "blockwart.list_project_record_events",
+        "blockwart.act_on_project_record",
+        "blockwart.import_project_legacy",
     }
     assert all(
         tools[name].annotations and tools[name].annotations.readOnlyHint
@@ -469,6 +474,9 @@ def test_mcp_client_completes_handshake_and_calls_every_read_only_tool() -> None
             "blockwart.preview_grant_scope",
             "blockwart.get_device_graph",
             "blockwart.get_network_topology",
+            "blockwart.get_project_record",
+            "blockwart.get_project_overview",
+            "blockwart.list_project_record_events",
         }
     )
     assert all(
@@ -546,9 +554,7 @@ def test_mcp_client_completes_handshake_and_calls_every_read_only_tool() -> None
         "opaque-own-cursor"
     ]
     assignment_payload = result_payloads["blockwart.list_admin_principal_assignments"]
-    assert assignment_payload["path"] == (
-        "/api/v1/admin/principals/principal%2Fadmin/assignments"
-    )
+    assert assignment_payload["path"] == ("/api/v1/admin/principals/principal%2Fadmin/assignments")
     assert assignment_payload["query"] == {
         "assignment_type": ["direct"],
         "limit": ["2"],
@@ -1304,6 +1310,11 @@ def test_mcp_tools_publish_explicit_read_write_and_delete_hints() -> None:
         "blockwart.list_project_records",
         "blockwart.list_project_record_history",
         "blockwart.search_project_workspace",
+        "blockwart.get_project_record",
+        "blockwart.get_project_overview",
+        "blockwart.list_project_record_events",
+        "blockwart.act_on_project_record",
+        "blockwart.import_project_legacy",
         "blockwart.list_project_chronology",
         "blockwart.list_audit_events",
         "blockwart.add_comment",
@@ -1748,7 +1759,7 @@ def test_mcp_full_read_etag_is_reused_unchanged_for_preview_and_update(
 
 @pytest.mark.parametrize(
     "if_match",
-    ['"rev-', 'rev-19', '"rev-0"', 'W/"rev-19"'],
+    ['"rev-', "rev-19", '"rev-0"', 'W/"rev-19"'],
 )
 def test_mcp_preview_rejects_malformed_etag_before_request(if_match: str) -> None:
     proposed = {
@@ -2400,9 +2411,7 @@ def test_describe_schema_relation_type_returns_only_that_type() -> None:
     )
 
     accepting = [
-        t
-        for t in RELATIONSHIP_TYPES
-        if any("device" in pair for pair in allowed_endpoint_pairs(t))
+        t for t in RELATIONSHIP_TYPES if any("device" in pair for pair in allowed_endpoint_pairs(t))
     ]
     assert accepting
     for relation_type in accepting:
@@ -2432,9 +2441,7 @@ def test_describe_schema_relation_type_returns_only_that_type() -> None:
 
 
 def test_describe_schema_relation_type_leaves_errors_independent() -> None:
-    both = _schema_call(
-        {"sections": ["relationships", "errors"], "relation_type": "hosts"}
-    )
+    both = _schema_call({"sections": ["relationships", "errors"], "relation_type": "hosts"})
     errors = _schema_call({"sections": ["errors"]})
     assert both["relationship_errors"] == errors["relationship_errors"]
     assert [t["relation_type"] for t in both["relationships"]["types"]] == ["hosts"]
