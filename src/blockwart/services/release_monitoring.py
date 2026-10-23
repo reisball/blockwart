@@ -6,6 +6,7 @@ import asyncio
 import json
 import logging
 import secrets
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from hashlib import sha256
@@ -379,13 +380,16 @@ def check_authorized_service_release(
     object_id: str,
     settings: ReleaseMonitoringSettings,
 ) -> ReleaseCheckResult:
-    context = refresh_write_context(session, context, object_id=object_id)
-    authorize_object_command(
-        session, context, object_id=object_id, permission=Permission.WRITE,
-    )
+    def reauthorize():
+        current = refresh_write_context(session, context, object_id=object_id)
+        authorize_object_command(
+            session, current, object_id=object_id, permission=Permission.WRITE,
+        )
+
+    reauthorize()
     return check_service_release(
         session, object_id=object_id, settings=settings,
-        manual=True, retain_transaction=True,
+        manual=True, reauthorize=reauthorize,
     )
 
 
@@ -397,15 +401,14 @@ def check_service_release(
     manual: bool,
     now: datetime | None = None,
     owner: str | None = None,
-    retain_transaction: bool = False,
+    reauthorize: Callable[[], None] | None = None,
 ) -> ReleaseCheckResult:
-    """Run the leased path; authenticated commands retain their transaction.
+    """Acquire outside transactions; reauthorize manual checks before persistence.
 
-    Scheduled workers keep short committed lease transactions. Manual command
-    callers retain authorization locks through provider acquisition and record
-    persistence, and their outer command wrapper commits or rolls back once.
+    Lease/authorization phases are short. Revocation during an already started
+    provider GET prevents storing its observation, not the completed GET itself.
     """
-    settle = session.flush if retain_transaction else session.commit
+    settle = session.commit
 
     if not settings.enabled:
         return ReleaseCheckResult(object_id, "skipped", None, "runtime_disabled")
@@ -481,8 +484,7 @@ def check_service_release(
     if lease is None:
         return ReleaseCheckResult(object_id, "skipped", None, "already_claimed_or_not_due")
     # Re-read every catalog-controlled input after the claim, then close the
-    # transaction before acquisition for scheduled workers. Authenticated manual
-    # commands keep the transaction/authorization locks through acquisition.
+    # transaction before acquisition, including authenticated manual commands.
     # A stale claim can never discover a new target.
     row = session.get(CatalogObject, object_id)
     if row is None or row.kind != "service" or row.instance_id != lease.object_instance_id:
@@ -523,6 +525,26 @@ def check_service_release(
         total_timeout_ms=settings.total_timeout_ms,
         max_response_bytes=settings.max_response_bytes,
     )
+    # Snapshot ORM identities before commit so expiration cannot reopen a read
+    # transaction during acquisition. Never hold catalog locks over provider I/O.
+    service_id, instance_id = row.id, row.instance_id
+    source_revision = row.revision
+    claim_id = lease.id
+    target_key = resolution.target.cache_key
+    interval_seconds = config.interval_seconds
+
+    def authorize_or_release_claim():
+        if reauthorize is None:
+            return
+        try:
+            reauthorize()
+        except Exception:
+            session.rollback()
+            _delete_claim(session, claim_id, lease_owner)
+            session.commit()
+            raise
+
+    authorize_or_release_claim()
     settle()
     try:
         observed = fetch_latest_github_release(request)
@@ -533,23 +555,31 @@ def check_service_release(
             checked_at=claim_at,
             error_code="provider_failed",
         )
+    authorize_or_release_claim()
+    live = session.get(CatalogObject, service_id, populate_existing=True)
+    if reauthorize is not None and (
+        live is None or live.instance_id != instance_id or live.revision != source_revision
+    ):
+        _delete_claim(session, claim_id, lease_owner)
+        settle()
+        return ReleaseCheckResult(object_id, "skipped", None, "changed")
     record = record_release_observation(
         session,
-        object_id=row.id,
-        object_instance_id=row.instance_id,
-        target_key=resolution.target.cache_key,
+        object_id=service_id,
+        object_instance_id=instance_id,
+        target_key=target_key,
         observation=observed,
-        interval_seconds=config.interval_seconds,
+        interval_seconds=interval_seconds,
         settings=settings,
     )
     if record is None:
-        _delete_claim(session, lease.id, lease_owner)
+        _delete_claim(session, claim_id, lease_owner)
         settle()
         return ReleaseCheckResult(object_id, "skipped", None, "changed")
     session.execute(
         update(ServiceReleaseCheckLease)
         .where(
-            ServiceReleaseCheckLease.id == lease.id,
+            ServiceReleaseCheckLease.id == claim_id,
             ServiceReleaseCheckLease.lease_owner == lease_owner,
         )
         .values(

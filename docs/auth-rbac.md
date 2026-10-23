@@ -993,8 +993,16 @@ current-context gate. Read-only previews remain lock-free and give no later
 write guarantee. SQLite serializes writers; PostgreSQL row locks establish the
 order with concurrent grant revocation, catalog-role changes and deactivation.
 A writer authorized first may commit before revocation; once revocation wins,
-a stale snapshot cannot write or return a successful replay. Denied Project
-synchronization must not resolve credentials or call GitHub.
+a stale snapshot cannot write or return a successful replay. A Project synchronization denied at its initial current-authority gate must
+not resolve credentials or call GitHub. External acquisition uses short
+preflight and completion transactions, never long-lived authorization locks.
+The preflight validates CAS, references and idempotency without record/event/key
+mutation. Immutable project/record snapshots bind acquisition; source changes
+fail completion CAS. Current authority and credential readability are checked
+again before each further GitHub GET and before storing a result. Revocation
+while an already-authorized GET is in flight prevents further GETs and durable
+observations; it cannot undo the already-started request. Successful cached
+replays perform no acquisition.
 
 ### Rights explanation and rollout
 
@@ -1004,7 +1012,9 @@ The REST fields are preserved by MCP and rendered with the same EN/DE global
 role labels in the UI. `owner_coverage.actor_has_owner_source` still describes
 a real local/inherited source; `actor_has_global_authority` separately reports
 Global Owner authority. Global authority is never fabricated as a grant and
-never counted as local coverage.
+never counted as local coverage. Active explicit global principals are included
+even with no ObjectGrant rows; candidate selection uses an IN-subquery instead
+of DISTINCT, preserving deterministic case-insensitive ordering on PostgreSQL.
 
 This change needs no data migration or mass grant creation. The release version,
 DB schema, current identities/role assignments and existing grants are unchanged.
@@ -1021,9 +1031,11 @@ extend that restriction to every locally authorized identity.
 
 
 Review follow-up strengthens three equivalent boundaries: manually triggered
-release checks in UI/REST retain the authenticated transaction and its locks
-through the bounded provider call and observation write (scheduled workers keep
-short lease transactions); identity-role/capability and credential mutations
+release checks in UI/REST use short authorization/lease transactions before
+provider acquisition and fresh authorization plus instance/revision validation
+before observation persistence. No database transaction spans the provider
+request. Revoked completion releases its own lease without storing an
+observation (scheduled workers keep short lease transactions); identity-role/capability and credential mutations
 lock actor/target/coverage before password reauthentication can insert its FK
 audit event; creation replays re-check the created object's current readability
 and re-project current fields/capabilities, not historical Owner authority.

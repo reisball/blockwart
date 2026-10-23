@@ -697,3 +697,49 @@ def test_generic_creation_cannot_forge_unique_legacy_provenance(project, root_cl
     )
     assert response.status_code == 422, response.text
     assert adopt(c, s, 0).status_code == 200
+
+
+@pytest.mark.parametrize("phase", ["metadata", "object"])
+@pytest.mark.parametrize("change", ["deactivate", "source"])
+def test_github_acquisition_rechecks_before_next_get_and_persistence(
+    project, root_client, root_state, monkeypatch, phase, change,
+):
+    """Real sync pipeline, no provider mock bypass: revoke/change between GETs. Refs #297."""
+    from sqlalchemy import func, select
+
+    from blockwart.models import IdempotencyRecord, Principal, ProjectRecord, ProjectRecordEvent
+
+    c, s = root_client, root_state
+    repo = _save(c, s, {
+        "kind": "repository", "title": "Bound source", "owner": "example", "name": "repo",
+        "github_id": 123, "sync_enabled": True,
+    }).json()["record"]
+    ref = {"repository_id": repo["id"], "kind": "issue", "number": 7}
+    task = make(c, s, "Bound observation", github_references=[ref])
+    with s["session_factory"]() as db:
+        events = db.scalar(select(func.count()).select_from(ProjectRecordEvent))
+        keys = db.scalar(select(func.count()).select_from(IdempotencyRecord))
+        version = db.get(ProjectRecord, task["id"]).version
+    calls = []
+
+    def get(path, token, timeout):
+        calls.append(path)
+        if (phase == "metadata") == (len(calls) == 1):
+            with s["session_factory"]() as db, transaction(db):
+                if change == "deactivate":
+                    db.get(Principal, s["owner_id"]).active = False
+                else:
+                    db.get(CatalogObject, "work").revision += 1
+        if path == "/repositories/123":
+            return {"id": 123, "full_name": "example/repo", "private": False}
+        return {"number": 7, "state": "closed"}
+
+    monkeypatch.setenv("BLOCKWART_PROJECT_GITHUB_SYNC_ENABLED", "true")
+    monkeypatch.setattr("blockwart.services.project_github._github_get", get)
+    result = act(c, s, task, "sync_github")
+    assert result.status_code == (404 if change == "deactivate" else 412), result.text
+    assert len(calls) == (1 if phase == "metadata" else 2)
+    with s["session_factory"]() as db:
+        assert db.get(ProjectRecord, task["id"]).version == version
+        assert db.scalar(select(func.count()).select_from(ProjectRecordEvent)) == events
+        assert db.scalar(select(func.count()).select_from(IdempotencyRecord)) == keys

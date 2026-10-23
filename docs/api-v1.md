@@ -1054,7 +1054,16 @@ capabilities. Missing, replaced or now-concealed results fail closed; no second
 creation or link mutation occurs. Stored operation/link metadata remains the
 original operation result.
 
-Manual release checks in UI/REST execute inside one authorized command
-transaction through the bounded provider request and observation persistence;
-a revoked/deactivated stale context is refused before provider access or writes.
-Scheduled checks retain their existing short-transaction lease behavior.
+Manual release checks in UI/REST use short current-authority/lease transactions,
+with no database transaction across the provider request. Current authority and
+object instance/revision are rechecked before persistence. Revoked/deactivated
+contexts are refused before acquisition; revocation during an already-started
+GET prevents storing its result and releases the caller's lease. Changed source
+objects return `skipped/changed`. Scheduled checks keep short lease transactions.
+
+Project GitHub sync similarly separates read-only idempotency/CAS preflight,
+external acquisition and a freshly authorized completion transaction. Project
+revision plus record ETag bind the source snapshot; source changes reject the
+completion rather than overwriting changes. Each further credential/GET phase
+checks current authority. No record/event/idempotency mutation is committed
+before acquisition, and a successful cached replay performs no external GET.

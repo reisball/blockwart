@@ -2413,6 +2413,10 @@ def reserve_idempotency_record(
         if inserted.rowcount == 1:
             return existing, None
     assert existing is not None
+    return existing, _stored_idempotency_response(existing, operation_context, request_hash)
+
+
+def _stored_idempotency_response(existing, operation_context, request_hash):
     if (
         existing.operation_context != operation_context
         or existing.request_hash != request_hash
@@ -2428,7 +2432,34 @@ def reserve_idempotency_record(
         raise CommandConflict("stored idempotency response is invalid") from exc
     if not isinstance(response, dict):
         raise CommandConflict("stored idempotency response is invalid")
-    return existing, response
+    return response
+
+
+def lookup_idempotency_response(
+    session: Session,
+    context: WriteContext,
+    *,
+    key: str,
+    operation_context: str,
+    request_payload: dict[str, object],
+    ttl_seconds: int,
+    now: datetime,
+) -> dict[str, object] | None:
+    """Read-only preflight; never reserve a key before external acquisition."""
+    if not _IDEMPOTENCY_KEY_PATTERN.fullmatch(key):
+        raise CommandConflict(
+            "Idempotency-Key must contain 16 to 128 visible ASCII characters"
+        )
+    if ttl_seconds < 300 or ttl_seconds > 604800:
+        raise ValueError("idempotency TTL is outside the supported range")
+    existing = session.scalar(select(IdempotencyRecord).where(
+        IdempotencyRecord.principal_id == context.principal.id,
+        IdempotencyRecord.key_hash == hashlib.sha256(key.encode("utf-8")).hexdigest(),
+    ))
+    if existing is None or existing.expires_at <= now:
+        return None
+    request_hash = hashlib.sha256(_canonical_json(request_payload).encode("utf-8")).hexdigest()
+    return _stored_idempotency_response(existing, operation_context, request_hash)
 
 
 def _write_command_audit(

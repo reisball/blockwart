@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from uuid import uuid4
 
@@ -420,6 +421,21 @@ def _assessment(session, project, row, action):
     }
 
 
+@dataclass(frozen=True)
+class _SyncProject:
+    id: str
+    instance_id: str
+    revision: int
+
+
+@dataclass(frozen=True)
+class _SyncItem:
+    id: str
+    kind: str
+    data_json: str
+    version: int
+
+
 def apply_action(
     session,
     context,
@@ -431,8 +447,63 @@ def apply_action(
     idempotency_key,
     idempotency_ttl_seconds,
 ):
+    arguments = dict(
+        object_id=object_id, record_id=record_id, payload=payload,
+        expected_record=expected_record, idempotency_key=idempotency_key,
+        idempotency_ttl_seconds=idempotency_ttl_seconds,
+    )
+    if payload.action != "sync_github":
+        return _apply_action_locked(session, context, **arguments)
+    from blockwart.services.commands import refresh_write_context
+    from blockwart.services.project_github import sync_record
+
+    # Validate current authority, CAS, payload and cached response without
+    # reserving a key or mutating a record before the external acquisition.
+    context = refresh_write_context(session, context, object_id=object_id)
+    project = read_project(session, ReadAccess(context.principal, context.policy), object_id)
+    row = _record(session, project, record_id)
+    replay = save_record(
+        session, context, object_id=object_id, record_id=record_id,
+        payload=RECORD_ADAPTER.validate_json(row.data_json), expected_revision=None,
+        record_expected=expected_record, command_data=payload.model_dump(mode="json"),
+        idempotency_key=idempotency_key, idempotency_ttl_seconds=idempotency_ttl_seconds,
+        check_only=True,
+    )
+    if replay is not None:
+        session.commit()
+        return replay
+    project_snapshot = _SyncProject(project.id, project.instance_id, project.revision)
+    item_snapshot = _SyncItem(row.id, row.kind, row.data_json, row.version)
+    session.commit()
+    observation = sync_record(session, context, project_snapshot, item_snapshot)
+    session.commit()
+    # Recheck authority and source/record versions after acquisition. Only this
+    # short transaction may store the record, event and idempotency response.
+    return _apply_action_locked(
+        session, context, **arguments, sync_observation=observation,
+        prepared_project_revision=project_snapshot.revision,
+    )
+
+
+def _apply_action_locked(
+    session,
+    context,
+    *,
+    object_id,
+    record_id,
+    payload: ProjectActionIn,
+    expected_record,
+    idempotency_key,
+    idempotency_ttl_seconds,
+    sync_observation=None,
+    prepared_project_revision=None,
+):
+    from blockwart.services.commands import refresh_write_context
+
+    context = refresh_write_context(session, context, object_id=object_id)
     access = ReadAccess(context.principal, context.policy)
     project = read_project(session, access, object_id)
+    source_revision = project.revision
     row = _record(session, project, record_id)
     data = json.loads(row.data_json)
     if payload.action == "patch":
@@ -461,6 +532,8 @@ def apply_action(
     )
     if result.replayed:
         return result
+    if prepared_project_revision is not None and source_revision != prepared_project_revision:
+        raise CommandPreconditionFailed("Project changed during GitHub acquisition")
     from dataclasses import replace
 
     from blockwart.services.policy import policy_for_principal
@@ -488,9 +561,9 @@ def apply_action(
             "evidence": evidence_refs,
         }
     elif payload.action == "sync_github":
-        from blockwart.services.project_github import sync_record
-
-        event_data = sync_record(session, context, project, row)
+        if sync_observation is None:
+            raise ValueError("GitHub observations require a completed acquisition phase")
+        event_data = sync_observation
     _event(session, project, row, context, payload.action, event_data)
     session.flush()
     result.record = record_out(session, access, row)

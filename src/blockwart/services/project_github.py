@@ -12,9 +12,16 @@ import time
 from datetime import UTC, datetime
 
 from blockwart.config import Settings
+from blockwart.domain.auth import Permission
 from blockwart.domain.monitoring_policy import pin_address
 from blockwart.domain.timestamps import format_rfc3339_utc
-from blockwart.services.commands import CommandValidationFailed
+from blockwart.models import CatalogObject
+from blockwart.services.commands import (
+    CommandPreconditionFailed,
+    CommandValidationFailed,
+    authorize_object_command,
+    refresh_write_context,
+)
 from blockwart.services.monitoring_gatus import _CREDENTIAL_UNREADABLE, _read_credential
 from blockwart.services.project_workspace import _record, _visible_ref
 from blockwart.services.read_access import ReadAccess
@@ -99,6 +106,9 @@ def _credential(
     filename = settings.project_github_credential_files.get(source)
     if not filename:
         raise ObservationError("credential_not_configured")
+    # Visibility lookup may have opened a read transaction. Acquisition itself
+    # must remain outside it; the next GET has its own current-authority gate.
+    session.commit()
     try:
         token = _read_credential(filename, timeout=0.5)
     except TimeoutError:
@@ -106,6 +116,23 @@ def _credential(
     if token is _CREDENTIAL_UNREADABLE or not token:
         raise ObservationError("credential_unavailable")
     return token
+
+
+def _current_sync_authority(session, context, project, item, credential_reference=None):
+    """Short current-authority/source gate, committed before credential/network I/O."""
+    current = refresh_write_context(session, context, object_id=project.id)
+    authorize_object_command(session, current, object_id=project.id, permission=Permission.WRITE)
+    live = session.get(CatalogObject, project.id)
+    if live.instance_id != project.instance_id or live.revision != project.revision:
+        raise CommandPreconditionFailed("Project changed during GitHub acquisition")
+    if _record(session, live, item.id).version != item.version:
+        raise CommandPreconditionFailed("Record changed during GitHub acquisition")
+    if credential_reference and not _visible_ref(
+        session, ReadAccess(current.principal, current.policy), credential_reference,
+    ):
+        raise ObservationError("credential_not_accessible")
+    session.commit()
+    return current
 
 
 def sync_record(session, context, project, row):
@@ -122,8 +149,12 @@ def sync_record(session, context, project, row):
     for ref in refs:
         observed = {"reference": ref, "ok": False}
         try:
+            context = _current_sync_authority(session, context, project, row)
             repo_row = _record(session, project, ref["repository_id"])
             repository = json.loads(repo_row.data_json)
+            repository_version = repo_row.version
+            repository_id = repo_row.id
+            session.commit()
             if not settings.project_github_sync_enabled or not repository.get("sync_enabled"):
                 raise ObservationError("sync_disabled")
             if not repository.get("github_id"):
@@ -132,13 +163,20 @@ def sync_record(session, context, project, row):
                 raise ObservationError("budget_exhausted")
             identity = ref["repository_id"]
             if identity not in metadata:
+                context = _current_sync_authority(
+                    session, context, project, row, repository.get("credential_reference"),
+                )
                 token = _credential(
                     settings,
                     session,
                     context,
                     repository,
                     project_instance_id=project.instance_id,
-                    repository_record_id=repo_row.id,
+                    repository_record_id=repository_id,
+                )
+                session.commit()
+                context = _current_sync_authority(
+                    session, context, project, row, repository.get("credential_reference"),
                 )
                 meta = _github_get(
                     f"/repositories/{repository['github_id']}",
@@ -158,6 +196,9 @@ def sync_record(session, context, project, row):
                 raise ObservationError("budget_exhausted")
             suffix = {"issue": "issues", "pull": "pulls", "commit": "commits"}[ref["kind"]]
             object_key = ref.get("number") or ref.get("sha")
+            context = _current_sync_authority(
+                session, context, project, row, repository.get("credential_reference"),
+            )
             result = _github_get(
                 f"/repos/{meta['full_name']}/{suffix}/{object_key}",
                 token,
@@ -174,7 +215,7 @@ def sync_record(session, context, project, row):
             web_kind = "issues" if ref["kind"] == "issue" else ref["kind"]
             observed.update(
                 ok=True,
-                repository_record_version=_record(session, project, ref["repository_id"]).version,
+                repository_record_version=repository_version,
                 repository_github_id=meta["id"],
                 repository_full_name=meta["full_name"],
                 private=bool(meta.get("private")),
@@ -183,6 +224,7 @@ def sync_record(session, context, project, row):
                 url=f"https://github.com/{meta['full_name']}/{web_kind}/{object_key}",
             )
         except ObservationError as exc:
+            session.rollback()
             observed["error"] = str(exc)
         observations.append(observed)
     return {

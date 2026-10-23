@@ -441,7 +441,7 @@ def test_every_creation_replay_uses_current_result_authority(
                     create()
 
 
-def test_manual_release_check_holds_authority_until_observation_commits(
+def test_manual_release_check_reauthorizes_after_unlocked_acquisition(
     migrated_pg_engine,
     monkeypatch,
 ):
@@ -499,30 +499,17 @@ def test_manual_release_check_holds_authority_until_observation_commits(
             checker = pool.submit(check)
             assert provider_entered.wait(10)
             revoker = pool.submit(revoke)
-            observed = False
-            deadline = time.monotonic() + 10
-            while time.monotonic() < deadline:
-                with migrated_pg_engine.connect() as c:
-                    observed = (
-                        c.execute(
-                            text(
-                                "SELECT wait_event_type='Lock' FROM pg_stat_activity "
-                                "WHERE application_name=:name"
-                            ),
-                            {"name": application},
-                        ).scalar_one_or_none()
-                        is True
-                    )
-                if observed or revoker.done():
-                    break
-                time.sleep(0.02)
+            # Revocation is not delayed by acquisition; the completed response
+            # must not be stored under the former authorization snapshot.
+            assert revoker.result(5) is True
             release_provider.set()
-            assert checker.result(10) == "observed"
-            assert revoker.result(10) is True
-            assert observed
+            from blockwart.services.commands import CommandAuthorizationDenied, CommandNotFound
+
+            with pytest.raises((CommandAuthorizationDenied, CommandNotFound)):
+                checker.result(10)
     finally:
         release_provider.set()
         revoker_engine.dispose()
     with factory() as s:
-        assert s.scalar(select(func.count()).select_from(ServiceReleaseObservation)) == 1
+        assert s.scalar(select(func.count()).select_from(ServiceReleaseObservation)) == 0
         assert not policy_for_principal(s, actor_id).can(Permission.WRITE, "guarded-check")

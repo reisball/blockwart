@@ -324,6 +324,13 @@ def test_global_owner_transport_manages_local_grants_and_shows_global_source(
 
     with alembic_session_factory() as session, transaction(session):
         actor_id, _ = seed(session, global_owner=True)
+        grantless = {}
+        for role in [CatalogRole.CATALOG_OWNER, CatalogRole.CATALOG_VIEWER]:
+            principal = create_service_account(
+                session, login=f"grantless-{role.value}",
+                display_name=f"Grantless {role.value}", catalog_role=role,
+            )
+            grantless[principal.id] = role.value
         if channel == "ui":
             human = create_human_principal(
                 session,
@@ -354,6 +361,9 @@ def test_global_owner_transport_manages_local_grants_and_shows_global_source(
             page = client.get("/objects/system?edit=permissions")
             assert page.status_code == 200, page.text
             assert "Global Catalog Owner" in page.text
+            for role in grantless.values():
+                assert f"Grantless {role}" in page.text
+            assert "Global Catalog Reader" in page.text
             with alembic_session_factory() as session:
                 revision = session.get(CatalogObject, "system").revision
             response = client.post(
@@ -371,6 +381,11 @@ def test_global_owner_transport_manages_local_grants_and_shows_global_source(
         else:
             auth = {"Authorization": "Bearer " + token.value}
             access = client.get(path, headers=auth).json()
+            for identity, source in grantless.items():
+                effective = next(e for e in access["effective_access"]
+                                 if e["principal"]["id"] == identity)
+                assert effective["sources"] == []
+                assert effective["global_authorities"][0]["source"] == source
             entry = next(e for e in access["effective_access"] if e["principal"]["id"] == actor_id)
             assert entry["global_authorities"][0]["source"] == "catalog_owner"
 
@@ -402,6 +417,11 @@ def test_global_owner_transport_manages_local_grants_and_shows_global_source(
                     "blockwart.get_object_access", {"object_id": "system"}, fetcher=fetch
                 )
                 assert "catalog_owner" in result["content"][0]["text"]
+                effective = json.loads(result["content"][0]["text"])["effective_access"]
+                for identity, source in grantless.items():
+                    entry = next(e for e in effective if e["principal"]["id"] == identity)
+                    assert entry["sources"] == []
+                    assert entry["global_authorities"][0]["source"] == source
             else:
                 response = client.post(
                     path + "/grants",

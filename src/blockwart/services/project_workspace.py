@@ -45,6 +45,7 @@ from blockwart.services.commands import (
     _assign_creator_owner,
     _require_knowledge_reference_access,
     authorize_object_command,
+    lookup_idempotency_response,
     parse_if_match,
     refresh_write_context,
     reserve_idempotency_record,
@@ -286,7 +287,8 @@ def save_record(
     record_expected: str | None = None,
     command_data: dict | None = None,
     legacy_import: bool = False,
-) -> ProjectRecordCommandOut:
+    check_only: bool = False,
+) -> ProjectRecordCommandOut | None:
     context = refresh_write_context(session, context, object_id=object_id)
     authorize_object_command(session, context, object_id=object_id, permission=Permission.WRITE)
     # History provenance follows the same audience binding as project chronology.
@@ -315,15 +317,23 @@ def save_record(
             "record_id": record_id,
             "revision": record_expected or expected,
         }
-    idem, replay = reserve_idempotency_record(
-        session,
-        context,
+    if check_only and (
+        record_id is None or new_ref is not None
+        or (command_data or {}).get("action") != "sync_github"
+    ):
+        raise ValueError("Read-only preflight is restricted to existing-record GitHub sync")
+    arguments = dict(
         key=idempotency_key,
         operation_context=f"project_record:{project.instance_id}",
         request_payload=request_data,
         ttl_seconds=idempotency_ttl_seconds,
         now=now,
     )
+    if check_only:
+        idem = None
+        replay = lookup_idempotency_response(session, context, **arguments)
+    else:
+        idem, replay = reserve_idempotency_record(session, context, **arguments)
     lock_principal_rows(session, (context.principal.id,))
     locked = session.scalar(
         select(CatalogObject)
@@ -431,6 +441,8 @@ def save_record(
     from blockwart.services.project_management import validate_record
 
     validate_record(session, context, project, identity, data, row, legacy_import=legacy_import)
+    if check_only:
+        return None
     claimed = session.execute(
         update(CatalogObject)
         .where(

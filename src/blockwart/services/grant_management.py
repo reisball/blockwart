@@ -182,9 +182,15 @@ def query_object_access(
 
     active_principals = session.scalars(
         select(Principal)
-        .join(ObjectGrant, ObjectGrant.principal_id == Principal.id)
-        .where(Principal.active.is_(True))
-        .distinct()
+        .where(
+            Principal.active.is_(True),
+            or_(
+                Principal.id.in_(select(ObjectGrant.principal_id)),
+                Principal.catalog_role.in_((
+                    CatalogRole.CATALOG_OWNER.value, CatalogRole.CATALOG_VIEWER.value,
+                )),
+            ),
+        )
         .order_by(func.lower(Principal.login), Principal.id)
     ).all()
     anchor_cache: dict[str, CatalogObject] = {}
