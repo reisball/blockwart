@@ -41,7 +41,7 @@ from blockwart.services.ownership import (
     object_owner_coverage,
     resolve_owner_principal,
 )
-from blockwart.services.policy import policy_for_principal
+from blockwart.services.policy import GlobalPolicySource, policy_for_principal
 
 # Stable structured reasons published through REST, MCP, and the UI. A healthy
 # object's Owner-source requirement and the ownerless recovery path are
@@ -85,10 +85,18 @@ class EffectiveGrantSource:
 
 
 @dataclass(frozen=True, slots=True)
+class EffectiveGlobalAuthority:
+    source: GlobalPolicySource
+    permissions: tuple[Permission, ...]
+    root_kinds: tuple[str, ...]
+
+
+@dataclass(frozen=True, slots=True)
 class EffectivePrincipalAccess:
     principal: PrincipalSummary
     permissions: tuple[Permission, ...]
     sources: tuple[EffectiveGrantSource, ...]
+    global_authorities: tuple[EffectiveGlobalAuthority, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -105,6 +113,7 @@ class OwnerCoverageView:
     inactive_direct_owner_grants: int
     actor_has_owner_source: bool
     adoption_available: bool
+    actor_has_global_authority: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -212,6 +221,14 @@ def query_object_access(
                     for permission in Permission
                     if permission in permissions
                 ),
+                global_authorities=tuple(
+                    EffectiveGlobalAuthority(
+                        source=a.source,
+                        permissions=tuple(p for p in Permission if p in a.permissions),
+                        root_kinds=tuple(sorted(a.root_kinds)),
+                    )
+                    for a in policy.global_authorities if a.permissions
+                ),
                 sources=tuple(
                     sorted(
                         sources,
@@ -236,9 +253,11 @@ def query_object_access(
             direct_active_owner_grants=coverage.direct_active_owner_grants,
             inherited_active_owner_grants=coverage.inherited_active_owner_grants,
             inactive_direct_owner_grants=coverage.inactive_direct_owner_grants,
-            actor_has_owner_source=actor_can_manage_owner_grants(
-                context,
-                object_id=object_id,
+            actor_has_owner_source=any(
+                grant.role == Role.OWNER for grant in context.policy.grants_for(object_id)
+            ),
+            actor_has_global_authority=context.policy.has_global_authority(
+                GlobalPolicySource.CATALOG_OWNER
             ),
             adoption_available=(
                 coverage.ownerless and _holds_adoption_authority(session, context)
@@ -761,7 +780,7 @@ def actor_can_manage_owner_grants(
     *,
     object_id: str,
 ) -> bool:
-    return any(
+    return context.policy.has_global_authority(GlobalPolicySource.CATALOG_OWNER) or any(
         grant.role == Role.OWNER
         for grant in context.policy.grants_for(object_id)
     )
@@ -821,6 +840,8 @@ def _require_owner_for_owner_grant(
                 "ownerless-object adoption flow"
             ),
         )
+    if policy.has_global_authority(GlobalPolicySource.CATALOG_OWNER):
+        return
     raise CommandAuthorizationDenied(
         object_id=object_id,
         permission=Permission.MANAGE_ACCESS,

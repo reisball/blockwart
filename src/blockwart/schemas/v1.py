@@ -51,6 +51,7 @@ from blockwart.domain.update_preview import (
     PREVIEW_DIFF_PATH_MAX_LENGTH,
     PREVIEW_DIFF_VALUE_MAX_LENGTH,
 )
+from blockwart.schemas.admin import GlobalAuthorityOut
 from blockwart.schemas.agent import (
     AgentCatalogBatchItem,
     AgentCatalogContextRead,
@@ -961,6 +962,7 @@ class V1EffectivePrincipalAccessOut(BaseModel):
     principal: V1PrincipalSummaryOut
     permissions: list[Permission]
     sources: list[V1EffectiveGrantSourceOut]
+    global_authorities: list[GlobalAuthorityOut] = Field(default_factory=list)
 
 
 class V1OwnerCoverageOut(BaseModel):
@@ -973,6 +975,7 @@ class V1OwnerCoverageOut(BaseModel):
     inherited_active_owner_grants: int = Field(ge=0)
     inactive_direct_owner_grants: int = Field(ge=0)
     actor_has_owner_source: bool
+    actor_has_global_authority: bool = False
     adoption_available: bool
 
 

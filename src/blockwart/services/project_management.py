@@ -659,12 +659,14 @@ def import_legacy(
     from blockwart.services.commands import (
         authorize_object_command,
         parse_if_match,
+        refresh_write_context,
         reserve_idempotency_record,
         revision_etag,
     )
     from blockwart.services.policy import policy_for_principal
     from blockwart.services.project_workspace import _projected_data, require_record_origin
 
+    context = refresh_write_context(session, context, object_id=object_id)
     authorize_object_command(session, context, object_id=object_id, permission=Permission.WRITE)
     require_record_origin(context, object_id)
     access = ReadAccess(context.principal, context.policy)

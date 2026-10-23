@@ -2805,3 +2805,91 @@ def test_postgresql_object_revision_clock_rejects_aba(migrated_pg_engine):
             with pytest.raises(RevisionConflict), transaction(reader):
                 apply_object_upsert(reader, plan)
             original = replacement
+
+
+@pytest.mark.parametrize("change", ["revoke", "deactivate", "global_revoke"])
+@pytest.mark.parametrize("chronology", [False, True])
+@pytest.mark.parametrize("replay", [False, True])
+def test_postgresql_297_comment_waits_for_committed_authority_change(
+    migrated_pg_engine, change, chronology, replay,
+):
+    """Observe a real PostgreSQL lock wait; a stale write/replay must then deny."""
+    from concurrent.futures import ThreadPoolExecutor
+
+    from sqlalchemy import delete, select, update
+    from test_rbac_boundaries_297 import context, seed
+
+    from blockwart.db.session import transaction
+    from blockwart.domain.auth import CatalogRole
+    from blockwart.models import ObjectComment, ObjectGrant, Principal
+    from blockwart.services.access import revoke_object_grant
+    from blockwart.services.commands import CommandAuthorizationDenied, CommandNotFound
+    from blockwart.services.comments import add_object_comment
+    from blockwart.services.identity import create_service_account, deactivate_principal
+    from blockwart.services.project_chronology import add_project_chronology_entry
+
+    factory = sessionmaker(bind=migrated_pg_engine, autoflush=False)
+    with factory() as session:
+        with transaction(session):
+            actor_id, _ = seed(session, global_owner=change == "global_revoke")
+            if change == "global_revoke":
+                session.execute(delete(ObjectGrant).where(ObjectGrant.principal_id == actor_id))
+                create_service_account(session, login="standby", display_name="Standby",
+                                       catalog_role=CatalogRole.CATALOG_OWNER)
+        ctx = context(session, actor_id)
+        grant_id = session.scalar(select(ObjectGrant.id).where(
+            ObjectGrant.principal_id == actor_id, ObjectGrant.object_id == 'project',
+        ))
+
+    def append(session):
+        args = dict(object_id='project', body='Race progress',
+                    idempotency_key='postgres-comment-297-race', idempotency_ttl_seconds=3600)
+        if chronology:
+            return add_project_chronology_entry(session, ctx, kind='note', **args)
+        return add_object_comment(session, ctx, **args)
+
+    if replay:
+        with factory() as session, transaction(session):
+            append(session)
+    with factory() as revoker:
+        if change == 'revoke':
+            revoke_object_grant(revoker, grant_id=grant_id)
+        elif change == 'deactivate':
+            deactivate_principal(revoker, principal_id=actor_id)
+        else:
+            revoker.execute(update(Principal).where(Principal.id == actor_id)
+                            .values(catalog_role=None))
+        application = f'bw-297-{uuid.uuid4().hex}'
+        writer_engine = create_engine(migrated_pg_engine.url,
+                                     connect_args={'application_name': application})
+        def writer():
+            with Session(writer_engine) as session:
+                try:
+                    with transaction(session):
+                        append(session)
+                except (CommandNotFound, CommandAuthorizationDenied):
+                    return 'denied'
+                return 'incorrect-success'
+        try:
+            with ThreadPoolExecutor(max_workers=1) as pool:
+                future = pool.submit(writer)
+                observed = False
+                deadline = time.monotonic() + 10
+                while time.monotonic() < deadline:
+                    with migrated_pg_engine.connect() as connection:
+                        observed = connection.execute(text(
+                            "SELECT wait_event_type = 'Lock' FROM pg_stat_activity "
+                            "WHERE application_name = :application"
+                        ), {'application': application}).scalar_one_or_none() is True
+                    if observed or future.done():
+                        break
+                    time.sleep(0.02)
+                revoker.commit()
+                assert future.result(timeout=10) == 'denied'
+                assert observed, 'writer must serialize with revocation, not bypass it'
+        finally:
+            revoker.rollback()
+            writer_engine.dispose()
+    with factory() as session:
+        assert len(session.scalars(select(ObjectComment)).all()) == int(replay)
+        assert session.get(Principal, actor_id).active is (change != 'deactivate')

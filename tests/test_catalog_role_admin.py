@@ -1230,11 +1230,11 @@ def test_ui_catalog_role_control_assigns_role_and_shows_in_views(
     listing = catalog_role_ui_client.get("/admin/principals")
     assert listing.status_code == 200
     assert "Catalog role" in listing.text
-    assert "Catalog owner" in listing.text
+    assert "Global Catalog Owner" in listing.text
 
     reloaded = catalog_role_ui_client.get(f"/admin/principals/{target_id}")
     assert reloaded.status_code == 200
-    assert "Catalog owner" in reloaded.text
+    assert "Global Catalog Owner" in reloaded.text
 
 
 def test_ui_catalog_viewer_option_and_german_label_are_distinct(
@@ -1265,8 +1265,8 @@ def test_ui_catalog_viewer_option_and_german_label_are_distinct(
     assert 'value="catalog_owner"' in initial.text
     assert 'value="catalog_viewer"' in initial.text
     assert response.status_code == 303
-    assert "Catalog viewer" in english.text
-    assert "Katalog-Viewer" in german.text
+    assert "Global Catalog Reader" in english.text
+    assert "Global Catalog Reader" in german.text
 
 
 def test_ui_catalog_role_etag_precondition_behavior(

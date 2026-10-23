@@ -46,6 +46,7 @@ from blockwart.services.commands import (
     _require_knowledge_reference_access,
     authorize_object_command,
     parse_if_match,
+    refresh_write_context,
     reserve_idempotency_record,
     revision_etag,
 )
@@ -286,6 +287,7 @@ def save_record(
     command_data: dict | None = None,
     legacy_import: bool = False,
 ) -> ProjectRecordCommandOut:
+    context = refresh_write_context(session, context, object_id=object_id)
     authorize_object_command(session, context, object_id=object_id, permission=Permission.WRITE)
     # History provenance follows the same audience binding as project chronology.
     # Check before idempotency replay as well as before any durable mutation.

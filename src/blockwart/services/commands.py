@@ -5,7 +5,7 @@ import json
 import re
 from collections.abc import Collection, Mapping
 from copy import deepcopy
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
 
 from pydantic import ValidationError
@@ -77,9 +77,9 @@ from blockwart.services.catalog import (
     typed_reference_holders,
     upsert_object,
 )
-from blockwart.services.identity import record_security_event
+from blockwart.services.identity import principal_context, record_security_event
 from blockwart.services.ownership import InitialOwnerError, assign_initial_owner
-from blockwart.services.policy import PolicySnapshot, policy_for_principal
+from blockwart.services.policy import GlobalPolicySource, PolicySnapshot, policy_for_principal
 from blockwart.services.read_access import ReadAccess
 
 _ETAG_PATTERN = re.compile(r'^"rev-([1-9][0-9]*)"$')
@@ -372,6 +372,7 @@ def update_catalog_object(
     precondition. A preview grants no lock, reservation, or later-apply
     guarantee.
     """
+    context = refresh_write_context(session, context, object_id=object_id)
     plan = plan_object_update(
         session,
         context,
@@ -681,6 +682,7 @@ def rename_catalog_object(
     same lock the shared upsert uses, then reports the unchanged revision
     without advancing it and without writing an audit event.
     """
+    context = refresh_write_context(session, context, object_id=object_id)
     plan = plan_object_rename(
         session,
         context,
@@ -894,6 +896,7 @@ def create_child_object(
     idempotency_ttl_seconds: int,
     now: datetime | None = None,
 ) -> ObjectCommandResult:
+    context = refresh_write_context(session, context, object_id=parent_id)
     timestamp = now or _now()
     parent = _require_permission(
         session,
@@ -1011,6 +1014,7 @@ def create_catalog_root(
     relationship, subtree grant, wildcard, or sentinel grant is ever created.
     Catalog-role membership is never changed by this catalog write.
     """
+    context = refresh_write_context(session, context, object_id="<catalog-root>")
     timestamp = now or _now()
     authority = _require_root_creation_authority(session, context, kind=payload.kind)
     request_payload = {"payload": payload.model_dump(mode="json")}
@@ -1108,6 +1112,7 @@ def create_attached_device(
     single transaction. Relationship metadata is validated by the shared domain
     layer and covered by the idempotency record.
     """
+    context = refresh_write_context(session, context, object_id=parent_id)
     timestamp = now or _now()
     parent = _require_permission(
         session,
@@ -1248,6 +1253,7 @@ def create_service_credential_reference(
     command stores metadata only: no secret value, secret-store access, or
     target-system access is created or granted.
     """
+    context = refresh_write_context(session, context, object_id=service_id)
     timestamp = now or _now()
     service = _require_credential_reference_permission(
         session,
@@ -1681,6 +1687,7 @@ def create_object_relationship(
     expected_revision: int | str | None,
     metadata: Mapping[str, object] | None = None,
 ) -> RelationshipCommandResult:
+    context = refresh_write_context(session, context, object_id=object_id)
     target, peer, expected_revision = _relationship_command_objects(
         session,
         context,
@@ -1708,6 +1715,10 @@ def create_object_relationship(
             from_ref=from_ref,
             to_ref=to_ref,
             expected_revision=expected_revision,
+        )
+    if relation_type == CANONICAL_PLACEMENT_RELATION_TYPE:
+        _require_placement_authority(
+            session, context, from_ref=from_ref, to_ref=to_ref, attaching=True,
         )
     existing = session.scalar(
         select(Relationship).where(
@@ -1910,6 +1921,7 @@ def delete_object_relationship(
     to_ref: str,
     expected_revision: int | str | None,
 ) -> RelationshipCommandResult:
+    context = refresh_write_context(session, context, object_id=object_id)
     target, peer, expected_revision = _relationship_command_objects(
         session,
         context,
@@ -1965,6 +1977,10 @@ def delete_object_relationship(
             relationship,
             relation_type=relation_type,
         )
+    if relation_type == CANONICAL_PLACEMENT_RELATION_TYPE:
+        _require_placement_authority(
+            session, context, from_ref=from_ref, to_ref=to_ref, attaching=False,
+        )
     old_revision = target.revision
     new_revision = _claim_object_revision(
         session,
@@ -2011,6 +2027,62 @@ def delete_object_relationship(
         to_ref=to_ref,
         changed=True,
         metadata=canonical_metadata,
+    )
+
+
+def refresh_write_context(
+    session: Session,
+    context: WriteContext,
+    *,
+    object_id: str,
+) -> WriteContext:
+    """Serialize authorization with revocation, deactivation and placement.
+
+    Take the same principal -> Owner grant -> placement -> command-grant locks
+    as grant mutations, before any object/idempotency write. A reloaded policy
+    is required even for successful replays. Locks remain held until commit.
+    """
+    principals = lock_grant_command_state(
+        session,
+        actor_principal_id=context.principal.id,
+        object_id=object_id,
+    )
+    actor = principals.get(context.principal.id)
+    if actor is None or not actor.active:
+        raise CommandNotFound("catalog object not found")
+    return replace(
+        context,
+        principal=principal_context(
+            actor, service_token_audience=context.principal.service_token_audience,
+        ),
+        policy=policy_for_principal(session, actor.id),
+    )
+
+
+def _require_placement_authority(
+    session: Session,
+    context: WriteContext,
+    *,
+    from_ref: str,
+    to_ref: str,
+    attaching: bool,
+) -> None:
+    """Authorize against the old graph, never the rights the new edge creates."""
+    parent_id = from_ref.split(":", 1)[-1]
+    child_id = to_ref.split(":", 1)[-1]
+    _require_permission(session, context, object_id=child_id, permission=Permission.READ)
+    if not (
+        context.policy.has_global_authority(GlobalPolicySource.CATALOG_OWNER)
+        or any(grant.role == Role.OWNER for grant in context.policy.grants_for(child_id))
+    ):
+        raise CommandAuthorizationDenied(
+            object_id=child_id,
+            permission=Permission.MANAGE_ACCESS,
+            code="owner_required_to_change_placement",
+        )
+    _require_permission(
+        session, context, object_id=parent_id,
+        permission=Permission.CREATE_CHILD if attaching else Permission.WRITE,
     )
 
 

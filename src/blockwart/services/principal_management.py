@@ -204,6 +204,7 @@ class EffectivePrincipalGrantView:
     object_label: str
     permissions: tuple[Permission, ...]
     sources: tuple[PrincipalGrantSourceView, ...]
+    global_authorities: tuple[GlobalAuthorityView, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -465,6 +466,14 @@ def query_principal_detail(
                 object_label=object_row.label,
                 permissions=tuple(
                     permission for permission in Permission if permission in permissions
+                ),
+                global_authorities=tuple(
+                    GlobalAuthorityView(
+                        source=a.source.value,
+                        permissions=tuple(p for p in Permission if p in a.permissions),
+                        root_kinds=tuple(sorted(a.root_kinds)),
+                    )
+                    for a in target_policy.global_authorities if a.permissions
                 ),
                 sources=tuple(
                     sorted(
