@@ -154,3 +154,12 @@ required MCP record discriminators, rendered browser creation and safe Markdown,
 MCP-to-real-API calls, and a populated
 0026→0027 table-for-table compatibility snapshot. Existing Project/Research, chronology,
 authorization, migration and machine-contract suites remain regression requirements.
+
+### Empty source rows (Refs #275)
+
+Both Project editing surfaces and their add-row templates start the source-type
+selector at an empty option. An untouched source row is therefore ignored by the
+existing form parser and cannot block an ordinary work-state save. Selecting a
+source type or entering any other metadata still creates an explicit source
+candidate, so incomplete entries remain validation errors. Existing selected
+source types and legacy metadata preservation are unchanged.
