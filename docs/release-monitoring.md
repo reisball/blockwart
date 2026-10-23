@@ -169,3 +169,13 @@ Provider references:
 - <https://docs.github.com/en/rest/releases/releases#get-the-latest-release>
 - <https://docs.github.com/en/rest/using-the-rest-api/best-practices-for-using-the-rest-api>
 - <https://docs.github.com/en/rest/using-the-rest-api/rate-limits-for-the-rest-api>
+
+### Evidence expiry and retry deadlines (Refs #268)
+
+Successful release evidence is fresh through `last_success_at + interval_seconds`
+and stale immediately after that boundary. `next_due_at` is only the next attempt's
+schedule; error backoff, Retry-After and jitter cannot make old successful evidence
+fresh again (or expire it early). Failed attempts retain prior evidence and its
+original success instant; a service with no success remains pending. A successful
+200/304 acquisition starts a new evidence window. Stable-only release selection,
+error/status precedence and retry cadence are unchanged.
