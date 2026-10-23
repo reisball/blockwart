@@ -80,7 +80,11 @@ use this closed field vocabulary; extra field names are not echoed. Nested
 command wrappers keep their request location without replacing the canonical
 provenance field path. Secret scanning retains its original lowercase key
 normalization (ACL scanning retains casefold), including Unicode controls.
-Existing generic fallback behavior remains for genuinely unknown errors.
+Contract-driven tests assert that every declared REST parameter and MCP
+argument keeps its location, including simultaneous invalid filters. Adding a
+public boundary field requires extending the closed vocabulary; unknown caller
+keys must still truncate. Existing generic fallback behavior remains for
+genuinely unknown errors.
 Validation acceptance, roles, grants and ownership are unchanged.
 
 One narrowly scoped exception exists for a rejected search page size on

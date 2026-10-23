@@ -512,3 +512,58 @@ def test_project_patch_domain_paths_never_reflect_dictionary_keys(write_client, 
     assert detail["location"] == "body.access.new_credential_reference.data"
     assert detail["rule"] == "reject_credential_value_keys"
     assert mcp_server._upstream_details(response.json()["error"]) == [detail]
+
+
+def test_every_declared_rest_and_mcp_parameter_retains_its_location():
+    from pathlib import Path
+
+    from blockwart.domain.validation_errors import public_detail
+
+    contract = json.loads((Path(__file__).parent / "contracts" / "openapi.json").read_text())
+    for path in contract["paths"].values():
+        for operation in path.values():
+            if not isinstance(operation, dict):
+                continue
+            for parameter in operation.get("parameters", []):
+                location = parameter["in"] + "." + parameter["name"]
+                assert (
+                    public_detail(location=location, code="invalid_format")["location"] == location
+                )
+    for definition in mcp_server.TOOL_DEFINITIONS.values():
+        schema = (
+            definition.get("inputSchema", {})
+            if isinstance(definition, dict)
+            else definition.inputSchema
+        )
+        for name in schema.get("properties", {}):
+            for location in (name, "arguments." + name):
+                assert (
+                    public_detail(location=location, code="invalid_format")["location"] == location
+                )
+
+
+@pytest.mark.parametrize(
+    ("path", "locations"),
+    [
+        (
+            "/api/v1/projects/work/workspace/item?overdue=invalid&blocked=invalid",
+            {"query.overdue", "query.blocked"},
+        ),
+        (
+            "/api/v1/attention?severity=invalid&signal_state=invalid",
+            {"query.severity", "query.signal_state"},
+        ),
+    ],
+)
+def test_simultaneous_invalid_filters_remain_distinct(write_client, root_state, path, locations):  # noqa: F811
+    from test_project_workspace import _create_project
+
+    _create_project(write_client, root_state["owner_token"], "work")
+    response = write_client.get(
+        path, headers={"Authorization": "Bearer " + root_state["owner_token"]}
+    )
+    assert response.status_code == 422
+    details = response.json()["error"]["details"]
+    assert len(details) == 2
+    assert {detail["location"] for detail in details} == locations
+    assert mcp_server._upstream_details(response.json()["error"]) == details
