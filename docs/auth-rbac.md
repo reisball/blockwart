@@ -1018,3 +1018,17 @@ platform admin can still take over non-global-Owner identities through the
 existing protected credential contract. Global-Owner targets retain the
 existing human dual-role/password protection. This issue does not silently
 extend that restriction to every locally authorized identity.
+
+
+Review follow-up strengthens three equivalent boundaries: manually triggered
+release checks in UI/REST retain the authenticated transaction and its locks
+through the bounded provider call and observation write (scheduled workers keep
+short lease transactions); identity-role/capability and credential mutations
+lock actor/target/coverage before password reauthentication can insert its FK
+audit event; creation replays re-check the created object's current readability
+and re-project current fields/capabilities, not historical Owner authority.
+Fresh creation records bind an immutable object instance; legacy records bind
+the recorded creation timestamp. Hidden or replaced results are refused even
+when the caller retains creation rights on the old parent. Replay performs no
+second mutation, but its returned representation/ETag reflects current access
+and state; unchanged-state replay remains equal apart from `replayed`.

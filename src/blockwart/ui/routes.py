@@ -125,7 +125,7 @@ from blockwart.services.queries import (
 )
 from blockwart.services.read_access import ReadAccess
 from blockwart.services.release_monitoring import (
-    check_service_release,
+    check_authorized_service_release,
     query_release_overview,
     release_monitoring_settings,
 )
@@ -3544,20 +3544,11 @@ def check_service_release_from_ui(
     access = read_access_from_request(request)
     context = ui_write_context(request, access)
     execute_ui_command(
-        session,
-        context,
-        lambda: authorize_object_command(
-            session,
-            context,
-            object_id=object_id,
-            permission=Permission.WRITE,
+        session, context,
+        lambda: check_authorized_service_release(
+            session, context, object_id=object_id,
+            settings=release_monitoring_settings(request.app.state.settings),
         ),
-    )
-    check_service_release(
-        session,
-        object_id=object_id,
-        settings=release_monitoring_settings(request.app.state.settings),
-        manual=True,
     )
     return RedirectResponse(
         url=_detail_redirect_url(request, object_id),

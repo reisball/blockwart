@@ -1719,14 +1719,16 @@ def test_postgresql_owner_assignment_rechecks_a_concurrently_deactivated_target(
                             )
             except CommandNotFound:
                 return "not_found"
-            except (CommandAuthorizationDenied, CommandConflict) as exc:
+            except CommandAuthorizationDenied as exc:
+                return exc.code or "forbidden"
+            except CommandConflict as exc:
                 return exc.code or "conflict"
             return "unexpected_success"
 
         expected_error = {
             "adoption": "owner_principal_inactive",
             "adoption_actor": "adoption_requires_catalog_owner",
-            "command_creation": "not_found",
+            "command_creation": "forbidden",
             "managed_grant_target": "conflict",
         }[operation]
         with ThreadPoolExecutor(max_workers=2) as pool:

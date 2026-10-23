@@ -81,13 +81,14 @@ def test_seed_interleaving_must_not_reuse_a_published_etag(db, monkeypatch):
             assert row.revision == 1
             etag = '"rev-1"'
             for revision in (2, 3, 4):
-                response = client.put(
-                    "/api/v1/objects/reused",
-                    headers={**auth, "If-Match": etag},
-                    json={**payload, "label": f"Published {revision}"},
-                )
-                assert response.status_code == 200, response.text
-                etag = response.headers["etag"]
+                # Seed already holds Owner locks. Do not synchronously call an
+                # authorized API writer that is correctly serialized behind it.
+                with engine.begin() as writer:
+                    writer.execute(text(
+                        "UPDATE catalog_objects SET label=:label, revision=:revision "
+                        "WHERE id='reused'"
+                    ), {"label": f"Published {revision}", "revision": revision})
+                etag = f'"rev-{revision}"'
             saved["old_etag"] = etag
             original_check(session, row, kind)
 

@@ -886,6 +886,48 @@ def _json_document(raw_json: str | None) -> object:
     return document
 
 
+def _authorized_created_object(
+    session: Session,
+    context: WriteContext,
+    object_id: str,
+) -> CatalogObjectOut:
+    from blockwart.services.queries import get_catalog_object
+
+    policy = policy_for_principal(session, context.principal.id)
+    current = replace(context, policy=policy)
+    _require_permission(session, current, object_id=object_id, permission=Permission.READ)
+    result = get_catalog_object(session, object_id, ReadAccess(current.principal, policy))
+    if not isinstance(result, CatalogObjectOut):
+        raise CommandNotFound("catalog object not found")
+    return result.model_copy(update={
+        "capabilities": sorted(result.capabilities, key=lambda permission: permission.value),
+    })
+
+
+def _replay_created_object(
+    session: Session,
+    context: WriteContext,
+    response: Mapping[str, object],
+    *,
+    field: str = "catalog_object",
+) -> CatalogObjectOut:
+    original = CatalogObjectOut.model_validate(response[field])
+    current = _authorized_created_object(session, context, original.id)
+    row = session.get(CatalogObject, original.id)
+    instance_id = response.get("object_instance_id")
+    # Newly recorded responses bind the immutable instance ID. Older responses
+    # still bind their creation timestamp; neither may disclose a replacement.
+    if row is None:
+        raise CommandNotFound("catalog object not found")
+    same_instance = (
+        row.instance_id == instance_id if instance_id is not None
+        else current.created_at == original.created_at
+    )
+    if not same_instance:
+        raise CommandNotFound("catalog object not found")
+    return current
+
+
 def create_child_object(
     session: Session,
     context: WriteContext,
@@ -918,9 +960,10 @@ def create_child_object(
         now=timestamp,
     )
     if replay is not None:
+        current = _replay_created_object(session, context, replay)
         return ObjectCommandResult(
-            catalog_object=CatalogObjectOut.model_validate(replay["catalog_object"]),
-            etag=str(replay["etag"]),
+            catalog_object=current,
+            etag=revision_etag(current.revision),
             changed=bool(replay["changed"]),
             replayed=True,
         )
@@ -943,7 +986,7 @@ def create_child_object(
     _assign_creator_owner(session, context, object_id=created.id)
     parent_revision = _bump_object_revision(session, parent.id)
     session.flush()
-    result = get_object(session, created.id)
+    result = _authorized_created_object(session, context, created.id)
     child_row = session.get(CatalogObject, created.id)
     if result is None or child_row is None:
         raise CommandConflict("created object could not be loaded")
@@ -979,6 +1022,7 @@ def create_child_object(
         },
     )
     response = {
+        "object_instance_id": child_row.instance_id,
         "catalog_object": result.model_dump(mode="json"),
         "etag": revision_etag(result.revision),
         "changed": True,
@@ -1028,9 +1072,10 @@ def create_catalog_root(
         now=timestamp,
     )
     if replay is not None:
+        current = _replay_created_object(session, context, replay)
         return ObjectCommandResult(
-            catalog_object=CatalogObjectOut.model_validate(replay["catalog_object"]),
-            etag=str(replay["etag"]),
+            catalog_object=current,
+            etag=revision_etag(current.revision),
             changed=bool(replay["changed"]),
             replayed=True,
         )
@@ -1043,7 +1088,7 @@ def create_catalog_root(
     object_ref = f"{created.kind}:{created.id}"
     _assign_creator_owner(session, context, object_id=created.id)
     session.flush()
-    result = get_object(session, created.id)
+    result = _authorized_created_object(session, context, created.id)
     root_row = session.get(CatalogObject, created.id)
     if result is None or root_row is None:
         raise CommandConflict("created object could not be loaded")
@@ -1080,6 +1125,7 @@ def create_catalog_root(
         },
     )
     response = {
+        "object_instance_id": root_row.instance_id,
         "catalog_object": result.model_dump(mode="json"),
         "etag": revision_etag(result.revision),
         "changed": True,
@@ -1138,9 +1184,10 @@ def create_attached_device(
         now=timestamp,
     )
     if replay is not None:
+        current = _replay_created_object(session, context, replay)
         return ObjectCommandResult(
-            catalog_object=CatalogObjectOut.model_validate(replay["catalog_object"]),
-            etag=str(replay["etag"]),
+            catalog_object=current,
+            etag=revision_etag(current.revision),
             changed=bool(replay["changed"]),
             replayed=True,
         )
@@ -1167,7 +1214,7 @@ def create_attached_device(
     _assign_creator_owner(session, context, object_id=created.id)
     parent_revision = _bump_object_revision(session, parent.id)
     session.flush()
-    result = get_object(session, created.id)
+    result = _authorized_created_object(session, context, created.id)
     child_row = session.get(CatalogObject, created.id)
     if result is None or child_row is None:
         raise CommandConflict("created object could not be loaded")
@@ -1205,6 +1252,7 @@ def create_attached_device(
         },
     )
     response = {
+        "object_instance_id": child_row.instance_id,
         "catalog_object": result.model_dump(mode="json"),
         "etag": revision_etag(result.revision),
         "changed": True,
@@ -1292,6 +1340,11 @@ def create_service_credential_reference(
         now=timestamp,
     )
     if replay is not None:
+        current = _replay_created_object(
+            session, context, replay, field="credential_reference",
+        )
+        replay = {**replay, "credential_reference": current.model_dump(mode="json"),
+                  "etag": revision_etag(current.revision)}
         return _service_credential_reference_result(replay, replayed=True)
 
     # The shared lock order takes principal rows before object rows. The service
@@ -1387,7 +1440,7 @@ def create_service_credential_reference(
     session.flush()
     session.expire(service)
     link_path = f"data.access_methods[{access_method_index}].credential_references"
-    result = get_object(session, created.id)
+    result = _authorized_created_object(session, context, created.id)
     reference_row = session.get(CatalogObject, created.id)
     if result is None or reference_row is None:
         raise CommandConflict("created object could not be loaded")
@@ -1443,6 +1496,7 @@ def create_service_credential_reference(
         },
     )
     response = {
+        "object_instance_id": reference_row.instance_id,
         "credential_reference": result.model_dump(mode="json"),
         "etag": revision_etag(result.revision),
         "service_id": service_id,
@@ -2049,6 +2103,10 @@ def refresh_write_context(
     )
     actor = principals.get(context.principal.id)
     if actor is None or not actor.active:
+        if object_id == "<catalog-root>":
+            raise CommandAuthorizationDenied(
+                object_id=object_id, permission=Permission.CREATE_CHILD,
+            )
         raise CommandNotFound("catalog object not found")
     return replace(
         context,

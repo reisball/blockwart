@@ -538,7 +538,7 @@ and grants no secret-store or target-system access.
 | Rejected body, including secret-shaped values or another `kind` | `422 validation_error` |
 
 Repeating the same request with the same key within the idempotency TTL returns
-the stored result with `replayed = true`, even after the service revision moved
+the original link-operation result with `replayed = true`, even after the service revision moved
 on, and creates nothing further; its `service_etag` is then the one the original
 call produced, so read the service again before a later ETag-bound write. A new
 key for an already created reference ID is `409 credential_reference_id_unavailable`.
@@ -1043,3 +1043,18 @@ MCP forwards these additive fields unchanged. Existing-object canonical
 placement changes additionally require pre-change effective child Ownership
 or global Owner and appropriate current/destination parent authority; see
 [the consolidated contract](auth-rbac.md#consolidated-role-contract-297).
+
+
+Creation replay security: the parent/root creation permission is not continuing
+authority over the created result. Root, child, attached-device and service
+credential-reference replays require current readability of the same object
+instance. The returned object and its ETag/capabilities are re-projected from
+current authorized state, so a retained Viewer cannot receive historical Owner
+capabilities. Missing, replaced or now-concealed results fail closed; no second
+creation or link mutation occurs. Stored operation/link metadata remains the
+original operation result.
+
+Manual release checks in UI/REST execute inside one authorized command
+transaction through the bounded provider request and observation persistence;
+a revoked/deactivated stale context is refused before provider access or writes.
+Scheduled checks retain their existing short-transaction lease behavior.
