@@ -23,6 +23,7 @@ from blockwart.domain.asset_state import (
     is_asset_kind,
 )
 from blockwart.domain.decisions import decision_contract_projection
+from blockwart.domain.input_validation import INPUT_RULES
 from blockwart.domain.monitoring import service_monitoring_contract_projection
 from blockwart.domain.object_schema import (
     BUILTIN_SCHEMAS,
@@ -159,6 +160,10 @@ def violation_policy_projection() -> dict[str, Any]:
     return {
         "detail_fields": ["code", "location", "message", "path", "rule"],
         "generic_violation": GENERIC_SCHEMA_VIOLATION,
+        "input_rules": [
+            {"rule": name, "violation": contract[0], "description": contract[1]}
+            for name, contract in sorted(INPUT_RULES.items())
+        ],
         "unknown_violations_fall_back_to_generic": True,
         "violations": [
             {"code": code, "description": SCHEMA_VIOLATION_CONTRACTS[code]}

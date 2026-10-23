@@ -50,6 +50,30 @@ canonical published fields, in this order:
 - `rule`: the published schema-rule name when a schema postcondition rejected
   the write (for example `reject_credential_value_keys`), or `null` otherwise.
 
+### Shared input-validation rules
+
+Catalog security/ACL, placement, asset-state, provenance timestamps and project
+record/action validators emit source-structured diagnostics. The schema
+projection publishes their stable names and descriptions in
+`violation_policy.input_rules`. Examples are `secret_content`, `acl_metadata`,
+`placement_state`, `timestamp_rfc3339` and `github_reference_identity`.
+
+`path` also accepts catalog envelope fields (such as `summary` or
+`provenance.observed_at`) and project record/action fields (such as
+`github_references[0]`, `criteria` or `body`). `location` retains the enclosing
+model and array location. Multi-field semantic rules name their model scope
+instead of falsely naming a single field; their `path` may be null while
+`rule` remains specific. This also applies to authorized project patch/merged
+record validation. No submitted value, stored identity or raw exception text
+is reflected.
+
+Recursive security scans retain distinct findings, deduplicate and sort the
+public results, and return at most 20 details. Scanner paths use only published
+field vocabulary; unknown or unsafe dictionary-key segments truncate to their
+nearest safe scope, even when the arbitrary key resembles a valid identifier.
+Existing generic fallback behavior remains for genuinely unknown errors.
+Validation acceptance, roles, grants and ownership are unchanged.
+
 One narrowly scoped exception exists for a rejected search page size on
 `/api/v1/objects`, `/api/v1/context`, `/api/agent/search`,
 `/api/agent/context`, `blockwart.search`, and `blockwart.get_context`. That

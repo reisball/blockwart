@@ -1,0 +1,335 @@
+"""Issue #299: input-only source rules survive API and real MCP HTTP transport."""
+
+from __future__ import annotations
+
+import asyncio
+import json
+import threading
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+import pytest
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
+from pydantic import BaseModel
+from test_catalog_root_creation import root_state  # noqa: F401
+from test_field_validation_errors import owner_headers, write_client  # noqa: F401
+
+from blockwart.api.errors import install_api_error_contract, install_request_context
+from blockwart.mcp import server as mcp_server
+from blockwart.schemas.catalog import CatalogObjectIn
+from blockwart.schemas.project_workspace import ProjectAccessIn, ProjectActionIn, ProjectItemIn
+
+BASE = {"id": "diagnostic-service", "kind": "service", "label": "Diagnostic", "data": {}}
+MARKER = "Bearer " + "A" * 24
+
+
+class Nested(BaseModel):
+    payload: CatalogObjectIn
+
+
+@pytest.fixture
+def probe():
+    app = FastAPI()
+    install_api_error_contract(app)
+    install_request_context(app)
+
+    @app.post("/api/object")
+    def obj(payload: CatalogObjectIn):
+        return {"ok": True}
+
+    @app.post("/api/nested")
+    def nested(payload: Nested):
+        return {"ok": True}
+
+    @app.post("/api/item")
+    def item(payload: ProjectItemIn):
+        return {"ok": True}
+
+    @app.post("/api/action")
+    def action(payload: ProjectActionIn):
+        return {"ok": True}
+
+    @app.post("/api/access")
+    def access(payload: ProjectAccessIn):
+        return {"ok": True}
+
+    with TestClient(app) as client:
+        yield client
+
+
+@pytest.mark.parametrize(
+    ("patch", "code", "path", "rule"),
+    [
+        ({"data": {"password": MARKER}}, "forbidden_key", "data.password", "secret_content"),
+        (
+            {"data": {"extensions": [{"token": MARKER}]}},
+            "forbidden_key",
+            "data.extensions[0].token",
+            "secret_content",
+        ),
+        ({"summary": MARKER}, "forbidden_key", "summary", "secret_content"),
+        ({"data": {"permissions": []}}, "field_not_allowed", "data.permissions", "acl_metadata"),
+        (
+            {"data": {"extensions": [{"acl": []}]}},
+            "field_not_allowed",
+            "data.extensions[0].acl",
+            "acl_metadata",
+        ),
+        ({"data": {"placement": []}}, "type_mismatch", "data.placement", "placement_object"),
+        (
+            {"data": {"placement": {"state": "assigned"}}},
+            "value_not_allowed",
+            "data.placement.state",
+            "placement_state",
+        ),
+        (
+            {"data": {"placement": {"state": "unassigned", "reason": ""}}},
+            "value_too_short",
+            "data.placement.reason",
+            "placement_reason",
+        ),
+        (
+            {"kind": "host", "data": {"placement": {"state": "unassigned"}}},
+            "field_not_allowed",
+            "data.placement",
+            "placement_kind",
+        ),
+        (
+            {"kind": "credential_reference", "lifecycle": "active"},
+            "field_not_allowed",
+            "lifecycle",
+            "asset_state_kind",
+        ),
+        (
+            {"provenance": {"observed_at": "not-a-date"}},
+            "invalid_format",
+            "provenance.observed_at",
+            "timestamp_rfc3339",
+        ),
+    ],
+)
+def test_catalog_rules(probe, patch, code, path, rule):
+    response = probe.post("/api/object", json={**BASE, **patch})
+    assert response.status_code == 422
+    details = response.json()["error"]["details"]
+    assert any(d["code"] == code and d["path"] == path and d["rule"] == rule for d in details)
+    assert MARKER not in response.text
+    assert mcp_server._upstream_details(response.json()["error"]) == details
+
+
+@pytest.mark.parametrize(
+    ("endpoint", "payload", "rule", "path"),
+    [
+        ("item", {"description": MARKER}, "secret_content", "description"),
+        ("item", {"criteria": [{"id": "c1", "description": "c"}]}, "requirement_fields", None),
+        (
+            "item",
+            {
+                "item_type": "requirement",
+                "criteria": [{"id": "c1", "description": "c"}, {"id": "c1", "description": "d"}],
+            },
+            "unique_criterion_ids",
+            "criteria",
+        ),
+        ("item", {"item_type": "evidence"}, "evidence_fields", None),
+        ("item", {"issue_url": "ftp://example.invalid"}, "safe_http_url", "issue_url"),
+        ("item", {"due_at": "not-a-date"}, "timestamp_rfc3339", "due_at"),
+        (
+            "item",
+            {"github_references": [{"repository_id": "r", "kind": "issue"}]},
+            "github_reference_identity",
+            "github_references[0]",
+        ),
+        ("item", {"status_authority": "github"}, "github_status_authority", None),
+        (
+            "item",
+            {
+                "relations": [
+                    {"relation": "depends_on", "target_id": "a"},
+                    {"relation": "depends_on", "target_id": "a"},
+                ]
+            },
+            "unique_relations",
+            "relations",
+        ),
+        (
+            "item",
+            {
+                "github_references": [
+                    {"repository_id": "r", "kind": "issue", "number": 1},
+                    {"repository_id": "r", "kind": "issue", "number": 1},
+                ]
+            },
+            "unique_github_references",
+            "github_references",
+        ),
+        ("action", {"action": "comment"}, "comment_body", "body"),
+        ("action", {"action": "assess", "result": "accepted"}, "assessment_fields", None),
+        ("action", {"action": "reuse_evidence"}, "evidence_reuse_fields", None),
+        (
+            "action",
+            {"action": "comment", "body": "c", "changes": {"title": "a"}},
+            "patch_changes",
+            "changes",
+        ),
+        ("action", {"action": "comment", "body": MARKER}, "secret_content", "body"),
+        (
+            "access",
+            {
+                "credential_reference": "a",
+                "new_credential_reference": {
+                    "id": "b",
+                    "kind": "credential_reference",
+                    "label": "B",
+                    "data": {},
+                },
+            },
+            "one_credential_reference",
+            None,
+        ),
+        (
+            "access",
+            {"new_credential_reference": BASE},
+            "credential_reference_kind",
+            "new_credential_reference.kind",
+        ),
+    ],
+)
+def test_project_rules(probe, endpoint, payload, rule, path):
+    base = {} if endpoint == "action" else {"kind": endpoint, "title": "Diagnostic"}
+    response = probe.post("/api/" + endpoint, json={**base, **payload})
+    assert response.status_code == 422
+    details = response.json()["error"]["details"]
+    assert any(d["rule"] == rule and d["path"] == path for d in details), details
+    assert all(d["code"] != "invalid_value" for d in details)
+    assert MARKER not in response.text
+    assert mcp_server._upstream_details(response.json()["error"]) == details
+
+
+def test_nested_model_location_and_unknown_dictionary_key_redaction(probe):
+    for key in ("bad.key", "ghp_" + "B" * 24, "unpublished-dictionary-name"):
+        response = probe.post(
+            "/api/nested", json={"payload": {**BASE, "data": {key: {"password": MARKER}}}}
+        )
+        detail = response.json()["error"]["details"][0]
+        assert detail["location"] == "body.payload.data"
+        assert detail["path"] == "data"
+        assert detail["rule"] == "secret_content"
+        assert key not in response.text and MARKER not in response.text
+
+
+def test_multiple_violations_are_bounded_deduplicated_and_deterministic(probe):
+    data = {"extensions": [{"password": MARKER, "acl": []} for _ in range(30)]}
+    responses = [probe.post("/api/object", json={**BASE, "data": data}).json() for _ in range(2)]
+    details = responses[0]["error"]["details"]
+    assert len(details) == 20
+    assert details == responses[1]["error"]["details"]
+    assert len({json.dumps(d, sort_keys=True) for d in details}) == 20
+    assert {d["rule"] for d in details} == {"secret_content", "acl_metadata"}
+    assert MARKER not in json.dumps(responses)
+
+
+@pytest.mark.parametrize(
+    ("endpoint", "payload"),
+    [
+        ("object", BASE),
+        ("item", {"kind": "item", "title": "Valid"}),
+        ("action", {"action": "comment", "body": "Valid comment"}),
+        ("object", {**BASE, "data": {"placement": {"state": "unassigned", "reason": "planned"}}}),
+    ],
+)
+def test_valid_controls(probe, endpoint, payload):
+    assert probe.post("/api/" + endpoint, json=payload).status_code == 200
+
+
+def test_real_object_api_and_mcp_http_transport(write_client, owner_headers, monkeypatch):  # noqa: F811
+    monkeypatch.setenv("BLOCKWART_API_TOKEN", "synthetic-runtime-token")
+    monkeypatch.delenv("BLOCKWART_API_TOKEN_FILE", raising=False)
+    # The upstream is the actual authenticated object-write API, not a handcrafted error.
+    response = write_client.post(
+        "/api/v1/roots",
+        headers=owner_headers,
+        json={**BASE, "data": {"extensions": [{"token": MARKER}]}},
+    )
+    assert response.status_code == 422
+    expected = response.json()["error"]["details"]
+
+    class ApiHandler(BaseHTTPRequestHandler):
+        def do_POST(self):
+            payload = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+            upstream = write_client.post("/api/v1/roots", headers=owner_headers, json=payload)
+            body = upstream.content
+            self.send_response(upstream.status_code)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def log_message(self, *args):
+            pass
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), ApiHandler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    monkeypatch.setenv("BLOCKWART_API_BASE_URL", f"http://127.0.0.1:{server.server_port}")
+    try:
+        result = asyncio.run(
+            mcp_server.handle_call_tool(
+                "blockwart.create_root",
+                {
+                    "idempotency_key": "diagnostic-299-root",
+                    "object": {**BASE, "data": {"extensions": [{"token": MARKER}]}},
+                },
+            )
+        )
+        payload = json.loads(result.content[0].text)
+        assert result.isError
+        assert payload["error"]["details"] == expected
+        assert expected[0]["path"] == "data.extensions[0].token"
+        assert expected[0]["rule"] == "secret_content"
+        assert MARKER not in result.content[0].text
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=5)
+
+
+def test_actual_project_create_and_patch_api_keep_diagnostics(write_client, root_state):  # noqa: F811
+    from test_project_records import _save
+    from test_project_workspace import _create_project
+
+    _create_project(write_client, root_state["owner_token"], "work")
+    invalid = _save(write_client, root_state, {
+        "kind": "item", "title": "Diagnostic", "due_at": "not-a-date"})
+    assert invalid.status_code == 422
+    detail = invalid.json()["error"]["details"][0]
+    assert detail["rule"] == "timestamp_rfc3339" and detail["path"] == "due_at"
+
+    created = _save(write_client, root_state, {"kind": "item", "title": "Diagnostic"})
+    assert created.status_code == 201
+    record = created.json()["record"]
+    response = write_client.post(
+        f"/api/v1/projects/work/workspace/actions/{record['id']}",
+        headers={"Authorization": "Bearer " + root_state["owner_token"],
+                 "If-Match": record["record_etag"], "Idempotency-Key": "diagnostic-patch-299-key"},
+        json={"action": "patch", "changes": {"due_at": "not-a-date"}},
+    )
+    assert response.status_code == 422, response.text
+    detail = response.json()["error"]["details"][0]
+    assert detail["rule"] == "timestamp_rfc3339" and detail["path"] == "due_at"
+    assert "not-a-date" not in response.text
+    after = write_client.get(
+        f"/api/v1/projects/work/workspace/record/{record['id']}",
+        headers={"Authorization": "Bearer " + root_state["owner_token"]},
+    ).json()
+    assert after["record_etag"] == record["record_etag"]
+
+
+def test_placement_reason_type_is_not_reported_as_string_length(probe):
+    response = probe.post("/api/object", json={**BASE, "data": {
+        "placement": {"state": "unassigned", "reason": 42}}})
+    assert response.status_code == 422
+    detail = response.json()["error"]["details"][0]
+    assert detail["code"] == "type_mismatch"
+    assert detail["rule"] == "placement_reason_type"
+    assert detail["path"] == "data.placement.reason"

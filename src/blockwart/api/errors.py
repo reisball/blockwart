@@ -23,6 +23,7 @@ from blockwart.domain.search import (
 from blockwart.domain.validation_errors import (
     detail_from_validation_error,
     order_public_details,
+    sanitize_public_details,
     search_limit_detail,
     violation_for_validation_type,
 )
@@ -75,11 +76,13 @@ class CodedHTTPException(HTTPException):
         error_code: str,
         detail: str,
         headers: dict[str, str] | None = None,
+        details: list | None = None,
     ) -> None:
         if not _ERROR_CODE_PATTERN.fullmatch(error_code):
             raise ValueError("invalid API error code")
         super().__init__(status_code=status_code, detail=detail, headers=headers)
         self.error_code = error_code
+        self.public_details = sanitize_public_details(details)
 
 
 def install_batch_request_bound(app: FastAPI) -> None:
@@ -276,6 +279,7 @@ def install_api_error_contract(app: FastAPI) -> None:
             message=message,
             correlation_id=_correlation_id(request),
             headers=exc.headers,
+            details=getattr(exc, "public_details", None),
         )
 
     @app.exception_handler(DatabaseTransactionError)

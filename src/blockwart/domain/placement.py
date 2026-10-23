@@ -1,6 +1,8 @@
 from collections.abc import Iterable, Mapping
 from typing import Any, Literal
 
+from blockwart.domain.input_validation import reject_input
+
 CANONICAL_PLACEMENT_RELATION_TYPE = "hosts"
 UNASSIGNED_PLACEMENT_STATE = "unassigned"
 PlacementState = Literal["root", "assigned", "unassigned", "unknown"]
@@ -27,24 +29,22 @@ def validate_placement_metadata(data: Mapping[str, Any], *, kind: str) -> None:
     if placement is None:
         return
     if kind not in {"system", "service"}:
-        raise ValueError("data.placement is supported only for system and service objects")
+        reject_input("Placement", [(("data", "placement"), "placement_kind")])
     if not isinstance(placement, Mapping):
-        raise ValueError("data.placement must be an object")
+        reject_input("Placement", [(("data", "placement"), "placement_object")])
     if placement.get("state") != UNASSIGNED_PLACEMENT_STATE:
-        raise ValueError("data.placement.state must be unassigned")
+        reject_input("Placement", [(("data", "placement", "state"), "placement_state")])
     reason = placement.get("reason")
-    if reason is not None and (
-        not isinstance(reason, str) or not reason.strip()
-    ):
-        raise ValueError("data.placement.reason must be a non-empty string")
+    if reason is not None:
+        if not isinstance(reason, str):
+            reject_input("Placement", [(("data", "placement", "reason"), "placement_reason_type")])
+        if not reason.strip():
+            reject_input("Placement", [(("data", "placement", "reason"), "placement_reason")])
 
 
 def is_explicitly_unassigned(data: Mapping[str, Any]) -> bool:
     placement = data.get("placement")
-    return (
-        isinstance(placement, Mapping)
-        and placement.get("state") == UNASSIGNED_PLACEMENT_STATE
-    )
+    return isinstance(placement, Mapping) and placement.get("state") == UNASSIGNED_PLACEMENT_STATE
 
 
 def placement_state(
@@ -79,10 +79,7 @@ class PlacementGraph:
         self._parents_by_ref: dict[str, list[str]] = {}
         self._children_by_ref: dict[str, list[str]] = {}
         for relationship in relationships:
-            if (
-                _record_value(relationship, "relation_type")
-                != CANONICAL_PLACEMENT_RELATION_TYPE
-            ):
+            if _record_value(relationship, "relation_type") != CANONICAL_PLACEMENT_RELATION_TYPE:
                 continue
             parent_ref = str(_record_value(relationship, "from_ref"))
             child_ref = str(_record_value(relationship, "to_ref"))

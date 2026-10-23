@@ -107,7 +107,9 @@ def _command_http_error(
     if isinstance(exc, CommandPreconditionFailed):
         return HTTPException(status_code=412, detail=str(exc))
     if isinstance(exc, CommandValidationFailed):
-        return HTTPException(status_code=422, detail=str(exc))
+        return CodedHTTPException(
+            422, error_code="validation_error", detail=str(exc), details=exc.details
+        )
     if isinstance(
         exc,
         CommandConflict

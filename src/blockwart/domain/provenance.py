@@ -6,6 +6,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field, ValidationError, field_validator
 
+from blockwart.domain.input_validation import InputRuleError
 from blockwart.domain.security import find_secret_violations
 from blockwart.domain.timestamps import format_rfc3339_utc
 
@@ -40,7 +41,10 @@ class CatalogProvenance(BaseModel):
     def normalize_timestamp(cls, value: str | None) -> str | None:
         if value is None:
             return None
-        return normalize_rfc3339_utc(value)
+        try:
+            return normalize_rfc3339_utc(value)
+        except ValueError as exc:
+            raise InputRuleError("timestamp_rfc3339") from exc
 
 
 class CatalogProvenanceOut(CatalogProvenance):

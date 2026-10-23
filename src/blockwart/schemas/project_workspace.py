@@ -4,9 +4,10 @@ from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, field_validator, model_validator
 
+from blockwart.domain.input_validation import InputRuleError, reject_input
 from blockwart.domain.object_schema import is_safe_external_http_url
 from blockwart.domain.provenance import parse_rfc3339_utc
-from blockwart.domain.security import find_secret_violations
+from blockwart.domain.security import input_security_violations
 from blockwart.domain.timestamps import format_rfc3339_utc
 from blockwart.schemas.catalog import CatalogObjectIn
 
@@ -30,8 +31,9 @@ class RecordBase(BaseModel):
 
     @model_validator(mode="after")
     def safe_metadata(self):
-        if find_secret_violations(self.model_dump(mode="json")):
-            raise ValueError("Secret-shaped content is not allowed; use a credential reference")
+        reject_input(
+            type(self).__name__, list(input_security_violations(self.model_dump(mode="json")))
+        )
         return self
 
 
@@ -106,9 +108,9 @@ class GitHubReferenceIn(BaseModel):
     def identity(self):
         if self.kind == "commit":
             if not self.sha or self.number is not None:
-                raise ValueError("A commit requires a full SHA and no number")
+                reject_input(type(self).__name__, [((), "github_reference_identity")])
         elif self.number is None or self.sha is not None:
-            raise ValueError("An issue or pull request requires a number and no SHA")
+            reject_input(type(self).__name__, [((), "github_reference_identity")])
         return self
 
 
@@ -156,23 +158,25 @@ class ProjectItemIn(RecordBase):
     @model_validator(mode="after")
     def semantics(self):
         if len({c.id for c in self.criteria}) != len(self.criteria):
-            raise ValueError("Criterion IDs must be unique")
+            reject_input(type(self).__name__, [(("criteria",), "unique_criterion_ids")])
         if (self.requirement or self.criteria) and self.item_type != "requirement":
-            raise ValueError("Only requirements have requirement text or criteria")
+            reject_input(type(self).__name__, [((), "requirement_fields")])
         if bool(self.evidence) != (self.item_type == "evidence"):
-            raise ValueError("Evidence records require structured evidence")
+            reject_input(type(self).__name__, [((), "evidence_fields")])
         refs = [r.model_dump_json() for r in self.github_references]
         if len(set(refs)) != len(refs):
-            raise ValueError("Duplicate GitHub reference")
+            reject_input(
+                type(self).__name__, [(("github_references",), "unique_github_references")]
+            )
         links = [(r.relation, r.target_id) for r in self.relations]
         if len(set(links)) != len(links):
-            raise ValueError("Duplicate relation")
+            reject_input(type(self).__name__, [(("relations",), "unique_relations")])
         if self.status_authority == "github" and (
             not self.leading_reference
             or self.leading_reference.kind != "issue"
             or self.leading_reference.model_dump_json() not in refs
         ):
-            raise ValueError("GitHub authority requires exactly one linked leading issue")
+            reject_input(type(self).__name__, [((), "github_status_authority")])
         return self
 
     @field_validator("due_at")
@@ -217,12 +221,15 @@ class ProjectAccessIn(RecordBase):
     @model_validator(mode="after")
     def one_reference(self):
         if self.credential_reference and self.new_credential_reference:
-            raise ValueError("Choose an existing or a new reference, not both")
+            reject_input(type(self).__name__, [((), "one_credential_reference")])
         if (
             self.new_credential_reference
             and self.new_credential_reference.kind != "credential_reference"
         ):
-            raise ValueError("Only credential_reference metadata can be created here")
+            reject_input(
+                type(self).__name__,
+                [(("new_credential_reference", "kind"), "credential_reference_kind")],
+            )
         return self
 
 
@@ -294,12 +301,15 @@ class ProjectSearchPageOut(BaseModel):
 def normalized_time(value):
     if value is None:
         return None
-    return format_rfc3339_utc(parse_rfc3339_utc(value))
+    try:
+        return format_rfc3339_utc(parse_rfc3339_utc(value))
+    except ValueError as exc:
+        raise InputRuleError("timestamp_rfc3339") from exc
 
 
 def validated_url(value):
     if value is not None and not is_safe_external_http_url(value):
-        raise ValueError("A safe HTTP(S) URL without credentials is required")
+        raise InputRuleError("safe_http_url")
     return value
 
 
@@ -316,16 +326,17 @@ class ProjectActionIn(BaseModel):
 
     @model_validator(mode="after")
     def valid_action(self):
-        if find_secret_violations(self.model_dump(mode="json")):
-            raise ValueError("Use credential references, not secret values")
+        reject_input(
+            type(self).__name__, list(input_security_violations(self.model_dump(mode="json")))
+        )
         if self.action == "comment" and not self.body:
-            raise ValueError("A comment body is required")
+            reject_input(type(self).__name__, [(("body",), "comment_body")])
         if self.action == "assess" and (not self.result or not self.reason):
-            raise ValueError("An assessment requires result and reason")
+            reject_input(type(self).__name__, [((), "assessment_fields")])
         if self.action == "reuse_evidence" and (not self.reason or not self.evidence_ids):
-            raise ValueError("Reusing evidence requires references and reason")
+            reject_input(type(self).__name__, [((), "evidence_reuse_fields")])
         if self.action != "patch" and self.changes:
-            raise ValueError("Changes are only allowed for patch actions")
+            reject_input(type(self).__name__, [(("changes",), "patch_changes")])
         return self
 
 

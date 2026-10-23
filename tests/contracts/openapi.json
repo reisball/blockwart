@@ -33460,6 +33460,123 @@
         "rule"
       ],
       "generic_violation": "invalid_value",
+      "input_rules": [
+        {
+          "description": "Access control belongs to the object grant API.",
+          "rule": "acl_metadata",
+          "violation": "field_not_allowed"
+        },
+        {
+          "description": "An assessment requires result and reason.",
+          "rule": "assessment_fields",
+          "violation": "rule_violation"
+        },
+        {
+          "description": "Lifecycle and health require an asset kind.",
+          "rule": "asset_state_kind",
+          "violation": "field_not_allowed"
+        },
+        {
+          "description": "A comment body is required.",
+          "rule": "comment_body",
+          "violation": "required_field_missing"
+        },
+        {
+          "description": "New access metadata must be a credential reference.",
+          "rule": "credential_reference_kind",
+          "violation": "value_not_allowed"
+        },
+        {
+          "description": "Evidence items require structured evidence, other items forbid it.",
+          "rule": "evidence_fields",
+          "violation": "rule_violation"
+        },
+        {
+          "description": "Evidence reuse requires references and reason.",
+          "rule": "evidence_reuse_fields",
+          "violation": "rule_violation"
+        },
+        {
+          "description": "Commits require SHA only; issues/pulls require number only.",
+          "rule": "github_reference_identity",
+          "violation": "rule_violation"
+        },
+        {
+          "description": "GitHub status authority requires a linked leading issue.",
+          "rule": "github_status_authority",
+          "violation": "rule_violation"
+        },
+        {
+          "description": "Choose an existing or new credential reference, not both.",
+          "rule": "one_credential_reference",
+          "violation": "rule_violation"
+        },
+        {
+          "description": "Changes are allowed only for patch actions.",
+          "rule": "patch_changes",
+          "violation": "field_not_allowed"
+        },
+        {
+          "description": "Placement metadata requires a system or service.",
+          "rule": "placement_kind",
+          "violation": "field_not_allowed"
+        },
+        {
+          "description": "Placement metadata must be an object.",
+          "rule": "placement_object",
+          "violation": "type_mismatch"
+        },
+        {
+          "description": "Placement reason must be a non-empty string.",
+          "rule": "placement_reason",
+          "violation": "value_too_short"
+        },
+        {
+          "description": "Placement reason must be a string.",
+          "rule": "placement_reason_type",
+          "violation": "type_mismatch"
+        },
+        {
+          "description": "Explicit placement state must be unassigned.",
+          "rule": "placement_state",
+          "violation": "value_not_allowed"
+        },
+        {
+          "description": "Only requirement items may carry requirement text or criteria.",
+          "rule": "requirement_fields",
+          "violation": "rule_violation"
+        },
+        {
+          "description": "A safe HTTP(S) URL without credentials is required.",
+          "rule": "safe_http_url",
+          "violation": "invalid_format"
+        },
+        {
+          "description": "Secret-shaped keys or raw secret values are forbidden.",
+          "rule": "secret_content",
+          "violation": "forbidden_key"
+        },
+        {
+          "description": "A timestamp with an explicit UTC offset is required.",
+          "rule": "timestamp_rfc3339",
+          "violation": "invalid_format"
+        },
+        {
+          "description": "Criterion IDs must be unique.",
+          "rule": "unique_criterion_ids",
+          "violation": "rule_violation"
+        },
+        {
+          "description": "GitHub references must be unique.",
+          "rule": "unique_github_references",
+          "violation": "rule_violation"
+        },
+        {
+          "description": "Relation and target pairs must be unique.",
+          "rule": "unique_relations",
+          "violation": "rule_violation"
+        }
+      ],
       "unknown_violations_fall_back_to_generic": true,
       "violations": [
         {

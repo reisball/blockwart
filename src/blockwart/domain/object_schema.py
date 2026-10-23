@@ -9,6 +9,7 @@ from types import MappingProxyType
 from typing import Any, Literal
 from urllib.parse import parse_qsl, urlsplit
 
+from blockwart.domain.input_validation import INPUT_RULES
 from blockwart.domain.interfaces import CANONICAL_EXPOSURES, CANONICAL_TRANSPORTS
 from blockwart.domain.monitoring import (
     GATUS_DOCUMENT_KEYS,
@@ -2622,7 +2623,13 @@ def public_rule_name(rule: SchemaRule | str) -> str:
 
 
 PUBLIC_SCHEMA_RULE_CONTRACTS: Mapping[str, str] = MappingProxyType(
-    {public_rule_name(name): description for name, description in SCHEMA_RULE_CONTRACTS.items()}
+    {
+        **{
+            public_rule_name(name): description
+            for name, description in SCHEMA_RULE_CONTRACTS.items()
+        },
+        **{name: contract[1] for name, contract in INPUT_RULES.items()},
+    }
 )
 PUBLIC_SCHEMA_RULE_VIOLATIONS: Mapping[str, str] = MappingProxyType(
     {public_rule_name(name): violation for name, violation in SCHEMA_RULE_VIOLATIONS.items()}

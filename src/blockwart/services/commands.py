@@ -150,6 +150,23 @@ class CommandPreconditionFailed(CommandError):
 class CommandValidationFailed(CommandError):
     """A projected field value was rejected by its canonical domain contract."""
 
+    def __init__(self, message: str = "", *, details: list | None = None) -> None:
+        super().__init__(message)
+        self.details = details
+
+    @classmethod
+    def from_validation(cls, message: str, error: ValidationError):
+        from blockwart.domain.validation_errors import (
+            detail_from_validation_error,
+            order_public_details,
+        )
+
+        details = order_public_details(
+            detail_from_validation_error({**entry, "loc": ("body", *entry["loc"])})
+            for entry in error.errors(include_input=False, include_url=False)
+        )
+        return cls(message, details=details)
+
 
 class IdempotencyConflict(CommandConflict):
     """An idempotency key was reused with a different operation or payload."""

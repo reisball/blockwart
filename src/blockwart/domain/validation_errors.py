@@ -21,7 +21,9 @@ import re
 from collections.abc import Iterable, Mapping, Sequence
 from typing import Any
 
+from blockwart.domain.input_validation import INPUT_RULES, InputRuleError
 from blockwart.domain.object_schema import (
+    BUILTIN_SCHEMAS,
     GENERIC_SCHEMA_VIOLATION,
     PUBLIC_SCHEMA_RULE_CONTRACTS,
     SCHEMA_VIOLATION_CONTRACTS,
@@ -56,11 +58,124 @@ SEARCH_LIMIT_DETAIL_FIELDS: tuple[str, ...] = (
 )
 MAX_ECHOED_SCALAR = 1_000_000
 _DETAIL_SORT_FIELDS: tuple[str, ...] = ("location", "path", "code", "rule")
+INPUT_PATH_ROOTS = (
+    "id",
+    "kind",
+    "label",
+    "status",
+    "lifecycle",
+    "health",
+    "summary",
+    "provenance",
+    "title",
+    "description",
+    "item_type",
+    "assignee",
+    "due_at",
+    "parent_id",
+    "issue_url",
+    "related_objects",
+    "relations",
+    "priority",
+    "assignee_principal_id",
+    "blocked_reason",
+    "mandatory",
+    "archived",
+    "criteria",
+    "requirement",
+    "evidence",
+    "github_references",
+    "status_authority",
+    "leading_reference",
+    "legacy_origin",
+    "body",
+    "review_after",
+    "url",
+    "purpose",
+    "account",
+    "credential_reference",
+    "new_credential_reference",
+    "owner",
+    "name",
+    "github_id",
+    "sync_enabled",
+    "action",
+    "changes",
+    "result",
+    "reason",
+    "evidence_ids",
+)
+# Scanner paths may contain arbitrary dictionary keys. Only published vocabulary
+# survives, even when a user-controlled key fits the generic path grammar.
+_INPUT_PATH_KEYS = frozenset(
+    {
+        *INPUT_PATH_ROOTS,
+        "data",
+        "payload",
+        "object",
+        "record",
+        "item",
+        "page",
+        "access",
+        "repository",
+        "extensions",
+        "source_type",
+        "source_ref",
+        "managed_by",
+        "observed_at",
+        "verified_at",
+        "stale_after",
+        "manual_override",
+        "relation",
+        "target_id",
+        "target_version",
+        "required",
+        "original",
+        "source_url",
+        "change_reason",
+        "disposition",
+        "requirement_id",
+        "requirement_revision",
+        "outcome",
+        "subject",
+        "scope",
+        "limitations",
+        "repository_id",
+        "number",
+        "sha",
+        "field",
+        "index",
+        "text",
+        "placement",
+        "state",
+        "password",
+        "token",
+        "api_key",
+        "apikey",
+        "bearer",
+        "client_secret",
+        "cookie",
+        "private_key",
+        "secret",
+        "session",
+        "acl",
+        "access_control",
+        "access_grants",
+        "object_grants",
+        "permissions",
+        *(
+            part.replace("[]", "")
+            for schema in BUILTIN_SCHEMAS.values()
+            for field in schema.fields
+            for part in field.path.split(".")
+        ),
+    }
+)
 DATA_PATH_ROOT = "data"
 _BODY_LOCATION_ROOT = "body"
 # The closed set of canonical roots a published path may start with: the
 # catalog data document of an object write and the relationship command fields.
-PUBLIC_PATH_ROOTS: tuple[str, ...] = (DATA_PATH_ROOT, *RELATIONSHIP_PATH_ROOTS)
+PUBLIC_PATH_ROOTS: tuple[str, ...] = (DATA_PATH_ROOT, *RELATIONSHIP_PATH_ROOTS, *INPUT_PATH_ROOTS)
 UNKNOWN_LOCATION = "unknown"
 MAX_PUBLIC_DETAILS = 20
 _MAX_PATH_SEGMENTS = 12
@@ -137,9 +252,17 @@ def public_path(
     if not isinstance(path, str):
         return None
     segments = path.split(".")
-    if not segments or segments[0] not in roots:
+    if not segments:
         return None
-    published = [segments[0]]
+    root = segments[0]
+    indexed_root = root.split("[", 1)[0]
+    if root not in roots and not (
+        indexed_root in roots
+        and indexed_root in INPUT_PATH_ROOTS
+        and _SEGMENT_PATTERN.fullmatch(root)
+    ):
+        return None
+    published = [root]
     for segment in segments[1:_MAX_PATH_SEGMENTS]:
         if not _SEGMENT_PATTERN.fullmatch(segment):
             break
@@ -205,9 +328,7 @@ def search_limit_detail(
     maximum: int,
 ) -> dict[str, str | int | None]:
     """Build the field-accurate detail of one rejected search page size."""
-    detail: dict[str, str | int | None] = dict(
-        public_detail(location=location, code=code)
-    )
+    detail: dict[str, str | int | None] = dict(public_detail(location=location, code=code))
     detail["field"] = SEARCH_LIMIT_FIELD
     detail["minimum"] = minimum
     detail["maximum"] = maximum
@@ -266,6 +387,23 @@ def detail_from_validation_error(error: Mapping[str, Any]) -> dict[str, str | No
     """
     location = ".".join(str(part) for part in error.get("loc", ())) or "body"
     cause = error.get("ctx", {}).get("error") if isinstance(error.get("ctx"), Mapping) else None
+    if isinstance(cause, InputRuleError) and cause.rule in INPUT_RULES:
+        # Pydantic has already prepended enclosing model/array locations.
+        raw_parts = tuple(error.get("loc", ()))
+        safe_parts = _safe_input_parts(raw_parts)
+        relative = _safe_input_parts(cause.path) if cause.path else ()
+        if not cause.path:
+            relative = safe_parts[1:] if safe_parts[:1] == ("body",) else safe_parts
+            while relative and relative[0] in {"item", "page", "access", "repository"}:
+                relative = relative[1:]
+        # A model-wide semantic constraint deliberately names its scope rather
+        # than falsely attributing a multi-field rule to one particular field.
+        return public_detail(
+            location=".".join(str(part) for part in safe_parts) or "body",
+            code=INPUT_RULES[cause.rule][0],
+            path=_input_path(relative),
+            rule=cause.rule,
+        )
     if isinstance(cause, ObjectSchemaError):
         return detail_from_object_schema_error(cause, location=location)
     if isinstance(cause, RelationshipIntegrityError):
@@ -275,6 +413,28 @@ def detail_from_validation_error(error: Mapping[str, Any]) -> dict[str, str | No
         code=violation_for_validation_type(error.get("type")),
         path=relationship_path_from_location(location),
     )
+
+
+def _safe_input_parts(parts: tuple) -> tuple:
+    safe = []
+    for part in parts[:_MAX_PATH_SEGMENTS]:
+        if isinstance(part, int) and not isinstance(part, bool) and 0 <= part <= 999999:
+            safe.append(part)
+        elif isinstance(part, str) and part in _INPUT_PATH_KEYS:
+            safe.append(part)
+        else:
+            break
+    return tuple(safe)
+
+
+def _input_path(parts: tuple) -> str | None:
+    path = ""
+    for part in parts:
+        if isinstance(part, int):
+            path += f"[{part}]"
+        else:
+            path += ("." if path else "") + part
+    return public_path(path)
 
 
 def relationship_path_from_location(location: object) -> str | None:
