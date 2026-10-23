@@ -79,3 +79,37 @@ in `tests/test_project_review_regressions.py`. Subsequent PR evidence names the
 corrected exact revision and its own checks; R2 is not approval of the fixes.
 
 The full 072bbd9 suite additionally exposed two legacy network-classification CLI assertions still expecting schema 0029. The isolated reproductions confirmed that classification behavior was correct and only the exact schema-head expectation needed updating to 0030. These assertions remain strict rather than dropping the revision check.
+
+
+## Native independent review R3
+
+Exact reviewed revision: `c2f868a23eb96df3bc50219927cdccfb067fb1bd`.
+The native reviewer verified all three R2 corrections and found two additional
+P2 boundaries. The parent reproduced both on SQLite and PostgreSQL: four
+expected failures and six successful adjacent checks before correction.
+
+- A use-case exception for explicitly unaccepted child scope was immediately
+  stale. Exception currentness now permits precisely the recorded unaccepted
+  children, while assessment identity, requirement revision, effective work
+  state and selected child proof versions remain part of its review basis.
+  Later child assessments and edits to already-stale child proofs invalidate
+  the exception and require a renewed review. Ordinary acceptance remains
+  strict and accepted children still undergo recursive currentness checks.
+- Generic record creation could forge `legacy_origin`, bypassing historical
+  ambiguity checks and import-event provenance. Only the dedicated import
+  service may create adoption provenance; the shared write validator also
+  repeats reconciliation under the project lock. Generic API/MCP/UI saves
+  cannot opt into that internal service flag. Existing provenance is immutable.
+
+Permanent regressions include both reproductions, unique-provenance forgery,
+subsequent exception staleness, preserved import-event cardinality and scoped
+transitive blocker behavior. No database migration or version bump is added.
+Exact corrected-revision test and review evidence is recorded on PR #298.
+
+The completed historical 072bbd9 full run had 2412 passed and four failures:
+the two network CLI assertions above plus seed CLI and SQLite backup/restore
+assertions still pinned to 0029. The latter two were also independently
+reproduced against the R3 checkout, showing actual migrated head 0030 versus
+expected 0029. All current-head assertions are updated strictly to 0030;
+intentional downgrade targets, migration history and deterministic release
+host-fake revision fixtures remain unchanged.

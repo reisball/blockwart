@@ -284,6 +284,7 @@ def save_record(
     idempotency_ttl_seconds: int,
     record_expected: str | None = None,
     command_data: dict | None = None,
+    legacy_import: bool = False,
 ) -> ProjectRecordCommandOut:
     authorize_object_command(session, context, object_id=object_id, permission=Permission.WRITE)
     # History provenance follows the same audience binding as project chronology.
@@ -427,7 +428,7 @@ def save_record(
     _validate_parent(session, project, identity, data)
     from blockwart.services.project_management import validate_record
 
-    validate_record(session, context, project, identity, data, row)
+    validate_record(session, context, project, identity, data, row, legacy_import=legacy_import)
     claimed = session.execute(
         update(CatalogObject)
         .where(

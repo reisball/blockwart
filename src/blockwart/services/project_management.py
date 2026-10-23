@@ -70,7 +70,7 @@ def _type(data):
     return data.get("item_type") if data["kind"] == "item" else data["kind"]
 
 
-def validate_record(session, context, project, identity, data, previous):
+def validate_record(session, context, project, identity, data, previous, *, legacy_import=False):
     """Validate the proposed complete graph under the project's write lock."""
     # Explicit baseline and provenance cannot be silently rewritten/erased.
     if previous:
@@ -214,9 +214,16 @@ def validate_record(session, context, project, identity, data, previous):
             raise CommandValidationFailed("Evidence cites unknown criteria")
     origin = data.get("legacy_origin")
     if origin and not previous:
+        if not legacy_import:
+            raise CommandValidationFailed("Legacy provenance requires the import action")
         values = json.loads(project.data_json).get(origin["field"], [])
         if origin["index"] >= len(values) or values[origin["index"]] != origin["text"]:
             raise CommandPreconditionFailed("Legacy entry changed")
+        existing, ambiguous = _legacy_match(
+            rows, _all_events(session, project), origin["field"], values, origin["index"]
+        )
+        if existing or ambiguous:
+            raise CommandConflict("Legacy occurrence changed; review source provenance")
     if origin:
         for key, value in graph.items():
             if key != identity and value.get("legacy_origin") == origin:
@@ -734,6 +741,7 @@ def import_legacy(
         expected_revision=expected_revision,
         idempotency_key=idempotency_key,
         command_data=command,
+        legacy_import=True,
         idempotency_ttl_seconds=idempotency_ttl_seconds,
     )
     if not result.replayed:
@@ -809,6 +817,11 @@ def _review_basis(row, rows, events):
                         None,
                     )
                     basis[key]["assessment_id"] = last
+                    assessment = _last_assessment(events, key, by_id[key].requirement_revision)
+                    basis[key]["assessment_evidence_versions"] = {
+                        item["id"]: by_id[item["id"]].version if item["id"] in by_id else None
+                        for item in (assessment or {}).get("evidence", [])
+                    }
     return basis
 
 
@@ -831,6 +844,13 @@ def _review_current(assessment, row, rows, events, seen=None):
         ):
             continue
         child = by_id[key]
+        # Exceptions permit the recorded unaccepted child scope. Its assessment,
+        # revision and proof versions remain in the basis, so subsequent changes
+        # still require renewed review.
+        if assessment["result"] == "exception" and key in assessment.get(
+            "unaccepted_requirements", []
+        ):
+            continue
         latest = _last_assessment(events, key, child.requirement_revision)
         if (
             not latest

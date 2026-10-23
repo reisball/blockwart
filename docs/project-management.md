@@ -69,7 +69,9 @@ An `assess` command records accepted/exception/rejected/reopened with authentica
 server time, reason, exact evidence snapshots and the dependency/revision basis. Accepted
 requirements need all mandatory criteria proven and mandatory relevant work finished; a use
 case also needs its relevant requirements accepted. An explicit, reasoned exception is a
-separately counted alternative and retains the missing scope. No universal zero-error criterion
+separately counted alternative and retains the missing scope. Excepted child scope is current
+at the moment of that explicit decision; later child assessments, requirement changes and
+changes to selected child proof versions require renewed review. No universal zero-error criterion
 or artificial detection criterion is invented. Informative/background criteria may be optional.
 
 Reopening work, changing relevant requirement content, or editing selected proof marks a prior
@@ -121,7 +123,9 @@ checks happen before replay or mutation. No locks or preconditions were removed.
 | Explicitly adopted list entry | Linked structured record; original list is a source/reference |
 
 `import-legacy` requires field, occurrence index, exact original text and project revision.
-The source is preserved. Mapping is project-instance/field/index/text-bound, deduplicated beyond
+The source is preserved. Adoption provenance is server-controlled: generic record creation
+cannot supply `legacy_origin`; it must use the dedicated import action, which also reconciles
+occurrence identity under the shared project lock. Mapping is project-instance/field/index/text-bound, deduplicated beyond
 idempotency-key expiry and across different request keys. A server event retains source revision,
 list fingerprint, author/time and authority transition. Identical text in two positions remains
 two explicit occurrences. A stale selection cannot import another entry. Non-adopting projects
