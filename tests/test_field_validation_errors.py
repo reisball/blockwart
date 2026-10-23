@@ -325,11 +325,10 @@ def test_api_write_rejects_a_secret_shaped_data_key_without_leaking_it(
 
     assert response["error"]["code"] == "validation_error"
     detail = response["error"]["details"][0]
-    # A secret-shape rejection is not a published ObjectSchemaError, so it
-    # fails closed onto the generic violation without naming the rejected key.
-    assert detail["code"] == GENERIC_SCHEMA_VIOLATION
-    assert detail["path"] is None
-    assert detail["rule"] is None
+    assert detail["code"] == "forbidden_key"
+    assert detail["location"] == "body.data.password"
+    assert detail["path"] == "data.password"
+    assert detail["rule"] == "secret_content"
     assert SECRET_MARKER not in json.dumps(response)
 
 

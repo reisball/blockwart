@@ -394,7 +394,7 @@ def save_record(
     try:
         data = RECORD_ADAPTER.validate_python(data).model_dump(mode="json")
     except ValidationError as exc:
-        raise CommandValidationFailed("Invalid merged record") from exc
+        raise CommandValidationFailed.from_validation("Invalid merged record", exc) from exc
     if row and row.kind != payload.kind:
         raise CommandValidationFailed("Record kind cannot be changed")
     # A hidden existing link must not be silently erased by an authorized projected edit.

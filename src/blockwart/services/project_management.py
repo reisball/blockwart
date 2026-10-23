@@ -444,7 +444,7 @@ def apply_action(
     try:
         record_payload = RECORD_ADAPTER.validate_python(data)
     except ValidationError as exc:
-        raise CommandValidationFailed("Invalid record changes") from exc
+        raise CommandValidationFailed.from_validation("Invalid record changes", exc) from exc
     # save_record reserves/replays the complete action, locks, reauthorizes and
     # validates record-version CAS. Never use a stale merge without CAS.
     result = save_record(

@@ -4,6 +4,7 @@ from pydantic import BaseModel, Field, model_validator
 
 from blockwart.domain.asset_state import AssetHealth, AssetLifecycle, is_asset_kind
 from blockwart.domain.auth import Permission
+from blockwart.domain.input_validation import reject_input
 from blockwart.domain.interfaces import normalize_interface_data
 from blockwart.domain.object_schema import normalize_object_data, validate_object_data
 from blockwart.domain.placement import PlacementState, validate_placement_metadata
@@ -12,7 +13,7 @@ from blockwart.domain.provenance import (
     CatalogProvenanceOut,
     manual_provenance,
 )
-from blockwart.domain.security import find_acl_data_violations, find_secret_violations
+from blockwart.domain.security import input_security_violations
 
 ObjectKind = Literal[
     "host",
@@ -76,21 +77,23 @@ class CatalogObjectIn(BaseModel):
 
     @model_validator(mode="after")
     def reject_secret_values(self) -> "CatalogObjectIn":
-        violations = find_secret_violations(self.model_dump())
-        if violations:
-            raise ValueError("; ".join(violations))
+        violations = list(input_security_violations(self.model_dump()))
         if self.reject_acl_data:
-            acl_violations = find_acl_data_violations(self.data)
-            if acl_violations:
-                raise ValueError("; ".join(acl_violations))
+            violations.extend(input_security_violations(self.data, acl=True, path=("data",)))
+        reject_input(type(self).__name__, violations)
         return self
 
     @model_validator(mode="after")
     def validate_catalog_data(self) -> "CatalogObjectIn":
-        if not is_asset_kind(self.kind) and (
-            self.lifecycle is not None or self.health is not None
-        ):
-            raise ValueError("lifecycle and health are only valid for asset kinds")
+        if not is_asset_kind(self.kind) and (self.lifecycle is not None or self.health is not None):
+            reject_input(
+                type(self).__name__,
+                [
+                    ((field,), "asset_state_kind")
+                    for field in ("lifecycle", "health")
+                    if getattr(self, field) is not None
+                ],
+            )
         if not self.allow_legacy_network_without_category:
             self.data = normalize_object_data(self.kind, self.data)
         validate_object_data(

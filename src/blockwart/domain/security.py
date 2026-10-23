@@ -113,3 +113,19 @@ def redact_secret_values(
     if isinstance(data, str) and looks_like_secret(data):
         return replacement
     return data
+
+
+def input_security_violations(data: Any, *, acl: bool = False, path=()):
+    """Yield structured scanner findings, not strings requiring message parsing."""
+    if isinstance(data, Mapping):
+        for key, value in data.items():
+            child = (*path, str(key))
+            normalized = str(key).casefold() if acl else str(key).lower()
+            if normalized in (FORBIDDEN_ACL_DATA_KEYS if acl else FORBIDDEN_SECRET_KEYS):
+                yield child, "acl_metadata" if acl else "secret_content"
+            yield from input_security_violations(value, acl=acl, path=child)
+    elif isinstance(data, list):
+        for index, value in enumerate(data):
+            yield from input_security_violations(value, acl=acl, path=(*path, index))
+    elif not acl and isinstance(data, str) and looks_like_secret(data):
+        yield path, "secret_content"
