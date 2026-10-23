@@ -3444,6 +3444,35 @@
         "title": "CommentPageOut",
         "type": "object"
       },
+      "CriterionIn": {
+        "additionalProperties": false,
+        "properties": {
+          "description": {
+            "maxLength": 1000,
+            "minLength": 1,
+            "title": "Description",
+            "type": "string"
+          },
+          "id": {
+            "maxLength": 40,
+            "minLength": 1,
+            "pattern": "^[a-zA-Z0-9_-]+$",
+            "title": "Id",
+            "type": "string"
+          },
+          "required": {
+            "default": true,
+            "title": "Required",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "id",
+          "description"
+        ],
+        "title": "CriterionIn",
+        "type": "object"
+      },
       "DirectPrincipalGrantOut": {
         "properties": {
           "created_at": {
@@ -3540,6 +3569,129 @@
         "title": "EffectivePrincipalGrantOut",
         "type": "object"
       },
+      "EvidenceIn": {
+        "additionalProperties": false,
+        "properties": {
+          "criteria": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 50,
+            "minItems": 1,
+            "title": "Criteria",
+            "type": "array"
+          },
+          "limitations": {
+            "default": "",
+            "maxLength": 2000,
+            "title": "Limitations",
+            "type": "string"
+          },
+          "observed_at": {
+            "title": "Observed At",
+            "type": "string"
+          },
+          "outcome": {
+            "enum": [
+              "pass",
+              "fail",
+              "inconclusive"
+            ],
+            "title": "Outcome",
+            "type": "string"
+          },
+          "requirement_id": {
+            "maxLength": 36,
+            "minLength": 1,
+            "title": "Requirement Id",
+            "type": "string"
+          },
+          "requirement_revision": {
+            "minimum": 1.0,
+            "title": "Requirement Revision",
+            "type": "integer"
+          },
+          "scope": {
+            "maxLength": 2000,
+            "minLength": 1,
+            "title": "Scope",
+            "type": "string"
+          },
+          "source_url": {
+            "maxLength": 2048,
+            "title": "Source Url",
+            "type": "string"
+          },
+          "subject": {
+            "maxLength": 1000,
+            "minLength": 1,
+            "title": "Subject",
+            "type": "string"
+          }
+        },
+        "required": [
+          "requirement_id",
+          "requirement_revision",
+          "criteria",
+          "outcome",
+          "subject",
+          "scope",
+          "source_url",
+          "observed_at"
+        ],
+        "title": "EvidenceIn",
+        "type": "object"
+      },
+      "GitHubReferenceIn": {
+        "additionalProperties": false,
+        "properties": {
+          "kind": {
+            "enum": [
+              "issue",
+              "pull",
+              "commit"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "number": {
+            "anyOf": [
+              {
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Number"
+          },
+          "repository_id": {
+            "maxLength": 36,
+            "minLength": 1,
+            "title": "Repository Id",
+            "type": "string"
+          },
+          "sha": {
+            "anyOf": [
+              {
+                "pattern": "^[0-9a-f]{40}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sha"
+          }
+        },
+        "required": [
+          "repository_id",
+          "kind"
+        ],
+        "title": "GitHubReferenceIn",
+        "type": "object"
+      },
       "GlobalAuthorityOut": {
         "properties": {
           "permissions": {
@@ -3624,6 +3776,38 @@
           "build_revision"
         ],
         "title": "HealthOut",
+        "type": "object"
+      },
+      "LegacyOriginIn": {
+        "additionalProperties": false,
+        "properties": {
+          "field": {
+            "enum": [
+              "open_questions",
+              "blockers",
+              "next_actions"
+            ],
+            "title": "Field",
+            "type": "string"
+          },
+          "index": {
+            "minimum": 0.0,
+            "title": "Index",
+            "type": "integer"
+          },
+          "text": {
+            "maxLength": 4000,
+            "minLength": 1,
+            "title": "Text",
+            "type": "string"
+          }
+        },
+        "required": [
+          "field",
+          "index",
+          "text"
+        ],
+        "title": "LegacyOriginIn",
         "type": "object"
       },
       "McpContractMetadataOut": {
@@ -4433,6 +4617,70 @@
         "title": "ProjectAccessIn",
         "type": "object"
       },
+      "ProjectActionIn": {
+        "additionalProperties": false,
+        "description": "Only explicitly supplied fields are changed. Null clears nullable fields only.",
+        "properties": {
+          "action": {
+            "enum": [
+              "patch",
+              "comment",
+              "assess",
+              "reuse_evidence",
+              "sync_github"
+            ],
+            "title": "Action",
+            "type": "string"
+          },
+          "body": {
+            "default": "",
+            "maxLength": 4000,
+            "title": "Body",
+            "type": "string"
+          },
+          "changes": {
+            "additionalProperties": true,
+            "title": "Changes",
+            "type": "object"
+          },
+          "evidence_ids": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 100,
+            "title": "Evidence Ids",
+            "type": "array"
+          },
+          "reason": {
+            "default": "",
+            "maxLength": 2000,
+            "title": "Reason",
+            "type": "string"
+          },
+          "result": {
+            "anyOf": [
+              {
+                "enum": [
+                  "accepted",
+                  "exception",
+                  "rejected",
+                  "reopened"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Result"
+          }
+        },
+        "required": [
+          "action"
+        ],
+        "title": "ProjectActionIn",
+        "type": "object"
+      },
       "ProjectChronologyCommandOut": {
         "properties": {
           "entry": {
@@ -4672,6 +4920,87 @@
         "title": "ProjectCreatorMutationIn",
         "type": "object"
       },
+      "ProjectEventOut": {
+        "properties": {
+          "author_id": {
+            "title": "Author Id",
+            "type": "string"
+          },
+          "author_label": {
+            "title": "Author Label",
+            "type": "string"
+          },
+          "created_at": {
+            "title": "Created At",
+            "type": "string"
+          },
+          "data": {
+            "additionalProperties": true,
+            "title": "Data",
+            "type": "object"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "kind": {
+            "title": "Kind",
+            "type": "string"
+          },
+          "origin": {
+            "title": "Origin",
+            "type": "string"
+          },
+          "record_id": {
+            "title": "Record Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "record_id",
+          "kind",
+          "data",
+          "author_id",
+          "author_label",
+          "origin",
+          "created_at"
+        ],
+        "title": "ProjectEventOut",
+        "type": "object"
+      },
+      "ProjectEventPageOut": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/ProjectEventOut"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Cursor"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "items",
+          "total"
+        ],
+        "title": "ProjectEventPageOut",
+        "type": "object"
+      },
       "ProjectHistoryPageOut": {
         "properties": {
           "items": {
@@ -4707,11 +5036,43 @@
       "ProjectItemIn": {
         "additionalProperties": false,
         "properties": {
+          "archived": {
+            "default": false,
+            "title": "Archived",
+            "type": "boolean"
+          },
           "assignee": {
             "default": "",
             "maxLength": 255,
             "title": "Assignee",
             "type": "string"
+          },
+          "assignee_principal_id": {
+            "anyOf": [
+              {
+                "maxLength": 36,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Assignee Principal Id"
+          },
+          "blocked_reason": {
+            "default": "",
+            "maxLength": 2000,
+            "title": "Blocked Reason",
+            "type": "string"
+          },
+          "criteria": {
+            "items": {
+              "$ref": "#/components/schemas/CriterionIn"
+            },
+            "maxItems": 50,
+            "title": "Criteria",
+            "type": "array"
           },
           "description": {
             "default": "",
@@ -4730,6 +5091,24 @@
             ],
             "title": "Due At"
           },
+          "evidence": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/EvidenceIn"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "github_references": {
+            "items": {
+              "$ref": "#/components/schemas/GitHubReferenceIn"
+            },
+            "maxItems": 50,
+            "title": "Github References",
+            "type": "array"
+          },
           "issue_url": {
             "anyOf": [
               {
@@ -4747,7 +5126,12 @@
             "enum": [
               "task",
               "question",
-              "blocker"
+              "blocker",
+              "use_case",
+              "requirement_group",
+              "requirement",
+              "decision",
+              "evidence"
             ],
             "title": "Item Type",
             "type": "string"
@@ -4756,6 +5140,31 @@
             "const": "item",
             "title": "Kind",
             "type": "string"
+          },
+          "leading_reference": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/GitHubReferenceIn"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "legacy_origin": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/LegacyOriginIn"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "mandatory": {
+            "default": true,
+            "title": "Mandatory",
+            "type": "boolean"
           },
           "parent_id": {
             "anyOf": [
@@ -4770,6 +5179,17 @@
             ],
             "title": "Parent Id"
           },
+          "priority": {
+            "default": "normal",
+            "enum": [
+              "low",
+              "normal",
+              "high",
+              "urgent"
+            ],
+            "title": "Priority",
+            "type": "string"
+          },
           "related_objects": {
             "items": {
               "type": "string"
@@ -4778,15 +5198,43 @@
             "title": "Related Objects",
             "type": "array"
           },
+          "relations": {
+            "items": {
+              "$ref": "#/components/schemas/RelationIn"
+            },
+            "maxItems": 100,
+            "title": "Relations",
+            "type": "array"
+          },
+          "requirement": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RequirementIn"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "status": {
             "default": "open",
             "enum": [
               "open",
               "in_progress",
               "blocked",
-              "done"
+              "done",
+              "deferred"
             ],
             "title": "Status",
+            "type": "string"
+          },
+          "status_authority": {
+            "default": "local",
+            "enum": [
+              "local",
+              "github"
+            ],
+            "title": "Status Authority",
             "type": "string"
           },
           "title": {
@@ -4986,12 +5434,30 @@
             "title": "Kind",
             "type": "string"
           },
+          "lifecycle": {
+            "default": "current",
+            "enum": [
+              "current",
+              "historical",
+              "superseded"
+            ],
+            "title": "Lifecycle",
+            "type": "string"
+          },
           "related_objects": {
             "items": {
               "type": "string"
             },
             "maxItems": 50,
             "title": "Related Objects",
+            "type": "array"
+          },
+          "relations": {
+            "items": {
+              "$ref": "#/components/schemas/RelationIn"
+            },
+            "maxItems": 100,
+            "title": "Relations",
             "type": "array"
           },
           "review_after": {
@@ -5059,6 +5525,11 @@
             ],
             "title": "Completed At"
           },
+          "context": {
+            "additionalProperties": true,
+            "title": "Context",
+            "type": "object"
+          },
           "created_at": {
             "title": "Created At",
             "type": "string"
@@ -5068,6 +5539,24 @@
             "title": "Data",
             "type": "object"
           },
+          "effective_status": {
+            "anyOf": [
+              {
+                "enum": [
+                  "open",
+                  "in_progress",
+                  "blocked",
+                  "done",
+                  "deferred"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Effective Status"
+          },
           "id": {
             "title": "Id",
             "type": "string"
@@ -5076,7 +5565,8 @@
             "enum": [
               "item",
               "page",
-              "access"
+              "access",
+              "repository"
             ],
             "title": "Kind",
             "type": "string"
@@ -5085,6 +5575,21 @@
             "default": false,
             "title": "Overdue",
             "type": "boolean"
+          },
+          "record_etag": {
+            "default": "",
+            "title": "Record Etag",
+            "type": "string"
+          },
+          "requirement_revision": {
+            "default": 1,
+            "title": "Requirement Revision",
+            "type": "integer"
+          },
+          "short_code": {
+            "default": "",
+            "title": "Short Code",
+            "type": "string"
           },
           "updated_at": {
             "title": "Updated At",
@@ -5186,6 +5691,78 @@
           "created_at"
         ],
         "title": "ProjectRecordVersionOut",
+        "type": "object"
+      },
+      "ProjectRepositoryIn": {
+        "additionalProperties": false,
+        "properties": {
+          "archived": {
+            "default": false,
+            "title": "Archived",
+            "type": "boolean"
+          },
+          "credential_reference": {
+            "anyOf": [
+              {
+                "maxLength": 192,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Credential Reference"
+          },
+          "github_id": {
+            "anyOf": [
+              {
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Github Id"
+          },
+          "kind": {
+            "const": "repository",
+            "title": "Kind",
+            "type": "string"
+          },
+          "name": {
+            "maxLength": 100,
+            "minLength": 1,
+            "pattern": "^[a-zA-Z0-9_.-]+$",
+            "title": "Name",
+            "type": "string"
+          },
+          "owner": {
+            "maxLength": 100,
+            "minLength": 1,
+            "pattern": "^[a-zA-Z0-9_.-]+$",
+            "title": "Owner",
+            "type": "string"
+          },
+          "sync_enabled": {
+            "default": false,
+            "title": "Sync Enabled",
+            "type": "boolean"
+          },
+          "title": {
+            "maxLength": 255,
+            "minLength": 1,
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "title",
+          "kind",
+          "owner",
+          "name"
+        ],
+        "title": "ProjectRepositoryIn",
         "type": "object"
       },
       "ProjectSearchHitOut": {
@@ -5351,6 +5928,92 @@
           "checks"
         ],
         "title": "ReadinessOut",
+        "type": "object"
+      },
+      "RelationIn": {
+        "additionalProperties": false,
+        "properties": {
+          "relation": {
+            "enum": [
+              "implements",
+              "applies_to",
+              "depends_on",
+              "precedes",
+              "blocked_by",
+              "supersedes",
+              "informed_by",
+              "documents",
+              "evidence_for"
+            ],
+            "title": "Relation",
+            "type": "string"
+          },
+          "target_id": {
+            "maxLength": 36,
+            "minLength": 1,
+            "title": "Target Id",
+            "type": "string"
+          },
+          "target_version": {
+            "anyOf": [
+              {
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Target Version"
+          }
+        },
+        "required": [
+          "relation",
+          "target_id"
+        ],
+        "title": "RelationIn",
+        "type": "object"
+      },
+      "RequirementIn": {
+        "additionalProperties": false,
+        "properties": {
+          "change_reason": {
+            "default": "",
+            "maxLength": 2000,
+            "title": "Change Reason",
+            "type": "string"
+          },
+          "disposition": {
+            "default": "active",
+            "enum": [
+              "active",
+              "superseded",
+              "deferred",
+              "waived"
+            ],
+            "title": "Disposition",
+            "type": "string"
+          },
+          "original": {
+            "default": "",
+            "maxLength": 4000,
+            "title": "Original",
+            "type": "string"
+          },
+          "source_url": {
+            "anyOf": [
+              {
+                "maxLength": 2048,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Url"
+          }
+        },
+        "title": "RequirementIn",
         "type": "object"
       },
       "Role": {
@@ -21089,6 +21752,385 @@
         ]
       }
     },
+    "/api/v1/projects/{object_id}/workspace/actions/{record_id}": {
+      "post": {
+        "operationId": "run_project_action_api_v1_projects__object_id__workspace_actions__record_id__post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "object_id",
+            "required": true,
+            "schema": {
+              "title": "Object Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "record_id",
+            "required": true,
+            "schema": {
+              "title": "Record Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "if-match",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "If-Match"
+            }
+          },
+          {
+            "in": "header",
+            "name": "idempotency-key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Idempotency-Key"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProjectActionIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProjectRecordCommandOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Authentication required"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Permission denied"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Resource not found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "412": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Precondition failed"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Request validation failed"
+          },
+          "428": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Precondition required"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Internal server error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Service unavailable"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Run Project Action",
+        "tags": [
+          "api-v1-readonly"
+        ]
+      }
+    },
+    "/api/v1/projects/{object_id}/workspace/events/{record_id}": {
+      "get": {
+        "operationId": "get_project_events_api_v1_projects__object_id__workspace_events__record_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "object_id",
+            "required": true,
+            "schema": {
+              "title": "Object Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "record_id",
+            "required": true,
+            "schema": {
+              "title": "Record Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "kind",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Kind"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 2048,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cursor"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProjectEventPageOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Authentication required"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Permission denied"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Resource not found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "412": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Precondition failed"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Request validation failed"
+          },
+          "428": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Precondition required"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Internal server error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Service unavailable"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Project Events",
+        "tags": [
+          "api-v1-readonly"
+        ]
+      }
+    },
     "/api/v1/projects/{object_id}/workspace/history/{record_id}": {
       "get": {
         "operationId": "get_project_record_history_api_v1_projects__object_id__workspace_history__record_id__get",
@@ -21259,6 +22301,468 @@
           }
         ],
         "summary": "Get Project Record History",
+        "tags": [
+          "api-v1-readonly"
+        ]
+      }
+    },
+    "/api/v1/projects/{object_id}/workspace/import-legacy": {
+      "post": {
+        "operationId": "import_project_legacy_api_v1_projects__object_id__workspace_import_legacy_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "object_id",
+            "required": true,
+            "schema": {
+              "title": "Object Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "if-match",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "If-Match"
+            }
+          },
+          {
+            "in": "header",
+            "name": "idempotency-key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Idempotency-Key"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": true,
+                "title": "Payload",
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProjectRecordCommandOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Authentication required"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Permission denied"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Resource not found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "412": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Precondition failed"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Request validation failed"
+          },
+          "428": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Precondition required"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Internal server error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Service unavailable"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Import Project Legacy",
+        "tags": [
+          "api-v1-readonly"
+        ]
+      }
+    },
+    "/api/v1/projects/{object_id}/workspace/overview": {
+      "get": {
+        "operationId": "get_project_overview_api_v1_projects__object_id__workspace_overview_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "object_id",
+            "required": true,
+            "schema": {
+              "title": "Object Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Authentication required"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Permission denied"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Resource not found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "412": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Precondition failed"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Request validation failed"
+          },
+          "428": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Precondition required"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Internal server error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Service unavailable"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Project Overview",
+        "tags": [
+          "api-v1-readonly"
+        ]
+      }
+    },
+    "/api/v1/projects/{object_id}/workspace/record/{record_id}": {
+      "get": {
+        "operationId": "get_project_record_api_v1_projects__object_id__workspace_record__record_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "object_id",
+            "required": true,
+            "schema": {
+              "title": "Object Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "record_id",
+            "required": true,
+            "schema": {
+              "title": "Record Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProjectRecordOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Authentication required"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Permission denied"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Resource not found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "412": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Precondition failed"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Request validation failed"
+          },
+          "428": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Precondition required"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Internal server error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Service unavailable"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Project Record",
         "tags": [
           "api-v1-readonly"
         ]
@@ -21462,7 +22966,8 @@
               "enum": [
                 "item",
                 "page",
-                "access"
+                "access",
+                "repository"
               ],
               "title": "Kind",
               "type": "string"
@@ -21479,7 +22984,8 @@
                     "open",
                     "in_progress",
                     "blocked",
-                    "done"
+                    "done",
+                    "deferred"
                   ],
                   "type": "string"
                 },
@@ -21500,7 +23006,12 @@
                   "enum": [
                     "task",
                     "question",
-                    "blocker"
+                    "blocker",
+                    "use_case",
+                    "requirement_group",
+                    "requirement",
+                    "decision",
+                    "evidence"
                   ],
                   "type": "string"
                 },
@@ -21519,6 +23030,38 @@
               "default": false,
               "title": "Overdue",
               "type": "boolean"
+            }
+          },
+          {
+            "in": "query",
+            "name": "priority",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Priority"
+            }
+          },
+          {
+            "in": "query",
+            "name": "archived",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Archived"
             }
           },
           {
@@ -21693,7 +23236,8 @@
               "enum": [
                 "item",
                 "page",
-                "access"
+                "access",
+                "repository"
               ],
               "title": "Kind",
               "type": "string"
@@ -21740,7 +23284,8 @@
                   "mapping": {
                     "access": "#/components/schemas/ProjectAccessIn",
                     "item": "#/components/schemas/ProjectItemIn",
-                    "page": "#/components/schemas/ProjectPageIn"
+                    "page": "#/components/schemas/ProjectPageIn",
+                    "repository": "#/components/schemas/ProjectRepositoryIn"
                   },
                   "propertyName": "kind"
                 },
@@ -21753,6 +23298,9 @@
                   },
                   {
                     "$ref": "#/components/schemas/ProjectAccessIn"
+                  },
+                  {
+                    "$ref": "#/components/schemas/ProjectRepositoryIn"
                   }
                 ],
                 "title": "Payload"
@@ -21905,7 +23453,8 @@
               "enum": [
                 "item",
                 "page",
-                "access"
+                "access",
+                "repository"
               ],
               "title": "Kind",
               "type": "string"
@@ -21961,7 +23510,8 @@
                   "mapping": {
                     "access": "#/components/schemas/ProjectAccessIn",
                     "item": "#/components/schemas/ProjectItemIn",
-                    "page": "#/components/schemas/ProjectPageIn"
+                    "page": "#/components/schemas/ProjectPageIn",
+                    "repository": "#/components/schemas/ProjectRepositoryIn"
                   },
                   "propertyName": "kind"
                 },
@@ -21974,6 +23524,9 @@
                   },
                   {
                     "$ref": "#/components/schemas/ProjectAccessIn"
+                  },
+                  {
+                    "$ref": "#/components/schemas/ProjectRepositoryIn"
                   }
                 ],
                 "title": "Payload"

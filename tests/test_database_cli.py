@@ -23,20 +23,20 @@ def test_database_cli_upgrades_then_checks_database(tmp_path: Path, capsys) -> N
     database_url = f"sqlite:///{tmp_path / 'cli.sqlite3'}"
 
     assert database_cli.main(["--database-url", database_url, "upgrade"]) == 0
-    assert "database_upgrade_ok revision=20261022_0029" in capsys.readouterr().out
+    assert "database_upgrade_ok revision=20261023_0030" in capsys.readouterr().out
 
     assert database_cli.main(["--database-url", database_url, "check"]) == 0
-    assert "database_check_ok revision=20261022_0029" in capsys.readouterr().out
+    assert "database_check_ok revision=20261023_0030" in capsys.readouterr().out
 
     assert database_cli.main(["--database-url", database_url, "integrity"]) == 0
     assert (
-        "database_integrity_ok revision=20261022_0029 diagnostics=0"
+        "database_integrity_ok revision=20261023_0030 diagnostics=0"
         in capsys.readouterr().out
     )
 
     assert database_cli.main(["--database-url", database_url, "monitoring"]) == 0
     monitoring_output = capsys.readouterr().out
-    assert "database_monitoring_ok revision=20261022_0029 mode=dry-run" in (
+    assert "database_monitoring_ok revision=20261023_0030 mode=dry-run" in (
         monitoring_output
     )
     assert "scanned=0 enabled=0 diagnostics=0" in monitoring_output

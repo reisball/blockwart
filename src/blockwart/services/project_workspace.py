@@ -7,7 +7,7 @@ from dataclasses import replace
 from datetime import UTC, datetime
 from uuid import uuid4
 
-from sqlalchemy import select, update
+from sqlalchemy import or_, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -66,8 +66,15 @@ def read_project(session: Session, access: ReadAccess, object_id: str) -> Catalo
 
 
 def _record(session, project, record_id):
-    row = session.get(ProjectRecord, record_id)
-    if row is None or row.project_instance_id != project.instance_id:
+    row = session.scalar(
+        select(ProjectRecord)
+        .where(
+            ProjectRecord.project_instance_id == project.instance_id,
+            or_(ProjectRecord.id == record_id, ProjectRecord.short_code == record_id),
+        )
+        .execution_options(populate_existing=True)
+    )
+    if row is None:
         raise CommandNotFound("Project record not found")
     return row
 
@@ -99,7 +106,13 @@ def _visible_ref(session, access, value):
 def record_out(session, access, row):
     data = _projected_data(session, access, row.data_json)
     due = data.get("due_at")
+    from blockwart.services.project_management import record_context
+
+    derived = record_context(session, row)
+    effective = derived["external"]["effective_status"]
     return ProjectRecordOut(
+        context=derived,
+        effective_status=effective,
         id=row.id,
         kind=row.kind,
         data=data,
@@ -107,9 +120,10 @@ def record_out(session, access, row):
         created_at=format_rfc3339_utc(row.created_at),
         updated_at=format_rfc3339_utc(row.updated_at),
         completed_at=format_rfc3339_utc(row.completed_at),
-        overdue=bool(
-            due and data.get("status") != "done" and parse_rfc3339_utc(due) < datetime.now(UTC)
-        ),
+        short_code=row.short_code or row.id,
+        record_etag=record_etag(row),
+        requirement_revision=row.requirement_revision,
+        overdue=bool(due and effective != "done" and parse_rfc3339_utc(due) < datetime.now(UTC)),
     )
 
 
@@ -122,6 +136,8 @@ def list_records(
     status: ItemStatus | None = None,
     item_type: ItemType | None = None,
     overdue: bool = False,
+    priority: str | None = None,
+    archived: bool | None = None,
     limit: int = 50,
     cursor: str | None = None,
 ) -> ProjectRecordPageOut:
@@ -136,9 +152,11 @@ def list_records(
     items = [
         item
         for item in items
-        if (status is None or item.data.get("status") == status)
+        if (status is None or item.effective_status == status)
         and (item_type is None or item.data.get("item_type") == item_type)
         and (not overdue or item.overdue)
+        and (priority is None or item.data.get("priority", "normal") == priority)
+        and (archived is None or item.data.get("archived", False) == archived)
     ]
     page = paginate_items(
         items,
@@ -153,6 +171,8 @@ def list_records(
             "status": status,
             "item_type": item_type,
             "overdue": overdue,
+            "priority": priority,
+            "archived": archived,
         },
         cursor=cursor,
         include_total=True,
@@ -234,21 +254,16 @@ def save_record(
     expected_revision: str | None,
     idempotency_key: str,
     idempotency_ttl_seconds: int,
+    record_expected: str | None = None,
+    command_data: dict | None = None,
 ) -> ProjectRecordCommandOut:
     authorize_object_command(session, context, object_id=object_id, permission=Permission.WRITE)
     # History provenance follows the same audience binding as project chronology.
     # Check before idempotency replay as well as before any durable mutation.
-    trusted_origin = (
-        context.principal.service_token_audience is None
-        if context.channel == "ui"
-        else context.channel in {"api", "mcp"}
-        and context.principal.service_token_audience == context.channel
-    )
-    if not trusted_origin:
-        raise CommandAuthorizationDenied(object_id=object_id, permission=Permission.WRITE)
+    require_record_origin(context, object_id)
     access = ReadAccess(context.principal, context.policy)
     project = read_project(session, access, object_id)
-    expected = parse_if_match(expected_revision)
+    expected = parse_if_match(expected_revision) if record_expected is None else None
     data = payload.model_dump(mode="json")
     new_ref = payload.new_credential_reference if isinstance(payload, ProjectAccessIn) else None
     if new_ref:
@@ -260,8 +275,15 @@ def save_record(
         "data": data,
         "new_reference": new_ref.model_dump(mode="json") if new_ref else None,
         "record_id": record_id,
-        "revision": expected,
+        "revision": record_expected or expected,
+        "command": command_data,
     }
+    if command_data is not None:
+        request_data = {
+            "command": command_data,
+            "record_id": record_id,
+            "revision": record_expected or expected,
+        }
     idem, replay = reserve_idempotency_record(
         session,
         context,
@@ -283,17 +305,46 @@ def save_record(
         .where(
             CatalogObject.id == object_id,
             CatalogObject.instance_id == project.instance_id,
-            CatalogObject.revision == expected,
+            *([CatalogObject.revision == expected] if expected is not None else []),
         )
         .with_for_update()
         .execution_options(populate_existing=True)
     )
     if locked is None:
         raise CommandPreconditionFailed("Project revision changed")
+    expected = locked.revision
     context = replace(context, policy=policy_for_principal(session, context.principal.id))
     access = ReadAccess(context.principal, context.policy)
     authorize_object_command(session, context, object_id=object_id, permission=Permission.WRITE)
     row = _record(session, project, record_id) if record_id else None
+    if record_expected is not None and (row is None or record_etag(row) != record_expected):
+        raise CommandPreconditionFailed("Record version changed")
+    if row:
+        # Older full-PUT clients know only the original fields. Preserve newly
+        # introduced PM fields if omitted; original PUT field semantics stay intact.
+        original_fields = {
+            "kind",
+            "title",
+            "description",
+            "item_type",
+            "status",
+            "assignee",
+            "due_at",
+            "parent_id",
+            "issue_url",
+            "related_objects",
+            "body",
+            "review_after",
+            "url",
+            "purpose",
+            "account",
+            "credential_reference",
+            "new_credential_reference",
+        }
+        prior = json.loads(row.data_json)
+        for field in set(type(payload).model_fields) - original_fields - payload.model_fields_set:
+            if field in prior:
+                data[field] = prior[field]
     if row and row.kind != payload.kind:
         raise CommandValidationFailed("Record kind cannot be changed")
     # A hidden existing link must not be silently erased by an authorized projected edit.
@@ -325,6 +376,9 @@ def save_record(
     _validate_refs(session, context, visible_data)
     identity = row.id if row else str(uuid4())
     _validate_parent(session, project, identity, data)
+    from blockwart.services.project_management import validate_record
+
+    validate_record(session, context, project, identity, data, row)
     claimed = session.execute(
         update(CatalogObject)
         .where(
@@ -371,12 +425,20 @@ def save_record(
             kind=payload.kind,
             data_json=serialized,
             version=1,
+            short_code=_next_code(session, project, data),
+            requirement_revision=1,
             created_at=now,
             updated_at=now,
             completed_at=completed_at,
         )
         session.add(row)
     else:
+        old = json.loads(row.data_json)
+        content_fields = ("title", "description", "criteria", "requirement")
+        if data.get("item_type") == "requirement" and any(
+            old.get(key) != data.get(key) for key in content_fields
+        ):
+            row.requirement_revision += 1
         row.data_json = serialized
         row.version += 1
         row.updated_at = now
@@ -506,9 +568,53 @@ def item_summary(session: Session, access: ReadAccess, object_id: str) -> dict:
         .order_by(ProjectRecord.created_at, ProjectRecord.id)
     ).all()
     items = [record_out(session, access, row) for row in rows]
-    pending = [item for item in items if item.data.get("status") != "done"]
+    pending = [
+        item
+        for item in items
+        if item.effective_status != "done" and not item.data.get("archived", False)
+    ]
     return {
         "open": len(pending),
         "overdue": sum(item.overdue for item in pending),
         "items": pending[:5],
     }
+
+
+def record_etag(row):
+    return f'"record-{row.project_instance_id}-{row.id}-v{row.version}"'
+
+
+def _next_code(session, project, data):
+    prefixes = {
+        "use_case": "UC",
+        "requirement_group": "GRP",
+        "requirement": "REQ",
+        "decision": "DEC",
+        "evidence": "EV",
+        "task": "TASK",
+    }
+    prefix = prefixes.get(data.get("item_type"), data["kind"].upper())
+    codes = session.scalars(
+        select(ProjectRecord.short_code).where(
+            ProjectRecord.project_instance_id == project.instance_id
+        )
+    ).all()
+    sequence = (
+        max(
+            (int(c.rsplit("-", 1)[1]) for c in codes if c and c.rsplit("-", 1)[-1].isdigit()),
+            default=0,
+        )
+        + 1
+    )
+    return f"{prefix}-{sequence:05d}"
+
+
+def require_record_origin(context, object_id):
+    trusted_origin = (
+        context.principal.service_token_audience is None
+        if context.channel == "ui"
+        else context.channel in {"api", "mcp"}
+        and context.principal.service_token_audience == context.channel
+    )
+    if not trusted_origin:
+        raise CommandAuthorizationDenied(object_id=object_id, permission=Permission.WRITE)

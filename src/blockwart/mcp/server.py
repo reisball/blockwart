@@ -10,6 +10,7 @@ import re
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any, get_args
+from typing import get_args as _get_type_args
 from urllib.error import HTTPError, URLError
 from urllib.parse import quote, urlencode, urlsplit
 from urllib.request import HTTPRedirectHandler, Request, build_opener
@@ -109,7 +110,13 @@ from blockwart.mcp.manifest import (
     runtime_catalog_evidence,
 )
 from blockwart.schemas.catalog import OBJECT_LABEL_MAX_LENGTH, ObjectKind
-from blockwart.schemas.project_workspace import RECORD_ADAPTER
+from blockwart.schemas.project_workspace import (
+    RECORD_ADAPTER,
+    ItemStatus,
+    ItemType,
+    ProjectActionIn,
+    RecordKind,
+)
 from blockwart.schemas.projects import ProjectChronologyKind
 
 ALL_OBJECT_KINDS: tuple[str, ...] = get_args(ObjectKind)
@@ -1583,6 +1590,96 @@ TOOLS.extend(
 )
 
 
+# New targeted actions deliberately use record ETags, not a stale project ETag.
+# Old full-replacement tools retain their original concurrency semantics.
+for _name, _description, _properties, _required in [
+    (
+        "get_project_record",
+        "Read a project record by UUID or stable short code, with record ETag.",
+        {"record_id": {"type": "string", "minLength": 1}},
+        ["record_id"],
+    ),
+    (
+        "get_project_overview",
+        "Read requirement coverage, explicit exceptions and legacy authority.",
+        {},
+        [],
+    ),
+    (
+        "list_project_record_events",
+        "Page task-specific discussion and assessment events, not chronology.",
+        {
+            "record_id": {"type": "string", "minLength": 1},
+            "kind": {"type": "string"},
+            "limit": {"type": "integer", "minimum": 1, "maximum": 100},
+            "cursor": {"type": "string", "maxLength": 2048},
+        },
+        ["record_id"],
+    ),
+    (
+        "act_on_project_record",
+        (
+            "Patch supplied fields, append comment, assess, review evidence reuse or run "
+            "opt-in GET-only GitHub sync. Requires record ETag; no automatic acceptance."
+        ),
+        {
+            "record_id": {"type": "string", "minLength": 1},
+            "action": ProjectActionIn.model_json_schema(),
+            "if_match": {"type": "string", "minLength": 1},
+            "idempotency_key": {"type": "string", "minLength": 16, "maxLength": 128},
+        },
+        ["record_id", "action", "if_match", "idempotency_key"],
+    ),
+    (
+        "import_project_legacy",
+        (
+            "Explicitly copy one exact legacy entry into structured work, preserving "
+            "its source and deduplicating repeated imports."
+        ),
+        {
+            "field": {"type": "string", "enum": ["open_questions", "blockers", "next_actions"]},
+            "index": {"type": "integer", "minimum": 0},
+            "text": {"type": "string", "minLength": 1, "maxLength": 4000},
+            "if_match": {"type": "string", "pattern": '^"rev-[1-9][0-9]*"$'},
+            "idempotency_key": {"type": "string", "minLength": 16, "maxLength": 128},
+        },
+        ["field", "index", "text", "if_match", "idempotency_key"],
+    ),
+]:
+    _input = {
+        "type": "object",
+        "properties": {"object_id": {"type": "string", "minLength": 1}, **_properties},
+        "required": ["object_id", *_required],
+        "additionalProperties": False,
+    }
+    _action_defs = _input["properties"].get("action", {}).pop("$defs", None)
+    if _action_defs:
+        _input["$defs"] = _action_defs
+    TOOLS.append(
+        {
+            "name": "blockwart." + _name,
+            "description": _description,
+            "inputSchema": _input,
+            "annotations": WRITE_ANNOTATIONS
+            if _name in {"act_on_project_record", "import_project_legacy"}
+            else READ_ONLY_ANNOTATIONS,
+        }
+    )
+
+
+for _tool in TOOLS:
+    if _tool["name"] == "blockwart.list_project_records":
+        _props = _tool["inputSchema"]["properties"]
+        for _field, _literal in [
+            ("kind", RecordKind),
+            ("status", ItemStatus),
+            ("item_type", ItemType),
+        ]:
+            _props[_field]["enum"] = list(_get_type_args(_literal))
+        _props["priority"] = {"type": "string", "enum": ["low", "normal", "high", "urgent"]}
+        _props["archived"] = {"type": "boolean"}
+
+
 for _tool in TOOLS:
     if _tool["name"] == "blockwart.save_project_record":
         _record_schema = _tool["inputSchema"]["properties"]["record"]
@@ -2205,6 +2302,45 @@ def call_tool(
                 if key not in {"object_id", "record_id", "kind"}
             },
         )
+    elif name in {
+        "blockwart.get_project_record",
+        "blockwart.get_project_overview",
+        "blockwart.list_project_record_events",
+        "blockwart.act_on_project_record",
+        "blockwart.import_project_legacy",
+    }:
+        root = f"/api/v1/projects/{quote(args['object_id'], safe='')}/workspace"
+        record_id = quote(args.get("record_id", ""), safe="")
+        if name == "blockwart.get_project_record":
+            payload = fetch(f"{root}/record/{record_id}", {})
+        elif name == "blockwart.get_project_overview":
+            payload = fetch(f"{root}/overview", {})
+        elif name == "blockwart.list_project_record_events":
+            payload = fetch(
+                f"{root}/events/{record_id}",
+                {k: v for k, v in args.items() if k in {"kind", "limit", "cursor"}},
+            )
+        else:
+            body = (
+                args["action"]
+                if name == "blockwart.act_on_project_record"
+                else {k: args[k] for k in ("field", "index", "text")}
+            )
+            path = (
+                f"actions/{record_id}"
+                if name == "blockwart.act_on_project_record"
+                else "import-legacy"
+            )
+            payload = request(
+                "POST",
+                f"{root}/{path}",
+                body,
+                {
+                    "If-Match": args["if_match"],
+                    "Idempotency-Key": args["idempotency_key"],
+                    "X-Blockwart-Channel": "mcp",
+                },
+            )
     elif name == "blockwart.save_project_record":
         root = f"/api/v1/projects/{quote(args['object_id'], safe='')}/workspace"
         record = args["record"]
