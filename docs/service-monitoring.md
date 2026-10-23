@@ -185,3 +185,43 @@ constraints for Gatus and adds nullable `last_received_at`; it refuses to
 downgrade while Gatus rows or pull-source errors remain. Before a
 live rollback, stop Blockwart and restore the verified pre-upgrade database with
 the matching previous image according to the deployment recovery contract.
+
+## Target-bound evidence (Refs #269)
+
+Observations and poll leases carry a SHA-256 fingerprint of the effective probe
+URL, or the Gatus source/group/endpoint and deployment-bound status URL. Intervals,
+labels and credential rotation are excluded. The digest and private source URL
+are never added to public projections. Migration `20261022_0029` adds nullable
+columns without rewriting old evidence; unbound old evidence remains pending until
+a matching check is acquired, and its schedule is reconciled with initial jitter.
+
+A projection uses only evidence matching the current effective target. A target
+change resets an idle lease to the initial schedule; an already running old check
+keeps its lease until completion/expiry, but cannot publish success for the new
+target. Every scheduler request captures its fingerprint before network I/O and
+passes that same value to ingestion. Ingestion refreshes/locks the catalog row and
+rejects a different current target. Different targets do not share their evidence
+or success timestamps even if upstream timestamps run backwards between them.
+
+`record_service_observation(..., target_fingerprint=...)` is required for delayed
+or asynchronous adapters. Omitting it is a trusted synchronous injection seam
+that binds to the current configuration, not a safe way to submit queued results.
+Polling and invalidation update only monitoring tables, never catalog revisions,
+business timestamps or audit events. Deploying this additive schema requires the
+usual separate rollout decision; this change does not modify live configuration.
+
+### Atomic target validation and reconciliation
+
+Observation ingestion revalidates the catalog instance and revision inside its
+`INSERT ... SELECT` statement. SQLite does not implement `SELECT FOR UPDATE`;
+Python-side validation alone could therefore let late target-A ingestion replace
+already committed target-B evidence. If the validated catalog snapshot changed,
+the statement writes nothing and ingestion returns `None`. A concurrent label or
+interval edit may conservatively discard one in-flight result; the next check
+recovers normally without changing the catalog revision or audit trail.
+
+Lease rebinding is a conditional database update, guarded by the previously read
+provider/target and an expiry check evaluated at write time. A stale reconciler
+cannot clear a live claim committed by another worker after candidate selection.
+Deterministic two-session regressions cover late SQLite ingestion and live-lease
+preservation on both SQLite and PostgreSQL (`test_monitoring_target_races.py`).

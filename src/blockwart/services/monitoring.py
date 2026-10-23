@@ -24,10 +24,11 @@ from collections.abc import Mapping, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
+from hashlib import sha256
 from types import MappingProxyType
 from typing import Any
 
-from sqlalchemy import case, delete, select, update
+from sqlalchemy import case, delete, exists, literal, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.orm import Session, sessionmaker
@@ -130,6 +131,7 @@ class DueCheck:
     object_id: str
     object_instance_id: str
     provider: str
+    target_fingerprint: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -254,6 +256,30 @@ def load_observation_index(
     }
 
 
+def monitoring_target_fingerprint(
+    data: Mapping[str, Any], *, object_id: str, provider: str,
+    settings: MonitoringSettings,
+) -> str:
+    """Bind evidence to the effective probe or mapping, not interval/labels.
+
+    Deployment-bound Gatus source URLs are hashed, never projected or logged.
+    Credentials are intentionally excluded so rotation does not erase evidence.
+    """
+    if provider == "gatus":
+        resolution = read_gatus_mapping(data, object_id=object_id)
+        mapping = resolution.mapping
+        source = settings.gatus_sources.get(mapping.source) if mapping else None
+        target = ([mapping.source, mapping.group, mapping.endpoint,
+                   source.url if source else None] if mapping else None)
+        diagnostic = resolution.diagnostic
+    else:
+        resolution = resolve_monitoring_target(data, object_id=object_id)
+        target = resolution.target.url if resolution.target else None
+        diagnostic = resolution.diagnostic
+    material = json.dumps([provider, target, diagnostic], separators=(",", ":"))
+    return sha256(material.encode()).hexdigest()
+
+
 def monitoring_projection(
     *,
     kind: str,
@@ -278,6 +304,10 @@ def monitoring_projection(
         if config.valid and config.provider is not None
         else None
     )
+    if record is not None and record.target_fingerprint != monitoring_target_fingerprint(
+        data, object_id=object_id, provider=config.provider, settings=resolved,
+    ):
+        record = None
     return monitoring_view(
         data=data,
         object_id=object_id,
@@ -298,6 +328,7 @@ def record_service_observation(
     observation: MonitoringObservation,
     now: datetime | None = None,
     settings: MonitoringSettings | None = None,
+    target_fingerprint: str | None = None,
 ) -> MonitoringRecord | None:
     """Ingest one canonical observation for a service.
 
@@ -314,7 +345,10 @@ def record_service_observation(
 
     resolved = settings or MonitoringSettings()
     moment = _aware(now or datetime.now(UTC))
-    catalog_object = session.get(CatalogObject, object_id)
+    catalog_object = session.scalar(
+        select(CatalogObject).where(CatalogObject.id == object_id)
+        .execution_options(populate_existing=True).with_for_update()
+    )
     if (
         catalog_object is None
         or catalog_object.kind != "service"
@@ -326,6 +360,12 @@ def record_service_observation(
         default_interval_seconds=resolved.default_interval_seconds,
     )
     if not config.valid or config.interval_seconds is None:
+        return None
+    current_target = monitoring_target_fingerprint(
+        _object_data(catalog_object), object_id=object_id,
+        provider=observation.provider, settings=resolved,
+    )
+    if target_fingerprint is not None and target_fingerprint != current_target:
         return None
     checked_at = _aware(observation.checked_at)
     received_at = _aware(observation.acquired_at)
@@ -344,6 +384,7 @@ def record_service_observation(
     }
     values = {
         **identity,
+        "target_fingerprint": current_target,
         "state": observation.state,
         "http_status": observation.http_status,
         "latency_ms": observation.latency_ms,
@@ -368,15 +409,33 @@ def record_service_observation(
     # success. Acquisition columns move whenever this deployment acquired more
     # recently, so re-reading an old upstream snapshot still reschedules the
     # next check instead of leaving the service permanently due.
-    newer_evidence = table.c.last_checked_at.is_(None) | (
+    changed_target = table.c.target_fingerprint.is_(None) | (
+        table.c.target_fingerprint != excluded.target_fingerprint
+    )
+    newer_evidence = changed_target | table.c.last_checked_at.is_(None) | (
         excluded.last_checked_at > table.c.last_checked_at
     )
-    newer_acquisition = table.c.last_received_at.is_(None) | (
+    newer_acquisition = changed_target | table.c.last_received_at.is_(None) | (
         excluded.last_received_at > table.c.last_received_at
     )
-    statement = insert.values(**values).on_conflict_do_update(
+    # SQLite ignores FOR UPDATE. Validate the catalog snapshot again inside
+    # the write statement so a target edit between validation and INSERT cannot
+    # replace the new target's evidence. This writes only observation storage;
+    # it never locks by mutating the catalog or advancing its revision.
+    live_snapshot = exists(select(CatalogObject.id).where(
+        CatalogObject.id == object_id,
+        CatalogObject.instance_id == object_instance_id,
+        CatalogObject.revision == catalog_object.revision,
+        CatalogObject.kind == "service",
+    ))
+    statement = insert.from_select(
+        list(values),
+        select(*[literal(value, type_=table.c[key].type) for key, value in values.items()])
+        .where(live_snapshot),
+    ).on_conflict_do_update(
         index_elements=["object_id", "object_instance_id", "provider"],
         set_={
+            "target_fingerprint": excluded.target_fingerprint,
             "state": case((newer_evidence, excluded.state), else_=table.c.state),
             "http_status": case(
                 (newer_evidence, excluded.http_status), else_=table.c.http_status
@@ -396,6 +455,7 @@ def record_service_observation(
                     newer_evidence & (excluded.state == "healthy"),
                     excluded.last_checked_at,
                 ),
+                (changed_target, None),
                 else_=table.c.last_success_at,
             ),
             "last_received_at": case(
@@ -411,13 +471,14 @@ def record_service_observation(
             ),
         },
     )
-    session.execute(statement)
+    if session.execute(statement).rowcount != 1:
+        return None
     row = session.scalars(
         select(ServiceObservation).where(
             ServiceObservation.object_id == object_id,
             ServiceObservation.object_instance_id == object_instance_id,
             ServiceObservation.provider == observation.provider,
-        )
+        ).execution_options(populate_existing=True)
     ).one()
     return _record(row)
 
@@ -439,7 +500,7 @@ def synchronize_check_schedule(
     moment = _aware(now or datetime.now(UTC))
     drivers = set(polling_providers())
 
-    wanted: dict[tuple[str, str], tuple[str, int]] = {}
+    wanted: dict[tuple[str, str], tuple[str, int, str]] = {}
     services = session.scalars(
         select(CatalogObject).where(CatalogObject.kind == "service")
     ).all()
@@ -459,6 +520,8 @@ def synchronize_check_schedule(
         wanted[(catalog_object.id, catalog_object.instance_id)] = (
             config.provider,
             config.interval_seconds,
+            monitoring_target_fingerprint(_object_data(catalog_object),
+                object_id=catalog_object.id, provider=config.provider, settings=resolved),
         )
 
     observations = {
@@ -475,26 +538,46 @@ def synchronize_check_schedule(
             if row.lease_expires_at is None or row.lease_expires_at <= _naive(moment):
                 session.delete(row)
             continue
-        selected_provider, interval_seconds = wanted[key]
-        if row.provider != selected_provider and (
-            row.lease_expires_at is None or row.lease_expires_at <= _naive(moment)
-        ):
-            row.provider = selected_provider
-            row.due_at = _naive(
-                _initial_due(
-                    moment,
-                    object_id=row.object_id,
-                    object_instance_id=row.object_instance_id,
-                    provider=selected_provider,
-                    jitter_seconds=resolved.jitter_seconds,
+        selected_provider, interval_seconds, selected_target = wanted[key]
+        if row.provider != selected_provider or row.target_fingerprint != selected_target:
+            # A SELECT is only a candidate snapshot: another reconciler may
+            # have rebound and claimed this lease before our first write.
+            # Re-evaluate expiry in the UPDATE, just like claim_due_checks.
+            result = session.execute(
+                update(ServiceCheckLease)
+                .where(
+                    ServiceCheckLease.id == row.id,
+                    (ServiceCheckLease.lease_expires_at.is_(None))
+                    | (ServiceCheckLease.lease_expires_at <= _naive(moment)),
+                    ServiceCheckLease.provider == row.provider,
+                    ServiceCheckLease.target_fingerprint.is_not_distinct_from(
+                        row.target_fingerprint
+                    ),
                 )
+                .values(
+                    provider=selected_provider,
+                    target_fingerprint=selected_target,
+                    due_at=_naive(_initial_due(
+                        moment,
+                        object_id=row.object_id,
+                        object_instance_id=row.object_instance_id,
+                        provider=selected_provider,
+                        jitter_seconds=resolved.jitter_seconds,
+                    )),
+                    lease_owner=None,
+                    lease_expires_at=None,
+                    updated_at=_naive(moment),
+                )
+                .execution_options(synchronize_session=False)
             )
-            row.lease_owner = None
-            row.lease_expires_at = None
-            row.updated_at = _naive(moment)
-        if row.provider != selected_provider:
+            if result.rowcount != 1:
+                continue
+            session.refresh(row)
+        if row.provider != selected_provider or row.target_fingerprint != selected_target:
             continue
         observation = observations.get((*key, selected_provider))
+        if observation is not None and observation.target_fingerprint != selected_target:
+            observation = None
         acquired_at = _acquired_at(observation)
         if acquired_at is None:
             continue
@@ -514,10 +597,12 @@ def synchronize_check_schedule(
             row.due_at = desired_naive
             row.updated_at = _naive(moment)
     created = 0
-    for (object_id, instance_id), (provider, interval_seconds) in wanted.items():
+    for (object_id, instance_id), (provider, interval_seconds, selected_target) in wanted.items():
         if (object_id, instance_id) in existing:
             continue
         observation = observations.get((object_id, instance_id, provider))
+        if observation is not None and observation.target_fingerprint != selected_target:
+            observation = None
         acquired_at = _acquired_at(observation)
         due_at = (
             _next_due(
@@ -544,6 +629,7 @@ def synchronize_check_schedule(
             "object_id": object_id,
             "object_instance_id": instance_id,
             "provider": provider,
+            "target_fingerprint": selected_target,
             "due_at": _naive(due_at),
             "created_at": _naive(moment),
             "updated_at": _naive(moment),
@@ -617,6 +703,7 @@ def claim_due_checks(
                 object_id=candidate.object_id,
                 object_instance_id=candidate.object_instance_id,
                 provider=candidate.provider,
+                target_fingerprint=candidate.target_fingerprint,
             )
         )
     session.commit()
@@ -699,6 +786,9 @@ def run_due_service_checks(
             not config.valid
             or not config.enabled
             or config.provider != claim.provider
+            or claim.target_fingerprint != monitoring_target_fingerprint(
+                data, object_id=claim.object_id, provider=claim.provider, settings=settings
+            )
             or config.interval_seconds is None
         ):
             _delete_claimed_lease(session, claim.lease_id, lease_owner)
@@ -708,6 +798,7 @@ def run_due_service_checks(
                 ServiceObservation.object_id == claim.object_id,
                 ServiceObservation.object_instance_id == claim.object_instance_id,
                 ServiceObservation.provider == claim.provider,
+                ServiceObservation.target_fingerprint == claim.target_fingerprint,
             )
         )
         current_acquired_at = _acquired_at(current_observation)
@@ -742,6 +833,7 @@ def run_due_service_checks(
                 session,
                 object_id=claim.object_id,
                 object_instance_id=claim.object_instance_id,
+                target_fingerprint=claim.target_fingerprint,
                 observation=MonitoringObservation(
                     provider=claim.provider,
                     state="check_error",
@@ -795,6 +887,7 @@ def run_due_service_checks(
                 object_id=claim.object_id,
                 object_instance_id=claim.object_instance_id,
                 observation=observation,
+                target_fingerprint=claim.target_fingerprint,
                 now=observation.acquired_at,
                 settings=settings,
             )
@@ -944,6 +1037,7 @@ def _record(row: ServiceObservation) -> MonitoringRecord:
         next_due_at=_aware_or_none(row.next_due_at),
         object_instance_id=row.object_instance_id,
         last_received_at=_aware_or_none(row.last_received_at),
+        target_fingerprint=row.target_fingerprint,
     )
 
 
@@ -986,6 +1080,8 @@ def _check_request(
         return (
             ProviderCheckRequest(
                 object_id=object_id,
+                target_fingerprint=monitoring_target_fingerprint(
+                    data, object_id=object_id, provider=provider, settings=settings),
                 target=None,
                 diagnostic=None,
                 limits=settings.limits,
@@ -1003,6 +1099,8 @@ def _check_request(
     return (
         ProviderCheckRequest(
             object_id=object_id,
+            target_fingerprint=monitoring_target_fingerprint(
+                data, object_id=object_id, provider=provider, settings=settings),
             target=resolution.target,
             diagnostic=resolution.diagnostic,
             limits=settings.limits,

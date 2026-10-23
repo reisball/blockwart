@@ -37,6 +37,9 @@ atomic SQL boundary, raw SQL deletion, repeated revisions and rollback. Both
 SQLite and PostgreSQL are covered. Ordinary same-instance revision/no-op semantics
 are unchanged. No deployment or issue closure is implied by this change.
 
+Monitoring's target binding is separate from the catalog revision clock. A
+monitoring observation does not claim or advance an object's business revision.
+
 ## UPDATE enforcement and delayed imports
 
 Every representation-changing database UPDATE now retains its high-water mark,
