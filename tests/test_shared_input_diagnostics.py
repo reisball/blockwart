@@ -299,8 +299,9 @@ def test_actual_project_create_and_patch_api_keep_diagnostics(write_client, root
     from test_project_workspace import _create_project
 
     _create_project(write_client, root_state["owner_token"], "work")
-    invalid = _save(write_client, root_state, {
-        "kind": "item", "title": "Diagnostic", "due_at": "not-a-date"})
+    invalid = _save(
+        write_client, root_state, {"kind": "item", "title": "Diagnostic", "due_at": "not-a-date"}
+    )
     assert invalid.status_code == 422
     detail = invalid.json()["error"]["details"][0]
     assert detail["rule"] == "timestamp_rfc3339" and detail["path"] == "due_at"
@@ -310,8 +311,11 @@ def test_actual_project_create_and_patch_api_keep_diagnostics(write_client, root
     record = created.json()["record"]
     response = write_client.post(
         f"/api/v1/projects/work/workspace/actions/{record['id']}",
-        headers={"Authorization": "Bearer " + root_state["owner_token"],
-                 "If-Match": record["record_etag"], "Idempotency-Key": "diagnostic-patch-299-key"},
+        headers={
+            "Authorization": "Bearer " + root_state["owner_token"],
+            "If-Match": record["record_etag"],
+            "Idempotency-Key": "diagnostic-patch-299-key",
+        },
         json={"action": "patch", "changes": {"due_at": "not-a-date"}},
     )
     assert response.status_code == 422, response.text
@@ -326,10 +330,109 @@ def test_actual_project_create_and_patch_api_keep_diagnostics(write_client, root
 
 
 def test_placement_reason_type_is_not_reported_as_string_length(probe):
-    response = probe.post("/api/object", json={**BASE, "data": {
-        "placement": {"state": "unassigned", "reason": 42}}})
+    response = probe.post(
+        "/api/object", json={**BASE, "data": {"placement": {"state": "unassigned", "reason": 42}}}
+    )
     assert response.status_code == 422
     detail = response.json()["error"]["details"][0]
     assert detail["code"] == "type_mismatch"
     assert detail["rule"] == "placement_reason_type"
     assert detail["path"] == "data.placement.reason"
+
+
+@pytest.mark.parametrize(
+    "key", ["secret", "SECRET", "ſecret", "ſession", "password", "Permissions", "acl"]
+)
+@pytest.mark.parametrize("acl", [False, True])
+def test_structured_scanner_preserves_legacy_acceptance(key, acl):
+    from blockwart.domain.security import (
+        find_acl_data_violations,
+        find_secret_violations,
+        input_security_violations,
+    )
+
+    data = {"extensions": [{key: "ordinary metadata"}]}
+    legacy = find_acl_data_violations(data) if acl else find_secret_violations(data)
+    assert bool(list(input_security_violations(data, acl=acl))) == bool(legacy)
+
+
+def test_unicode_non_secret_key_remains_accepted(probe):
+    response = probe.post(
+        "/api/object", json={**BASE, "data": {"extensions": {"ſecret": "ordinary metadata"}}}
+    )
+    assert response.status_code == 200
+
+
+@pytest.mark.parametrize("marker", ["ghp_" + "B" * 24, "unpublished-patch-field", "bad.key"])
+def test_project_patch_extra_keys_never_reach_api_or_mcp(write_client, root_state, marker):  # noqa: F811
+    from test_project_records import _save
+    from test_project_workspace import _create_project
+
+    _create_project(write_client, root_state["owner_token"], "work")
+    record = _save(write_client, root_state, {"kind": "item", "title": "Diagnostic"}).json()[
+        "record"
+    ]
+    response = write_client.post(
+        f"/api/v1/projects/work/workspace/actions/{record['id']}",
+        headers={
+            "Authorization": "Bearer " + root_state["owner_token"],
+            "If-Match": record["record_etag"],
+            "Idempotency-Key": "diagnostic-patch-extra-299",
+        },
+        json={"action": "patch", "changes": {marker: "ordinary metadata"}},
+    )
+    assert response.status_code == 422
+    assert marker not in response.text
+    details = response.json()["error"]["details"]
+    assert details == mcp_server._upstream_details(response.json()["error"])
+    assert details[0]["location"] == "body.item"
+    assert details[0]["code"] == "field_not_allowed"
+
+
+def test_attached_device_timestamp_has_canonical_provenance_path(write_client, owner_headers):  # noqa: F811
+    response = write_client.post(
+        "/api/v1/objects/existing-object/attached-devices",
+        headers=owner_headers,
+        json={
+            "device": {
+                "id": "diagnostic-device",
+                "kind": "device",
+                "label": "Diagnostic",
+                "provenance": {"observed_at": "not-a-date"},
+            }
+        },
+    )
+    assert response.status_code == 422
+    detail = response.json()["error"]["details"][0]
+    assert detail["location"] == "body.device.provenance.observed_at"
+    assert detail["path"] == "provenance.observed_at"
+    assert detail["rule"] == "timestamp_rfc3339"
+
+
+def test_nested_credential_timestamp_keeps_domain_path(probe):
+    response = probe.post(
+        "/api/access",
+        json={
+            "kind": "access",
+            "title": "Diagnostic",
+            "new_credential_reference": {
+                "id": "diagnostic-ref",
+                "kind": "credential_reference",
+                "label": "Diagnostic",
+                "provenance": {"verified_at": "not-a-date"},
+            },
+        },
+    )
+    detail = response.json()["error"]["details"][0]
+    assert detail["location"] == "body.new_credential_reference.provenance.verified_at"
+    assert detail["path"] == "provenance.verified_at"
+
+
+def test_unknown_create_key_is_also_sanitized(probe):
+    marker = "ghp_" + "C" * 24
+    response = probe.post(
+        "/api/item", json={"kind": "item", "title": "Diagnostic", marker: "ordinary"}
+    )
+    assert response.status_code == 422
+    assert marker not in response.text
+    assert response.json()["error"]["details"][0]["location"] == "body"

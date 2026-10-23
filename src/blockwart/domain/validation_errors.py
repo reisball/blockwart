@@ -110,8 +110,30 @@ INPUT_PATH_ROOTS = (
 _INPUT_PATH_KEYS = frozenset(
     {
         *INPUT_PATH_ROOTS,
+        *RELATIONSHIP_PATH_ROOTS,
+        "principal_type",
+        "login",
+        "display_name",
+        "platform_role",
+        "active",
+        "object_id",
+        "role",
+        "catalog_role",
+        "current_admin_password",
+        "project_creator",
+        "new_password",
+        "audience",
+        "expires_in_seconds",
+        "projection",
+        "fields",
+        "include_recent_comments",
+        "object_ids",
+        "new_label",
+        "access_method_index",
+        "principal_id",
         "data",
         "payload",
+        "device",
         "object",
         "record",
         "item",
@@ -385,7 +407,11 @@ def detail_from_validation_error(error: Mapping[str, Any]) -> dict[str, str | No
     violation; every other validation type is mapped onto the published
     violation catalog without copying its message, context, or input.
     """
-    location = ".".join(str(part) for part in error.get("loc", ())) or "body"
+    raw_location = tuple(error.get("loc", ()))
+    safe_location = (
+        _safe_input_parts(raw_location) if raw_location[:1] == ("body",) else raw_location
+    )
+    location = ".".join(str(part) for part in safe_location) or "body"
     cause = error.get("ctx", {}).get("error") if isinstance(error.get("ctx"), Mapping) else None
     if isinstance(cause, InputRuleError) and cause.rule in INPUT_RULES:
         # Pydantic has already prepended enclosing model/array locations.
@@ -394,7 +420,16 @@ def detail_from_validation_error(error: Mapping[str, Any]) -> dict[str, str | No
         relative = _safe_input_parts(cause.path) if cause.path else ()
         if not cause.path:
             relative = safe_parts[1:] if safe_parts[:1] == ("body",) else safe_parts
-            while relative and relative[0] in {"item", "page", "access", "repository"}:
+            while relative and relative[0] in {
+                "item",
+                "page",
+                "access",
+                "repository",
+                "device",
+                "object",
+                "payload",
+                "record",
+            }:
                 relative = relative[1:]
         # A model-wide semantic constraint deliberately names its scope rather
         # than falsely attributing a multi-field rule to one particular field.

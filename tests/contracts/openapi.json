@@ -33462,7 +33462,7 @@
       "generic_violation": "invalid_value",
       "input_rules": [
         {
-          "description": "Access control belongs to the object grant API.",
+          "description": "Catalog access control belongs to the object grant API.",
           "rule": "acl_metadata",
           "violation": "field_not_allowed"
         },
@@ -33472,7 +33472,7 @@
           "violation": "rule_violation"
         },
         {
-          "description": "Lifecycle and health require an asset kind.",
+          "description": "Lifecycle and health are only valid for asset kinds.",
           "rule": "asset_state_kind",
           "violation": "field_not_allowed"
         },
@@ -33517,7 +33517,7 @@
           "violation": "field_not_allowed"
         },
         {
-          "description": "Placement metadata requires a system or service.",
+          "description": "Placement metadata is supported only for system and service objects.",
           "rule": "placement_kind",
           "violation": "field_not_allowed"
         },
@@ -33552,7 +33552,7 @@
           "violation": "invalid_format"
         },
         {
-          "description": "Secret-shaped keys or raw secret values are forbidden.",
+          "description": "A forbidden secret-shaped key or raw secret value was found.",
           "rule": "secret_content",
           "violation": "forbidden_key"
         },

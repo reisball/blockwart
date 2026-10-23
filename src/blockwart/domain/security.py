@@ -120,7 +120,8 @@ def input_security_violations(data: Any, *, acl: bool = False, path=()):
     if isinstance(data, Mapping):
         for key, value in data.items():
             child = (*path, str(key))
-            if str(key).casefold() in (FORBIDDEN_ACL_DATA_KEYS if acl else FORBIDDEN_SECRET_KEYS):
+            normalized = str(key).casefold() if acl else str(key).lower()
+            if normalized in (FORBIDDEN_ACL_DATA_KEYS if acl else FORBIDDEN_SECRET_KEYS):
                 yield child, "acl_metadata" if acl else "secret_content"
             yield from input_security_violations(value, acl=acl, path=child)
     elif isinstance(data, list):

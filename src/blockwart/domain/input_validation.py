@@ -12,11 +12,20 @@ INPUT_RULES = MappingProxyType(
     {
         "secret_content": (
             "forbidden_key",
-            "Secret-shaped keys or raw secret values are forbidden.",
+            "A forbidden secret-shaped key or raw secret value was found.",
         ),
-        "acl_metadata": ("field_not_allowed", "Access control belongs to the object grant API."),
-        "asset_state_kind": ("field_not_allowed", "Lifecycle and health require an asset kind."),
-        "placement_kind": ("field_not_allowed", "Placement metadata requires a system or service."),
+        "acl_metadata": (
+            "field_not_allowed",
+            "Catalog access control belongs to the object grant API.",
+        ),
+        "asset_state_kind": (
+            "field_not_allowed",
+            "Lifecycle and health are only valid for asset kinds.",
+        ),
+        "placement_kind": (
+            "field_not_allowed",
+            "Placement metadata is supported only for system and service objects.",
+        ),
         "placement_object": ("type_mismatch", "Placement metadata must be an object."),
         "placement_state": ("value_not_allowed", "Explicit placement state must be unassigned."),
         "placement_reason": ("value_too_short", "Placement reason must be a non-empty string."),
@@ -70,7 +79,7 @@ class InputRuleError(ValueError):
     def __init__(self, rule: str, path: tuple[str | int, ...] = ()) -> None:
         self.rule = rule
         self.path = path
-        super().__init__("Input validation failed")
+        super().__init__(INPUT_RULES.get(rule, (None, "Input validation failed"))[1])
 
 
 def reject_input(title: str, violations: list[tuple[tuple[str | int, ...], str]]) -> None:

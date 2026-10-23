@@ -4,7 +4,7 @@ import json
 from datetime import UTC, datetime
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field, ValidationError, field_validator
+from pydantic import BaseModel, Field, ValidationError, ValidationInfo, field_validator
 
 from blockwart.domain.input_validation import InputRuleError
 from blockwart.domain.security import find_secret_violations
@@ -38,13 +38,15 @@ class CatalogProvenance(BaseModel):
 
     @field_validator("observed_at", "verified_at", "stale_after")
     @classmethod
-    def normalize_timestamp(cls, value: str | None) -> str | None:
+    def normalize_timestamp(cls, value: str | None, info: ValidationInfo) -> str | None:
         if value is None:
             return None
         try:
             return normalize_rfc3339_utc(value)
         except ValueError as exc:
-            raise InputRuleError("timestamp_rfc3339") from exc
+            raise InputRuleError(
+                "timestamp_rfc3339", ("provenance", info.field_name) if info.field_name else ()
+            ) from exc
 
 
 class CatalogProvenanceOut(CatalogProvenance):

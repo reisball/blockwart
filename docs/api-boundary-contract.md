@@ -71,6 +71,11 @@ Recursive security scans retain distinct findings, deduplicate and sort the
 public results, and return at most 20 details. Scanner paths use only published
 field vocabulary; unknown or unsafe dictionary-key segments truncate to their
 nearest safe scope, even when the arbitrary key resembles a valid identifier.
+All Pydantic body locations, including unknown extra keys in project patches,
+use this closed field vocabulary; extra field names are not echoed. Nested
+command wrappers keep their request location without replacing the canonical
+provenance field path. Secret scanning retains its original lowercase key
+normalization (ACL scanning retains casefold), including Unicode controls.
 Existing generic fallback behavior remains for genuinely unknown errors.
 Validation acceptance, roles, grants and ownership are unchanged.
 
