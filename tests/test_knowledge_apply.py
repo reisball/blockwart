@@ -370,7 +370,9 @@ def test_stale_revision_manual_override_and_relationship_evidence_fail_prewrite(
             engine.dispose()
         code = {
             "revision": "stale_target_revision",
-            "manual": "target_state_drift",
+            # The database guard now advances revisions for direct metadata
+            # writes too: reject this stale snapshot before payload comparison.
+            "manual": "stale_target_revision",
             "relationship": "relationship_evidence_drift",
         }[mutation]
         with pytest.raises(KnowledgeApplyError, match=code):

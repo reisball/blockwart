@@ -365,7 +365,7 @@ def test_adoption_preserves_objects_relationships_and_unrelated_grants(legacy, c
     after = _state(url)
 
     assert _objects_without_concurrency_tokens(url) == objects_before
-    for name in set(before) - EVIDENCE_TABLES:
+    for name in set(before) - EVIDENCE_TABLES - {"object_revision_clocks"}:
         assert after[name] == before[name], name
     object_columns = CatalogObject.__table__.columns.keys()
     id_index, revision_index = object_columns.index("id"), object_columns.index("revision")
@@ -373,6 +373,13 @@ def test_adoption_preserves_objects_relationships_and_unrelated_grants(legacy, c
     assert {row[id_index]: row[revision_index] for row in after["catalog_objects"]} == {
         object_id: revision + (1 if object_id in EXPECTED_OWNERLESS else 0)
         for object_id, revision in old_revisions.items()
+    }
+
+    # Revision clocks are concurrency evidence, not unrelated business data.
+    # They advance exactly with the adopted rows and remain unchanged elsewhere.
+    assert dict(after["object_revision_clocks"]) == {
+        object_id: revision + (1 if object_id in EXPECTED_OWNERLESS else 0)
+        for object_id, revision in before["object_revision_clocks"]
     }
 
     grants_before = set(before["object_grants"])
