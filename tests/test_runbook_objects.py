@@ -362,23 +362,18 @@ def test_reference_writes_require_readable_existing_kind_correct_targets(
         with transaction(session):
             upsert_object(session, _asset("target"))
             upsert_object(session, _runbook("writer-runbook"))
+        from blockwart.domain.auth import GrantScope, Role
+        from blockwart.services.access import create_object_grant
+        from blockwart.services.identity import create_service_account, principal_context
+        from blockwart.services.policy import policy_for_principal
+
+        with transaction(session):
+            writer = create_service_account(session, login="writer", display_name="Writer")
+            create_object_grant(session, principal_id=writer.id, object_id="writer-runbook",
+                                role=Role.EDITOR, scope=GrantScope.SELF)
         context = WriteContext(
-            principal=PrincipalContext(
-                id="writer",
-                principal_type=PrincipalType.SERVICE_ACCOUNT,
-                login="writer",
-                display_name="Writer",
-            ),
-            policy=PolicySnapshot(
-                "writer",
-                {
-                    "writer-runbook": frozenset(
-                        {Permission.DISCOVER, Permission.WRITE}
-                    )
-                },
-                {},
-            ),
-            channel="api",
+            principal=principal_context(writer, service_token_audience="api"),
+            policy=policy_for_principal(session, writer.id), channel="api",
         )
         for reference in ("system:target", "system:missing", "service:target"):
             with pytest.raises(CommandNotFound, match="runbook reference target not found"):
@@ -387,7 +382,7 @@ def test_reference_writes_require_readable_existing_kind_correct_targets(
                     context,
                     object_id="writer-runbook",
                     payload=_runbook("writer-runbook", applies_to=[reference]),
-                    expected_revision=1,
+                    expected_revision=session.get(CatalogObject, "writer-runbook").revision,
                 )
 
 

@@ -1748,6 +1748,9 @@
                           {% endfor %}
                         </td>
                         <td>
+                          {% for authority in entry.global_authorities %}
+                            <div><span class="badge">{{ t("admin.catalog_role." ~ authority.source.value) }}</span></div>
+                          {% endfor %}
                           {% for source in entry.sources %}
                             <div>
                               <span class="badge">{{ t("grant.direct_source") if source.direct else t("grant.inherited_source") }}</span>

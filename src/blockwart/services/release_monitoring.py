@@ -6,6 +6,7 @@ import asyncio
 import json
 import logging
 import secrets
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from hashlib import sha256
@@ -18,7 +19,7 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from blockwart.config import RELEASE_MONITORING_MAX_RESPONSE_BYTES, Settings, get_settings
 from blockwart.db.session import build_engine
-from blockwart.domain.auth import ObjectVisibility
+from blockwart.domain.auth import ObjectVisibility, Permission
 from blockwart.domain.release_monitoring import (
     DEFAULT_RELEASE_INTERVAL_SECONDS,
     MIN_RELEASE_CHECK_COOLDOWN_SECONDS,
@@ -34,6 +35,11 @@ from blockwart.models import (
     CatalogObject,
     ServiceReleaseCheckLease,
     ServiceReleaseObservation,
+)
+from blockwart.services.commands import (
+    WriteContext,
+    authorize_object_command,
+    refresh_write_context,
 )
 from blockwart.services.pagination import SortDirection, paginate_items
 from blockwart.services.read_access import ReadAccess
@@ -367,6 +373,26 @@ def synchronize_release_schedule(
     return created
 
 
+def check_authorized_service_release(
+    session: Session,
+    context: WriteContext,
+    *,
+    object_id: str,
+    settings: ReleaseMonitoringSettings,
+) -> ReleaseCheckResult:
+    def reauthorize():
+        current = refresh_write_context(session, context, object_id=object_id)
+        authorize_object_command(
+            session, current, object_id=object_id, permission=Permission.WRITE,
+        )
+
+    reauthorize()
+    return check_service_release(
+        session, object_id=object_id, settings=settings,
+        manual=True, reauthorize=reauthorize,
+    )
+
+
 def check_service_release(
     session: Session,
     *,
@@ -375,8 +401,14 @@ def check_service_release(
     manual: bool,
     now: datetime | None = None,
     owner: str | None = None,
+    reauthorize: Callable[[], None] | None = None,
 ) -> ReleaseCheckResult:
-    """Run the one application path shared by scheduled and manual checks."""
+    """Acquire outside transactions; reauthorize manual checks before persistence.
+
+    Lease/authorization phases are short. Revocation during an already started
+    provider GET prevents storing its observation, not the completed GET itself.
+    """
+    settle = session.commit
 
     if not settings.enabled:
         return ReleaseCheckResult(object_id, "skipped", None, "runtime_disabled")
@@ -448,15 +480,16 @@ def check_service_release(
         settings=settings,
         force=manual,
     )
-    session.commit()
+    settle()
     if lease is None:
         return ReleaseCheckResult(object_id, "skipped", None, "already_claimed_or_not_due")
     # Re-read every catalog-controlled input after the claim, then close the
-    # transaction before acquisition. A stale claim can never discover a new target.
+    # transaction before acquisition, including authenticated manual commands.
+    # A stale claim can never discover a new target.
     row = session.get(CatalogObject, object_id)
     if row is None or row.kind != "service" or row.instance_id != lease.object_instance_id:
         _delete_claim(session, lease.id, lease_owner)
-        session.commit()
+        settle()
         return ReleaseCheckResult(object_id, "skipped", None, "changed")
     data = _object_data(row)
     config = read_release_monitoring_config(
@@ -472,7 +505,7 @@ def check_service_release(
         or resolution.target is None
     ):
         _delete_claim(session, lease.id, lease_owner)
-        session.commit()
+        settle()
         return ReleaseCheckResult(object_id, "skipped", None, "changed")
     current = session.scalar(
         select(ServiceReleaseObservation).where(
@@ -492,7 +525,27 @@ def check_service_release(
         total_timeout_ms=settings.total_timeout_ms,
         max_response_bytes=settings.max_response_bytes,
     )
-    session.commit()
+    # Snapshot ORM identities before commit so expiration cannot reopen a read
+    # transaction during acquisition. Never hold catalog locks over provider I/O.
+    service_id, instance_id = row.id, row.instance_id
+    source_revision = row.revision
+    claim_id = lease.id
+    target_key = resolution.target.cache_key
+    interval_seconds = config.interval_seconds
+
+    def authorize_or_release_claim():
+        if reauthorize is None:
+            return
+        try:
+            reauthorize()
+        except Exception:
+            session.rollback()
+            _delete_claim(session, claim_id, lease_owner)
+            session.commit()
+            raise
+
+    authorize_or_release_claim()
+    settle()
     try:
         observed = fetch_latest_github_release(request)
     except Exception:  # noqa: BLE001 - provider boundary is stable and redacted
@@ -502,23 +555,31 @@ def check_service_release(
             checked_at=claim_at,
             error_code="provider_failed",
         )
+    authorize_or_release_claim()
+    live = session.get(CatalogObject, service_id, populate_existing=True)
+    if reauthorize is not None and (
+        live is None or live.instance_id != instance_id or live.revision != source_revision
+    ):
+        _delete_claim(session, claim_id, lease_owner)
+        settle()
+        return ReleaseCheckResult(object_id, "skipped", None, "changed")
     record = record_release_observation(
         session,
-        object_id=row.id,
-        object_instance_id=row.instance_id,
-        target_key=resolution.target.cache_key,
+        object_id=service_id,
+        object_instance_id=instance_id,
+        target_key=target_key,
         observation=observed,
-        interval_seconds=config.interval_seconds,
+        interval_seconds=interval_seconds,
         settings=settings,
     )
     if record is None:
-        _delete_claim(session, lease.id, lease_owner)
-        session.commit()
+        _delete_claim(session, claim_id, lease_owner)
+        settle()
         return ReleaseCheckResult(object_id, "skipped", None, "changed")
     session.execute(
         update(ServiceReleaseCheckLease)
         .where(
-            ServiceReleaseCheckLease.id == lease.id,
+            ServiceReleaseCheckLease.id == claim_id,
             ServiceReleaseCheckLease.lease_owner == lease_owner,
         )
         .values(
@@ -528,7 +589,7 @@ def check_service_release(
             updated_at=_naive(observed.checked_at),
         )
     )
-    session.commit()
+    settle()
     return ReleaseCheckResult(
         object_id,
         observed.outcome,

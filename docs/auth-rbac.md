@@ -136,7 +136,7 @@ search, lifecycle changes, direct and effective assignment views, password
 reset, and service-token lifecycle. Reverse assignment rows are limited to
 objects on which the acting admin currently has `manage_access`; hidden object
 IDs, labels, and counts are not released. Owner-grant changes still require an
-effective Owner grant and use the shared object ETag, last-owner, and
+effective Owner grant or Global Catalog Owner authority and use the shared object ETag, last-owner, and
 self-lockout checks.
 
 Principal search uses opaque, filter-bound keyset cursors and exposes no total
@@ -607,8 +607,8 @@ authorized Owner can perform a deliberate transfer. Successful revocation is
 visible to the next request because policy decisions are rebuilt from current
 database state and no authorization cache is used.
 
-An actor that has `manage_access` but no effective Owner grant is refused an
-Owner-grant change with one of two stable reasons, published identically as
+An actor that has `manage_access` but neither an effective Owner grant nor
+Global Catalog Owner authority is refused an Owner-grant change with one of two stable reasons, published identically as
 the REST and MCP error `code` and as a localized UI message:
 `owner_required_to_manage_owner_grants` when the object has an active Owner,
 and `object_has_no_owner_use_adoption_flow` when it has none. Both are still
@@ -619,8 +619,10 @@ denials and write the normal redacted denial security event with the reason.
 Every catalog object must be reached by at least one active object Owner grant,
 directly or through a canonical subtree grant. A global `catalog_owner`
 administers every object but is deliberately not an object Owner source: it
-neither satisfies nor masks this per-object invariant, and it cannot add,
-change, or remove Owner grants through ordinary grant management.
+neither satisfies nor masks this per-object invariant. It **can** add, change,
+or remove existing-object Owner grants without a local grant, subject to the
+same local coverage and revision constraints. The first Owner of a legacy
+ownerless object still uses the dedicated audited adoption flow.
 
 One shared primitive (`blockwart.services.ownership.assign_initial_owner`)
 writes the first direct `Owner/self` grant inside every creation transaction:
@@ -921,3 +923,128 @@ reference bound to one service access method is created only through the
 service-scoped `create_credential_reference` capability described above. Production
 identity bootstrap, token injection, and runtime rollout still require their
 dedicated approval.
+
+
+## Consolidated role contract (#297)
+
+The product labels **Global Catalog Owner** and **Global Catalog Reader** map
+to the existing stored values `catalog_owner` and `catalog_viewer`. There is no
+new reader role, schema revision or automatic assignment. New human and
+service accounts default to no platform role, no catalog role, no project
+creation capability and no object grants. Existing explicit assignments survive
+unchanged. Authentication is not authorization.
+
+| Object role | Discover | Read | Rename | Write/comments/PM/sync | New children | New credential reference | Manage non-Owner grants | Manage Ownership | Delete |
+|---|---|---|---|---|---|---|---|---|---|
+| discoverer | yes | — | — | — | — | — | — | — | — |
+| viewer | yes | yes | — | — | — | — | — | — | — |
+| renamer | yes | yes | yes | — | — | — | — | — | — |
+| editor | yes | yes | yes | yes | — | — | — | — | — |
+| creator | yes | yes | — | — | yes | — | — | — | — |
+| credential_reference_creator | yes | yes | — | — | — | yes | — | — | — |
+| access_manager | yes | yes | — | — | — | — | yes | — | — |
+| owner | yes | yes | yes | yes | yes | yes | yes | yes | yes |
+
+The credential-reference capability creates new metadata through its narrow
+service command; a Project workspace reference creation additionally needs
+Project write authority. No role gives a secret value or external access.
+The last local Owner cannot be removed without replacement, even by a global
+Owner. Global Owner controls all present/future roots and objects, independent
+of local Owners, but is not an identity administrator. Ownerless repair remains
+explicit and audited rather than bypassing coverage checks.
+
+Global Reader supplies only discover/read everywhere. Other grants are additive:
+Reader + Editor on Project A can comment, maintain records and synchronize on A,
+but not elsewhere. Reader alone creates no root, child, comment, record or
+synchronization. `project_creator` remains independent: Reader + Project Creator
+can read everything and create its own Projects, not edit other Projects. A
+creator receives Owner/self atomically only on genuinely new objects; it may
+not capture an existing foreign object. Revocation removes that source only.
+
+`self` is anchor-only. `subtree` propagates only down canonical `hosts` edges
+Host -> System, Host -> Service and System -> Service. No inheritance follows
+Project links, network links, attached devices, references, assignees, authors,
+`managed_by` or repository ownership. Direct grants do not override inherited
+or global rights; effective rights are their union.
+
+### Existing-object placement is an access-boundary mutation
+
+A placement create/delete requires effective Owner on the existing child or
+Global Catalog Owner, evaluated **before** changing the graph. Attaching also
+requires `create_child` on the destination parent; detaching requires `write` on
+the current parent. A denied child-Owner check has stable code
+`owner_required_to_change_placement`. The normal anchor-write, visibility, kind,
+ETag and relationship/coverage invariants still apply. An editor may continue
+ordinary content edits and non-inheriting relationships; it cannot change
+placement merely to acquire inherited permissions. Placement is changed only
+by the authorized relationship commands, not by an arbitrary object document
+or Project-record import. Protected offline imports remain a separate operator
+trust boundary and do not expose a weaker online mutation route.
+
+### Revocation and running commands
+
+Online mutations lock and reload authorization in the existing shared order:
+principals in ID order, active Owner grants, canonical placements, then
+authority/anchor grants. These are held until transaction end. Comments and
+chronology then lock the current object instance before any idempotency
+reservation, append, revision bump or successful replay. Object, relationship,
+new-object, Project-record/action/sync and legacy-import commands use the same
+current-context gate. Read-only previews remain lock-free and give no later
+write guarantee. SQLite serializes writers; PostgreSQL row locks establish the
+order with concurrent grant revocation, catalog-role changes and deactivation.
+A writer authorized first may commit before revocation; once revocation wins,
+a stale snapshot cannot write or return a successful replay. A Project synchronization denied at its initial current-authority gate must
+not resolve credentials or call GitHub. External acquisition uses short
+preflight and completion transactions, never long-lived authorization locks.
+The preflight validates CAS, references and idempotency without record/event/key
+mutation. Immutable project/record snapshots bind acquisition; source changes
+fail completion CAS. Current authority and credential readability are checked
+again before each further GitHub GET and before storing a result. Revocation
+while an already-authorized GET is in flight prevents further GETs and durable
+observations; it cannot undo the already-started request. Successful cached
+replays perform no acquisition. Completion revalidates credential readability
+for **all** acquired references, including earlier successes when a later GET
+outlives revocation. An unreadable credential produces only the reference,
+`ok: false` and `credential_not_accessible`; protected repository names, URLs,
+state and metadata are not persisted in the event or idempotency response.
+
+### Rights explanation and rollout
+
+Object access and principal-assignment responses carry real grant `sources`
+separately from additive `global_authorities` (source, permissions, root kinds).
+The REST fields are preserved by MCP and rendered with the same EN/DE global
+role labels in the UI. `owner_coverage.actor_has_owner_source` still describes
+a real local/inherited source; `actor_has_global_authority` separately reports
+Global Owner authority. Global authority is never fabricated as a grant and
+never counted as local coverage. Active explicit global principals are included
+even with no ObjectGrant rows; candidate selection uses an IN-subquery instead
+of DISTINCT, preserving deterministic case-insensitive ordering on PostgreSQL.
+
+This change needs no data migration or mass grant creation. The release version,
+DB schema, current identities/role assignments and existing grants are unchanged.
+Verify explicit Reader assignment/revocation, role combinations, global Owner
+create/update/revoke, valid/denied placement and concurrent revocation before
+rollout. Rollback changes code only; no new role value needs conversion. A
+rollback would restore the old security gaps and is not a security remediation.
+
+The separate identity-admin trust decision is deliberately unchanged: a
+platform admin can still take over non-global-Owner identities through the
+existing protected credential contract. Global-Owner targets retain the
+existing human dual-role/password protection. This issue does not silently
+extend that restriction to every locally authorized identity.
+
+
+Review follow-up strengthens three equivalent boundaries: manually triggered
+release checks in UI/REST use short authorization/lease transactions before
+provider acquisition and fresh authorization plus instance/revision validation
+before observation persistence. No database transaction spans the provider
+request. Revoked completion releases its own lease without storing an
+observation (scheduled workers keep short lease transactions); identity-role/capability and credential mutations
+lock actor/target/coverage before password reauthentication can insert its FK
+audit event; creation replays re-check the created object's current readability
+and re-project current fields/capabilities, not historical Owner authority.
+Fresh creation records bind an immutable object instance; legacy records bind
+the recorded creation timestamp. Hidden or replaced results are refused even
+when the caller retains creation rights on the old parent. Replay performs no
+second mutation, but its returned representation/ETag reflects current access
+and state; unchanged-state replay remains equal apart from `replayed`.

@@ -204,6 +204,7 @@ class EffectivePrincipalGrantView:
     object_label: str
     permissions: tuple[Permission, ...]
     sources: tuple[PrincipalGrantSourceView, ...]
+    global_authorities: tuple[GlobalAuthorityView, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -466,6 +467,14 @@ def query_principal_detail(
                 permissions=tuple(
                     permission for permission in Permission if permission in permissions
                 ),
+                global_authorities=tuple(
+                    GlobalAuthorityView(
+                        source=a.source.value,
+                        permissions=tuple(p for p in Permission if p in a.permissions),
+                        root_kinds=tuple(sorted(a.root_kinds)),
+                    )
+                    for a in target_policy.global_authorities if a.permissions
+                ),
                 sources=tuple(
                     sorted(
                         sources,
@@ -724,7 +733,9 @@ def update_managed_principal(
 ) -> PrincipalMutationResult:
     require_platform_admin(access)
     expected = _expected_revision(expected_revision)
-    lock_owner_coverage_state(session, extra_principal_ids=(principal_id,))
+    lock_owner_coverage_state(
+        session, extra_principal_ids=(access.principal.id, principal_id),
+    )
     row = session.get(Principal, principal_id)
     if row is None:
         raise ManagedPrincipalNotFound("principal not found")
@@ -848,6 +859,9 @@ def set_managed_project_creator(
     request_id: str | None = None,
 ) -> PrincipalMutationResult:
     """Change only the independent root-project creation capability."""
+    lock_owner_coverage_state(
+        session, extra_principal_ids=(access.principal.id, principal_id),
+    )
     require_catalog_owner_admin(session, access, channel=channel, request_id=request_id)
     _reauthenticate_catalog_owner_admin(
         session, access, password=actor_password, channel=channel, request_id=request_id
@@ -1014,6 +1028,9 @@ def _authorize_credential_administration(
     or rotating a secret, mutating a password, revoking sessions, or writing any
     success audit evidence.
     """
+    lock_owner_coverage_state(
+        session, extra_principal_ids=(access.principal.id, principal_id),
+    )
     target = session.get(Principal, principal_id)
     if target is not None and target.catalog_role == CatalogRole.CATALOG_OWNER:
         require_catalog_owner_admin(
@@ -1060,6 +1077,9 @@ def set_managed_catalog_role(
     success audit event. Removing the last active catalog owner fails closed at
     the service and SQLite-trigger levels.
     """
+    lock_owner_coverage_state(
+        session, extra_principal_ids=(access.principal.id, principal_id),
+    )
     require_catalog_owner_admin(
         session,
         access,

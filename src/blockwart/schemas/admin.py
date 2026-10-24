@@ -76,6 +76,7 @@ class EffectivePrincipalGrantOut(BaseModel):
     object_label: str
     permissions: list[Permission]
     sources: list[PrincipalGrantSourceOut]
+    global_authorities: list[GlobalAuthorityOut] = Field(default_factory=list)
 
 
 class PrincipalTokenOut(BaseModel):

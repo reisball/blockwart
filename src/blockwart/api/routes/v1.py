@@ -16,7 +16,7 @@ from blockwart.api.write_commands import (
 )
 from blockwart.config import Settings
 from blockwart.domain.asset_state import AssetHealth, AssetLifecycle
-from blockwart.domain.auth import GrantScope, Permission
+from blockwart.domain.auth import GrantScope
 from blockwart.domain.decisions import (
     APPLIES_TO_MAX_LENGTH,
     APPLIES_TO_PATTERN,
@@ -130,7 +130,6 @@ from blockwart.services.attention import (
     query_attention_page,
 )
 from blockwart.services.commands import (
-    authorize_object_command,
     create_attached_device,
     create_catalog_root,
     create_child_object,
@@ -163,7 +162,7 @@ from blockwart.services.project_chronology import (
 from blockwart.services.read_access import ReadAccess
 from blockwart.services.read_projection import CapabilitySets, project_read_items
 from blockwart.services.release_monitoring import (
-    check_service_release,
+    check_authorized_service_release,
     query_release_overview,
     release_monitoring_settings,
 )
@@ -983,21 +982,12 @@ def create_v1_release_check(
     access: Annotated[ReadAccess, Depends(require_api_read_access)],
 ) -> V1ReleaseCheckOut:
     context = api_write_context(request, access)
-    execute_api_command(
-        session,
-        context,
-        lambda: authorize_object_command(
-            session,
-            context,
-            object_id=object_id,
-            permission=Permission.WRITE,
+    result = execute_api_command(
+        session, context,
+        lambda: check_authorized_service_release(
+            session, context, object_id=object_id,
+            settings=release_monitoring_settings(request.app.state.settings),
         ),
-    )
-    result = check_service_release(
-        session,
-        object_id=object_id,
-        settings=release_monitoring_settings(request.app.state.settings),
-        manual=True,
     )
     return V1ReleaseCheckOut(
         object_id=object_id,

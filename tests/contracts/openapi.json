@@ -3532,6 +3532,13 @@
       },
       "EffectivePrincipalGrantOut": {
         "properties": {
+          "global_authorities": {
+            "items": {
+              "$ref": "#/components/schemas/GlobalAuthorityOut"
+            },
+            "title": "Global Authorities",
+            "type": "array"
+          },
           "object_id": {
             "title": "Object Id",
             "type": "string"
@@ -7478,6 +7485,13 @@
       },
       "V1EffectivePrincipalAccessOut": {
         "properties": {
+          "global_authorities": {
+            "items": {
+              "$ref": "#/components/schemas/GlobalAuthorityOut"
+            },
+            "title": "Global Authorities",
+            "type": "array"
+          },
           "permissions": {
             "items": {
               "$ref": "#/components/schemas/Permission"
@@ -8613,6 +8627,11 @@
       "V1OwnerCoverageOut": {
         "description": "Active object Owner sources; a global catalog role is never counted.",
         "properties": {
+          "actor_has_global_authority": {
+            "default": false,
+            "title": "Actor Has Global Authority",
+            "type": "boolean"
+          },
           "actor_has_owner_source": {
             "title": "Actor Has Owner Source",
             "type": "boolean"

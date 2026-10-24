@@ -60,6 +60,7 @@ from blockwart.services.catalog import create_relationship, upsert_object
 from blockwart.services.commands import (
     CommandAuthorizationDenied,
     CommandConflict,
+    CommandNotFound,
     CommandPreconditionFailed,
     WriteContext,
     create_catalog_root,
@@ -617,6 +618,7 @@ def test_catalog_owner_cannot_mint_the_first_owner_and_gets_the_adoption_reason(
         "inherited_active_owner_grants": 0,
         "inactive_direct_owner_grants": 0,
         "actor_has_owner_source": False,
+        "actor_has_global_authority": True,
         "adoption_available": True,
     }
     nova_grant = next(
@@ -985,13 +987,13 @@ def test_last_owner_and_self_lockout_protections_are_unchanged_after_adoption(
         assert response.status_code == 409
         assert _error_code(response) == "conflict"
 
-    # Now that an Owner exists, the catalog owner is back on the healthy rule.
+    # Global Owner may manage ownership, but cannot remove the last local Owner.
     catalog_owner_revoke = client.delete(
         f"{path}/{grant_id}",
         headers=_auth(tokens["zoe"], **{"If-Match": etag}),
     )
-    assert catalog_owner_revoke.status_code == 403
-    assert _error_code(catalog_owner_revoke) == "owner_required_to_manage_owner_grants"
+    assert catalog_owner_revoke.status_code == 409
+    assert _error_code(catalog_owner_revoke) == "conflict"
 
     second_owner = client.post(
         path,
@@ -1102,11 +1104,11 @@ def test_create_is_rejected_and_rolled_back_when_the_creator_can_no_longer_own(
     ids = ownerless_state["ids"]
     session_factory = ownerless_state["session_factory"]
     with session_factory() as session:
-        with pytest.raises(CommandConflict) as exc_info:
+        with pytest.raises(CommandNotFound):
             with transaction(session):
                 context = _write_context(session, ids["healthy_owner"])
                 # The creator is deactivated after its policy snapshot was
-                # taken; the shared primitive re-reads it before commit.
+                # taken; the command reauthorizes before creating anything.
                 session.execute(
                     update(Principal)
                     .where(Principal.id == ids["healthy_owner"])
@@ -1120,7 +1122,6 @@ def test_create_is_rejected_and_rolled_back_when_the_creator_can_no_longer_own(
                     idempotency_key="ownership-orphan-0001",
                     idempotency_ttl_seconds=3600,
                 )
-    assert exc_info.value.code == "owner_principal_inactive"
     with session_factory() as session:
         assert session.get(CatalogObject, "orphan-child") is None
         assert session.get(Principal, ids["healthy_owner"]).active is True
@@ -1473,12 +1474,13 @@ def test_ui_localizes_the_structured_owner_reasons(
 
     assert english.status_code == german.status_code == adoption.status_code == 403
     assert (
-        "Only an effective Owner of this object can add, change, or remove Owner grants."
+        "Only an effective Owner of this object or a Global Catalog Owner can add, "
+        "change, or remove Owner grants."
         in english.text
     )
     assert (
-        "Nur ein effektiver Owner dieses Objekts darf Owner-Freigaben hinzufügen, "
-        "ändern oder entfernen."
+        "Ein effektiver Owner dieses Objekts oder ein Global Catalog Owner darf "
+        "Owner-Freigaben hinzufügen, ändern oder entfernen."
     ) in german.text
     assert "Only an active catalog owner can adopt an ownerless object." in adoption.text
     with ownerless_state["session_factory"]() as session:
@@ -1715,14 +1717,18 @@ def test_postgresql_owner_assignment_rechecks_a_concurrently_deactivated_target(
                                 idempotency_key="deactivation-race-root-01",
                                 idempotency_ttl_seconds=3600,
                             )
-            except (CommandAuthorizationDenied, CommandConflict) as exc:
+            except CommandNotFound:
+                return "not_found"
+            except CommandAuthorizationDenied as exc:
+                return exc.code or "forbidden"
+            except CommandConflict as exc:
                 return exc.code or "conflict"
             return "unexpected_success"
 
         expected_error = {
             "adoption": "owner_principal_inactive",
             "adoption_actor": "adoption_requires_catalog_owner",
-            "command_creation": "owner_principal_inactive",
+            "command_creation": "forbidden",
             "managed_grant_target": "conflict",
         }[operation]
         with ThreadPoolExecutor(max_workers=2) as pool:
@@ -2236,7 +2242,7 @@ def test_postgresql_placement_delete_and_owner_update_share_coverage_lock_order(
                     session,
                     principal_id=actor_id,
                     object_id="placement-order-parent",
-                    role=Role.VIEWER,
+                    role=Role.EDITOR,
                     scope=GrantScope.SELF,
                 )
                 create_object_grant(
@@ -2568,17 +2574,17 @@ def test_postgresql_adoption_and_placement_create_share_coverage_lock(
             adoption_locked.set()
             assert placement_create_started.wait(timeout=10)
 
+        original_context = commands_module.refresh_write_context
+
         def coordinate_placement(
             session: Session,
+            context: WriteContext,
             *,
-            extra_principal_ids: Iterable[str] = (),
-        ) -> None:
+            object_id: str,
+        ) -> WriteContext:
             assert adoption_locked.wait(timeout=10)
             placement_create_started.set()
-            original_lock(
-                session,
-                extra_principal_ids=extra_principal_ids,
-            )
+            return original_context(session, context, object_id=object_id)
 
         monkeypatch.setattr(
             grant_management_module,
@@ -2587,7 +2593,7 @@ def test_postgresql_adoption_and_placement_create_share_coverage_lock(
         )
         monkeypatch.setattr(
             commands_module,
-            "lock_owner_coverage_state",
+            "refresh_write_context",
             coordinate_placement,
         )
 
@@ -2696,23 +2702,21 @@ def test_postgresql_placement_create_reauthorizes_after_actor_deactivation(
 
         placement_preflight_complete = threading.Event()
         actor_deactivated = threading.Event()
-        original_lock = commands_module.lock_owner_coverage_state
+        original_lock = commands_module.refresh_write_context
 
         def pause_before_placement_lock(
             session: Session,
+            context: WriteContext,
             *,
-            extra_principal_ids: Iterable[str] = (),
-        ) -> None:
+            object_id: str,
+        ) -> WriteContext:
             placement_preflight_complete.set()
             assert actor_deactivated.wait(timeout=10)
-            original_lock(
-                session,
-                extra_principal_ids=extra_principal_ids,
-            )
+            return original_lock(session, context, object_id=object_id)
 
         monkeypatch.setattr(
             commands_module,
-            "lock_owner_coverage_state",
+            "refresh_write_context",
             pause_before_placement_lock,
         )
 
@@ -2832,23 +2836,21 @@ def test_postgresql_placement_delete_reauthorizes_after_actor_deactivation(
 
         deletion_preflight_complete = threading.Event()
         actor_deactivated = threading.Event()
-        original_lock = commands_module.lock_owner_coverage_state
+        original_lock = commands_module.refresh_write_context
 
         def pause_before_deletion_lock(
             session: Session,
+            context: WriteContext,
             *,
-            extra_principal_ids: Iterable[str] = (),
-        ) -> None:
+            object_id: str,
+        ) -> WriteContext:
             deletion_preflight_complete.set()
             assert actor_deactivated.wait(timeout=10)
-            original_lock(
-                session,
-                extra_principal_ids=extra_principal_ids,
-            )
+            return original_lock(session, context, object_id=object_id)
 
         monkeypatch.setattr(
             commands_module,
-            "lock_owner_coverage_state",
+            "refresh_write_context",
             pause_before_deletion_lock,
         )
 

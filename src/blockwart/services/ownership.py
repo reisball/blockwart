@@ -3,8 +3,9 @@
 Every catalog object must be reachable by at least one active *object* Owner
 grant, either directly or through a canonical subtree grant. A global
 ``catalog_owner`` administers the whole catalog, but it is deliberately not an
-object Owner source: it can neither add, change, nor remove Owner grants
-through ordinary grant management, and it never masks a missing Owner here.
+object Owner source: it may manage existing Ownership without a local grant,
+but it never masks a missing local Owner here. Legacy first-Owner assignment
+still uses the dedicated audited adoption flow.
 
 This module is the one place that
 

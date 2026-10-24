@@ -20,6 +20,7 @@ from blockwart.services.commands import (
     CommandConflict,
     CommandNotFound,
     WriteContext,
+    refresh_write_context,
     reserve_idempotency_record,
     revision_etag,
 )
@@ -212,7 +213,11 @@ def add_object_comment(
     idempotency_ttl_seconds: int,
     project_chronology_kind: str | None = None,
 ) -> CommentCommandResult:
-    catalog_object = session.get(CatalogObject, object_id)
+    context = refresh_write_context(session, context, object_id=object_id)
+    catalog_object = session.scalar(
+        select(CatalogObject).where(CatalogObject.id == object_id)
+        .with_for_update().execution_options(populate_existing=True)
+    )
     visibility = context.policy.visibility_for(object_id)
     if catalog_object is None or visibility == ObjectVisibility.NONE:
         raise CommandNotFound("catalog object not found")

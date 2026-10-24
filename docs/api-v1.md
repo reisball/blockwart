@@ -538,7 +538,7 @@ and grants no secret-store or target-system access.
 | Rejected body, including secret-shaped values or another `kind` | `422 validation_error` |
 
 Repeating the same request with the same key within the idempotency TTL returns
-the stored result with `replayed = true`, even after the service revision moved
+the original link-operation result with `replayed = true`, even after the service revision moved
 on, and creates nothing further; its `service_etag` is then the one the original
 call produced, so read the service again before a later ETag-bound write. A new
 key for an already created reference ID is `409 credential_reference_id_unavailable`.
@@ -818,10 +818,10 @@ revision and ETag plus two explicitly separate projections:
   principals so stale assignments remain administratively visible;
 - `effective_access`: active principals that currently receive permissions on
   this object, with additive permissions and every direct or inherited grant
-  source;
+  source and separate `global_authorities` (never fabricated grants);
 - `owner_coverage`: `state` (`owned` or `ownerless`), the counts of active
   direct and inherited Owner grants and of inactive direct Owner grants,
-  `actor_has_owner_source`, and `adoption_available`. A global catalog role is
+  `actor_has_owner_source`, `actor_has_global_authority`, and `adoption_available`. A global catalog role is
   never counted as an Owner source here.
 
 Principal fields are limited to ID, login, display name, principal type, and
@@ -851,15 +851,17 @@ DELETE /api/v1/objects/{object_id}/access/grants/{grant_id}
 
 All commands require effective `manage_access` and current `If-Match`. Create
 accepts `principal_id`, `role`, and `scope`; update accepts `role` and `scope`.
-Only an effective Owner may create, change, or revoke an Owner grant. The
+An effective Owner or Global Catalog Owner may create, change, or revoke an
+Owner grant on an owned object. No local grant is required for global authority. The
 last-effective-owner and actor-self-lockout guards cover role changes, scope
 shrinks, and revocation over the canonical placement graph.
 
-An actor with `manage_access` but no effective Owner grant receives `403` with
+An actor with `manage_access` but neither effective local nor global Ownership
+receives `403` with
 one of two stable error codes instead of the generic `forbidden`:
 
 - `owner_required_to_manage_owner_grants`: the object has an active Owner, so
-  ask an Owner to make the change;
+  ask an object Owner or Global Catalog Owner to make the change;
 - `object_has_no_owner_use_adoption_flow`: no active direct or inherited Owner
   grant reaches the object, so a catalog owner must use the adoption command
   below. Ordinary grant management never mints that first Owner.
@@ -1027,3 +1029,41 @@ envelopes remain stable; readable Agent detail/context objects add the strong
 New integrations should use `/api/v1`. The MCP wrapper now reads v1 and maps
 the page items back to its established `results`/`objects` payload fields,
 while also returning `next_cursor`, optional `total`, sort, and direction.
+
+
+### Global sources in access explanations (#297)
+
+Each `effective_access` entry in object access and principal assignment views
+adds `global_authorities: [{source, permissions, root_kinds}]`, independently
+of its real local/inherited `sources`. `catalog_owner` means Global Catalog
+Owner; `catalog_viewer` means explicitly assigned Global Catalog Reader. No
+grant ID is synthesized. Owner coverage adds `actor_has_global_authority`;
+`actor_has_owner_source` and coverage counts retain their local-grant meaning.
+MCP forwards these additive fields unchanged. Existing-object canonical
+placement changes additionally require pre-change effective child Ownership
+or global Owner and appropriate current/destination parent authority; see
+[the consolidated contract](auth-rbac.md#consolidated-role-contract-297).
+
+
+Creation replay security: the parent/root creation permission is not continuing
+authority over the created result. Root, child, attached-device and service
+credential-reference replays require current readability of the same object
+instance. The returned object and its ETag/capabilities are re-projected from
+current authorized state, so a retained Viewer cannot receive historical Owner
+capabilities. Missing, replaced or now-concealed results fail closed; no second
+creation or link mutation occurs. Stored operation/link metadata remains the
+original operation result.
+
+Manual release checks in UI/REST use short current-authority/lease transactions,
+with no database transaction across the provider request. Current authority and
+object instance/revision are rechecked before persistence. Revoked/deactivated
+contexts are refused before acquisition; revocation during an already-started
+GET prevents storing its result and releases the caller's lease. Changed source
+objects return `skipped/changed`. Scheduled checks keep short lease transactions.
+
+Project GitHub sync similarly separates read-only idempotency/CAS preflight,
+external acquisition and a freshly authorized completion transaction. Project
+revision plus record ETag bind the source snapshot; source changes reject the
+completion rather than overwriting changes. Each further credential/GET phase
+checks current authority. No record/event/idempotency mutation is committed
+before acquisition, and a successful cached replay performs no external GET.
