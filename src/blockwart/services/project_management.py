@@ -36,6 +36,7 @@ from blockwart.services.commands import (
 from blockwart.services.pagination import paginate_items
 from blockwart.services.project_workspace import (
     _record,
+    _visible_ref,
     read_project,
     record_out,
     save_record,
@@ -448,8 +449,11 @@ def apply_action(
     idempotency_ttl_seconds,
 ):
     arguments = dict(
-        object_id=object_id, record_id=record_id, payload=payload,
-        expected_record=expected_record, idempotency_key=idempotency_key,
+        object_id=object_id,
+        record_id=record_id,
+        payload=payload,
+        expected_record=expected_record,
+        idempotency_key=idempotency_key,
         idempotency_ttl_seconds=idempotency_ttl_seconds,
     )
     if payload.action != "sync_github":
@@ -463,10 +467,16 @@ def apply_action(
     project = read_project(session, ReadAccess(context.principal, context.policy), object_id)
     row = _record(session, project, record_id)
     replay = save_record(
-        session, context, object_id=object_id, record_id=record_id,
-        payload=RECORD_ADAPTER.validate_json(row.data_json), expected_revision=None,
-        record_expected=expected_record, command_data=payload.model_dump(mode="json"),
-        idempotency_key=idempotency_key, idempotency_ttl_seconds=idempotency_ttl_seconds,
+        session,
+        context,
+        object_id=object_id,
+        record_id=record_id,
+        payload=RECORD_ADAPTER.validate_json(row.data_json),
+        expected_revision=None,
+        record_expected=expected_record,
+        command_data=payload.model_dump(mode="json"),
+        idempotency_key=idempotency_key,
+        idempotency_ttl_seconds=idempotency_ttl_seconds,
         check_only=True,
     )
     if replay is not None:
@@ -480,7 +490,10 @@ def apply_action(
     # Recheck authority and source/record versions after acquisition. Only this
     # short transaction may store the record, event and idempotency response.
     return _apply_action_locked(
-        session, context, **arguments, sync_observation=observation,
+        session,
+        context,
+        **arguments,
+        sync_observation=observation,
         prepared_project_revision=project_snapshot.revision,
     )
 
@@ -563,7 +576,22 @@ def _apply_action_locked(
     elif payload.action == "sync_github":
         if sync_observation is None:
             raise ValueError("GitHub observations require a completed acquisition phase")
-        event_data = sync_observation
+        # A credential may have become unreadable during the final GET (or a
+        # later reference). Recheck every observation with the locked, current
+        # policy. Persist only a sanitized failure, never protected upstream
+        # metadata acquired using authority that has since been revoked.
+        observations = []
+        for observed in sync_observation["observations"]:
+            repository = _record(session, project, observed["reference"]["repository_id"])
+            credential = json.loads(repository.data_json).get("credential_reference")
+            if credential and not _visible_ref(session, access, credential):
+                observed = {
+                    "reference": observed["reference"],
+                    "ok": False,
+                    "error": "credential_not_accessible",
+                }
+            observations.append(observed)
+        event_data = {**sync_observation, "observations": observations}
     _event(session, project, row, context, payload.action, event_data)
     session.flush()
     result.record = record_out(session, access, row)

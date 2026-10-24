@@ -1002,7 +1002,11 @@ fail completion CAS. Current authority and credential readability are checked
 again before each further GitHub GET and before storing a result. Revocation
 while an already-authorized GET is in flight prevents further GETs and durable
 observations; it cannot undo the already-started request. Successful cached
-replays perform no acquisition.
+replays perform no acquisition. Completion revalidates credential readability
+for **all** acquired references, including earlier successes when a later GET
+outlives revocation. An unreadable credential produces only the reference,
+`ok: false` and `credential_not_accessible`; protected repository names, URLs,
+state and metadata are not persisted in the event or idempotency response.
 
 ### Rights explanation and rollout
 
