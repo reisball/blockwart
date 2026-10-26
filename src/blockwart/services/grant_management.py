@@ -13,6 +13,8 @@ from blockwart.domain.auth import (
     Permission,
     PrincipalContext,
     Role,
+    permissions_for_role,
+    validate_grant_target,
 )
 from blockwart.domain.timestamps import format_rfc3339_utc
 from blockwart.models import CatalogObject, ObjectGrant, Principal
@@ -139,6 +141,8 @@ class GrantScopePreview:
     object_id: str
     scope: GrantScope
     affected_objects: tuple[ScopePreviewObject, ...]
+    role: Role | None = None
+    permissions: tuple[Permission, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -311,9 +315,13 @@ def preview_grant_scope(
     *,
     object_id: str,
     scope: GrantScope | str,
+    role: Role | str | None = None,
 ) -> GrantScopePreview:
-    _require_manage_access(session, context, object_id=object_id)
+    row = _require_manage_access(session, context, object_id=object_id)
     resolved_scope = GrantScope(scope)
+    resolved_role = Role(role) if role is not None else None
+    if resolved_role is not None:
+        _validate_grant_target(row, resolved_role, resolved_scope)
     affected_ids = grant_scope_object_ids(
         session,
         object_id=object_id,
@@ -327,6 +335,11 @@ def preview_grant_scope(
     return GrantScopePreview(
         object_id=object_id,
         scope=resolved_scope,
+        role=resolved_role,
+        permissions=(
+            tuple(p for p in Permission if p in permissions_for_role(resolved_role))
+            if resolved_role is not None else ()
+        ),
         affected_objects=tuple(
             ScopePreviewObject(
                 id=row.id,
@@ -487,6 +500,7 @@ def create_managed_grant(
         object_id=object_id,
         refresh_policy=True,
     )
+    _validate_grant_target(row, resolved_role, resolved_scope)
     _require_owner_for_owner_grant(
         session,
         context,
@@ -595,6 +609,7 @@ def update_managed_grant(
         and grant.principal_id != expected_principal_id
     ):
         raise CommandNotFound("direct grant not found")
+    _validate_grant_target(row, resolved_role, resolved_scope)
     _require_owner_for_owner_grant(
         session,
         context,
@@ -1040,3 +1055,14 @@ def _principal_summary(principal: Principal) -> PrincipalSummary:
         principal_type=principal.principal_type,
         active=principal.active,
     )
+
+
+def _validate_grant_target(
+    row: CatalogObject,
+    role: Role,
+    scope: GrantScope,
+) -> None:
+    try:
+        validate_grant_target(role, scope, object_kind=row.kind)
+    except ValueError as exc:
+        raise CommandConflict(str(exc), code="invalid_reference_content_grant") from exc

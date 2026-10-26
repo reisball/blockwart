@@ -1009,6 +1009,8 @@ class V1GrantScopePreviewOut(BaseModel):
     object_id: str
     scope: GrantScope
     affected_objects: list[V1ScopePreviewObjectOut]
+    role: Role | None = None
+    permissions: list[Permission] = Field(default_factory=list)
 
 
 class V1GrantCreateIn(BaseModel):

@@ -429,6 +429,8 @@ GRANT_ROLE_SCHEMA: JSON = {
         "editor",
         "creator",
         "credential_reference_creator",
+        "reference_content_reader",
+        "reference_content_editor",
         "access_manager",
         "owner",
     ],
@@ -1092,7 +1094,10 @@ TOOLS: list[JSON] = [
     {
         "name": "blockwart.update_object",
         "description": (
-            "Update one authorized object using its current strong ETag. Build "
+            "Update one authorized object using its current strong ETag. For "
+            "credential_reference, write changes metadata; write_reference_content "
+            "changes protected data.reference with unchanged metadata and does not "
+            "grant content read. Omitted protected content is preserved. Build "
             f"object.data from {SCHEMA_TOOL_NAME}."
         ),
         "inputSchema": {
@@ -1414,12 +1419,16 @@ TOOLS: list[JSON] = [
     },
     {
         "name": "blockwart.preview_grant_scope",
-        "description": "Preview the current canonical placement coverage of a grant scope.",
+        "description": (
+            "Preview grant coverage and, with an optional role, its permissions. "
+            "Reference content roles require a credential_reference with self scope."
+        ),
         "inputSchema": {
             "type": "object",
             "properties": {
                 "object_id": {"type": "string", "minLength": 1, "maxLength": 128},
                 "scope": GRANT_SCOPE_SCHEMA,
+                "role": GRANT_ROLE_SCHEMA,
             },
             "required": ["object_id", "scope"],
             "additionalProperties": False,
@@ -1946,6 +1955,25 @@ def _write_intents(
             intent["parent_kinds"] = parent_kinds
             intent["creation_path"] = _INTENT_CREATION_PATHS[name]
             intent["authorization"] = _intent_authorization(name, supported)
+            if name == "blockwart.update_object" and "credential_reference" in supported:
+                intent["field_permissions"] = {
+                    "kind": "credential_reference",
+                    "protected_path": "data.reference",
+                    "metadata_read": Permission.READ.value,
+                    "metadata_write": Permission.WRITE.value,
+                    "content_read": Permission.READ_REFERENCE_CONTENT.value,
+                    "content_write": Permission.WRITE_REFERENCE_CONTENT.value,
+                    "content_only_update": (
+                        "write_reference_content permits changing protected content with "
+                        "unchanged metadata; ordinary write does not permit changing "
+                        "protected content. Omitted protected content is preserved."
+                    ),
+                    "response_visibility": (
+                        "read_reference_content is required to return protected content, "
+                        "including mutation responses, previews, and historical values; "
+                        "write_reference_content does not imply read_reference_content."
+                    ),
+                }
             intent["reference_link"] = (
                 dict(SERVICE_CREDENTIAL_REFERENCE_LINK)
                 if name == SERVICE_CREDENTIAL_REFERENCE_TOOL
@@ -2754,7 +2782,10 @@ def call_tool(
         object_id = _required_string(args, "object_id")
         payload = fetch(
             f"/api/v1/objects/{quote(object_id, safe='')}/access/preview",
-            {"scope": _required_string(args, "scope")},
+            {
+                "scope": _required_string(args, "scope"),
+                **({"role": args["role"]} if "role" in args else {}),
+            },
         )
     elif name == "blockwart.create_grant":
         object_id = _required_string(args, "object_id")

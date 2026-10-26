@@ -108,7 +108,7 @@ Blockwart stores independent authorization axes on a principal:
 | Axis | Stored as | Meaning |
 |---|---|---|
 | identity administration | `platform_role = admin` | identity and credential administration |
-| global catalog authority | `catalog_role = catalog_owner` | all eight permissions on every object |
+| global catalog authority | `catalog_role = catalog_owner` | all permissions on every object |
 | global catalog read-only | `catalog_role = catalog_viewer` | exactly `discover` and `read` on every object |
 | global root-project creation | `project_creator = true` | create a top-level root of `kind = project` and nothing else, additively to the catalog role |
 | legacy root-project creation | `catalog_role = project_creator` | still recognized for existing principals; use the independent capability for new assignments |
@@ -178,11 +178,14 @@ An object grant assigns one role to one principal at one object with either
 | `editor` | `discover`, `read`, `write`, `rename` |
 | `creator` | `discover`, `read`, `create_child` |
 | `credential_reference_creator` | `discover`, `read`, `create_credential_reference` |
+| `reference_content_reader` | `discover`, `read`, `read_reference_content` |
+| `reference_content_editor` | `discover`, `read`, `write_reference_content` |
 | `access_manager` | `discover`, `read`, `manage_access` |
 | `owner` | all permissions, including `rename`, `create_credential_reference`, and `delete` |
 
-`discover` exposes only the safe stub projection. `read` permits the full
-object projection. Grants are additive, do not imply access to parents or
+`discover` exposes only the safe stub projection. `read` permits the
+metadata projection; protected credential-reference content requires its own
+capability as described below. Grants are additive, do not imply access to parents or
 siblings, and never live inside `data_json`.
 
 `rename` is a capability of its own rather than a part of `write`. It permits
@@ -206,6 +209,67 @@ carry it through their existing all-permission sets. `editor`, `creator`,
 `renamer`, `viewer`, `access_manager`, and `catalog_viewer` deliberately do not
 receive it, so no existing assignment is widened.
 
+### Credential-reference metadata and protected content
+
+For `credential_reference`, the complete `data.reference` object, including
+`reference.name`, `reference.path`, `reference.key`, and `reference.item_hint`,
+is protected content. Provider, scope, usage associations, and handling rules
+remain metadata governed by ordinary object access. Discovery remains a minimal
+safe entry, without protected content. Reading a linked service/system or
+following its credential-reference link grants no authority on the reference.
+
+| Authority on the reference | Discover | Metadata read | Metadata write | Content read | Content write | Manage access |
+|---|---|---|---|---|---|---|
+| `discoverer` | yes | no | no | no | no | no |
+| `viewer`, `catalog_viewer` | yes | yes | no | no | no | no |
+| `editor` | yes | yes | yes | no | no | no |
+| `reference_content_reader` | yes | yes | no | yes | no | no |
+| `reference_content_editor` | yes | yes | no | no | yes | no |
+| `access_manager` | yes | yes | no | no | no | yes |
+| `owner`, `catalog_owner` | yes | yes | yes | yes | yes | yes |
+| Platform admin without catalog authority | no | no | no | no | no | no |
+
+The content roles are valid only on a `credential_reference` with `self` scope.
+Creation, update, and role-aware scope preview reject another kind or `subtree`
+with `invalid_reference_content_grant`. They are ordinary, independently
+assignable additive object grants: assign both for content read **and** write,
+and add `editor` separately if metadata write is also required. The content
+editor deliberately does **not** imply content read, metadata write, rename,
+creation, deletion, or access management. Other narrow roles (`renamer`,
+`creator`, `credential_reference_creator`) keep their existing permissions and
+receive neither content capability. An access manager may delegate/revoke these
+non-Owner roles using the usual current-object ETag and audit path; changing an
+Owner grant still follows the existing Owner restrictions. Revocation removes
+only that grant's contribution: another grant or catalog-owner authority can
+still supply the capability. Access inspection reports the effective content
+permissions alongside their ordinary grant/global sources. A role-aware grant
+preview reports that role's permissions and validated scope; it is not a write
+or an access grant.
+
+Metadata updates preserve protected content when omitted and reject unauthorized
+content changes. Content-only editors can update protected fields without
+metadata-write authority; all mutation responses, previews, and historical
+payloads still obey the separate content-read requirement. In particular,
+writing content does not authorize echoing its current or previous values.
+Kind conversion into or out of a credential reference additionally requires
+content-write authority as well as ordinary metadata write. When converting
+away, omit `data.reference`; retaining a locator under another kind is rejected.
+Historical reference snapshots remain content-protected after conversion.
+
+**Compatibility:** migration `20261026_0031` expands only the database role
+constraint and preserves every existing grant (IDs, roles, scopes, creators,
+and timestamps), principal, and object. It assigns no new role. Existing
+viewers, editors, and catalog viewers retain metadata access, but their former
+implicit content visibility/update behavior becomes narrower: neither ordinary
+`read` nor `write` carries a content capability. Explicitly delegate the new
+roles for callers that still need content access. Existing Owners and catalog
+owners retain full control through their all-permission mappings; catalog
+owners do not become per-object Owner sources. No other existing role is widened.
+Downgrade refuses if **either** new-role grant still exists, including grants
+to inactive principals. Explicitly revoke them first (or restore the paired
+pre-migration backup); downgrade never deletes grants or maps them to a broader
+role automatically.
+
 `subtree` follows only the canonical placement graph:
 
 - `host -> system`
@@ -220,7 +284,7 @@ reparenting changes access without a stale application cache.
 
 An active principal with `catalog_role = catalog_owner` holds `discover`,
 `read`, `write`, `rename`, `create_child`, `create_credential_reference`,
-`manage_access`, and `delete` on
+`read_reference_content`, `write_reference_content`, `manage_access`, and `delete` on
 every object that currently exists, including objects created after the role
 was assigned.
 
@@ -237,7 +301,8 @@ An active human or service-account principal with
 `catalog_role = catalog_viewer` holds exactly `discover` and `read` on the same
 complete current catalog and every object created later, including a new
 disconnected root. It never implies `write`, `rename`, `create_child`,
-`create_credential_reference`, `manage_access`, `delete`, platform
+`create_credential_reference`, `read_reference_content`, `write_reference_content`,
+`manage_access`, `delete`, platform
 administration, credential administration,
 or token
 administration. Login, a valid browser session or token, and platform admin

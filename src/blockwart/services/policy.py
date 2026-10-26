@@ -6,10 +6,11 @@ from collections import defaultdict
 from dataclasses import dataclass
 from enum import StrEnum
 
-from sqlalchemy import and_, literal, select
+from sqlalchemy import and_, literal, or_, select
 from sqlalchemy.orm import Session, aliased
 
 from blockwart.domain.auth import (
+    REFERENCE_CONTENT_ROLES,
     CatalogRole,
     GrantScope,
     ObjectVisibility,
@@ -207,6 +208,15 @@ def policy_for_principal(
         .where(
             ObjectGrant.principal_id == principal_id,
             Principal.active.is_(True),
+            # Raw/legacy malformed content-role grants are not authority, even
+            # for metadata, and must never seed placement inheritance.
+            or_(
+                ObjectGrant.role.not_in(REFERENCE_CONTENT_ROLES),
+                and_(
+                    CatalogObject.kind == "credential_reference",
+                    ObjectGrant.scope == GrantScope.SELF,
+                ),
+            ),
         )
     )
     reach = roots.cte("authorized_object_reach", recursive=True)

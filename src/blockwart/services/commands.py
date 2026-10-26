@@ -81,6 +81,7 @@ from blockwart.services.identity import principal_context, record_security_event
 from blockwart.services.ownership import InitialOwnerError, assign_initial_owner
 from blockwart.services.policy import GlobalPolicySource, PolicySnapshot, policy_for_principal
 from blockwart.services.read_access import ReadAccess
+from blockwart.services.reference_content import authorized_reference_data
 
 _ETAG_PATTERN = re.compile(r'^"rev-([1-9][0-9]*)"$')
 _IDEMPOTENCY_KEY_PATTERN = re.compile(r"^[\x21-\x7e]{16,128}$")
@@ -315,18 +316,37 @@ def plan_object_update(
         if refresh_policy
         else context
     )
+    content_only = (
+        not current_context.policy.can(Permission.WRITE, object_id)
+        and current_context.policy.can(Permission.WRITE_REFERENCE_CONTENT, object_id)
+    )
     row = _require_permission(
         session,
         current_context,
         object_id=object_id,
-        permission=Permission.WRITE,
+        permission=Permission.WRITE_REFERENCE_CONTENT if content_only else Permission.WRITE,
     )
+    if content_only and row.kind != CREDENTIAL_REFERENCE_KIND:
+        raise CommandAuthorizationDenied(object_id=object_id, permission=Permission.WRITE)
     resolved_revision = _resolve_expected_revision(expected_revision)
     if payload.id != object_id:
         raise CommandConflict("payload object id does not match the resource")
     if row.revision != resolved_revision:
         raise CommandPreconditionFailed("object revision changed")
     stored_data = _raw_object_snapshot(row).get("data")
+    if CREDENTIAL_REFERENCE_KIND in {row.kind, payload.kind}:
+        if row.kind != payload.kind:
+            if not current_context.policy.can(Permission.WRITE_REFERENCE_CONTENT, object_id):
+                raise CommandAuthorizationDenied(
+                    object_id=object_id, permission=Permission.WRITE_REFERENCE_CONTENT,
+                )
+            if payload.kind != CREDENTIAL_REFERENCE_KIND and "reference" in payload.data:
+                raise CommandConflict(
+                    "reference content cannot be retained when changing to another kind",
+                    code="reference_content_requires_reference_kind",
+                )
+        if payload.kind == CREDENTIAL_REFERENCE_KIND:
+            payload = _reference_update_payload(row, payload, current_context)
     preexisting_typed_references = frozenset(
         iter_typed_reference_strings(stored_data)
         if isinstance(stored_data, Mapping)
@@ -347,6 +367,14 @@ def plan_object_update(
         )
     except RevisionConflict as exc:
         raise CommandPreconditionFailed("object revision changed") from exc
+    if content_only:
+        before_metadata = _current_snapshot(row)
+        after_metadata = _proposed_snapshot(upsert_plan)
+        for snapshot in (before_metadata, after_metadata):
+            if isinstance(snapshot.get("data"), dict):
+                snapshot["data"].pop("reference", None)
+        if before_metadata != after_metadata:
+            raise CommandAuthorizationDenied(object_id=object_id, permission=Permission.WRITE)
     return ObjectUpdatePlan(
         row=row,
         payload=payload,
@@ -354,6 +382,34 @@ def plan_object_update(
         upsert=upsert_plan,
         context=current_context,
     )
+
+
+def _reference_update_payload(
+    row: CatalogObject,
+    payload: CatalogObjectIn,
+    context: WriteContext,
+) -> CatalogObjectIn:
+    """Keep omitted content and gate every explicit replacement independently.
+
+    Metadata-only clients round-trip their projected document. Omission is
+    preservation even for content writers; an explicit empty object clears the
+    locator. Readers may echo unchanged content, but a caller unable to read it
+    cannot use equality/no-op behavior as a locator-guessing oracle.
+    """
+    stored = _json_document(row.data_json)
+    stored_data = stored if isinstance(stored, dict) else {}
+    data = deepcopy(payload.data)
+    if "reference" in data:
+        if not context.policy.can(Permission.WRITE_REFERENCE_CONTENT, row.id) and (
+            not context.policy.can(Permission.READ_REFERENCE_CONTENT, row.id)
+            or data["reference"] != stored_data.get("reference")
+        ):
+            raise CommandAuthorizationDenied(
+                object_id=row.id, permission=Permission.WRITE_REFERENCE_CONTENT,
+            )
+    elif "reference" in stored_data:
+        data["reference"] = deepcopy(stored_data["reference"])
+    return payload.model_copy(update={"data": data})
 
 
 def update_catalog_object(
@@ -398,6 +454,7 @@ def update_catalog_object(
         raise CommandNotFound("catalog object not found")
     result = result.model_copy(
         update={
+            "data": authorized_reference_data(result.kind, object_id, result.data, context.policy),
             "capabilities": sorted(
                 context.policy.permissions_for(object_id),
                 key=lambda permission: permission.value,
@@ -455,6 +512,12 @@ def preview_catalog_object_update(
     rendered_before = _render_preview_snapshot(before, context=plan.context)
     rendered_after = _render_preview_snapshot(after, context=plan.context)
     digest_after = _render_preview_snapshot(after)
+    if plan.payload.kind == CREDENTIAL_REFERENCE_KIND and not plan.context.policy.can(
+        Permission.READ_REFERENCE_CONTENT, object_id,
+    ):
+        # The digest must collapse protected proposals as well as stored values.
+        # Otherwise it would become an equality oracle over hidden locators.
+        digest_after = rendered_after
     diff, diff_truncated, diff_digest = preview_diff(
         before,
         after,
@@ -850,6 +913,12 @@ def _render_preview_snapshot(
     safe = redacted if isinstance(redacted, dict) else {}
     if context is None:
         return safe
+    if snapshot.get("kind") == CREDENTIAL_REFERENCE_KIND and not context.policy.can(
+        Permission.READ_REFERENCE_CONTENT, str(snapshot.get("id", "")),
+    ):
+        data = safe.get("data")
+        if isinstance(data, dict) and "reference" in data:
+            data["reference"] = REDACTED_PREVIEW_VALUE
     concealed = _redact_concealed_references(safe, context)
     return concealed if isinstance(concealed, dict) else {}
 

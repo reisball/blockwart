@@ -54,6 +54,10 @@ from blockwart.services.pagination import (
     encode_page_cursor,
 )
 from blockwart.services.read_access import ReadAccess
+from blockwart.services.reference_content import (
+    reference_audit_details,
+    reference_audit_requires_projection,
+)
 
 ACTIVITY_RESOURCE = "activity"
 ACTIVITY_SORT_FIELD = "occurred_at"
@@ -160,6 +164,7 @@ def query_activity_page(
     for row in rows[:limit]:
         item = _project_event(
             row,
+            access=access,
             readable=readable,
             event_type=event_type,
             kind=kind,
@@ -427,6 +432,7 @@ def _is_visible(
 def _project_event(
     row: AuditEvent,
     *,
+    access: ReadAccess,
     readable: _ReadableCatalog,
     event_type: str | None,
     kind: str | None,
@@ -444,6 +450,10 @@ def _project_event(
     if occurred_at is None:
         return None
     details = load_audit_details(row)
+    if reference_audit_requires_projection(object_kind, details) and not access.policy.can(
+        Permission.READ_REFERENCE_CONTENT, object_id,
+    ):
+        details = reference_audit_details(details)
     summary = render_audit_summary_english(
         row.action,
         details,

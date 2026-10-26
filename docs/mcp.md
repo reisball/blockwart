@@ -264,12 +264,26 @@ precondition.
 
 Before a reviewed full-object update, `blockwart.preview_object_update` accepts
 the exact `object_id`, `if_match`, and complete `object` arguments of
-`blockwart.update_object`. It requires effective `write` but is annotated
-read-only and directly returns REST's bounded redacted diff, canonical no-op
+`blockwart.update_object`. It requires the same effective metadata/content
+update authority as the update but is annotated read-only and directly returns REST's bounded redacted diff, canonical no-op
 answer, base and expected result revision/ETag, complete safe-diff digest, and
 versioned preview digest. It creates no lock or reservation; clients still pass
 the original ETag to the real update and receive the ordinary precondition
 failure if anything changed in between.
+
+For `credential_reference`, `data.reference` is protected separately from
+metadata. `read_reference_content` controls its values in direct, batch and
+context reads, responses, previews and history. `write_reference_content`
+controls replacement through `update_object` without implying content read;
+a content-only writer must preserve all metadata. Omitted `reference` is
+preserved; explicit `{}` clears it. Ordinary `write` cannot change it.
+Delegate the additive `reference_content_reader` / `reference_content_editor`
+roles with `self` scope on the reference itself. Existing Viewer/Editor and
+Global Catalog Reader grants gain neither capability; Owner and Global Catalog
+Owner keep both. `get_object_access` includes effective permissions, and
+`preview_grant_scope` accepts an optional `role` to validate the target and
+return its proposed permissions. The stored field schema and provider set
+remain unchanged. See [the field boundary and migration policy](auth-rbac.md).
 
 To change only a display name, `blockwart.rename_object` takes `object_id`,
 `new_label`, and `if_match` and nothing else, for every nameable kind. It

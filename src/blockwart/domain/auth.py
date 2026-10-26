@@ -37,6 +37,11 @@ class Permission(StrEnum):
     # child and the link is a narrow data change, so neither `create_child`
     # nor `write` implies it, and it implies neither of them.
     CREATE_CREDENTIAL_REFERENCE = "create_credential_reference"
+    # Protected credential-reference locator and access hints are separate from
+    # the metadata governed by READ/WRITE. Neither content capability implies
+    # the other.
+    READ_REFERENCE_CONTENT = "read_reference_content"
+    WRITE_REFERENCE_CONTENT = "write_reference_content"
     MANAGE_ACCESS = "manage_access"
     DELETE = "delete"
 
@@ -48,6 +53,8 @@ class Role(StrEnum):
     EDITOR = "editor"
     CREATOR = "creator"
     CREDENTIAL_REFERENCE_CREATOR = "credential_reference_creator"
+    REFERENCE_CONTENT_READER = "reference_content_reader"
+    REFERENCE_CONTENT_EDITOR = "reference_content_editor"
     ACCESS_MANAGER = "access_manager"
     OWNER = "owner"
 
@@ -94,6 +101,20 @@ ROLE_PERMISSIONS = MappingProxyType(
                 Permission.DISCOVER,
                 Permission.READ,
                 Permission.CREATE_CREDENTIAL_REFERENCE,
+            }
+        ),
+        Role.REFERENCE_CONTENT_READER: frozenset(
+            {
+                Permission.DISCOVER,
+                Permission.READ,
+                Permission.READ_REFERENCE_CONTENT,
+            }
+        ),
+        Role.REFERENCE_CONTENT_EDITOR: frozenset(
+            {
+                Permission.DISCOVER,
+                Permission.READ,
+                Permission.WRITE_REFERENCE_CONTENT,
             }
         ),
         Role.ACCESS_MANAGER: frozenset(
@@ -214,3 +235,30 @@ def roles_for_permission(permission: Permission | str) -> frozenset[Role]:
     return frozenset(
         role for role, permissions in ROLE_PERMISSIONS.items() if resolved in permissions
     )
+
+
+REFERENCE_CONTENT_ROLES = frozenset({
+    Role.REFERENCE_CONTENT_READER, Role.REFERENCE_CONTENT_EDITOR,
+})
+
+
+def validate_grant_target(
+    role: Role | str,
+    scope: GrantScope | str,
+    *,
+    object_kind: str,
+) -> None:
+    """Reject content-role delegation outside one credential reference.
+
+    These roles are additive object grants, not placement-wide capabilities.
+    Keep validation shared by grant creation, update, and role-aware previews.
+    Other roles retain their existing kind/scope rules.
+    """
+    resolved_role = Role(role)
+    resolved_scope = GrantScope(scope)
+    if resolved_role in REFERENCE_CONTENT_ROLES and (
+        object_kind != "credential_reference" or resolved_scope != GrantScope.SELF
+    ):
+        raise ValueError(
+            "reference content roles require a credential_reference target with self scope"
+        )

@@ -21,7 +21,8 @@ class ObjectGrant(Base):
         CheckConstraint(
             "role IN "
             "('discoverer','viewer','renamer','editor','creator',"
-            "'credential_reference_creator','access_manager','owner')",
+            "'credential_reference_creator','reference_content_reader',"
+            "'reference_content_editor','access_manager','owner')",
             name="ck_object_grants_role",
         ),
         CheckConstraint(
