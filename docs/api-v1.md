@@ -44,7 +44,7 @@ skipped equal-sort rows.
 count. Set `include_total=true` when an exact authorized matching count is
 needed.
 
-For `/api/v1/activity`, an exact total is attempted within 5000 authorized
+For [`/api/v1/activity`](activity-feed.md), an exact total is attempted within 5000 authorized
 filtered events plus one probe. Its `total_status` is `not_requested`, `exact`,
 or `budget_exhausted`. In the last case `total` is `null`; narrow the filters
 or continue paging. This status does not assert that the authorized total is
@@ -94,8 +94,8 @@ Each item carries a closed `category`, `severity`, `reason_code`,
 existing closed domain vocabulary, an optional evidence timestamp, and one
 `target` with the canonical `kind:id` reference plus its detail path. Categories
 are `record_integrity`, `monitoring`, `release`, `lifecycle`, `endpoint`, `placement`,
-`relationship_integrity`, `provenance`, `runbook`, `knowledge`, and
-`source_coverage`. Severities are
+`relationship_integrity`, `provenance`, `runbook`, `knowledge`,
+`source_coverage`, and `access` (including `access_owner_missing`). Severities are
 `critical`, `warning`, and `info`. Item signal states are `current`, `stale`,
 and `unknown`; the summary additionally reports `not_applicable` per category.
 The full reason vocabulary and its meaning are in [Needs
@@ -432,8 +432,12 @@ are committed atomically. The response is `201`, includes `Location` and
 
 Keys are SHA-256 hashed at rest and bound globally per principal to the exact
 operation context and canonical request payload. Repeating the same request
-within `BLOCKWART_IDEMPOTENCY_TTL_SECONDS` (default 24 hours) returns the stored
-result without another object or audit event. Reusing a key for another parent,
+within `BLOCKWART_IDEMPOTENCY_TTL_SECONDS` (default 24 hours) creates no second
+object or audit event. Replay requires current readability of the same created
+object instance; its object fields, capabilities and ETag are projected from
+current state, not the stored historical representation. Concealed, missing or
+replaced results fail closed. Original operation metadata remains unchanged.
+Reusing a key for another parent,
 operation, or payload returns `409 conflict`. Expired records may be replaced.
 
 ### `POST /api/v1/roots`
@@ -538,9 +542,11 @@ and grants no secret-store or target-system access.
 | Rejected body, including secret-shaped values or another `kind` | `422 validation_error` |
 
 Repeating the same request with the same key within the idempotency TTL returns
-the original link-operation result with `replayed = true`, even after the service revision moved
-on, and creates nothing further; its `service_etag` is then the one the original
-call produced, so read the service again before a later ETag-bound write. A new
+`replayed = true` and creates or links nothing further, even after the service
+revision moves on. The created reference must still be the same readable object
+instance; its representation, capabilities and ETag reflect current authorized
+state. Link-operation metadata, including `service_etag`, remains the original
+operation's result, so read the service again before a later ETag-bound write. A new
 key for an already created reference ID is `409 credential_reference_id_unavailable`.
 
 ### `PUT /api/v1/objects/{object_id}`
@@ -551,6 +557,26 @@ reference, type, lifecycle, and placement validation. ACLs and delete authority
 are not part of the payload. Missing `If-Match` returns
 `428 precondition_required`; a stale or malformed value returns
 `412 precondition_failed`.
+
+**PUT is replacement, not PATCH.** Build the complete writable
+`CatalogObjectIn` document from a fresh full read: preserve the intended `id`,
+`kind`, label/status, summary, complete `data`, provenance and canonical
+lifecycle/health. Omitted fields can take defaults or clear stored content;
+omitted asset lifecycle/health have the specific preservation rules in the
+[domain model](domain-model.md). Never send a compact/context response wholesale:
+read-only capabilities, relationships and diagnostics are not write fields.
+For a label-only change prefer the narrow [rename command](#post-apiv1objectsobject_idrename).
+
+Construction example (pseudocode, not an additional API):
+
+```python
+writable = {key: full_read[key] for key in (
+    "id", "kind", "label", "status", "summary", "data", "provenance",
+    "lifecycle", "health",
+) if key in full_read}
+writable["summary"] = "Reviewed operational summary."
+# Preview with the full_read ETag, inspect the diff, then PUT this same document.
+```
 
 Host and system payloads may include the ordered manual
 `data.installed_software` list documented in `object-validation.md`. REST uses

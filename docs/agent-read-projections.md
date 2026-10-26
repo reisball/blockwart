@@ -137,7 +137,9 @@ reads no catalog data. It can now be scoped three ways, all of which only ever
 remove published material:
 
 - `kind` — one object kind and the relationship types that accept it;
-- `write_intent` — exactly one of the four write-intent tools;
+- `write_intent` — exactly one of five fully qualified values:
+  `blockwart.create_child`, `blockwart.create_root`, `blockwart.update_object`,
+  `blockwart.create_attached_device`, `blockwart.create_service_credential_reference`;
 - `sections` — a closed selection of `object_fields`, `write_intents`,
   `minimal_example`, `relationships`, and `errors`.
 
@@ -145,6 +147,19 @@ remove published material:
 metadata-shape, and graph-rule contract. Relationship rejection and metadata
 violation codes belong only to `errors`, alongside the object violation policy.
 Select both sections when preparing a relationship write.
+
+For an authorization-sensitive object write, retain `write_intents` so the
+response includes `authorization` and `creation_path`, not just an example:
+
+```json
+{
+  "kind": "project",
+  "write_intent": "blockwart.create_root",
+  "sections": ["object_fields", "write_intents", "minimal_example"]
+}
+```
+
+Bare `create_root` is not a valid `write_intent`; use the qualified value above.
 
 `minimal_example` gates every generated example, both the per-kind
 `minimal_example` and the per-intent `example`. Selecting `minimal_example`

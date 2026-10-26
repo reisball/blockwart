@@ -1,5 +1,7 @@
 # Agent API
 
+For new integrations, start with the [Agent quickstart](agent-quickstart.md).
+
 Blockwart exposes a read-only compatibility agent namespace under /api/agent.
 
 The namespace is intentionally separate from the catalog read API. Authorized

@@ -163,10 +163,12 @@ write, credential provisioning or automatic integration activation is included.
 
 The observer uses fixed api.github.com:443, public-address policy, all-answer DNS admission,
 a pinned socket, hostname-verified TLS, GET only, no redirects/proxies/retries, bounded headers/
-body/deadline and a total manual action budget. Sync runs synchronously under the atomic project
-command lock, so target edits cannot overtake its write. It deliberately does not introduce an
-asynchronous lease/scheduler. This can briefly serialize other writes while the bounded read
-finishes. Search/list/detail reads never contact GitHub.
+body/deadline and a total manual action budget. Sync uses short current-authority/source
+preflight and completion transactions;
+no database transaction spans external acquisition. Completion rechecks Project
+instance/revision, record ETag and repository configuration before committing;
+concurrent edits reject stale completion rather than being overwritten. No
+asynchronous lease/scheduler is introduced. Search/list/detail reads never contact GitHub.
 
 Public anonymous access is explicit when no credential reference is configured. Private access
 uses an operator-managed JSON mapping `BLOCKWART_PROJECT_GITHUB_CREDENTIAL_FILES`, from exact

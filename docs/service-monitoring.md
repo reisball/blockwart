@@ -88,7 +88,12 @@ States are normalized as follows:
   `down`;
 - redirect, 4xx, invalid target, policy denial, or other bounded probe problem:
   `check_error`;
-- before the first observation, or after `next_due_at`: effective `unknown`.
+- before the first observation, or once evidence expires: effective `unknown`.
+
+Evidence expiry is calculated from `last_checked_at` plus the effective interval
+and deterministic jitter. `next_due_at` is the acquisition schedule, calculated
+from acquisition time; it is not an evidence-validity deadline. For Gatus, stale
+upstream evidence may already be unknown before the next acquisition is due.
 
 The last observed state stays available when stale. Manual catalog
 `maintenance` always wins in the effective health display, without deleting or

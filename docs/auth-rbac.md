@@ -23,9 +23,12 @@ principal revokes all of its active sessions and service tokens.
 Every service token has a server-stored audience, `api` or `mcp`.
 It is selected only by protected issuance/rotation operations and is included in
 credential metadata, never inferred from a client header. Existing tokens
-migrate to `api`. The audience currently provides trusted provenance for
-comment appends: API comments require `api`, MCP comments require `mcp`; it
-does not add object permissions or bypass the bearer-token policy.
+migrate to `api`. Channel-sensitive commands require the matching audience:
+REST uses `api`, MCP uses `mcp`, and the UI uses its authenticated browser
+session. This includes disconnected-root creation, ownerless adoption,
+comment/Project-chronology appends and Project-workspace writes/actions.
+The audience supplies trusted origin, not object permissions; it never bypasses
+current authorization. Read access alone does not prove write eligibility.
 
 The identity endpoint is:
 
@@ -288,10 +291,10 @@ rules. Policy is rebuilt from current database state on every request without a
 long-lived authorization cache; role assignment or revocation changes the
 policy fingerprint, so bound cursors fail closed.
 
-Owner-coverage computation treats any active catalog owner as covering every
-current object without creating a grant. Exclusion-based coverage checks used
-for deactivation and deletion ignore the excluded principal and then fall back
-to the remaining active catalog owners and scoped Owner grants.
+Owner coverage counts active local or inherited object Owner grants only.
+Global `catalog_owner` authority does not satisfy this invariant. Exclusion-based
+checks for deactivation/deletion exclude that principal's grants and require
+remaining active object Owner coverage; global administration cannot mask a gap.
 
 Normal catalog-role assignment and removal are performed through one dedicated
 application command and its REST/UI surfaces, described below. The role is never
@@ -532,9 +535,12 @@ One shared application command runs in one transaction. It:
 Any failure rolls the whole transaction back: no reference, grant, link, audit
 event, or idempotency reservation survives. Missing `If-Match` is `428`; a
 malformed, weak, or stale value is `412`, and concurrent callers holding the
-same base ETag have exactly one winner. The same key and request replay the
-original result even after the service revision moved on; the same key with any
-other service, index, ETag, or object is `409`. An index outside
+same base ETag have exactly one winner. The same key and request perform no
+second link mutation even after the service revision moves on. Replay requires
+current readability of the same created reference instance and returns its
+current authorized representation/ETag; stored link-operation metadata remains
+original. Re-read the service before another conditional write. The same key
+with another service, index, ETag, or object is `409`. An index outside
 `data.access_methods` is `409 access_method_not_found`, and a target that is not
 a service is `409 credential_reference_requires_service`.
 
@@ -574,9 +580,11 @@ service-scoped call. It never assigns `catalog_owner` or `write` on the service.
 
 An actor needs effective `manage_access` on the anchor object to list, create,
 update, or revoke its direct grants. Owner grants have an additional invariant:
-only an actor with effective `owner` on that object may create, change, or
-revoke them. Role names are not accepted as proof; both checks resolve the
-actor's current grants from the database inside the command transaction.
+an actor needs a current local/inherited Owner source **or** global
+`catalog_owner` authority to create, change, or revoke them. Both paths enforce
+local Owner coverage and current revision checks inside the command transaction.
+An ownerless object requires the dedicated adoption flow, not an ordinary grant
+mutation. Platform admin alone grants neither path.
 
 The object UI's **Access control** panel, API v1, and MCP expose one shared
 application service:

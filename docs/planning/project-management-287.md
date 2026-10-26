@@ -1,5 +1,11 @@
 # Project management implementation plan · #287
 
+> Historical implementation/review evidence. For current usage and contracts,
+> see [Project management](../project-management.md) and
+> [Project workspace](../project-workspace.md). Past task ownership, commands and
+> verification results below do not authorize new operations or prove another build.
+
+
 Authorized 2026-10-23. Candidate 0.2.0 is a post-completion decision, not a release or version bump. Main baseline: `c0d6c8d1b53bcbdca650dae69c45c7361cb51530`.
 
 ## Scope and evidence
