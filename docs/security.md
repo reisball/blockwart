@@ -118,6 +118,11 @@ default and uses an empty network allowlist by default. Every DNS answer and the
 concrete pinned connection address must pass the scheme, port, and network
 policy; broad public allowlists do not unlock private, loopback, link-local,
 reserved, or metadata ranges. The original hostname remains bound to HTTP Host
-and TLS SNI/certificate validation. The adapter follows no redirect, uses no
-environment proxy, sends no credential or cookie, reads no body, and exposes
-only stable redacted errors. See [Service monitoring](service-monitoring.md).
+and TLS SNI/certificate validation. Both adapters reject redirects, ignore
+environment proxies and expose only
+stable redacted errors. The `builtin_http` probe sends no credential or cookie
+and reads no body. The `gatus` pull adapter instead reads a bounded status body
+and may send a Bearer token from a protected runtime file bound to that exact
+deployment-configured Gatus source; catalog data cannot choose the URL, file
+or credential. Raw bodies and token values are never stored or returned. See
+[Service monitoring](service-monitoring.md) and [Gatus pull](gatus-pull.md).

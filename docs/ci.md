@@ -61,10 +61,55 @@ repository does not schedule Dependabot version-update pull requests.
 Repository-level Dependabot alerts and security updates may still open a
 focused pull request for a dependency with a known vulnerability.
 
+## Disposable PostgreSQL prerequisite
+
+The full proof includes PostgreSQL 16, not only SQLite. Use a **disposable test
+server**: tests create/drop databases and need a role with `CREATEDB` (or a
+superuser). Never use a production database URL. For example, with Docker:
+
+```bash
+docker run --detach --rm --name blockwart-dev-postgres \
+  --publish 127.0.0.1:55432:5432 \
+  --env POSTGRES_USER=blockwart --env POSTGRES_PASSWORD=blockwart \
+  --env POSTGRES_DB=blockwart postgres:16
+docker exec blockwart-dev-postgres pg_isready -U blockwart
+export BLOCKWART_TEST_PG_URL='postgresql+psycopg2://blockwart:blockwart@127.0.0.1:55432/blockwart'
+```
+
+Run the proof only once `pg_isready` reports accepting connections. The example
+password is disposable test data. Confirm Python can reach the same server and
+the test role can create databases before starting pytest:
+
+```bash
+python - <<'PYTHON'
+import os
+from sqlalchemy import create_engine, text
+url = os.environ["BLOCKWART_TEST_PG_URL"].rsplit("/", 1)[0] + "/postgres"
+with create_engine(url).connect() as connection:
+    assert connection.scalar(text(
+        "SELECT rolcreatedb OR rolsuper FROM pg_roles WHERE rolname = current_user"
+    )), "The disposable test role needs CREATEDB"
+print("PostgreSQL test prerequisite passed")
+PYTHON
+```
+
+Keep the URL exported for pytest below. Unreachable PostgreSQL otherwise causes
+compatibility tests to skip; a green exit with that skip reason is **not** full
+PostgreSQL proof. Inspect the `-ra` summary for
+`PostgreSQL test database unreachable` and retain the actual passed/skipped
+results. CI provisions the equivalent service on port 5432 and explicitly sets
+the URL. Remove only your example server after testing with
+`docker stop blockwart-dev-postgres`.
+
 ## Contract Proof
 
 The Gitea and GitHub workflows in `.gitea/workflows/ci.yml` and
-`.github/workflows/ci.yml` are intentionally byte-identical. Each host runs the same proof:
+`.github/workflows/ci.yml` are intentionally byte-identical. Each host runs the
+same proof. The local equivalent below assumes the locked development install,
+`actionlint`, a working Docker daemon and the PostgreSQL prerequisite above.
+Command-scoped `PYTHONPATH=src` makes local OpenAPI checks inspect the working
+tree after edits to a non-editable install; do not export it globally into the
+installed-package smoke.
 
 ```bash
 ./scripts/update-dependency-locks.sh --check
@@ -72,8 +117,8 @@ cmp .gitea/workflows/ci.yml .github/workflows/ci.yml
 actionlint .gitea/workflows/ci.yml .github/workflows/ci.yml
 ruff check --no-cache .
 python -m compileall -q src tests scripts
-pytest -q
-python scripts/update_openapi_contract.py --check
+pytest -q -ra
+PYTHONPATH=src python scripts/update_openapi_contract.py --check
 ./scripts/ci/package-smoke.sh
 REVISION="$(git rev-parse HEAD)"
 docker build \
@@ -85,10 +130,12 @@ docker build \
 
 The package smoke builds a wheel, installs it into a clean virtual environment, changes to a
 directory outside the repository, starts `blockwart-start`, loads packaged templates and static
-assets, runs the relationship-integrity diagnostic, and exercises all 42
-tools through 47 read/write, preview, Project-workspace, coverage, attention,
-activity, comment, audit, grant-management, and ownerless-adoption calls to the
-installed `blockwart-mcp` console command. It also proves identical same-commit
+assets, runs the relationship-integrity diagnostic, and verifies the complete
+47-tool catalog. Its read/write, preview, Project-workspace, coverage, attention,
+activity, comment, audit, grant-management, and ownerless-adoption calls use the
+installed `blockwart-mcp` console command. The smoke's `mcp_calls` summary is a
+fixed label, not an independently measured count of calls or per-tool coverage.
+It also proves identical same-commit
 wrapper/API metadata and a fail-fast incompatible diagnosis for a deliberately
 reduced materialized tool catalog through both installed CLI paths. Before
 seeding it bootstraps the first catalog owner without an anchor, proves that
@@ -132,7 +179,7 @@ The OpenAPI snapshot at `tests/contracts/openapi.json` is an intentionally revie
 contract. After an approved API change, update and review it with:
 
 ```bash
-python scripts/update_openapi_contract.py
+PYTHONPATH=src python scripts/update_openapi_contract.py
 ```
 
 CI uses no live Blockwart instance, production database, or production secret. On both hosts, a
@@ -151,16 +198,21 @@ resolver/socket adapter results and use documentation address ranges only. The
 package and container smoke paths leave the poller disabled and the target
 allowlist empty; their monitoring database plan is read-only.
 
-The real host differences remain outside the workflow: Gitea Actions uses the Fabrik runner and
-Gitea repository permissions, while GitHub Actions uses GitHub repository permissions and
-GitHub's own runner, event-delivery, and log-retention environment. `actionlint` and byte parity
-prove static syntax and command parity. Runtime parity is additionally proven by successful
-GitHub Actions runs on:
+The real host differences remain outside the workflow: each host uses its own
+runner provisioning, repository permissions, event delivery and log retention.
+`actionlint` and byte parity prove static syntax and command parity; runtime
+success is tied to the exact CI revision, not to a historical migration run.
+CI success does not imply deployment or production readiness.
 
-- the exact imported Gitea `main` SHA `8d0bd2fcb097c09f1be8863539ef6527f3745d82`
-  ([run #1](https://github.com/reisball/blockwart/actions/runs/30751416724)); and
-- the canonical post-cutover GitHub `main` SHA
-  `ca83e17a0c8bb8b605ab661d8c9e57fe883bbcb9`
+## Historical migration verification
+
+The completed [GitHub migration](github-migration.md) retained successful
+same-source parity runs on:
+
+- imported commit `8d0bd2fcb097c09f1be8863539ef6527f3745d82`
+  ([run #1](https://github.com/reisball/blockwart/actions/runs/30751416724));
+- post-cutover commit `ca83e17a0c8bb8b605ab661d8c9e57fe883bbcb9`
   ([run #2](https://github.com/reisball/blockwart/actions/runs/30752565755)).
 
-These CI results do not imply deployment or production readiness.
+These are historical evidence only, not verification of current HEAD or a
+requirement to recreate the original host environment.

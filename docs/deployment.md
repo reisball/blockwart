@@ -22,7 +22,7 @@ Do not bind Blockwart to LAN or public networks until those decisions are made.
 Install the package:
 
 ```bash
-python3 -m venv .venv
+python3.12 -m venv .venv
 . .venv/bin/activate
 python -m pip install .
 ```
@@ -34,9 +34,9 @@ password through a TTY or `--password-stdin`:
 ```bash
 BLOCKWART_DATABASE_URL=sqlite:////tmp/blockwart.sqlite3 blockwart-db upgrade
 BLOCKWART_DATABASE_URL=sqlite:////tmp/blockwart.sqlite3 \
-  blockwart-auth bootstrap-owner --login kai --display-name Kai --catalog-owner
+  blockwart-auth bootstrap-owner --login example-owner --display-name "Example Owner" --catalog-owner
 BLOCKWART_DATABASE_URL=sqlite:////tmp/blockwart.sqlite3 \
-  blockwart-seed --seed seeds/pilot_objects.yaml --owner-login kai
+  blockwart-seed --seed seeds/pilot_objects.yaml --owner-login example-owner
 ```
 
 A seed or Markdown import never creates an ownerless object: without a valid
@@ -46,7 +46,7 @@ for every disconnected canonical component:
 
 ```bash
 BLOCKWART_DATABASE_URL=sqlite:////tmp/blockwart.sqlite3 \
-  blockwart-auth bootstrap-owner --login kai --display-name Kai \
+  blockwart-auth bootstrap-owner --login example-owner --display-name "Example Owner" \
   --object-id COMPONENT_ROOT_ID --scope subtree --catalog-owner
 ```
 
@@ -61,16 +61,25 @@ scoped catalog access still comes only from the listed Owner anchors.
 `--catalog-owner` additionally assigns the independent global catalog-owner
 role in the same transaction; without it, startup and readiness fail with
 `catalog_owner_missing`. For an existing database upgraded from an earlier
-release, explicitly run `blockwart-auth promote-admin --login kai` and
-`blockwart-auth bootstrap-catalog-owner --login kai`; migrations `0012`,
+release, explicitly run `blockwart-auth promote-admin --login example-owner` and
+`blockwart-auth bootstrap-catalog-owner --login example-owner`; migrations `0012`,
 `0015`, and `0019` never guess an admin, catalog-owner, or catalog-viewer
 identity.
 
-Then run the migration/readiness-gated launcher:
+The packaged `blockwart-start` launcher runs migration/readiness checks and
+then binds **`0.0.0.0:8000`**, not just localhost. It has no `--host` option.
+Use it only inside the loopback-published container below or an explicitly
+approved network boundary.
+
+For a loopback-only package run, keep the migration and readiness gates before
+starting Uvicorn (all commands below use the same database URL):
 
 ```bash
-BLOCKWART_DATABASE_URL=sqlite:////tmp/blockwart.sqlite3 \
-  blockwart-start
+export BLOCKWART_DATABASE_URL=sqlite:////tmp/blockwart.sqlite3
+blockwart-db upgrade &&
+  blockwart-db check &&
+  python -c 'from blockwart.config import get_settings; from blockwart.db.readiness import check_database_readiness; check_database_readiness(get_settings())' &&
+  python -m uvicorn blockwart.main:app --host 127.0.0.1 --port 8000 --no-proxy-headers
 ```
 
 Direct HTTP remains useful for local health probes, but browsers will not send Blockwart's
@@ -87,9 +96,9 @@ BLOCKWART_BUILD_REVISION="$(git rev-parse HEAD)" \
 docker compose -f compose.example.yaml run --rm blockwart \
   blockwart-db upgrade
 docker compose -f compose.example.yaml run --rm blockwart \
-  blockwart-auth bootstrap-owner --login kai --display-name Kai --catalog-owner
+  blockwart-auth bootstrap-owner --login example-owner --display-name "Example Owner" --catalog-owner
 docker compose -f compose.example.yaml run --rm blockwart \
-  blockwart-seed --seed seeds/pilot_objects.yaml --owner-login kai
+  blockwart-seed --seed seeds/pilot_objects.yaml --owner-login example-owner
 docker compose -f compose.example.yaml up
 ```
 
@@ -507,56 +516,11 @@ being guessed or repaired.
 
 ## Runtime Configuration
 
-Required:
-
-- `BLOCKWART_DATABASE_URL`
-
-Optional:
-
-- `BLOCKWART_ENV`
-- `BLOCKWART_BUILD_REVISION` (default `unknown`; inject the deployed Git commit at image build)
-- `BLOCKWART_SECRET_REFERENCE`
-- `BLOCKWART_AUTH_SESSION_TTL_SECONDS` (default `3600`, allowed `300..3600`;
-  absolute standard human browser-session lifetime)
-- `BLOCKWART_AUTH_REMEMBER_SESSION_TTL_SECONDS` (default `2592000`, allowed
-  `86400..7776000`; absolute opt-in persistent human browser-session lifetime)
-- `BLOCKWART_AUTH_LOGIN_CHALLENGE_TTL_SECONDS` (default `600`, allowed
-  `60..3600`)
-- `BLOCKWART_AUTH_LOGIN_RATE_WINDOW_SECONDS` (default `60`, allowed `10..3600`)
-- `BLOCKWART_AUTH_LOGIN_SOURCE_ATTEMPT_LIMIT` (default `10`)
-- `BLOCKWART_AUTH_LOGIN_ACCOUNT_ATTEMPT_LIMIT` (default `5`)
-- `BLOCKWART_AUTH_LOGIN_GLOBAL_ATTEMPT_LIMIT` (default `60`)
-- `BLOCKWART_AUTH_LOGIN_SOURCE_CHALLENGE_LIMIT` (default `30`)
-- `BLOCKWART_AUTH_LOGIN_GLOBAL_CHALLENGE_LIMIT` (default `120`)
-- `BLOCKWART_AUTH_PASSWORD_MAX_CONCURRENCY` (default `2`, allowed `1..16`)
-- `BLOCKWART_AUTH_SECURITY_EVENT_RETENTION_DAYS` (default `90`)
-- `BLOCKWART_AUTH_SECURITY_EVENT_MAX_ROWS` (default `100000`)
-- `BLOCKWART_AUTH_SERVICE_TOKEN_RATE_WINDOW_SECONDS` (default `60`, allowed `10..3600`)
-- `BLOCKWART_AUTH_SERVICE_TOKEN_GLOBAL_FAILURE_LIMIT` (default `300`)
-- `BLOCKWART_AUTH_SERVICE_TOKEN_SOURCE_FAILURE_LIMIT` (default `30`)
-- `BLOCKWART_AUTH_SERVICE_TOKEN_FINGERPRINT_FAILURE_LIMIT` (default `10`)
-- `BLOCKWART_AUTH_SERVICE_TOKEN_FAILURE_BUCKET_MAX_ROWS` (default `10000`)
-- `BLOCKWART_AUTH_SERVICE_TOKEN_FAILURE_BUCKET_PRUNE_INTERVAL_SECONDS` (default `60`)
-- `BLOCKWART_AUTH_TRUSTED_PROXY_CIDRS` (default empty; comma-separated exact networks)
-- `BLOCKWART_MONITORING_POLLER_ENABLED` (default `false`)
-- `BLOCKWART_MONITORING_DEFAULT_INTERVAL_SECONDS` (default `300`, allowed `60..86400`)
-- `BLOCKWART_MONITORING_ALLOWED_TARGET_NETWORKS` (default empty; comma-separated CIDRs)
-- `BLOCKWART_MONITORING_ALLOWED_TARGET_PORTS` (default `80,443`)
-- `BLOCKWART_MONITORING_CONNECT_TIMEOUT_MS` (default `2000`, allowed `100..15000`)
-- `BLOCKWART_MONITORING_TOTAL_TIMEOUT_MS` (default `5000`, allowed `200..30000`)
-- `BLOCKWART_MONITORING_MAX_RESPONSE_BYTES` (default `65536`, allowed `1024..1048576`)
-- `BLOCKWART_MONITORING_MAX_CHECKS_PER_RUN` (default `20`, allowed `1..1000`)
-- `BLOCKWART_MONITORING_MAX_CONCURRENT_CHECKS` (default `4`, allowed `1..32`)
-- `BLOCKWART_MONITORING_LEASE_SECONDS` (default `60`, allowed `10..3600`)
-- `BLOCKWART_MONITORING_JITTER_SECONDS` (default `30`, allowed `0..3600`)
-- `BLOCKWART_MONITORING_POLL_INTERVAL_SECONDS` (default `5`, allowed `1..60`)
-- `BLOCKWART_MONITORING_GATUS_SOURCES` (default empty; comma-separated bounded
-  `name=status-url` bindings fixed by the deployment)
-- `BLOCKWART_MONITORING_GATUS_CREDENTIAL_FILES` (default empty;
-  comma-separated `name=/absolute/token-file` bindings, one protected file per
-  declared source; never put a token value in this setting)
-- `BLOCKWART_SQLITE_BUSY_TIMEOUT_MS` (default `5000`, allowed `100..60000`)
-- `BLOCKWART_SQLITE_WAL_ENABLED` (default `true`)
+Use the [server configuration reference](config.md#server-settings) for all
+supported environment variables, defaults and validation bounds. Explicitly
+set `BLOCKWART_DATABASE_URL` for the intended instance; the development default
+is not a production database selection. Keep runtime secrets in protected
+files, not catalog documents or committed environment files.
 
 Every SQLite connection enables foreign-key enforcement and applies the configured busy timeout.
 The five-second default absorbs short UI/import lock contention while still failing a stuck writer
@@ -565,8 +529,9 @@ during a write transaction. In-memory SQLite retains its compatible `memory` jou
 Disabling WAL selects SQLite's `DELETE` journal for an explicitly incompatible filesystem, but
 reduces concurrency and must be documented in the deployment configuration.
 
-The monitoring lease must be strictly longer than the total probe timeout, and
-the connect timeout cannot exceed the total timeout. Invalid combinations fail
+For both monitoring features, `lease_seconds * 1000 >= total_timeout_ms + 1000`
+(the mandatory acquisition safety margin); connect timeout cannot exceed total
+timeout. Invalid combinations fail
 configuration validation. Do not enable polling until the exact target plan,
 smallest necessary CIDRs/ports, backup, and recovery procedure have been
 reviewed. A broad public CIDR still does not allow special-purpose networks.
