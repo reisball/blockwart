@@ -1,133 +1,90 @@
 # Blockwart
 
-Blockwart is an infrastructure knowledge base for humans and AI agents. It
-keeps hosts, systems, services, networks, devices, relationships, runbook
-links, and credential references in one searchable catalog.
+**Infrastructure knowledge for humans and AI agents.**
 
-Blockwart stores references to credentials, never passwords, tokens, private
-keys, or other secret values.
+Blockwart is a self-hosted infrastructure knowledge base that connects your
+systems, services, networks, and devices with the knowledge needed to operate
+them. Keep dependencies, runbooks, decisions, and project documentation in one
+searchable catalog — accessible through a web interface, a REST API, and the
+Model Context Protocol (MCP).
 
-## Current status
+[Documentation](docs/README.md) ·
+[Installation](docs/deployment.md) ·
+[MCP integration](docs/mcp.md) ·
+[Releases](https://github.com/reisball/blockwart/releases)
 
-The current Development/Staging pilot is deployed and accepted. The GitHub
-repository `reisball/blockwart` and its `main` branch are canonical; the former
-Gitea repository is retained only as a read-only rollback source.
+## Why Blockwart?
 
-The pilot is not a production service and this repository does not deploy it
-automatically.
+Infrastructure documentation is most useful when it explains both what exists
+and how it fits together. Blockwart links operational knowledge directly to the
+systems and services it describes, giving people and agents a shared source of
+context.
 
-## What Blockwart can do
+- **Understand your infrastructure.** Catalog hosts, systems, services, networks,
+  and devices. Explore their placement, dependencies, and network topology.
+- **Keep knowledge connected.** Link runbooks and decisions to the infrastructure
+  they describe, with lifecycle and review information.
+- **Organize project work.** Track tasks, questions, and blockers alongside
+  versioned knowledge pages, external access references, and project history.
+- **Give agents scoped access.** Let AI tools search and maintain authorized
+  catalog data through MCP or REST, using object-level permissions.
+- **Spot what needs attention.** Review documentation and catalog issues, with
+  optional service-health checks and GitHub release observations.
+- **Keep changes accountable.** Manage human and service accounts with
+  role-based access, object grants, and an audit trail.
 
-- model infrastructure as typed catalog objects and validated relationships;
-- describe bounded internal service components and their local dependencies;
-- record canonical Decisions with explicit lifecycle, asset scope, related knowledge, and
-  cycle-safe supersession links;
-- keep canonical Project research, experiments, migrations, implementations, and incident
-  reviews as structured reviewed knowledge with safe evidence and typed links;
-- manage standalone or related Projects in a focused overview/workspace with a
-  seven-kind append-only professional chronology;
-- track Project items (tasks, questions and blockers), versioned Markdown knowledge
-  pages, and external accesses with credential references in the
-  [Project workspace](docs/project-workspace.md);
-- keep canonical Runbook operating and recovery contracts with inert exact commands,
-  explicit verification, distinct rollback/recovery, and cycle-safe typed links;
-- opt services into provider-neutral health observations through bounded,
-  allowlisted HTTP(S) checks without changing catalog revision history;
-- opt services into public GitHub stable-release observations without changing
-  running versions, health observations, catalog revision history, or deployments;
-- show placement, device, dependency, and network topology in the human UI;
-- search and read authorized context through REST and MCP;
-- create, update, relate, and delete catalog objects through authorized UI,
-  REST, and MCP commands;
-- rename any nameable object through a narrow, ETag-bound contract that
-  changes only its label and uses its own delegable `rename` capability;
-- keep an append-only, Markdown-capable operational comment timeline per
-  object through UI, REST, and MCP;
-- manage human and service-account identities, explicit global catalog-owner,
-  read-only catalog-viewer, and project-creator roles, and additive object
-  grants separately;
-- delegate creating top-level Project roots on its own, without handing out
-  catalog-wide write, delete, or access-management authority;
-- delegate creating credential-reference metadata for one service and linking it
-  to one of its access methods in one atomic call, without catalog-wide root
-  creation or unrestricted service editing;
-- enforce centralized RBAC, optimistic concurrency, idempotency, audit, and
-  last-owner safeguards;
-- import reviewed infrastructure data from Markdown/YAML with a dry-run-first
-  workflow;
-- export generated Markdown/YAML without exporting credential values.
+Blockwart stores **credential references, not secrets**. Passwords, tokens, and
+private keys stay in your existing secret store.
 
-## Interfaces
+## Getting started
 
-| Interface | Use it for | Contract |
-|---|---|---|
-| Human UI | Search, catalog work, access management, and administration | [Authentication and RBAC](docs/auth-rbac.md) |
-| REST API v1 | Stable object-authorized reads and commands | [API v1](docs/api-v1.md) |
-| Agent API | Read-only compatibility access for existing clients | [Agent API](docs/agent-api.md) |
-| MCP (`blockwart-mcp`) | Agent-native catalog reads and authorized commands over stdio | [MCP server](docs/mcp.md) |
-| Object comments | Human and agent operational history, separate from audit | [Object comments](docs/object-comments.md) |
-| Import CLI | Reviewed TOOLS.md/YAML ingestion without resolving secrets | [Markdown import](docs/markdown-import.md) |
-| Needs attention | One authorized read-only view over record and relationship integrity, placement, lifecycle, monitoring, endpoints, provenance, Runbook readiness, knowledge review, and source coverage | [Needs attention](docs/attention.md) |
-| Source coverage CLI | Closed reviewed Knowledge inventories with dry-run evidence and explicit recording | [Reviewed source coverage](docs/source-coverage-manifest.md) |
-| Knowledge plan CLI | Deterministic private-source classification with no catalog writes | [Knowledge planning](docs/knowledge-planning.md) |
-| Knowledge apply CLI | Offline digest-bound reviewed apply and paired SQLite rollback | [Knowledge apply](docs/knowledge-apply.md) |
-| Release CLI | Dry-run-first container release with restored-copy proof and verified automatic rollback | [Atomic release workflow](docs/release-workflow.md) |
+Blockwart can run as a Python application or in a container. Python installations
+require **Python 3.12 or newer**.
 
-## Versions and releases
+1. Follow the [installation guide](docs/deployment.md) to install Blockwart,
+   initialize the database, and create the first administrator and catalog owner.
+2. Configure HTTPS for browser access and review the
+   [configuration reference](docs/config.md).
+3. Start building your catalog in the web interface, or connect a client using
+   the [REST API](docs/api-v1.md) or [MCP server](docs/mcp.md).
 
-Product versions follow the [versioning and release rules](docs/versioning.md).
-See the [changelog](CHANGELOG.md) and
-[GitHub releases](https://github.com/reisball/blockwart/releases) for published
-versions. A software release does not automatically deploy an instance or
-change the Development/Staging pilot status.
+The installation guide also covers backups, readiness checks, and upgrades.
 
-## Agent quick start
+## Connect your tools
 
-For new agent integrations, prefer `blockwart-mcp` or `/api/v1`. Both expose
-the same authorization decisions and safe catalog projections.
+Use the web interface for interactive catalog and project work. Use the
+[REST API](docs/api-v1.md) for integrations and automation, or the
+[MCP server](docs/mcp.md) to connect compatible AI assistants.
 
-Run the MCP server against an existing Blockwart API:
+All three interfaces use the same authorization model. Agent access is assigned
+to service accounts and limited by their granted permissions; connecting an
+agent does not give it unrestricted access to the catalog.
 
-```bash
-BLOCKWART_API_BASE_URL=http://127.0.0.1:8000 \
-BLOCKWART_API_TOKEN_FILE=/protected/path/to/token \
-blockwart-mcp
-```
-
-The service-account token must have the exact object grants required by the
-requested tools. Credential references may be returned; credential values are
-never resolved. See the [MCP tool list](docs/mcp.md), [REST API](docs/api-v1.md),
-the [agent read-projection guide](docs/agent-read-projections.md), and
-[authorization model](docs/auth-rbac.md) before integrating a client.
-
-## Local setup
-
-Create an environment, install the development dependencies, upgrade the
-database, and start the application:
-
-```bash
-python3 -m venv .venv
-. .venv/bin/activate
-python -m pip install --constraint requirements/dev.txt ".[dev]"
-blockwart-db upgrade
-uvicorn blockwart.main:app --reload
-```
-
-Database initialization, Owner bootstrap, container startup, HTTPS, readiness,
-backup, and rollback are documented in [Deployment](docs/deployment.md).
-Environment variables and pilot seed commands are documented in
-[Configuration](docs/config.md).
+Existing documentation can be brought into the catalog through the
+[reviewed Markdown/YAML import workflow](docs/markdown-import.md).
 
 ## Documentation
 
-Use the [documentation index](docs/README.md) to find the current API,
-security, operations, architecture, data, and historical migration material.
+- [Documentation index](docs/README.md)
+- [Installation and operation](docs/deployment.md)
+- [Configuration](docs/config.md)
+- [Authentication and permissions](docs/auth-rbac.md)
+- [REST API](docs/api-v1.md) and [MCP integration](docs/mcp.md)
+- [Project workspace](docs/project-workspace.md)
 
-For development checks and build contracts, see [CI](docs/ci.md).
-Questions and tracked work belong in this repository's GitHub Issues.
+For changes between versions, see the [changelog](CHANGELOG.md) and
+[GitHub releases](https://github.com/reisball/blockwart/releases).
+
+## Contributing and support
+
+Found a bug or have an idea? Search the existing
+[issues](https://github.com/reisball/blockwart/issues) or open a new one.
+For development setup, checks, and the contribution workflow, see
+[Contributing](CONTRIBUTING.md).
+
+Please report vulnerabilities through the process described in the
+[security policy](SECURITY.md), rather than a public issue.
 
 ## License
 
-Blockwart is licensed under the [Apache License 2.0](LICENSE). It may be used,
-modified, and distributed for private or commercial purposes under that
-license's terms.
+Blockwart is licensed under the [Apache License 2.0](LICENSE).
