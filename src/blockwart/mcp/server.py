@@ -342,6 +342,7 @@ FIELD_ACCURATE_TOOLS: tuple[str, ...] = (
     *PREVIEW_TOOLS,
     *RENAME_TOOLS,
     *RELATIONSHIP_TOOLS,
+    "blockwart.save_project_record",
 )
 # The read tools whose rejected page size publishes one narrowly scoped
 # field-accurate detail. Every other rejected read argument keeps the opaque
@@ -2048,6 +2049,46 @@ _ARGUMENT_VIOLATIONS: dict[str, str] = {
 }
 
 
+def _record_argument_errors(error: ValidationError) -> list[ValidationError]:
+    """Descend only into the declared record variant, never unrelated branches.
+
+    jsonschema reports oneOf/anyOf at the enclosing object. The published
+    discriminator identifies a unique branch; nullable anyOf has a single
+    non-null branch. Ambiguous unions retain their safe enclosing diagnosis.
+    """
+    if error.validator not in {"oneOf", "anyOf"} or not error.context:
+        return [error]
+    schema = error.schema
+    branches = schema[error.validator]
+    discriminator = schema.get("discriminator", {})
+    key = discriminator.get("propertyName")
+    if key and isinstance(error.instance, dict):
+        value = error.instance.get(key)
+        reference = discriminator.get("mapping", {}).get(value) if isinstance(value, str) else None
+        selected = [i for i, branch in enumerate(branches) if branch.get("$ref") == reference]
+        if reference is None or len(selected) != 1:
+            # Keep the declared discriminator location; never publish its value.
+            return [
+                ValidationError(
+                    "",
+                    validator="required" if key not in error.instance else "enum",
+                    path=[*error.absolute_path, key],
+                )
+            ]
+    elif error.validator == "anyOf" and error.instance is not None:
+        selected = [i for i, branch in enumerate(branches) if branch.get("type") != "null"]
+        if len(selected) != 1:
+            return [error]
+    else:
+        return [error]
+    return [
+        leaf
+        for child in error.context
+        if child.schema_path and child.schema_path[0] == selected[0]
+        for leaf in _record_argument_errors(child)
+    ]
+
+
 def _argument_details(name: str, arguments: JSON) -> list[dict[str, str | int | None]]:
     """Project rejected tool arguments onto the published violation contract.
 
@@ -2056,21 +2097,35 @@ def _argument_details(name: str, arguments: JSON) -> list[dict[str, str | int | 
     values and jsonschema messages are never copied.
     """
     details: list[dict[str, str | int | None]] = []
-    for error in TOOL_INPUT_VALIDATORS[name].iter_errors(arguments):
-        location = ".".join(str(part) for part in error.absolute_path)
+    errors = TOOL_INPUT_VALIDATORS[name].iter_errors(arguments)
+    if name == "blockwart.save_project_record":
+        errors = (leaf for error in errors for leaf in _record_argument_errors(error))
+    for error in errors:
         code = _ARGUMENT_VIOLATIONS.get(str(error.validator), GENERIC_SCHEMA_VIOLATION)
+        # Unknown keys are instance data, even when they resemble declared paths.
+        # Preserve existing tool behavior, but never append them for record diagnostics.
+        extra = [] if name == "blockwart.save_project_record" else _unexpected_arguments(error)
         rejected = [
-            f"{location}.{argument}" if location else argument
-            for argument in (*_missing_arguments(error), *_unexpected_arguments(error))
+            [*error.absolute_path, argument] for argument in (*_missing_arguments(error), *extra)
         ]
-        for argument_location in rejected or [location]:
-            details.append(
+        for segments in rejected or [list(error.absolute_path)]:
+            argument_location = ".".join(str(part) for part in segments)
+            detail: dict[str, str | int | None] = dict(
                 public_detail(
                     location=argument_location,
                     code=code,
-                    path=_canonical_argument_path(name, argument_location),
+                    path=_canonical_argument_path(name, argument_location, segments=segments),
                 )
             )
+            if (
+                name == "blockwart.save_project_record"
+                and str(error.validator) == "maxLength"
+                and type(error.validator_value) is int
+            ):
+                # A local schema constant, never the submitted text or its length.
+                detail["rule"] = "maxLength"
+                detail["maximum"] = error.validator_value
+            details.append(detail)
     return order_public_details(details)
 
 
@@ -2148,13 +2203,24 @@ def _unexpected_arguments(error: ValidationError) -> list[str]:
     )
 
 
-def _canonical_argument_path(name: str, location: str) -> str | None:
+def _canonical_argument_path(
+    name: str, location: str, *, segments: list[str | int] | None = None
+) -> str | None:
     """Return the canonical catalog or relationship path an argument points at."""
     parts = location.split(".")
     if not parts or not parts[0]:
         return None
     if name in RELATIONSHIP_ARGUMENT_TOOLS and parts[0] in RELATIONSHIP_PATH_ROOTS:
         return location
+    if name == "blockwart.save_project_record" and parts[0] == "record":
+        # Only typed validator indices become brackets; a numeric input key is not an index.
+        canonical = ""
+        for part in (segments or parts)[1:]:
+            if type(part) is int:
+                canonical += f"[{part}]"
+            else:
+                canonical += ("." if canonical else "") + part
+        return canonical or None
     argument = WRITE_INTENT_OBJECT_ARGUMENTS.get(name)
     if argument is None or len(parts) < 2 or parts[0] != argument:
         return None

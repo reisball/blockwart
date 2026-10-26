@@ -189,3 +189,31 @@ which publishes exactly the narrowly scoped limit detail above and describes no
 other argument. MCP sends its validated or
 generated ID on every outgoing API request. Legacy or malformed upstream errors remain
 the generic `upstream_http_error`.
+
+### Project-record MCP argument diagnostics
+
+`blockwart.save_project_record` also uses the safe field-accurate local argument
+contract. For create and replacement calls, the wrapper follows the published
+`record.kind` discriminator and nested nullable schemas to report only the
+selected variant's violations, not errors from unrelated record kinds.
+Locations retain the request prefix (for example `record.body`); canonical paths
+are relative to the record (for example `body`). Invalid discriminators name
+`record.kind` without reflecting the rejected value. Ambiguous schemas retain a
+safe enclosing diagnostic.
+
+A `maxLength` rejection on this tool additionally publishes `rule: "maxLength"`
+and `maximum`, taken only from the local published JSON Schema. Thus an overlong
+page body reports `code: "value_too_long"`, `location: "record.body"`,
+`path: "body"`, `rule: "maxLength"`, `maximum: 4000`. No submitted value, text,
+actual length or exception message is included. This is a local record-tool
+extension, not a change to arbitrary upstream-detail forwarding or other tools.
+Validation, bounds, HTTP requests, ETags, idempotency and authorization are
+unchanged. Both accepted 4,000-character and rejected 4,001-character requests
+are exercised through the real STDIO MCP response path.
+
+Record diagnostic paths retain typed array indices (for example,
+`location: record.criteria.0.description`, `path: criteria[0].description`).
+For `blockwart.save_project_record`, undeclared keys are never path segments:
+additional-property violations point to the enclosing declared record/object,
+even when a submitted key resembles `body.password`, `0`, or a field declared
+on another record shape. Other tools retain their existing diagnostics.
