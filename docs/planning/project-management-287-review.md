@@ -1,5 +1,11 @@
 # Project-management acceptance and review follow-up
 
+> Historical implementation/review evidence. For current usage and contracts,
+> see [Project management](../project-management.md) and
+> [Project workspace](../project-workspace.md). Past task ownership, commands and
+> verification results below do not authorize new operations or prove another build.
+
+
 Refs #287–#296; implementation PR #298. The general RBAC proposal #297 and
 OpenClaw integration #173 are separate work, not included in this PR.
 

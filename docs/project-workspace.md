@@ -37,7 +37,9 @@ All record payloads are closed, validated models in `schemas/project_workspace.p
 The `kind` discriminator is mandatory for every REST/MCP record input; omitted kinds are
 rejected during argument validation, before any REST request or mutation.
 
-- **Item:** title, Markdown description, `item_type` (`task`, `question`, `blocker`), `status`
+- **Item (original compatibility fields):** title, Markdown description, `item_type`
+  (originally `task`, `question`, `blocker`; current additional types are in
+  [Project management](project-management.md)), `status`
   (`open`, `in_progress`, `blocked`, `done`), responsibility label, optional timezone-aware
   `due_at`, parent item UUID, safe issue URL and typed object references. Responsibility is
   descriptive metadata, not an ACL or an automatic assignment notification. Any state can be
@@ -110,9 +112,12 @@ MCP registers `blockwart.list_project_records`, `blockwart.save_project_record`,
 `blockwart.list_project_record_history` and `blockwart.search_project_workspace`. `save` selects
 creation versus replacement by optional `record_id`; `record` is the same discriminated payload
 as REST. It forwards ETag, idempotency and MCP origin through the same API. The published input
-schema is generated from the shared payload models. Existing tools remain unchanged; the MCP
-manifest changes from 38 to 42 tools, requiring an explicitly refreshed client catalog when this
-version is eventually deployed.
+schema is generated from the shared payload models. The current additional
+detail/overview/event/action/import tools are listed in
+[Project management](project-management.md#restmcp-addition-map) and the complete
+[MCP map](mcp.md). After a wrapper/API upgrade, verify the manifest and refresh
+only a stale client catalog as described there; do not infer compatibility from
+a historical tool count.
 
 Example item payload:
 

@@ -81,6 +81,11 @@ It wraps the object-authorized v1 API:
 - blockwart.get_object_context -> GET /api/v1/objects/{object_id}
 - blockwart.get_object_contexts -> POST /api/v1/object-contexts
 - blockwart.list_projects -> GET /api/v1/projects
+- blockwart.get_project_record -> GET /api/v1/projects/{object_id}/workspace/record/{record_id}
+- blockwart.get_project_overview -> GET /api/v1/projects/{object_id}/workspace/overview
+- blockwart.list_project_record_events -> GET /api/v1/projects/{object_id}/workspace/events/{record_id}
+- blockwart.act_on_project_record -> POST /api/v1/projects/{object_id}/workspace/actions/{record_id}
+- blockwart.import_project_legacy -> POST /api/v1/projects/{object_id}/workspace/import-legacy
 - blockwart.list_project_records -> GET /api/v1/projects/{object_id}/workspace/{kind}
 - blockwart.save_project_record -> POST or PUT /api/v1/projects/{object_id}/workspace/{kind}[/{record_id}]
 - blockwart.list_project_record_history -> GET /api/v1/projects/{object_id}/workspace/history/{record_id}
@@ -92,6 +97,7 @@ It wraps the object-authorized v1 API:
 - blockwart.add_comment -> POST /api/v1/objects/{object_id}/comments
 - blockwart.get_context -> GET /api/v1/context
 - blockwart.get_attention -> GET /api/v1/attention
+- blockwart.get_activity -> GET /api/v1/activity
 - blockwart.get_source_coverage -> GET /api/v1/source-coverage
 - blockwart.create_child -> POST /api/v1/objects/{parent_id}/children
 - blockwart.create_root -> POST /api/v1/roots
@@ -154,6 +160,9 @@ ladder.
 
 ## Agent intent guide
 
+For the end-to-end read/prepare/write/verify sequence and error recovery, start
+with the [Agent quickstart](agent-quickstart.md).
+
 Choose the smallest tool that directly answers the intent:
 
 - Call `blockwart.describe_schema` before any object or relationship write. It
@@ -170,7 +179,7 @@ Choose the smallest tool that directly answers the intent:
   `kind` argument narrows both the kind contract and the relationship types
   that accept that kind as an endpoint; the published relationship vocabulary
   stays complete. For one small write, request exactly one `kind`, one
-  `write_intent`, and `sections: ["object_fields", "minimal_example"]`; add
+  `write_intent`, and `sections: ["object_fields", "write_intents", "minimal_example"]`; add
   `relationships` or `errors` only when that write needs them. Every write
   intent also publishes its `creation_path` (`placement_child`,
   `disconnected_root`, `attached_device`, `service_bound_reference`, or `null`
@@ -523,7 +532,11 @@ method, the service revision advances once, and nothing else changes. The
 result carries the created object and its `etag`, `service_etag` and
 `service_revision`, `link_path`, the REST `owner_grant`, and the additive
 `service_ref`, `owner_assignment`, and `revision` proofs. A replay with the same
-key returns the original result with `replayed = true`. The tool stores metadata
+key returns `replayed = true` without another mutation. The same created
+reference instance must remain readable; its object representation/capabilities
+and ETag are current, while original link-operation metadata (including
+`service_etag`) is retained. Re-read the service before a later conditional
+write. The tool stores metadata
 only and grants no secret-store or target-system access; see
 [Service-bound credential-reference creation](auth-rbac.md#service-bound-credential-reference-creation).
 
@@ -612,10 +625,12 @@ arguments and never appear in tool output. File re-reading allows credential
 rotation without restarting the MCP process.
 
 Tokens used by this wrapper must be issued with the server-stored `mcp`
-audience for comment writes. Revision `20260804_0014` conservatively marks all
+audience for channel-sensitive writes: root creation, ownerless adoption,
+comments, Project chronology and Project-workspace mutations/actions. It does
+not add permissions. Revision `20260804_0014` conservatively marks all
 pre-existing tokens as `api`; rotate the exact deployed MCP token with
 `--audience mcp` under the normal credential/deployment approval before
-enabling `blockwart.add_comment`. A caller-controlled header cannot change a
+enabling those writes. A caller-controlled header cannot change a
 token's audience.
 
 Bearer credentials may use plain HTTP only for loopback targets. Non-loopback
@@ -655,7 +670,10 @@ argument path), `message` (published description), `path` (canonical catalog dat
 `data.network.category` or canonical relationship path such as `relation_type` or
 `metadata.link_kind`, or `null`), and `rule` (published schema-rule name, or `null`). Rejected
 argument values and jsonschema messages are never copied into a detail. Read tools keep their
-opaque `invalid_arguments` shape and do not add `details`.
+opaque `invalid_arguments` shape except for the narrowly published search
+`limit` details on `blockwart.search`/`blockwart.get_context` and schema
+`relation_type` details on `blockwart.describe_schema` (`value_not_allowed` or
+`field_not_allowed`); see the [boundary contract](api-boundary-contract.md).
 
 When the Agent API returns an HTTP 422 validation failure, MCP forwards sanitized field `details`
 from the upstream response onto the same canonical contract. MCP re-derives each detail locally:
@@ -675,8 +693,9 @@ compatibility are specified in [Project workspace](project-workspace.md).
 The runtime/dev locks select MCP SDK 1.30.0. Blockwart uses the low-level
 `mcp.server.Server` over stdio; its HTTP calls to Blockwart's REST API are its own
 client, not the SDK's Streamable HTTP/SSE client. The canonical registry, manifest
-digest, tool schemas and version handshake remain the integration contract (42
-tools at the v0.1.0 baseline), not a claim based only on dependency installation.
+digest, tool schemas and version handshake remain the integration contract,
+not a claim based only on dependency installation. Historical baseline counts
+are not a substitute for the installed revision's `tools/list` and manifest.
 
 SDK 1.30's same-origin HTTP redirect policy does not change this stdio transport.
 Its FastMCP Streamable HTTP idle-session expiry/cap defaults likewise do not apply

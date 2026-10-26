@@ -145,7 +145,11 @@ validators remain authoritative for behavior that depends on multiple fields:
 
 This keeps one field-rule registry without duplicating richer domain logic.
 
-## Non-Goals
+## Historical scope of the initial validation slice
+
+The following list describes the original slice, not current API limitations.
+Relationship-metadata commands and device-graph endpoints are now supported; see
+[REST v1](api-v1.md) and [MCP](mcp.md).
 
 - no schema database tables or migrations
 - no editable storage paths or field types

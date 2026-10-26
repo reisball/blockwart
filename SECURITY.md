@@ -17,8 +17,11 @@ not include vulnerability details in that issue.
 
 ## Supported versions
 
-Until Blockwart publishes versioned releases, security fixes target the current
-`main` branch. Deployment operators remain responsible for protecting their
+Security fixes target the current `main` branch. Older tags and published
+releases do not have a separate backport or maintenance guarantee. A release
+version alone does not establish that it includes later security fixes; check
+the relevant advisory and fixed commit. Deployment operators remain responsible
+for protecting their
 catalog database, credentials, reverse proxy, backups, and runtime secrets.
 
 The product's technical security model is documented in

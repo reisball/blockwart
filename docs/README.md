@@ -1,8 +1,25 @@
 # Documentation Index
 
-This index separates current product contracts from historical evidence and
-reference material. Nothing in the historical or raw/reference sections is
-deleted by this classification.
+Start with the guide for your task. Current usage and interface contracts are
+listed separately from historical plans and verification evidence.
+
+## Start here
+
+| You want to… | Read first | Then |
+| --- | --- | --- |
+| Understand Blockwart and use the catalog | [Project overview](../README.md) | [Domain model](domain-model.md), [Project workspace](project-workspace.md) |
+| Install or operate an instance | [Deployment](deployment.md) | [Configuration](config.md), [security model](security.md), [release workflow](release-workflow.md) |
+| Connect an AI agent or automate catalog work | [Agent quickstart](agent-quickstart.md) | [MCP](mcp.md), [REST v1](api-v1.md), [permissions](auth-rbac.md) |
+| Contribute code or documentation | [Contributing](../CONTRIBUTING.md) | [Development and CI checks](ci.md), [versioning](versioning.md) |
+
+For typed project requirements, evidence, acceptance and GitHub observations,
+use [Project management](project-management.md). The older
+[Agent API](agent-api.md) is a read-only compatibility interface; new REST
+integrations use `/api/v1`.
+
+Generated discovery (`blockwart.describe_schema`, OpenAPI and MCP `tools/list`)
+provides the machine contract for the installed revision. Examples are not
+permission grants, and a historical test result is not evidence for your build.
 
 ## Active Operating Documentation
 
@@ -21,6 +38,7 @@ deleted by this classification.
 
 ## Active API Documentation
 
+- [Agent quickstart](agent-quickstart.md)
 - [Agent API](agent-api.md), [API v1](api-v1.md), and the [API boundary
   contract](api-boundary-contract.md)
 - [MCP server](mcp.md)
@@ -53,6 +71,8 @@ deleted by this classification.
   dry-run-first legacy classification
 - [Canonical Project knowledge](projects.md), including category-specific results,
   evidence, typed links, and reviewed migration
+- [Typed project management](project-management.md): requirements, evidence,
+  record-scoped actions, acceptance and opt-in GitHub observations
 - [Project workspace](project-workspace.md): items (tasks, questions, blockers),
   versioned knowledge pages and external accesses, with shared UI/REST/MCP
   authorization and append-only history
@@ -69,7 +89,16 @@ deleted by this classification.
 - [Append-only object comments](object-comments.md)
 - [Catalog provenance and freshness](provenance.md)
 
-## Historical Migration Evidence
+## Historical plans and verification evidence
+
+These documents explain past implementation and cutover work; they are not
+current installation instructions or an authorization to repeat operations.
+Current behavior is documented in the active references above.
+
+- [Project-management implementation plan](planning/project-management-287.md)
+- [Project-management review evidence](planning/project-management-287-review.md)
+
+### Migration evidence
 
 [Gitea to GitHub migration runbook](github-migration.md) records the completed
 cutover and preserves the pre-cutover procedure as evidence. Keep

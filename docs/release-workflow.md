@@ -60,7 +60,20 @@ blockwart-release --print-schema error
 
 The complete generic example is
 [`examples/release/spec-v1.json`](../examples/release/spec-v1.json). Unknown
-fields and versions are rejected. The source commit is exactly 40 lowercase
+fields and versions are rejected. Replace example paths and the source commit
+for your instance. `expected_schema_revision` is also release-specific: it must
+match the selected artifact's packaged Alembic head, not the schema of your
+currently running database. From a clean checkout of the selected commit with
+its dependencies installed, inspect it without migrating a database:
+
+```bash
+PYTHONPATH=src python -c 'from alembic.script import ScriptDirectory; from blockwart.db.migrations import build_alembic_config; print(ScriptDirectory.from_config(build_alembic_config()).get_current_head())'
+```
+
+The example's `20261023_0030` is the head at this documentation revision, not a
+permanent default. A packaged mismatch fails with `packaged_schema_mismatch`.
+
+The source commit is exactly 40 lowercase
 hexadecimal characters; abbreviated SHAs, symbolic refs, ambiguous SHA-shaped
 refs, missing objects, non-commit objects, and commits unreachable from every
 ref are rejected. The repository must be at that exact `HEAD` with a clean

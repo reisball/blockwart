@@ -183,10 +183,12 @@ exactly the canonical fields above (`code`, `location`, `message`, `path`, `rule
 Arbitrary upstream details, raw inputs, secret values, internal validation context,
 and database diagnostics are never forwarded; an upstream detail that does not name a
 published violation code is dropped. Read tools keep their
-opaque `invalid_arguments` shape without `details`; the single exception is the
-rejected search `limit` of `blockwart.search` and `blockwart.get_context`,
-which publishes exactly the narrowly scoped limit detail above and describes no
-other argument. MCP sends its validated or
+opaque `invalid_arguments` shape without `details`, with two narrow exceptions:
+rejected search `limit` on `blockwart.search`/`blockwart.get_context` publishes
+only the limit detail above; `blockwart.describe_schema` rejects an invalid or
+inapplicable `relation_type` with a `relation_type` detail
+(`value_not_allowed` or `field_not_allowed`). Neither exception broadens errors
+for other read arguments. MCP sends its validated or
 generated ID on every outgoing API request. Legacy or malformed upstream errors remain
 the generic `upstream_http_error`.
 
