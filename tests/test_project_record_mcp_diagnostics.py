@@ -86,6 +86,8 @@ def test_only_selected_nested_record_branch_is_described(monkeypatch, record, lo
     details = json.loads(response.content[0].text)["error"]["details"]
     assert len(details) == 1
     assert details[0]["location"] == location
+    expected_path = location.removeprefix("record.").replace(".0", "[0]")
+    assert details[0]["path"] == expected_path
     assert details[0]["maximum"] == maximum
     assert details[0]["rule"] == "maxLength"
     assert "xxx" not in response.content[0].text
@@ -150,3 +152,29 @@ def test_stdio_transport_preserves_diagnostic_and_valid_boundary():
         assert requests[0]["if_match"] == '"rev-7"'
         assert requests[0]["idempotency_key"] == "record-diagnostic-0001"
         assert requests[0]["body"]["body"] == "x" * 4000
+
+
+@pytest.mark.parametrize("key", ["body.password", "0", "title", "private-marker"])
+@pytest.mark.parametrize("nested", [False, True])
+def test_unknown_keys_are_not_published_as_schema_paths(monkeypatch, key, nested):
+    def no_request(*args, **kwargs):
+        pytest.fail("invalid record reached upstream")
+
+    monkeypatch.setattr(server, "request_json", no_request)
+    if nested:
+        # title is declared at the record root, but not on a criterion.
+        record = {"kind": "item", "criteria": [{"id": "c", key: "PRIVATE-VALUE"}]}
+        expected_location, expected_path = "record.criteria.0", "criteria[0]"
+    else:
+        if key == "title":
+            key = "description.password"
+        record = {key: "PRIVATE-VALUE"}
+        expected_location, expected_path = "record", None
+    response = asyncio.run(server.handle_call_tool(TOOL, arguments(record)))
+    assert response.isError
+    details = json.loads(response.content[0].text)["error"]["details"]
+    rejected = [d for d in details if d["code"] == "field_not_allowed"]
+    assert len(rejected) == 1
+    assert rejected[0]["location"] == expected_location
+    assert rejected[0]["path"] == expected_path
+    assert "PRIVATE-VALUE" not in response.content[0].text

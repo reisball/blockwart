@@ -2101,18 +2101,20 @@ def _argument_details(name: str, arguments: JSON) -> list[dict[str, str | int | 
     if name == "blockwart.save_project_record":
         errors = (leaf for error in errors for leaf in _record_argument_errors(error))
     for error in errors:
-        location = ".".join(str(part) for part in error.absolute_path)
         code = _ARGUMENT_VIOLATIONS.get(str(error.validator), GENERIC_SCHEMA_VIOLATION)
+        # Unknown keys are instance data, even when they resemble declared paths.
+        # Preserve existing tool behavior, but never append them for record diagnostics.
+        extra = [] if name == "blockwart.save_project_record" else _unexpected_arguments(error)
         rejected = [
-            f"{location}.{argument}" if location else argument
-            for argument in (*_missing_arguments(error), *_unexpected_arguments(error))
+            [*error.absolute_path, argument] for argument in (*_missing_arguments(error), *extra)
         ]
-        for argument_location in rejected or [location]:
+        for segments in rejected or [list(error.absolute_path)]:
+            argument_location = ".".join(str(part) for part in segments)
             detail: dict[str, str | int | None] = dict(
                 public_detail(
                     location=argument_location,
                     code=code,
-                    path=_canonical_argument_path(name, argument_location),
+                    path=_canonical_argument_path(name, argument_location, segments=segments),
                 )
             )
             if (
@@ -2201,7 +2203,9 @@ def _unexpected_arguments(error: ValidationError) -> list[str]:
     )
 
 
-def _canonical_argument_path(name: str, location: str) -> str | None:
+def _canonical_argument_path(
+    name: str, location: str, *, segments: list[str | int] | None = None
+) -> str | None:
     """Return the canonical catalog or relationship path an argument points at."""
     parts = location.split(".")
     if not parts or not parts[0]:
@@ -2209,7 +2213,14 @@ def _canonical_argument_path(name: str, location: str) -> str | None:
     if name in RELATIONSHIP_ARGUMENT_TOOLS and parts[0] in RELATIONSHIP_PATH_ROOTS:
         return location
     if name == "blockwart.save_project_record" and parts[0] == "record":
-        return ".".join(parts[1:]) or None
+        # Only typed validator indices become brackets; a numeric input key is not an index.
+        canonical = ""
+        for part in (segments or parts)[1:]:
+            if type(part) is int:
+                canonical += f"[{part}]"
+            else:
+                canonical += ("." if canonical else "") + part
+        return canonical or None
     argument = WRITE_INTENT_OBJECT_ARGUMENTS.get(name)
     if argument is None or len(parts) < 2 or parts[0] != argument:
         return None
