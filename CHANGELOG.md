@@ -30,6 +30,7 @@ Project management workflows, stronger access controls, and clearer validation e
 - [#266](https://github.com/reisball/blockwart/pull/266) — Update the MCP SDK to 1.30.0.
 - [#285](https://github.com/reisball/blockwart/pull/285) — Validate OpenAPI against the current source checkout.
 - [#305](https://github.com/reisball/blockwart/pull/305) — Restructure the README around capabilities and getting started.
+- [#307](https://github.com/reisball/blockwart/pull/307) — Align API/MCP and operating guides, and add an agent quickstart.
 
 **Upgrade:** Database migrations are required. REST endpoints remain under `/api/v1`.
 
