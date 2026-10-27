@@ -370,7 +370,7 @@ def test_historical_reference_kind_is_protected_after_conversion(
                 "before": {"id": REF_ID, "kind": "credential_reference", "data": {
                     "reference": {"path": LOCATOR},
                 }},
-                "changes": [{"field": "reference.path", "old": LOCATOR, "new": "", 
+                "changes": [{"field": "reference.path", "old": LOCATOR, "new": "",
                              "value_change": True}],
             }),
         ))
