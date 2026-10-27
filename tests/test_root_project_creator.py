@@ -337,8 +337,10 @@ def test_service_project_creator_creates_root_project_with_owner_self(
         "discover",
         "manage_access",
         "read",
+        "read_reference_content",
         "rename",
         "write",
+        "write_reference_content",
     ]
     with session_factory() as session:
         _root_facts(session, "service-project", creator_state["creator_id"])
@@ -758,8 +760,10 @@ def test_project_creator_cannot_widen_its_own_authority_through_its_new_root(
         "discover",
         "manage_access",
         "read",
+        "read_reference_content",
         "rename",
         "write",
+        "write_reference_content",
     ]
     assert creator_client.get(
         "/api/v1/objects/existing-project", headers=headers

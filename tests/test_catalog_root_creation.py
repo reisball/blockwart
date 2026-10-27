@@ -288,8 +288,10 @@ def test_service_catalog_owner_creates_root_with_real_owner_grant(
         "discover",
         "manage_access",
         "read",
+        "read_reference_content",
         "rename",
         "write",
+        "write_reference_content",
     ]
     with session_factory() as session:
         _root_facts(session, "service-root")

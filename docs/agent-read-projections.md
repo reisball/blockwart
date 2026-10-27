@@ -88,6 +88,11 @@ effective rights are identical — a discover-only object and a fully writable o
 can never collapse onto one capability block. A concealed placeholder
 contributes no entry, so the table cannot become an existence oracle.
 
+The separate `read_reference_content` and `write_reference_content` rights also
+participate in exact-set deduplication. New permission codes are appended to the
+registry so keys for pre-existing permission sets remain stable. A projection
+never grants either content right or changes the reference-content boundary.
+
 Full reads keep their inline `capabilities` list and never carry a
 `capability_set`; projected reads do the opposite. The two contracts cannot be
 confused for one another.
