@@ -9,7 +9,7 @@ listed separately from historical plans and verification evidence.
 | --- | --- | --- |
 | Understand Blockwart and try the catalog | [Project overview](../README.md) | [First useful catalog, local HTTPS and UI tour](quickstart.md) |
 | Install or operate an instance | [Deployment](deployment.md) | [Configuration](config.md), [security model](security.md), [release workflow](release-workflow.md) |
-| Connect an AI agent or automate catalog work | [Agent quickstart](agent-quickstart.md) | [MCP](mcp.md), [REST v1](api-v1.md), [permissions](auth-rbac.md) |
+| Connect an AI agent or automate catalog work | [Agent quickstart](agent-quickstart.md) | [Optional agent-skill template](agent-skill.md), [MCP](mcp.md), [REST v1](api-v1.md), [permissions](auth-rbac.md) |
 | Contribute code or documentation | [Contributing](../CONTRIBUTING.md) | [Development and CI checks](ci.md), [versioning](versioning.md) |
 
 For typed project requirements, evidence, acceptance and GitHub observations,
@@ -41,7 +41,7 @@ permission grants, and a historical test result is not evidence for your build.
 
 ## Active API Documentation
 
-- [Agent quickstart](agent-quickstart.md)
+- [Agent quickstart](agent-quickstart.md) and [optional reusable skill / quick-reference workflow](agent-skill.md)
 - [Agent API](agent-api.md), [API v1](api-v1.md), and the [API boundary
   contract](api-boundary-contract.md)
 - [MCP server](mcp.md)

@@ -270,6 +270,14 @@ Use adoption only if `adoption_available` is true and the operator authorized
 that action; global Owner authority does not itself satisfy local Owner coverage.
 See [ownership and recovery](auth-rbac.md#ownership-invariant-and-ownerless-recovery).
 
+## Optional reusable workflow
+
+After the first successful read, adopt the [agent-skill template](agent-skill.md)
+if your client benefits from reusable instructions. It preserves the same scoped
+read → prepare → write → verify flow and includes an optional, dated routing
+index. It does not install the MCP connection, broaden access or replace the
+current tool contracts.
+
 ## Further reference
 
 - [MCP tools and transport](mcp.md), [read projections](agent-read-projections.md)
