@@ -7,6 +7,9 @@ Notable product changes are recorded here. Versions follow the
 
 ### Added
 
+- Portable agent-skill template and optional, scoped quick-reference workflow,
+  linked from the agent onboarding documentation (#317).
+
 - End-to-end local evaluation guide with HTTPS, a small fictional catalog and UI
   tour; clearer product boundaries and agent connection/first-read instructions.
 
