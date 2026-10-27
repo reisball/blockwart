@@ -6,11 +6,15 @@ capabilities authorize the top-level ``data.reference`` subtree.
 """
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Collection, Mapping
 from copy import deepcopy
 from typing import Any
 
+from sqlalchemy import select
+from sqlalchemy.orm import Session
+
 from blockwart.domain.auth import Permission
+from blockwart.models import AuditEvent
 from blockwart.services.policy import PolicySnapshot
 
 REFERENCE_KIND = "credential_reference"
@@ -79,9 +83,11 @@ def reference_audit_details(details: Mapping[str, Any]) -> dict[str, Any]:
     return result
 
 
-def reference_audit_requires_projection(kind: str, details: Mapping[str, Any]) -> bool:
+def reference_audit_requires_projection(
+    kind: str, details: Mapping[str, Any], *, was_reference: bool = False,
+) -> bool:
     """Historical field protection follows event/snapshot kinds, not just today's kind."""
-    if kind == REFERENCE_KIND:
+    if kind == REFERENCE_KIND or (was_reference and details.get("event") == "legacy"):
         return True
     if str(details.get("object_ref", "")).startswith(f"{REFERENCE_KIND}:"):
         return True
@@ -99,3 +105,21 @@ def reference_audit_requires_projection(kind: str, details: Mapping[str, Any]) -
              or change["field"].removeprefix("data.").startswith("reference."))
         for change in changes
     )
+
+
+def historical_reference_object_ids(session: Session, object_ids: Collection[str]) -> set[str]:
+    """Conservatively classify only page candidates using immutable history.
+
+    Conversion audit snapshots retain the prior kind, even when legacy events
+    themselves lack classification. SQL filters by indexed object IDs and
+    returns only distinct IDs, never loading a catalog/history into Python.
+    A textual false positive only makes legacy rendering more restrictive.
+    """
+    if not object_ids:
+        return set()
+    return set(session.scalars(
+        select(AuditEvent.object_id).where(
+            AuditEvent.object_id.in_(object_ids),
+            AuditEvent.details_json.contains(REFERENCE_KIND, autoescape=True),
+        ).distinct()
+    ).all())

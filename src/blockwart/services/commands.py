@@ -333,6 +333,7 @@ def plan_object_update(
         raise CommandConflict("payload object id does not match the resource")
     if row.revision != resolved_revision:
         raise CommandPreconditionFailed("object revision changed")
+    replaces_reference = "reference" in payload.data
     stored_data = _raw_object_snapshot(row).get("data")
     if CREDENTIAL_REFERENCE_KIND in {row.kind, payload.kind}:
         if row.kind != payload.kind:
@@ -373,8 +374,17 @@ def plan_object_update(
         for snapshot in (before_metadata, after_metadata):
             if isinstance(snapshot.get("data"), dict):
                 snapshot["data"].pop("reference", None)
-        if before_metadata != after_metadata:
+        if _canonical_json(before_metadata) != _canonical_json(after_metadata):
             raise CommandAuthorizationDenied(object_id=object_id, permission=Permission.WRITE)
+    if (
+        payload.kind == CREDENTIAL_REFERENCE_KIND
+        and replaces_reference
+        and not current_context.policy.can(Permission.READ_REFERENCE_CONTENT, object_id)
+        and current_context.policy.can(Permission.WRITE_REFERENCE_CONTENT, object_id)
+    ):
+        # A blind replacement is always a write, even if its bytes match.
+        # No-op answers/revisions would otherwise validate hidden locator guesses.
+        upsert_plan = replace(upsert_plan, unchanged=False)
     return ObjectUpdatePlan(
         row=row,
         payload=payload,
@@ -402,7 +412,7 @@ def _reference_update_payload(
     if "reference" in data:
         if not context.policy.can(Permission.WRITE_REFERENCE_CONTENT, row.id) and (
             not context.policy.can(Permission.READ_REFERENCE_CONTENT, row.id)
-            or data["reference"] != stored_data.get("reference")
+            or _canonical_json(data["reference"]) != _canonical_json(stored_data.get("reference"))
         ):
             raise CommandAuthorizationDenied(
                 object_id=row.id, permission=Permission.WRITE_REFERENCE_CONTENT,
@@ -518,6 +528,25 @@ def preview_catalog_object_update(
         # The digest must collapse protected proposals as well as stored values.
         # Otherwise it would become an equality oracle over hidden locators.
         digest_after = rendered_after
+    if (
+        CREDENTIAL_REFERENCE_KIND in {plan.row.kind, plan.payload.kind}
+        and not plan.context.policy.can(Permission.READ_REFERENCE_CONTENT, object_id)
+    ):
+        # Compare fixed opaque branch markers, not hidden originals. Explicit
+        # blind replacements always publish the same redacted change; omission
+        # preserves content and contributes no change. Neither equality nor
+        # stored branch presence/shape may affect the safe preview contract.
+        blind_replacement = "reference" in payload.data or plan.row.kind != plan.payload.kind
+        for snapshot in (before, after, rendered_before, rendered_after, digest_after):
+            if not isinstance(snapshot.get("data"), dict):
+                # A malformed historical scalar has no classifiable fields.
+                snapshot["data"] = {}
+            snapshot["data"].pop("reference", None)
+        if blind_replacement:
+            before["data"]["reference"] = REDACTED_PREVIEW_VALUE
+            after["data"]["reference"] = None
+            for snapshot in (rendered_before, rendered_after, digest_after):
+                snapshot["data"]["reference"] = REDACTED_PREVIEW_VALUE
     diff, diff_truncated, diff_digest = preview_diff(
         before,
         after,

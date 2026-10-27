@@ -277,6 +277,9 @@ context reads, responses, previews and history. `write_reference_content`
 controls replacement through `update_object` without implying content read;
 a content-only writer must preserve all metadata. Omitted `reference` is
 preserved; explicit `{}` clears it. Ordinary `write` cannot change it.
+Explicit blind replacements always advance the revision, including equal values;
+previews publish one fixed redacted replacement, never equality, existence, or
+shape of hidden content. Omission retains normal no-op behavior.
 Delegate the additive `reference_content_reader` / `reference_content_editor`
 roles with `self` scope on the reference itself. Existing Viewer/Editor and
 Global Catalog Reader grants gain neither capability; Owner and Global Catalog

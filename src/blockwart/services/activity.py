@@ -55,6 +55,7 @@ from blockwart.services.pagination import (
 )
 from blockwart.services.read_access import ReadAccess
 from blockwart.services.reference_content import (
+    historical_reference_object_ids,
     reference_audit_details,
     reference_audit_requires_projection,
 )
@@ -159,7 +160,9 @@ def query_activity_page(
         )
     page_cap = min(limit + 1, ACTIVITY_MAX_SCAN_EVENTS)
     rows = list(session.scalars(page_statement.limit(page_cap)).all())
-    readable = _readable_objects(session, access, {row.object_id for row in rows})
+    readable = _readable_objects(
+        session, access, {row.object_id for row in rows}, include_reference_history=True,
+    )
     items: list[ActivityItem] = []
     for row in rows[:limit]:
         item = _project_event(
@@ -302,13 +305,14 @@ def _keyset_predicate(
 class _ReadableCatalog:
     """The authorized DETAIL-visibility projection used for attribution."""
 
-    __slots__ = ("ids", "refs", "kinds", "labels")
+    __slots__ = ("ids", "refs", "kinds", "labels", "historical_reference_ids")
 
     def __init__(self) -> None:
         self.ids: set[str] = set()
         self.refs: dict[str, str] = {}
         self.kinds: dict[str, str] = {}
         self.labels: dict[str, str] = {}
+        self.historical_reference_ids: set[str] = set()
 
 
 def _global_read(access: ReadAccess) -> bool:
@@ -318,7 +322,8 @@ def _global_read(access: ReadAccess) -> bool:
 
 
 def _readable_objects(
-    session: Session, access: ReadAccess, candidate_ids: set[str | None]
+    session: Session, access: ReadAccess, candidate_ids: set[str | None],
+    *, include_reference_history: bool = False,
 ) -> _ReadableCatalog:
     """Resolve only scanned candidates against the current catalog and policy."""
     readable = _ReadableCatalog()
@@ -333,6 +338,10 @@ def _readable_objects(
         readable.refs[row.id] = f"{row.kind}:{row.id}"
         readable.kinds[row.id] = row.kind
         readable.labels[row.id] = row.label
+    if include_reference_history:
+        # Only page candidates need history; placement traversal and exact
+        # counts must not add a history scan over the whole readable catalog.
+        readable.historical_reference_ids = historical_reference_object_ids(session, readable.ids)
     return readable
 
 
@@ -450,8 +459,16 @@ def _project_event(
     if occurred_at is None:
         return None
     details = load_audit_details(row)
-    if reference_audit_requires_projection(object_kind, details) and not access.policy.can(
-        Permission.READ_REFERENCE_CONTENT, object_id,
+    # REST activity intentionally keeps global permissions nonmaterialized;
+    # generic per-object policy checks alone cannot recognize Catalog Owners.
+    if reference_audit_requires_projection(
+        object_kind, details, was_reference=object_id in readable.historical_reference_ids,
+    ) and not (
+        access.policy.can(Permission.READ_REFERENCE_CONTENT, object_id)
+        or any(
+            Permission.READ_REFERENCE_CONTENT in authority.permissions
+            for authority in access.policy.global_authorities
+        )
     ):
         details = reference_audit_details(details)
     summary = render_audit_summary_english(

@@ -632,7 +632,11 @@ Viewer, Editor and Global Catalog Reader grants do not gain content access.
 See [the permission matrix and migration policy](auth-rbac.md).
 
 Update previews enforce these same gates and redact both protected values and
-protected digest material for actors without content read. Access inspection
+protected digest material for actors without content read. An explicit blind
+replacement is always a revision-advancing write, including an equal value;
+its preview emits one fixed opaque replacement, independent of hidden equality,
+existence, or shape. Omission preserves content and normal no-op semantics.
+Access inspection
 publishes the effective capabilities; role-aware grant previews accept `role`
 and publish the proposed permissions.
 
@@ -640,7 +644,9 @@ and publish the proposed permissions.
 
 Previews exactly the safe full-object `PUT` above without applying it. The path
 ID, complete `CatalogObjectIn` JSON body, and current strong `If-Match` are the
-same inputs. Effective `write` on that exact object is still required. Missing
+same inputs. Effective `write` on that exact object is required for metadata
+changes; `write_reference_content` independently permits content-only changes.
+Missing
 and concealed path IDs remain the same `404`; discover-only and read-only
 principals receive `403` without a preview. Missing `If-Match` is
 `428 precondition_required`, while a malformed, weak, or stale value is
@@ -669,7 +675,8 @@ Each diff side has exactly `state`, `type`, and `text`. State is
 exact normalized text and other values use canonical JSON, capped at 120
 characters. `text` is null for absent and redacted values. Canonical values are
 compared before this lossy rendering, so an unchanged concealed value remains a
-no-op while a material change still emits a redacted diff entry. Stored
+no-op while a material change still emits a redacted diff entry, except for
+explicit blind reference replacements described above. Stored
 secret-shaped values and typed identities the caller cannot read collapse
 before digest calculation. A distinct caller-supplied proposed concealed value
 binds the semantic diff digest without appearing in the response, so proposals

@@ -562,8 +562,14 @@ def query_catalog_detail(
         else []
     )
     if not access.policy.can(Permission.READ_REFERENCE_CONTENT, object_id):
+        was_reference = any(
+            reference_audit_requires_projection(catalog_object.kind, event["details"])
+            for event in audit_events
+        )
         for event in audit_events:
-            if reference_audit_requires_projection(catalog_object.kind, event["details"]):
+            if reference_audit_requires_projection(
+                catalog_object.kind, event["details"], was_reference=was_reference,
+            ):
                 event["details"] = reference_audit_details(event["details"])
                 event["summary"] = render_audit_summary_english(
                     event["action"], event["details"],

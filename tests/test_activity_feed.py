@@ -537,9 +537,19 @@ def test_page_and_count_queries_have_candidate_limits(
             event.remove(session.get_bind(), "before_cursor_execute", observe)
 
     assert page.total_status == "budget_exhausted"
-    assert len(statements) == 2
-    assert all(" LIMIT " in sql and "count(" not in sql.lower() for sql, _ in statements)
-    assert [params[-2] for _, params in statements] == [3, 4]
+    # Historical reference classification is a separate DISTINCT-ID query,
+    # scoped to the page candidates; it never loads extra audit event rows.
+    history = [(sql, params) for sql, params in statements if "SELECT DISTINCT" in sql]
+    event_queries = [(sql, params) for sql, params in statements if "SELECT DISTINCT" not in sql]
+    assert len(history) == 1
+    history_sql, history_params = history[0]
+    assert "audit_events.object_id IN" in history_sql
+    assert set(history_params[:-1]).issubset(ids)
+    assert len(history_params[:-1]) <= 3
+    assert history_params[-1] == "credential/_reference"
+    assert len(event_queries) == 2
+    assert all(" LIMIT " in sql and "count(" not in sql.lower() for sql, _ in event_queries)
+    assert [params[-2] for _, params in event_queries] == [3, 4]
 
 
 def test_catalog_viewer_activity_avoids_full_catalog_id_read_and_revokes_cursor(

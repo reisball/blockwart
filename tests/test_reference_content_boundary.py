@@ -437,3 +437,190 @@ def test_conversion_into_reference_requires_content_update_authority(
                 session, write_for(session, boundary_state, "editor"), object_id=REF_ID,
                 payload=document(), expected_revision=row.revision,
             )
+
+
+@pytest.mark.parametrize("stored_reference", [{"path": LOCATOR}, {}, None])
+def test_blind_replacement_previews_do_not_reveal_equality_or_presence(
+    alembic_session_factory, boundary_state, stored_reference,
+):
+    with alembic_session_factory() as session, transaction(session):
+        row = session.get(CatalogObject, REF_ID)
+        data = json.loads(row.data_json)
+        if stored_reference is None:
+            data.pop("reference", None)
+        else:
+            data["reference"] = stored_reference
+        row.data_json = json.dumps(data)
+        session.flush()
+        revision = row.revision
+        context = write_for(session, boundary_state, "writer")
+        previews = [preview_catalog_object_update(
+            session, context, object_id=REF_ID,
+            payload=payload_from(session, reference=guess), expected_revision=revision,
+        ) for guess in ({"path": LOCATOR}, {"path": NEW_LOCATOR}, {})]
+        signatures = [(
+            preview.changed, preview.expected_result_revision, preview.expected_result_etag,
+            [entry.as_json() for entry in preview.diff], preview.diff_truncated,
+            preview.diff_digest, preview.preview_digest,
+        ) for preview in previews]
+        assert signatures[0] == signatures[1] == signatures[2]
+        assert previews[0].changed is True
+        assert previews[0].expected_result_revision == revision + 1
+        assert row.revision == revision
+
+
+def test_blind_equal_replacement_advances_revision_like_other_replacements(
+    alembic_session_factory, boundary_state,
+):
+    with alembic_session_factory() as session, transaction(session):
+        row = session.get(CatalogObject, REF_ID)
+        reference = json.loads(row.data_json)["reference"]
+        revision = row.revision
+        result = update_catalog_object(
+            session, write_for(session, boundary_state, "writer"), object_id=REF_ID,
+            payload=payload_from(session, reference=reference), expected_revision=revision,
+        )
+        assert result.changed is True
+        assert result.catalog_object.revision == revision + 1
+        assert "reference" not in result.catalog_object.data
+
+
+@pytest.mark.parametrize("stored_value,proposed_value", [
+    (True, 1), (1, True), (1, 1.0), ({"flags": [True]}, {"flags": [1]}),
+])
+def test_content_only_writer_cannot_change_metadata_json_types(
+    alembic_session_factory, boundary_state, stored_value, proposed_value,
+):
+    with alembic_session_factory() as session, transaction(session):
+        row = session.get(CatalogObject, REF_ID)
+        data = json.loads(row.data_json)
+        data["custom_metadata"] = {"enabled": stored_value}
+        row.data_json = json.dumps(data)
+        session.flush()
+        stored_json = row.data_json
+        revision = row.revision
+        payload = payload_from(session, reference={"name": NEW_LOCATOR})
+        payload.data["custom_metadata"]["enabled"] = proposed_value
+        for command in (preview_catalog_object_update, update_catalog_object):
+            with pytest.raises(CommandAuthorizationDenied):
+                command(session, write_for(session, boundary_state, "writer"),
+                        object_id=REF_ID, payload=payload, expected_revision=revision)
+        assert row.data_json == stored_json
+        assert row.revision == revision
+
+
+@pytest.mark.parametrize("legacy_details", [{}, {"version": 1, "event": "legacy"}])
+def test_unclassified_legacy_history_remains_protected_after_owner_conversion(
+    alembic_session_factory, boundary_state, legacy_details,
+):
+    with alembic_session_factory() as session, transaction(session):
+        session.add(AuditEvent(
+            object_id=REF_ID, action="legacy_update", actor="legacy",
+            summary=f"Old path {LOCATOR}", details_json=json.dumps(legacy_details),
+        ))
+        session.flush()
+        row = session.get(CatalogObject, REF_ID)
+        update_catalog_object(
+            session, write_for(session, boundary_state, "owner"), object_id=REF_ID,
+            payload=CatalogObjectIn(id=REF_ID, kind="service", label="Converted reference",
+                                    data={"schema_version": 1}), expected_revision=row.revision,
+        )
+        viewer = access_for(session, boundary_state, "viewer")
+        assert LOCATOR not in json.dumps(query_catalog_detail(session, REF_ID, viewer).audit_events)
+        # The legacy row may be on a page without the later conversion event.
+        page = query_activity_page(session, viewer, object_id=REF_ID, limit=1, direction="asc")
+        assert LOCATOR not in str(page)
+        owner = access_for(session, boundary_state, "owner")
+        assert LOCATOR in json.dumps(query_catalog_detail(session, REF_ID, owner).audit_events)
+
+
+@pytest.mark.parametrize("transport", ["rest", "mcp"])
+def test_blind_equal_and_unequal_previews_are_identical_on_transports(
+    alembic_session_factory, boundary_client, boundary_state, transport,
+):
+    with alembic_session_factory() as session:
+        row = session.get(CatalogObject, REF_ID)
+        revision = row.revision
+        reference = json.loads(row.data_json)["reference"]
+        payloads = [payload_from(session, reference=guess).model_dump(mode="json")
+                    for guess in (reference, {"name": NEW_LOCATOR})]
+    headers = {"Authorization": f"Bearer {boundary_state['writer'][1]}"}
+
+    def requester(method, path, body, request_headers):
+        response = boundary_client.request(method, path, json=body,
+                                           headers={**request_headers, **headers})
+        assert response.status_code == 200, response.text
+        return response.json()
+
+    results = []
+    for payload in payloads:
+        if transport == "rest":
+            result = requester("POST", f"/api/v1/objects/{REF_ID}/update-preview", payload,
+                               {"If-Match": f'"rev-{revision}"'})
+        else:
+            result = call_tool("blockwart.preview_object_update", {
+                "object_id": REF_ID, "if_match": f'"rev-{revision}"', "object": payload,
+            }, requester=requester)
+        results.append(result)
+    assert results[0] == results[1]
+    assert LOCATOR not in json.dumps(results)
+    with alembic_session_factory() as session:
+        assert session.get(CatalogObject, REF_ID).revision == revision
+
+
+@pytest.mark.parametrize("name", ["writer", "owner"])
+def test_content_omission_retains_canonical_noop_for_all_writers(
+    alembic_session_factory, boundary_state, name,
+):
+    with alembic_session_factory() as session, transaction(session):
+        revision = session.get(CatalogObject, REF_ID).revision
+        payload = payload_from(session)
+        context = write_for(session, boundary_state, name)
+        preview = preview_catalog_object_update(
+            session, context, object_id=REF_ID, payload=payload, expected_revision=revision,
+        )
+        assert preview.changed is False
+        assert preview.diff == []
+        assert preview.expected_result_revision == revision
+        result = update_catalog_object(session, context, object_id=REF_ID,
+                                       payload=payload, expected_revision=revision)
+        assert result.changed is False
+        assert result.catalog_object.revision == revision
+
+
+def test_metadata_writer_with_content_read_cannot_change_protected_extension_type(
+    alembic_session_factory, boundary_state,
+):
+    with alembic_session_factory() as session, transaction(session):
+        row = session.get(CatalogObject, REF_ID)
+        data = json.loads(row.data_json)
+        data["reference"]["custom"] = True
+        row.data_json = json.dumps(data)
+        session.flush()
+        create_object_grant(session, principal_id=boundary_state["reader"][0],
+                            object_id=REF_ID, role=Role.EDITOR, scope=GrantScope.SELF)
+        session.flush()
+        proposed_reference = {**data["reference"], "custom": 1}
+        payload = payload_from(session, reference=proposed_reference)
+        for command in (preview_catalog_object_update, update_catalog_object):
+            with pytest.raises(CommandAuthorizationDenied):
+                command(session, write_for(session, boundary_state, "reader"), object_id=REF_ID,
+                        payload=payload, expected_revision=row.revision)
+
+
+def test_blind_preview_repair_does_not_expose_unclassifiable_stored_data(
+    alembic_session_factory, boundary_state,
+):
+    with alembic_session_factory() as session, transaction(session):
+        row = session.get(CatalogObject, REF_ID)
+        row.data_json = json.dumps(LOCATOR)
+        session.flush()
+        create_object_grant(session, principal_id=boundary_state["writer"][0],
+                            object_id=REF_ID, role=Role.EDITOR, scope=GrantScope.SELF)
+        session.flush()
+        preview = preview_catalog_object_update(
+            session, write_for(session, boundary_state, "writer"), object_id=REF_ID,
+            payload=document(), expected_revision=row.revision,
+        )
+        assert preview.changed is True
+        assert LOCATOR not in json.dumps([entry.as_json() for entry in preview.diff])

@@ -251,10 +251,20 @@ content changes. Content-only editors can update protected fields without
 metadata-write authority; all mutation responses, previews, and historical
 payloads still obey the separate content-read requirement. In particular,
 writing content does not authorize echoing its current or previous values.
+An explicit blind replacement always advances the revision, even if its bytes
+match; its preview always reports one opaque redacted replacement and the same
+next-revision prediction. Hidden equality, branch presence, and locator shape
+cannot affect its diff or digest. Omitting content retains ordinary no-op
+semantics. Content-only writers must preserve metadata with type-sensitive JSON
+equality (`true`, `1`, and `1.0` are distinct).
 Kind conversion into or out of a credential reference additionally requires
 content-write authority as well as ordinary metadata write. When converting
 away, omit `data.reference`; retaining a locator under another kind is rejected.
 Historical reference snapshots remain content-protected after conversion.
+Unclassified legacy events also remain protected when immutable object history
+shows a former reference kind; activity resolves this for page candidates only.
+Global Catalog Owner content authority applies even to nonmaterialized activity
+policy snapshots.
 
 **Compatibility:** migration `20261026_0031` expands only the database role
 constraint and preserves every existing grant (IDs, roles, scopes, creators,
