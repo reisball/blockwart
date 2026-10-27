@@ -1139,8 +1139,10 @@ def test_rest_principal_projection_exposes_catalog_role_and_global_authority(
                 "discover",
                 "manage_access",
                 "read",
+                "read_reference_content",
                 "rename",
                 "write",
+                "write_reference_content",
             ],
             # The catalog owner keeps creating every root kind.
             "root_kinds": sorted(OBJECT_KINDS),

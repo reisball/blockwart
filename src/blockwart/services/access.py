@@ -5,7 +5,7 @@ from collections.abc import Iterable
 from sqlalchemy import and_, literal, or_, select
 from sqlalchemy.orm import Session, aliased
 
-from blockwart.domain.auth import CatalogRole, GrantScope, Role
+from blockwart.domain.auth import CatalogRole, GrantScope, Role, validate_grant_target
 from blockwart.domain.placement import CANONICAL_PLACEMENT_RELATION_TYPE
 from blockwart.models import CatalogObject, ObjectGrant, Principal, Relationship
 from blockwart.services.audit import add_audit_event
@@ -84,6 +84,10 @@ def create_object_grant(
         raise AccessGrantError("principal not found")
     if catalog_object is None:
         raise AccessGrantError("catalog object not found")
+    try:
+        validate_grant_target(resolved_role, resolved_scope, object_kind=catalog_object.kind)
+    except ValueError as exc:
+        raise AccessGrantError(str(exc)) from exc
     if actor_principal_id is not None and session.get(Principal, actor_principal_id) is None:
         raise AccessGrantError("actor principal not found")
     existing = session.scalar(

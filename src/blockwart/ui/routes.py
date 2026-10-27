@@ -36,6 +36,7 @@ from blockwart.domain.object_schema import (
 )
 from blockwart.domain.placement import CANONICAL_PLACEMENT_RELATION_TYPE, PlacementError
 from blockwart.domain.projects import ProjectCategory, ProjectStatus, project_category_fields
+from blockwart.domain.provenance import CatalogProvenance
 from blockwart.domain.relationships import (
     LINK_KINDS,
     NETWORK_DEVICE_CATEGORIES,
@@ -59,6 +60,7 @@ from blockwart.domain.service_components import (
 )
 from blockwart.domain.ui_schema import (
     CREATE_KIND_ORDER,
+    UiTypeSchema,
     create_parent_kinds,
     create_root_field_keys,
     get_ui_schema,
@@ -189,6 +191,16 @@ router = APIRouter(
 OBJECT_KINDS = (*PUBLIC_OBJECT_KINDS, "runbook", "decision", "project")
 RUNBOOK_KIND = "runbook"
 DECISION_KIND = "decision"
+# Existing references have detail/edit forms, but remain outside generic creation.
+REFERENCE_UI_SCHEMA = UiTypeSchema(
+    kind="credential_reference",
+    primary_name_label_key="field.primary_name.credential_reference.label",
+    primary_name_storage="label",
+    supports_platform=False,
+    fields=("kind", "object_id", "primary_name", "status", "summary"),
+    create_fields=(),
+    panels=(),
+)
 PROJECT_KIND = "project"
 DECISION_TEXT_FIELDS = ("context", "decision", "rationale")
 DECISION_TIMESTAMP_FIELDS = ("decided_at", "effective_at", "review_after")
@@ -663,6 +675,11 @@ def _localized_ui_schema_payload(
     translator: Any,
 ) -> dict[str, dict[str, Any]]:
     payload = ui_schema_payload()
+    payload["credential_reference"] = {
+        **REFERENCE_UI_SCHEMA.as_dict(),
+        "schema_fields": schema_field_payload(REFERENCE_UI_SCHEMA),
+        "create_field_definitions": [],
+    }
     for schema in payload.values():
         for collection in ("schema_fields", "create_field_definitions"):
             for field in schema[collection]:
@@ -1385,6 +1402,18 @@ def _detail_template_context(
             **i18n,
         }
     object_data = catalog_object.data
+    is_credential_reference = catalog_object.kind == "credential_reference"
+    can_read_reference_content = (
+        is_credential_reference and Permission.READ_REFERENCE_CONTENT in catalog_object.capabilities
+    )
+    can_write_reference_content = (
+        is_credential_reference
+        and Permission.WRITE_REFERENCE_CONTENT in catalog_object.capabilities
+    )
+    metadata_data = dict(object_data)
+    if is_credential_reference:
+        # The separate content editor is the only UI that submits this subtree.
+        metadata_data.pop("reference", None)
     schemas = _localized_ui_schema_payload(str(i18n["locale"]), translator)
     ui_schema = schemas[catalog_object.kind]
     schema_fields = list(ui_schema["schema_fields"])
@@ -1673,12 +1702,20 @@ def _detail_template_context(
             "source_ref": f"{catalog_object.kind}:{catalog_object.id}",
             "index": own_access_method_count,
         },
+        "is_credential_reference": is_credential_reference,
+        "can_read_reference_content": can_read_reference_content,
+        "can_write_reference_content": can_write_reference_content,
+        "reference_content_json": (
+            json.dumps(object_data.get("reference", {}), indent=2, sort_keys=True)
+            if can_read_reference_content
+            else ""
+        ),
         "credential_references": [],
         "data_json": (
             data_json_override
             if data_json_override is not None
             else json.dumps(
-                _without_credential_references(catalog_object.data),
+                _without_credential_references(metadata_data),
                 indent=2,
                 sort_keys=True,
             )
@@ -1691,7 +1728,7 @@ def _detail_template_context(
             catalog_object.last_changed or catalog_object.updated_at,
             translator,
         ),
-        "object_kinds": OBJECT_KINDS,
+        "object_kinds": (("credential_reference",) if is_credential_reference else OBJECT_KINDS),
         "object_statuses": OBJECT_STATUSES_UI,
         "platform_types": PLATFORM_TYPES,
         "error": error,
@@ -1704,7 +1741,12 @@ def _detail_template_context(
         "grant_scope_preview": grant_scope_preview,
         "grant_principal_results": principal_results,
         "grant_principal_query": principal_query,
-        "grant_roles": tuple(Role),
+        "grant_roles": tuple(
+            role
+            for role in Role
+            if is_credential_reference
+            or role not in {Role.REFERENCE_CONTENT_READER, Role.REFERENCE_CONTENT_EDITOR}
+        ),
         "grant_scopes": tuple(GrantScope),
         "can_delete": Permission.DELETE in catalog_object.capabilities,
         "object_etag": revision_etag(catalog_object.revision),
@@ -1781,6 +1823,7 @@ def _detail_navigation_context(
         "network",
         "access",
         "permissions",
+        "reference-content",
         "relationship-add",
     )
     return {
@@ -1798,6 +1841,7 @@ def _detail_navigation_context(
         },
         "detail_post_urls": {
             "overview": detail_href,
+            "reference_content": (f"/objects/{object_id}/reference-content?{detail_query_string}"),
             "network": f"/objects/{object_id}/network?{detail_query_string}",
             "installed_software": (
                 f"/objects/{object_id}/installed-software?{detail_query_string}"
@@ -1878,9 +1922,15 @@ def _render_object_detail(
         can_manage_access_enabled = (
             Permission.MANAGE_ACCESS in detail_read_model.catalog_object.capabilities
         )
-        if (edit_section == "permissions" and not can_manage_access_enabled) or (
-            edit_section != "permissions" and edit_section and not can_write_enabled
-        ):
+        edit_allowed = {
+            "permissions": can_manage_access_enabled,
+            "reference-content": (
+                detail_read_model.catalog_object.kind == "credential_reference"
+                and Permission.WRITE_REFERENCE_CONTENT
+                in detail_read_model.catalog_object.capabilities
+            ),
+        }.get(edit_section, can_write_enabled)
+        if edit_section and not edit_allowed:
             edit_section = ""
     principal_query = request.query_params.get("principal_q", "")[:100].strip()
     grant_access = None
@@ -1988,7 +2038,14 @@ def object_detail(
         read_model.catalog_object.visibility == "detail"
         and Permission.MANAGE_ACCESS in read_model.catalog_object.capabilities
     )
-    edit_allowed = manage_access_enabled if edit == "permissions" else write_enabled
+    edit_allowed = {
+        "permissions": manage_access_enabled,
+        "reference-content": (
+            read_model.catalog_object.visibility == "detail"
+            and read_model.catalog_object.kind == "credential_reference"
+            and Permission.WRITE_REFERENCE_CONTENT in read_model.catalog_object.capabilities
+        ),
+    }.get(edit, write_enabled)
     return _render_object_detail(
         request,
         session,
@@ -2893,6 +2950,84 @@ def _comment_display_rows(page) -> list[dict[str, Any]]:
 
 
 @router.post(
+    "/objects/{object_id}/reference-content",
+    response_class=HTMLResponse,
+    dependencies=[Depends(require_browser_write_csrf)],
+)
+def update_reference_content(
+    request: Request,
+    object_id: str,
+    session: Annotated[Session, Depends(get_session)],
+    reference_json: Annotated[str, Form()] = "",
+    if_match: Annotated[str, Form()] = "",
+):
+    access = read_access_from_request(request)
+    context = ui_write_context(request, access)
+    execute_ui_command(
+        session,
+        context,
+        lambda: authorize_object_command(
+            session,
+            context,
+            object_id=object_id,
+            permission=Permission.WRITE_REFERENCE_CONTENT,
+        ),
+    )
+    existing_object = get_object(session, object_id)
+    if existing_object is None:
+        raise HTTPException(status_code=404, detail="Catalog object not found")
+    if existing_object.kind != "credential_reference":
+        raise HTTPException(status_code=422, detail="Object is not a credential reference")
+    try:
+        # An empty write-only form must never be interpreted as clearing content.
+        # Explicit {} is a deliberate replacement with an empty object.
+        reference = json.loads(reference_json)
+        if not isinstance(reference, dict):
+            raise ValueError("Reference content must be a JSON object")
+        data = _editable_data_copy(existing_object.data)
+        data["reference"] = reference
+        payload = CatalogObjectIn(
+            id=existing_object.id,
+            kind=existing_object.kind,
+            label=existing_object.label,
+            status=existing_object.status,
+            summary=existing_object.summary,
+            data=data,
+            provenance=CatalogProvenance.model_validate(
+                existing_object.provenance.model_dump(exclude={"is_stale"})
+            ),
+        )
+        execute_ui_command(
+            session,
+            context,
+            lambda: update_catalog_object(
+                session,
+                context,
+                object_id=object_id,
+                payload=payload,
+                expected_revision=_ui_expected_revision(
+                    request,
+                    if_match,
+                    existing_object.revision,
+                ),
+            ),
+        )
+    except (HTTPException, ValueError) as exc:
+        # Validation may inspect existing protected values. Do not echo it or
+        # the submitted document into an error response, even for write-only users.
+        return _render_object_detail(
+            request,
+            session,
+            object_id,
+            error=translation_context(request)["t"]("reference_content.invalid"),
+            edit_section="reference-content",
+            can_write_enabled=False,
+            status_code=exc.status_code if isinstance(exc, HTTPException) else 422,
+        )
+    return RedirectResponse(url=_detail_redirect_url(request, object_id), status_code=303)
+
+
+@router.post(
     "/objects/{object_id}",
     response_class=HTMLResponse,
     dependencies=[Depends(require_browser_write_csrf)],
@@ -3021,7 +3156,15 @@ def update_object(
         data = _editable_data_copy(
             existing_object.data if data_json is None else _parse_object_form_data(data_json)
         )
-        ui_schema = get_ui_schema(target_kind)
+        if existing_object.kind == "credential_reference" and data_json is None:
+            # Metadata forms that do not carry a JSON document must not echo
+            # unreadable protected content into the shared command gate.
+            data.pop("reference", None)
+        ui_schema = (
+            REFERENCE_UI_SCHEMA
+            if target_kind == "credential_reference"
+            else get_ui_schema(target_kind)
+        )
         primary_value = None
         if primary_name is not None or hostname is not None or label is not None:
             primary_value = (primary_name or hostname or label or "").strip()
@@ -3172,6 +3315,8 @@ def update_object(
                 if submitted_project
                 else _runbook_form_error(request, exc)
                 if submitted_runbook
+                else translation_context(request)["t"]("reference_content.metadata_invalid")
+                if read_model.catalog_object.kind == "credential_reference"
                 else _safe_error_message(exc)
             ),
             edit_section=(

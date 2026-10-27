@@ -3,7 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
-from collections.abc import Collection, Mapping
+from collections.abc import Iterable, Mapping
 from copy import deepcopy
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
@@ -81,6 +81,7 @@ from blockwart.services.identity import principal_context, record_security_event
 from blockwart.services.ownership import InitialOwnerError, assign_initial_owner
 from blockwart.services.policy import GlobalPolicySource, PolicySnapshot, policy_for_principal
 from blockwart.services.read_access import ReadAccess
+from blockwart.services.reference_content import authorized_reference_data
 
 _ETAG_PATTERN = re.compile(r'^"rev-([1-9][0-9]*)"$')
 _IDEMPOTENCY_KEY_PATTERN = re.compile(r"^[\x21-\x7e]{16,128}$")
@@ -264,6 +265,7 @@ class ObjectUpdatePlan:
     expected_revision: int
     upsert: ObjectUpsertPlan
     context: WriteContext
+    blind_reference_replacement: bool = False
 
     @property
     def changed(self) -> bool:
@@ -315,29 +317,49 @@ def plan_object_update(
         if refresh_policy
         else context
     )
+    content_only = (
+        not current_context.policy.can(Permission.WRITE, object_id)
+        and current_context.policy.can(Permission.WRITE_REFERENCE_CONTENT, object_id)
+    )
     row = _require_permission(
         session,
         current_context,
         object_id=object_id,
-        permission=Permission.WRITE,
+        permission=Permission.WRITE_REFERENCE_CONTENT if content_only else Permission.WRITE,
     )
+    if content_only and row.kind != CREDENTIAL_REFERENCE_KIND:
+        raise CommandAuthorizationDenied(object_id=object_id, permission=Permission.WRITE)
     resolved_revision = _resolve_expected_revision(expected_revision)
     if payload.id != object_id:
         raise CommandConflict("payload object id does not match the resource")
     if row.revision != resolved_revision:
         raise CommandPreconditionFailed("object revision changed")
+    replaces_reference = "reference" in payload.data
     stored_data = _raw_object_snapshot(row).get("data")
-    preexisting_typed_references = frozenset(
-        iter_typed_reference_strings(stored_data)
-        if isinstance(stored_data, Mapping)
-        else ()
-    )
+    if CREDENTIAL_REFERENCE_KIND in {row.kind, payload.kind}:
+        if row.kind != payload.kind:
+            if not current_context.policy.can(Permission.WRITE_REFERENCE_CONTENT, object_id):
+                raise CommandAuthorizationDenied(
+                    object_id=object_id, permission=Permission.WRITE_REFERENCE_CONTENT,
+                )
+            if payload.kind != CREDENTIAL_REFERENCE_KIND and "reference" in payload.data:
+                raise CommandConflict(
+                    "reference content cannot be retained when changing to another kind",
+                    code="reference_content_requires_reference_kind",
+                )
+        if payload.kind == CREDENTIAL_REFERENCE_KIND:
+            payload = _reference_update_payload(row, payload, current_context)
     _require_knowledge_reference_access(
         session,
         current_context,
         payload,
         all_typed_references=True,
-        preexisting_typed_references=preexisting_typed_references,
+        preserved_data=stored_data,
+        revalidate_reference_content=(
+            replaces_reference
+            and CREDENTIAL_REFERENCE_KIND in {row.kind, payload.kind}
+            and not current_context.policy.can(Permission.READ_REFERENCE_CONTENT, object_id)
+        ),
     )
     try:
         upsert_plan = plan_object_upsert(
@@ -347,13 +369,60 @@ def plan_object_update(
         )
     except RevisionConflict as exc:
         raise CommandPreconditionFailed("object revision changed") from exc
+    if content_only:
+        before_metadata = _current_snapshot(row)
+        after_metadata = _proposed_snapshot(upsert_plan)
+        for snapshot in (before_metadata, after_metadata):
+            if isinstance(snapshot.get("data"), dict):
+                snapshot["data"].pop("reference", None)
+        if _canonical_json(before_metadata) != _canonical_json(after_metadata):
+            raise CommandAuthorizationDenied(object_id=object_id, permission=Permission.WRITE)
+    blind_reference_replacement = (
+        CREDENTIAL_REFERENCE_KIND in {row.kind, payload.kind}
+        and (replaces_reference or row.kind != payload.kind)
+        and not current_context.policy.can(Permission.READ_REFERENCE_CONTENT, object_id)
+        and current_context.policy.can(Permission.WRITE_REFERENCE_CONTENT, object_id)
+    )
+    if blind_reference_replacement:
+        # A blind replacement is always a write, even if its bytes match.
+        # No-op answers/revisions would otherwise validate hidden locator guesses.
+        upsert_plan = replace(upsert_plan, unchanged=False)
     return ObjectUpdatePlan(
         row=row,
         payload=payload,
         expected_revision=resolved_revision,
         upsert=upsert_plan,
         context=current_context,
+        blind_reference_replacement=blind_reference_replacement,
     )
+
+
+def _reference_update_payload(
+    row: CatalogObject,
+    payload: CatalogObjectIn,
+    context: WriteContext,
+) -> CatalogObjectIn:
+    """Keep omitted content and gate every explicit replacement independently.
+
+    Metadata-only clients round-trip their projected document. Omission is
+    preservation even for content writers; an explicit empty object clears the
+    locator. Readers may echo unchanged content, but a caller unable to read it
+    cannot use equality/no-op behavior as a locator-guessing oracle.
+    """
+    stored = _json_document(row.data_json)
+    stored_data = stored if isinstance(stored, dict) else {}
+    data = deepcopy(payload.data)
+    if "reference" in data:
+        if not context.policy.can(Permission.WRITE_REFERENCE_CONTENT, row.id) and (
+            not context.policy.can(Permission.READ_REFERENCE_CONTENT, row.id)
+            or _canonical_json(data["reference"]) != _canonical_json(stored_data.get("reference"))
+        ):
+            raise CommandAuthorizationDenied(
+                object_id=row.id, permission=Permission.WRITE_REFERENCE_CONTENT,
+            )
+    elif "reference" in stored_data:
+        data["reference"] = deepcopy(stored_data["reference"])
+    return payload.model_copy(update={"data": data})
 
 
 def update_catalog_object(
@@ -398,6 +467,7 @@ def update_catalog_object(
         raise CommandNotFound("catalog object not found")
     result = result.model_copy(
         update={
+            "data": authorized_reference_data(result.kind, object_id, result.data, context.policy),
             "capabilities": sorted(
                 context.policy.permissions_for(object_id),
                 key=lambda permission: permission.value,
@@ -416,6 +486,9 @@ def update_catalog_object(
             before=before,
             after=after,
             changes=_structured_changes(before, after),
+            extra=(
+                {"reference_content_replaced": True} if plan.blind_reference_replacement else None
+            ),
         )
     return ObjectCommandResult(
         catalog_object=result,
@@ -455,6 +528,31 @@ def preview_catalog_object_update(
     rendered_before = _render_preview_snapshot(before, context=plan.context)
     rendered_after = _render_preview_snapshot(after, context=plan.context)
     digest_after = _render_preview_snapshot(after)
+    if plan.payload.kind == CREDENTIAL_REFERENCE_KIND and not plan.context.policy.can(
+        Permission.READ_REFERENCE_CONTENT, object_id,
+    ):
+        # The digest must collapse protected proposals as well as stored values.
+        # Otherwise it would become an equality oracle over hidden locators.
+        digest_after = rendered_after
+    if (
+        CREDENTIAL_REFERENCE_KIND in {plan.row.kind, plan.payload.kind}
+        and not plan.context.policy.can(Permission.READ_REFERENCE_CONTENT, object_id)
+    ):
+        # Compare fixed opaque branch markers, not hidden originals. Explicit
+        # blind replacements always publish the same redacted change; omission
+        # preserves content and contributes no change. Neither equality nor
+        # stored branch presence/shape may affect the safe preview contract.
+        blind_replacement = "reference" in payload.data or plan.row.kind != plan.payload.kind
+        for snapshot in (before, after, rendered_before, rendered_after, digest_after):
+            if not isinstance(snapshot.get("data"), dict):
+                # A malformed historical scalar has no classifiable fields.
+                snapshot["data"] = {}
+            snapshot["data"].pop("reference", None)
+        if blind_replacement:
+            before["data"]["reference"] = REDACTED_PREVIEW_VALUE
+            after["data"]["reference"] = None
+            for snapshot in (rendered_before, rendered_after, digest_after):
+                snapshot["data"]["reference"] = REDACTED_PREVIEW_VALUE
     diff, diff_truncated, diff_digest = preview_diff(
         before,
         after,
@@ -850,6 +948,12 @@ def _render_preview_snapshot(
     safe = redacted if isinstance(redacted, dict) else {}
     if context is None:
         return safe
+    if snapshot.get("kind") == CREDENTIAL_REFERENCE_KIND and not context.policy.can(
+        Permission.READ_REFERENCE_CONTENT, str(snapshot.get("id", "")),
+    ):
+        data = safe.get("data")
+        if isinstance(data, dict) and "reference" in data:
+            data["reference"] = REDACTED_PREVIEW_VALUE
     concealed = _redact_concealed_references(safe, context)
     return concealed if isinstance(concealed, dict) else {}
 
@@ -2637,13 +2741,41 @@ def _canonical_relationship_metadata(
     return validate_relationship_metadata(relation_type, metadata)
 
 
+def _changed_typed_reference_strings(
+    proposed: object,
+    stored: object,
+    *,
+    revalidate_reference_content: bool = False,
+    force: bool = False,
+    root: bool = True,
+) -> Iterable[str]:
+    """Yield proposed references not preserved at their exact stored location."""
+    if isinstance(proposed, Mapping):
+        previous = stored if isinstance(stored, Mapping) else {}
+        for key, value in proposed.items():
+            yield from _changed_typed_reference_strings(
+                value, previous.get(key), root=False,
+                force=force or (root and key == "reference" and revalidate_reference_content),
+            )
+    elif isinstance(proposed, list | tuple):
+        previous = stored if isinstance(stored, list | tuple) else ()
+        for index, value in enumerate(proposed):
+            yield from _changed_typed_reference_strings(
+                value, previous[index] if index < len(previous) else None,
+                root=False, force=force,
+            )
+    elif force or not isinstance(stored, str) or proposed != stored:
+        yield from iter_typed_reference_strings(proposed)
+
+
 def _require_knowledge_reference_access(
     session: Session,
     context: WriteContext,
     payload: CatalogObjectIn,
     *,
     all_typed_references: bool = False,
-    preexisting_typed_references: Collection[str] = (),
+    preserved_data: object = None,
+    revalidate_reference_content: bool = False,
 ) -> None:
     """Fail closed when a projected write names an unreadable typed target.
 
@@ -2653,11 +2785,11 @@ def _require_knowledge_reference_access(
 
     Existing create commands and declared knowledge fields retain their
     reviewed knowledge-reference contract. The full-object update planner opts
-    into all other typed references, exempting only byte-identical values
-    already present in the stored canonical data. Newly introduced or changed
-    values therefore cannot distinguish an unreadable target from an absent or
-    kind-mismatched one, while an unrelated edit does not re-authorize an
-    unchanged stored reference.
+    into all other typed references. Only unchanged values at the exact same
+    location are preserved without target reauthorization. Explicitly supplied
+    blind content is never exempted based on hidden stored values. Thus neither
+    a hidden equality guess nor relocation can borrow another field's exemption,
+    while an unrelated edit can preserve inaccessible stored targets.
     """
     if payload.kind == "runbook":
         knowledge_references = iter_runbook_references(payload.data)
@@ -2675,12 +2807,10 @@ def _require_knowledge_reference_access(
         reference.value for reference in knowledge_references
     }
     if all_typed_references:
-        reference_values = {
-            reference_value
-            for reference_value in iter_typed_reference_strings(payload.data)
-            if reference_value not in preexisting_typed_references
-            or reference_value in knowledge_reference_values
-        }
+        reference_values = knowledge_reference_values | set(_changed_typed_reference_strings(
+            payload.data, preserved_data,
+            revalidate_reference_content=revalidate_reference_content,
+        ))
     else:
         reference_values = knowledge_reference_values
     references: set[TypedReference] = set()

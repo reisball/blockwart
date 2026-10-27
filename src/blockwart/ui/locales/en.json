@@ -1503,5 +1503,19 @@
   "project.pm.blocked_only": "Blocked",
   "project.pm.depends_on_filter": "Depends on",
   "project.pm.legacy_reconcile": "Identical legacy entries cannot be matched unambiguously after a source change. Reconcile their provenance first; no duplicate task is created.",
-  "project.pm.unblocked_only": "Not blocked"
+  "project.pm.unblocked_only": "Not blocked",
+  "permission.read_reference_content": "Read reference content",
+  "permission.write_reference_content": "Replace reference content",
+  "role.reference_content_reader": "Reference content reader",
+  "role.reference_content_editor": "Reference content editor (write-only)",
+  "reference_content.title": "Protected reference content",
+  "reference_content.json": "Reference content (JSON)",
+  "reference_content.metadata_json": "Reference metadata (JSON)",
+  "reference_content.replace_help": "Saving replaces the entire protected reference content. Enter an explicit {} to clear it; a blank form makes no change.",
+  "reference_content.write_only": "You may replace this content but cannot read its current values. The form starts empty.",
+  "reference_content.restricted": "You do not have permission to read reference content.",
+  "reference_content.invalid": "Reference content was not saved. Enter a valid JSON object and ensure the object revision is current.",
+  "reference_content.metadata_invalid": "Reference metadata was not saved. Check the submitted metadata.",
+  "field.primary_name.credential_reference.label": "Reference name",
+  "kind.credential_reference": "Credential reference"
 }

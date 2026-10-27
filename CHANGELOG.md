@@ -5,6 +5,19 @@ Notable product changes are recorded here. Versions follow the
 
 ## [Unreleased]
 
+### Added
+
+- Independently delegated read/update permissions for existing credential-reference
+  locator content across the web UI, REST API and MCP (#315).
+
+### Changed
+
+- Credential-reference metadata grants no longer expose or modify `data.reference`.
+  Existing Viewer/Editor and Global Catalog Reader grants remain metadata-only;
+  Owners retain full control. Migration `20261026_0031` preserves existing grants
+  and supports explicit assignment of the new content roles. Omitted locator
+  content is preserved during metadata updates; see `docs/auth-rbac.md`.
+
 ## [0.2.0] - 2026-10-26
 
 Project management workflows, stronger access controls, and clearer validation errors.

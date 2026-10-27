@@ -21,7 +21,7 @@ def test_integrated_mcp_contract_has_reviewed_manifest_evidence() -> None:
     assert metadata == {
         "build_revision": "issue-188-236-245-248-249-250-251",
         "contract_version": "1",
-        "manifest_digest": "c43db23aa73b563788559e7d2375ffd7aa150925a7e6e6973f212c52f0478435",
+        "manifest_digest": "2bdacee31d8db48e4963e037262b4565faf7a61e0c0d716afaf5f33e2a9d4097",
         "tool_count": 47,
     }
 

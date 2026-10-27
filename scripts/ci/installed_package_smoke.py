@@ -206,8 +206,10 @@ def check_root_project_creator(token: str) -> None:
         "discover",
         "manage_access",
         "read",
+        "read_reference_content",
         "rename",
         "write",
+        "write_reference_content",
     ]
 
     denied_status, denied = post_json(
@@ -1072,7 +1074,7 @@ def main() -> None:
         token=api_token,
     )["objects"][0]
 
-    assert readiness["revision"] == "20261023_0030"
+    assert readiness["revision"] == "20261026_0031"
     assert "Blockwart" in index
     assert static_content_type == "text/css"
     assert not any(

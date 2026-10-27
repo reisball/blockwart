@@ -3945,6 +3945,8 @@
           "rename",
           "create_child",
           "create_credential_reference",
+          "read_reference_content",
+          "write_reference_content",
           "manage_access",
           "delete"
         ],
@@ -6031,6 +6033,8 @@
           "editor",
           "creator",
           "credential_reference_creator",
+          "reference_content_reader",
+          "reference_content_editor",
           "access_manager",
           "owner"
         ],
@@ -7603,6 +7607,23 @@
           "object_id": {
             "title": "Object Id",
             "type": "string"
+          },
+          "permissions": {
+            "items": {
+              "$ref": "#/components/schemas/Permission"
+            },
+            "title": "Permissions",
+            "type": "array"
+          },
+          "role": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Role"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "scope": {
             "$ref": "#/components/schemas/GrantScope"
@@ -18303,6 +18324,22 @@
             "schema": {
               "$ref": "#/components/schemas/GrantScope",
               "default": "subtree"
+            }
+          },
+          {
+            "in": "query",
+            "name": "role",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/Role"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Role"
             }
           }
         ],

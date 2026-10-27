@@ -178,6 +178,11 @@
               <label>{{ t("asset.summary") }}
                 <textarea class="summary-input" name="summary" placeholder="{{ t('field.summary.placeholder') }}">{{ object.summary or "" }}</textarea>
               </label>
+              {% if is_credential_reference %}
+                <label>{{ t("reference_content.metadata_json") }}
+                  <textarea name="data_json" spellcheck="false">{{ data_json }}</textarea>
+                </label>
+              {% endif %}
               <div class="overview-times">
                 <div class="fact fact-small">
                   <div class="fact-label">{{ t("detail.created_at")|upper }}</div>
@@ -235,6 +240,11 @@
               </div>
             </div>
           {% endif %}
+          {% if is_credential_reference %}
+            <div class="meta">{{ t("auth.capabilities") }}
+              {% for capability in object.capabilities %}<span class="badge">{{ t("permission." ~ capability) }}</span>{% endfor %}
+            </div>
+          {% endif %}
           {% if can_delete and edit_section != "overview" %}
             <form class="button-row" method="post" action="/objects/{{ object.id }}/delete">
               <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
@@ -243,6 +253,34 @@
             </form>
           {% endif %}
         </section>
+
+        {% if is_credential_reference %}
+          <section class="panel" aria-labelledby="reference-content-title">
+            <div class="panel-head">
+              <h2 class="section-title" id="reference-content-title">{{ t("reference_content.title") }}</h2>
+              {% if can_write_reference_content %}
+                <a class="button button-small button-muted" href="{{ detail_href if edit_section == 'reference-content' else detail_edit_hrefs['reference-content'] }}">{{ t("detail.cancel") if edit_section == 'reference-content' else t("detail.edit") }}</a>
+              {% endif %}
+            </div>
+            {% if edit_section == "reference-content" %}
+              {% if error %}<div class="error" role="alert">{{ error }}</div>{% endif %}
+              <p class="meta">{{ t("reference_content.replace_help") }}</p>
+              {% if not can_read_reference_content %}<p class="meta">{{ t("reference_content.write_only") }}</p>{% endif %}
+              <form class="form-grid" method="post" action="{{ detail_post_urls.reference_content }}">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+                <input type="hidden" name="if_match" value="{{ object_etag }}" />
+                <label>{{ t("reference_content.json") }}
+                  <textarea name="reference_json" spellcheck="false" autocomplete="off" required>{{ reference_content_json }}</textarea>
+                </label>
+                <div class="button-row"><button type="submit">{{ t("detail.save") }}</button><a class="button button-muted" href="{{ detail_href }}">{{ t("detail.cancel") }}</a></div>
+              </form>
+            {% elif can_read_reference_content %}
+              <pre class="code-block">{{ reference_content_json }}</pre>
+            {% else %}
+              <p class="meta">{{ t("reference_content.restricted") }}</p>
+            {% endif %}
+          </section>
+        {% endif %}
 
         {% if supports_runbook %}
           {% if edit_section == "runbook" %}

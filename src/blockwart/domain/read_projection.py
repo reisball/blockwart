@@ -193,6 +193,9 @@ _PERMISSION_CODES: dict[Permission, str] = {
     Permission.CREATE_CREDENTIAL_REFERENCE: "k",
     Permission.MANAGE_ACCESS: "m",
     Permission.DELETE: "x",
+    # Append new codes so every existing capability-set key remains stable.
+    Permission.READ_REFERENCE_CONTENT: "l",
+    Permission.WRITE_REFERENCE_CONTENT: "u",
 }
 EMPTY_CAPABILITY_SET_KEY = "cap-0"
 

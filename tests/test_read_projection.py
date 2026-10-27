@@ -10,6 +10,7 @@ field a discover-only stub does not already publish.
 from __future__ import annotations
 
 from collections.abc import Generator
+from itertools import combinations
 from typing import Annotated, Any
 
 import pytest
@@ -149,11 +150,9 @@ def test_every_descriptor_names_the_core_sections_and_the_contract_version() -> 
 def test_distinct_effective_permission_sets_never_share_a_capability_key() -> None:
     seen: dict[str, frozenset[Permission]] = {}
     candidates = [
-        frozenset(),
-        frozenset({Permission.DISCOVER}),
-        frozenset({Permission.DISCOVER, Permission.READ}),
-        frozenset({Permission.DISCOVER, Permission.READ, Permission.WRITE}),
-        frozenset(Permission),
+        frozenset(subset)
+        for count in range(len(Permission) + 1)
+        for subset in combinations(Permission, count)
     ]
     for permissions in candidates:
         key = capability_set_key(permissions)
@@ -162,6 +161,31 @@ def test_distinct_effective_permission_sets_never_share_a_capability_key() -> No
         assert frozenset(capability_set_permissions(key)) == permissions
 
     assert len(seen) == len(candidates)
+
+
+@pytest.mark.parametrize(
+    ("permissions", "expected"),
+    [
+        ([], "cap-0"),
+        ([Permission.DISCOVER, Permission.READ], "cap-dr"),
+        ([Permission.DISCOVER, Permission.READ, Permission.WRITE], "cap-drw"),
+        ([permission for permission in Permission if permission not in {
+            Permission.READ_REFERENCE_CONTENT, Permission.WRITE_REFERENCE_CONTENT,
+        }], "cap-drwnckmx"),
+    ],
+)
+def test_existing_capability_keys_remain_stable(permissions, expected) -> None:
+    assert capability_set_key(permissions) == expected
+
+
+@pytest.mark.parametrize("permission", [
+    Permission.READ_REFERENCE_CONTENT, Permission.WRITE_REFERENCE_CONTENT,
+])
+def test_new_content_permissions_remain_distinct_in_projected_reads(permission) -> None:
+    base = {Permission.DISCOVER, Permission.READ}
+    key = capability_set_key(base | {permission})
+    assert key != capability_set_key(base)
+    assert set(capability_set_permissions(key)) == base | {permission}
 
 
 # --------------------------------------------------------------------------

@@ -82,6 +82,7 @@ from blockwart.services.project_chronology import (
 )
 from blockwart.services.read_access import ReadAccess
 from blockwart.services.record_integrity import read_catalog_record_data
+from blockwart.services.reference_content import authorized_reference_data
 from blockwart.services.release_monitoring import (
     current_release_monitoring_settings,
     load_release_observation_index,
@@ -429,7 +430,7 @@ class _AgentCatalogResolver:
             can_read = visibility == ObjectVisibility.DETAIL
             if obj.id not in candidate_ids:
                 continue
-            data = _safe_object_data(obj)
+            data = self.authorized_data(obj)
             if can_read:
                 data = self._project_knowledge_data(obj.kind, data)
             state = state_from_record(
@@ -569,11 +570,16 @@ class _AgentCatalogResolver:
             statement = statement.where(CatalogObject.kind == kind)
         return set(self.session.scalars(statement).all())
 
+    def authorized_data(self, obj: CatalogObject) -> dict[str, Any]:
+        return authorized_reference_data(
+            obj.kind, obj.id, _safe_object_data(obj), self.access.policy,
+        )
+
     def summary(self, obj: CatalogObject) -> AgentCatalogObjectRead:
         if self.access.policy.visibility_for(obj.id) == ObjectVisibility.STUB:
             return self.stub(obj)
         record = _safe_object_record(obj)
-        data = record.data
+        data = authorized_reference_data(obj.kind, obj.id, record.data, self.access.policy)
         projected_knowledge_data = self._project_knowledge_data(obj.kind, data)
         state = state_from_record(
             kind=obj.kind,
@@ -721,7 +727,7 @@ class _AgentCatalogResolver:
         recent_comments: dict[str, list[CommentOut]],
         recent_project_chronology: dict[str, list[ProjectChronologyEntryOut]],
     ) -> AgentCatalogObjectContext:
-        data = self._project_knowledge_data(obj.kind, _safe_object_data(obj))
+        data = self._project_knowledge_data(obj.kind, self.authorized_data(obj))
         object_ref = _object_ref(obj)
         relationships = [
             AgentRelationshipOut(

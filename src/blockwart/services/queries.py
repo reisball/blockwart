@@ -33,6 +33,7 @@ from blockwart.schemas.catalog import (
     CatalogObjectStubOut,
 )
 from blockwart.schemas.comments import CommentOut
+from blockwart.services.audit import render_audit_summary_english
 from blockwart.services.catalog import (
     list_audit_events_for_object,
     list_objects,
@@ -44,6 +45,11 @@ from blockwart.services.monitoring import (
     monitoring_projection,
 )
 from blockwart.services.read_access import ReadAccess
+from blockwart.services.reference_content import (
+    authorized_reference_data,
+    reference_audit_details,
+    reference_audit_requires_projection,
+)
 from blockwart.services.release_monitoring import (
     current_release_monitoring_settings,
     load_release_observation_index,
@@ -555,6 +561,20 @@ def query_catalog_detail(
         if catalog_object.visibility == ObjectVisibility.DETAIL
         else []
     )
+    if not access.policy.can(Permission.READ_REFERENCE_CONTENT, object_id):
+        was_reference = any(
+            reference_audit_requires_projection(catalog_object.kind, event["details"])
+            for event in audit_events
+        )
+        for event in audit_events:
+            if reference_audit_requires_projection(
+                catalog_object.kind, event["details"], was_reference=was_reference,
+            ):
+                event["details"] = reference_audit_details(event["details"])
+                event["summary"] = render_audit_summary_english(
+                    event["action"], event["details"],
+                    legacy_summary="Credential reference changed",
+                )
     comment_page = (
         query_comment_page(
             session,
@@ -1893,7 +1913,9 @@ def _project_catalog_object(
     ):
         placement_state = "unknown"
     if visibility == ObjectVisibility.DETAIL:
-        data = catalog_object.data
+        data = authorized_reference_data(
+            catalog_object.kind, catalog_object.id, catalog_object.data, access.policy,
+        )
 
         def can_discover(object_id: str) -> bool:
             return access.policy.can(Permission.DISCOVER, object_id)

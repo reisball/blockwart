@@ -1503,5 +1503,19 @@
   "project.pm.blocked_only": "Blockiert",
   "project.pm.depends_on_filter": "Hängt ab von",
   "project.pm.legacy_reconcile": "Identische Altbestandseinträge sind nach einer Quelländerung nicht eindeutig zuzuordnen. Bitte die Herkunft klären; es wird keine doppelte Aufgabe angelegt.",
-  "project.pm.unblocked_only": "Nicht blockiert"
+  "project.pm.unblocked_only": "Nicht blockiert",
+  "permission.read_reference_content": "Referenzinhalt lesen",
+  "permission.write_reference_content": "Referenzinhalt ersetzen",
+  "role.reference_content_reader": "Referenzinhalt-Leser",
+  "role.reference_content_editor": "Referenzinhalt-Bearbeiter (nur schreiben)",
+  "reference_content.title": "Geschützter Referenzinhalt",
+  "reference_content.json": "Referenzinhalt (JSON)",
+  "reference_content.metadata_json": "Referenzmetadaten (JSON)",
+  "reference_content.replace_help": "Speichern ersetzt den gesamten geschützten Referenzinhalt. Ein ausdrückliches {} leert ihn; ein leeres Formular ändert nichts.",
+  "reference_content.write_only": "Du darfst diesen Inhalt ersetzen, aber seine aktuellen Werte nicht lesen. Das Formular beginnt leer.",
+  "reference_content.restricted": "Du hast keine Berechtigung, den Referenzinhalt zu lesen.",
+  "reference_content.invalid": "Der Referenzinhalt wurde nicht gespeichert. Gib ein gültiges JSON-Objekt ein und prüfe, ob die Objektversion aktuell ist.",
+  "reference_content.metadata_invalid": "Die Referenzmetadaten wurden nicht gespeichert. Prüfe die übermittelten Metadaten.",
+  "field.primary_name.credential_reference.label": "Referenzname",
+  "kind.credential_reference": "Zugangsdatenreferenz"
 }

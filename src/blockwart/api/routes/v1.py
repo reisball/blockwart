@@ -16,7 +16,7 @@ from blockwart.api.write_commands import (
 )
 from blockwart.config import Settings
 from blockwart.domain.asset_state import AssetHealth, AssetLifecycle
-from blockwart.domain.auth import GrantScope
+from blockwart.domain.auth import GrantScope, Role
 from blockwart.domain.decisions import (
     APPLIES_TO_MAX_LENGTH,
     APPLIES_TO_PATTERN,
@@ -1597,6 +1597,7 @@ def preview_v1_grant_scope(
     session: Annotated[Session, Depends(get_session)],
     access: Annotated[ReadAccess, Depends(require_api_read_access)],
     scope: GrantScope = GrantScope.SUBTREE,
+    role: Role | None = None,
 ) -> V1GrantScopePreviewOut:
     context = api_write_context(request, access)
     result = execute_api_command(
@@ -1607,6 +1608,7 @@ def preview_v1_grant_scope(
             context,
             object_id=object_id,
             scope=scope,
+            role=role,
         ),
     )
     return V1GrantScopePreviewOut.model_validate(result)

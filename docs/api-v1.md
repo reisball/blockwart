@@ -551,8 +551,9 @@ key for an already created reference ID is `409 credential_reference_id_unavaila
 
 ### `PUT /api/v1/objects/{object_id}`
 
-Requires `write` on that exact object and `If-Match` with the current strong
-ETag. All mutable business fields use the existing shared schema, secret,
+Requires `write` on that exact object (or the separately delegated
+credential-reference content-update capability described below) and `If-Match`
+with the current strong ETag. All mutable business fields use the existing shared schema, secret,
 reference, type, lifecycle, and placement validation. ACLs and delete authority
 are not part of the payload. Missing `If-Match` returns
 `428 precondition_required`; a stale or malformed value returns
@@ -604,11 +605,52 @@ schema/secret validation, audit, and rollback. Merely storing a free-form
 `sources` entry never enables a network request. See [Public GitHub release
 monitoring](release-monitoring.md).
 
+### Credential-reference content permissions
+
+For existing `credential_reference` objects the whole `data.reference` subtree
+(locator name, path, key and item hint) is protected content. Provider, scope,
+usage associations and handling rules remain metadata. Detail and batch reads,
+search projections, mutation responses and audit history omit protected values
+unless the actor has `read_reference_content`. Related service/system access
+never grants reference-content access.
+
+`write` authorizes metadata changes only. Replacing `data.reference` requires
+`write_reference_content`; it does **not** imply content reading. A content-only
+writer may use this same PUT with every metadata field (including provenance)
+unchanged. The response still omits content without content-read authority.
+Omitting `data.reference` preserves it, including during metadata-only PUTs;
+explicit `{}` replaces it with an empty locator. This is the field-specific
+exception to replacement semantics. An actor without content write may echo
+unchanged content only if it can read that content; otherwise omit it.
+
+The additive grant roles `reference_content_reader` and
+`reference_content_editor` carry metadata discover/read plus content read or
+content write respectively. They require a `credential_reference` target and
+`self` scope. Combine them with ordinary roles when both sets of permissions
+are needed. Object Owner and Global Catalog Owner retain full control; existing
+Viewer, Editor and Global Catalog Reader grants do not gain content access.
+See [the permission matrix and migration policy](auth-rbac.md).
+
+Update previews enforce these same gates and redact both protected values and
+protected digest material for actors without content read. An explicit blind
+replacement is always a revision-advancing write, including an equal value;
+its preview emits one fixed opaque replacement, independent of hidden equality,
+existence, or shape. The replacement intent is persisted so history/activity
+also expose one fixed opaque change, never equality or leaf counts. Explicit
+blind typed-reference proposals require target readability independently of
+hidden old values; preservation exemptions apply only at unchanged locations.
+Omission preserves content and normal no-op semantics.
+Access inspection
+publishes the effective capabilities; role-aware grant previews accept `role`
+and publish the proposed permissions.
+
 ### `POST /api/v1/objects/{object_id}/update-preview`
 
 Previews exactly the safe full-object `PUT` above without applying it. The path
 ID, complete `CatalogObjectIn` JSON body, and current strong `If-Match` are the
-same inputs. Effective `write` on that exact object is still required. Missing
+same inputs. Effective `write` on that exact object is required for metadata
+changes; `write_reference_content` independently permits content-only changes.
+Missing
 and concealed path IDs remain the same `404`; discover-only and read-only
 principals receive `403` without a preview. Missing `If-Match` is
 `428 precondition_required`, while a malformed, weak, or stale value is
@@ -637,7 +679,8 @@ Each diff side has exactly `state`, `type`, and `text`. State is
 exact normalized text and other values use canonical JSON, capped at 120
 characters. `text` is null for absent and redacted values. Canonical values are
 compared before this lossy rendering, so an unchanged concealed value remains a
-no-op while a material change still emits a redacted diff entry. Stored
+no-op while a material change still emits a redacted diff entry, except for
+explicit blind reference replacements described above. Stored
 secret-shaped values and typed identities the caller cannot read collapse
 before digest calculation. A distinct caller-supplied proposed concealed value
 binds the semantic diff digest without appearing in the response, so proposals
@@ -863,8 +906,9 @@ same minimized identity projection as the access resource.
 
 ### `GET /api/v1/objects/{object_id}/access/preview`
 
-Accepts `scope=self|subtree` and returns the safe object ID, kind, label, and
-direct-anchor marker for every affected object. `subtree` follows canonical
+Accepts `scope=self|subtree` and an optional `role`, and returns the safe object
+ID, kind, label, and direct-anchor marker for every affected object. With a role,
+it also validates the target and returns the role's proposed permission set. `subtree` follows canonical
 placement only; other relationship types do not affect the preview.
 
 ### Grant commands
