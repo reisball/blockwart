@@ -7,6 +7,9 @@ Notable product changes are recorded here. Versions follow the
 
 ### Added
 
+- End-to-end local evaluation guide with HTTPS, a small fictional catalog and UI
+  tour; clearer product boundaries and agent connection/first-read instructions.
+
 - Independently delegated read/update permissions for existing credential-reference
   locator content across the web UI, REST API and MCP (#315).
 

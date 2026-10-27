@@ -1,7 +1,19 @@
 # MCP Server
 
-Blockwart ships a local MCP stdio server named `blockwart-mcp`. Transport and protocol lifecycle
-are implemented by the official Python MCP SDK.
+**New integration? Start with the [Agent quickstart](agent-quickstart.md)** for
+operator prerequisites, Python wrapper installation, a complete stdio client
+configuration, and your first read-only search → full-context result. To set up
+the application and create Example service first, use the
+[human quickstart](quickstart.md).
+
+Blockwart ships a local MCP stdio server named `blockwart-mcp`. Your client runs
+this wrapper locally; it connects to the separately running Blockwart HTTP API.
+No LLM is required on the Blockwart server. Transport and protocol lifecycle are
+implemented by the official Python MCP SDK.
+
+This page is the detailed reference: [configuration](#configuration),
+[tool selection](#agent-intent-guide), and
+[wrapper/API compatibility](#wrapperapi-contract-evidence-and-controlled-refresh).
 
 ## Wrapper/API contract evidence and controlled refresh
 

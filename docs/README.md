@@ -7,7 +7,7 @@ listed separately from historical plans and verification evidence.
 
 | You want to… | Read first | Then |
 | --- | --- | --- |
-| Understand Blockwart and use the catalog | [Project overview](../README.md) | [Domain model](domain-model.md), [Project workspace](project-workspace.md) |
+| Understand Blockwart and try the catalog | [Project overview](../README.md) | [First useful catalog, local HTTPS and UI tour](quickstart.md) |
 | Install or operate an instance | [Deployment](deployment.md) | [Configuration](config.md), [security model](security.md), [release workflow](release-workflow.md) |
 | Connect an AI agent or automate catalog work | [Agent quickstart](agent-quickstart.md) | [MCP](mcp.md), [REST v1](api-v1.md), [permissions](auth-rbac.md) |
 | Contribute code or documentation | [Contributing](../CONTRIBUTING.md) | [Development and CI checks](ci.md), [versioning](versioning.md) |
@@ -22,6 +22,9 @@ provides the machine contract for the installed revision. Examples are not
 permission grants, and a historical test result is not evidence for your build.
 
 ## Active Operating Documentation
+
+- [Local evaluation and first useful catalog](quickstart.md), including prerequisites,
+  Python/container alternatives, local HTTPS and an optional fictional demo
 
 - [Product versioning, changelog and GitHub releases](versioning.md)
 - [Configuration](config.md) and [deployment readiness](deployment.md)
