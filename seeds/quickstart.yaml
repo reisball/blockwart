@@ -1,0 +1,61 @@
+# Fictional, opt-in evaluation data. No real endpoint or credential is present.
+# Import into a fresh evaluation database, never on top of a personal catalog.
+schema_version: 1
+owner: Example Operators
+created_at: "2026-10-27T00:00:00Z"
+updated_at: "2026-10-27T00:00:00Z"
+objects:
+  - id: demo-host
+    kind: host
+    label: Example host
+    lifecycle: active
+    health: unknown
+    summary: Fictional hardware hosting one runtime and its service.
+    data:
+      schema_version: 1
+      purpose: Demonstrate where the example service runs.
+  - id: demo-runtime
+    kind: system
+    label: Example runtime
+    lifecycle: active
+    health: unknown
+    summary: Fictional runtime on Example host.
+    data:
+      schema_version: 1
+      purpose: A runtime environment, not another physical host.
+  - id: demo-service
+    kind: service
+    label: Example service
+    lifecycle: active
+    health: unknown
+    summary: Fictional service with a linked operating instruction.
+    data:
+      schema_version: 1
+      purpose: Show a connected host, runtime, service and runbook.
+  - id: demo-runbook
+    kind: runbook
+    label: Inspect Example service
+    summary: Fictional read-only inspection procedure; Blockwart never executes it.
+    data:
+      schema_version: 1
+      runbook_status: draft
+      purpose: Demonstrate a linked operating instruction, not a real procedure.
+      risk_level: read-only
+      approval_required: false
+      prerequisites:
+        - id: authorized-access
+          description: Obtain separately authorized read access to your real service.
+      steps:
+        - id: inspect
+          title: Inspect the service
+          description: Review the service status using its own approved interface.
+          expected_effect: Status is displayed without changing the service.
+      verification:
+        - id: confirm
+          description: Compare the observation with the service's documented expectation.
+          success_expectation: The status and observation time are understood.
+      applies_to: [service:demo-service]
+relationships:
+  - {from_ref: host:demo-host, relation_type: hosts, to_ref: system:demo-runtime}
+  - {from_ref: system:demo-runtime, relation_type: hosts, to_ref: service:demo-service}
+  - {from_ref: runbook:demo-runbook, relation_type: documents, to_ref: service:demo-service}

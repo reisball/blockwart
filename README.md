@@ -5,10 +5,11 @@
 Blockwart is a self-hosted infrastructure knowledge base that connects your
 systems, services, networks, and devices with the knowledge needed to operate
 them. Keep dependencies, runbooks, decisions, and project documentation in one
-searchable catalog — accessible through a web interface, a REST API, and the
+connected catalog — accessible through a web interface, a REST API, and the
 Model Context Protocol (MCP).
 
 [Documentation](docs/README.md) ·
+[Try it locally](docs/quickstart.md) ·
 [Installation](docs/deployment.md) ·
 [MCP integration](docs/mcp.md) ·
 [Releases](https://github.com/reisball/blockwart/releases)
@@ -36,19 +37,54 @@ context.
 Blockwart stores **credential references, not secrets**. Passwords, tokens, and
 private keys stay in your existing secret store.
 
+## Is it for you?
+
+For self-hosters, infrastructure operators and teams maintaining **curated**
+operational knowledge. Start with a question such as: “Where does this service
+run, what depends on it, and which operating instruction applies?”
+
+- **Not automatic inventory discovery.** You or your integrations maintain the
+  catalog; optional health observations do not discover your infrastructure.
+- **Not an executor or secret vault.** Runbooks are inert instructions, not jobs;
+  credential references identify secrets held elsewhere.
+- **Not a general document/RAG engine.** Catalog search is bounded and
+  deterministic. Project pages/tasks have project-local search, not global
+  cross-project search. The reviewed import accepts documented structured
+  Markdown/YAML shapes, not arbitrary document folders.
+- **Not a replacement for an issue tracker or monitoring stack.** Project work
+  complements external tracking. HTTP/Gatus service observations and public
+  GitHub stable-release checks are opt-in; release checks do not install updates.
+
 ## Getting started
 
-Blockwart can run as a Python application or in a container. Python installations
-require **Python 3.12 or newer**.
+**Human evaluation:** follow [First useful catalog](docs/quickstart.md), from
+checkout and local HTTPS to a signed-in browser, a host → runtime → service
+chain, a linked runbook, and your first saved catalog edit. The guide includes
+an optional four-object fictional seed and screenshots of the actual UI.
 
-1. Follow the [installation guide](docs/deployment.md) to install Blockwart,
-   initialize the database, and create the first administrator and catalog owner.
-2. Configure HTTPS for browser access and review the
-   [configuration reference](docs/config.md).
-3. Start building your catalog in the web interface, or connect a client using
-   the [REST API](docs/api-v1.md) or [MCP server](docs/mcp.md).
+**Agent integration:** use the [Agent quickstart](docs/agent-quickstart.md) for
+client configuration, scoped access, and a first read-only result. The stdio
+wrapper runs beside your MCP client and connects to the separately running API;
+Blockwart itself requires no model, GPU or paid service.
 
-The installation guide also covers backups, readiness checks, and upgrades.
+**Installation effort:** choose Python **3.12+** or a source-built container.
+You need database migration, an initial owner and owned catalog data, and HTTPS
+for browser login. Docker alone does not configure browser access. The complete
+local guide uses SQLite and Caddy; Linux is the CI target. Setup time and minimum
+hardware have not been benchmarked. See [prerequisites](docs/quickstart.md#before-downloading)
+before choosing a path.
+
+For an operated instance, use [Installation and operation](docs/deployment.md)
+for network boundaries, backups, readiness, upgrades and production HTTPS.
+`main` can contain unreleased work; choose a published tag and its matching
+documentation for a pinned release.
+
+### See the connected catalog
+
+![Fictional host, runtime and service in the Blockwart UI](docs/images/quickstart-topology.png)
+
+*Where does the service run? Follow placement, then open the service and its
+linked operating knowledge. [Take the complete tour](docs/quickstart.md#4-take-the-tour).*
 
 ## Connect your tools
 

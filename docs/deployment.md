@@ -1,9 +1,14 @@
-# Deployment Readiness
+# Installation and operation
 
 Blockwart is prepared for controlled deployment, but this repository does not deploy or register a
 persistent service by itself.
 
-## Approval Gate
+For a first local evaluation, start with [First useful catalog](quickstart.md):
+checkout, prerequisites, a four-object demo, executable local HTTPS and a browser
+tour. This reference covers operating decisions, existing databases and upgrades.
+The [README](../README.md#is-it-for-you) states the product boundaries.
+
+## Deployment decisions
 
 Before a real deployment, decide and document:
 
@@ -19,12 +24,16 @@ Do not bind Blockwart to LAN or public networks until those decisions are made.
 
 ## Local Package Run
 
-Install the package:
+Obtain the source first with `git clone https://github.com/reisball/blockwart.git`
+and `cd blockwart`. For production, select a published tag from
+[Releases](https://github.com/reisball/blockwart/releases) and use its matching
+docs; `main` can contain unreleased work. Commands below run from the checkout root.
+Install the package (Python 3.12+, including venv support):
 
 ```bash
 python3.12 -m venv .venv
 . .venv/bin/activate
-python -m pip install .
+python -m pip install --constraint requirements/runtime.txt .
 ```
 
 Initialize a database, bootstrap the first identity, and import the pilot seed
@@ -299,6 +308,11 @@ Docker allows eight seconds for the complete healthcheck, so readiness can retur
 `200`/`503` result before either client deadline expires.
 
 ## HTTPS Reverse Proxy Contract
+
+For an executable **same-machine evaluation** example, see the
+[local Caddy setup](quickstart.md#2-start-local-https) and its
+[Caddyfile](../examples/quickstart/Caddyfile). Its local CA and port 8443 are not
+a production public-domain certificate or HSTS policy.
 
 Production compose publishes Blockwart only on `127.0.0.1:8000`. The approved reverse proxy is
 the sole network entry point: it terminates HTTPS with a validated certificate, forwards to that

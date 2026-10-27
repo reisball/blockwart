@@ -5,21 +5,172 @@ workflow, not permission to change infrastructure, deploy software, execute a
 Runbook or obtain secrets. The legacy `/api/agent` namespace is read-only;
 new REST clients use `/api/v1`.
 
-## Connect and discover
+## Before connecting
 
-An operator supplies a service-account token with explicitly granted rights.
-For MCP, use the protected token-file setup in [MCP configuration](mcp.md#configuration).
-Channel-sensitive writes need an `mcp`-audience token on MCP or an `api`-audience
-token on REST; a caller-supplied channel header cannot change that audience.
-Platform administration, token possession and permission to read a credential
+Start with a running Blockwart application and an existing catalog object. The
+[human quickstart](quickstart.md) creates **Example service**, which this guide
+uses for its first read. You can substitute another service you are authorized
+to read. Blockwart needs **no LLM, model API key, or inference service on the
+server**; an AI assistant is an optional client of its deterministic MCP tools.
+
+Ask the operator to provide:
+
+- The application base URL, such as `https://blockwart.example.com` (without
+  `/api/v1`), reachable from the machine running your MCP client.
+- An active service account with an explicit `viewer` grant on Example service
+  (`self` scope), or on its intended parent subtree. `viewer` supplies both
+  `discover` and `read`. A deliberately assigned `catalog_viewer` role is the
+  broader, whole-catalog read-only alternative; it is not required here.
+- A protected bearer-token file for that account, readable by the OS user
+  running the MCP process. Issue the token with audience `mcp` so subsequent
+  authorized channel-sensitive MCP writes work too. Audience is not a grant.
+
+Token issuance belongs to the operator's **existing application environment**,
+with its configured database, not the client-only installation below. For an
+already-created service account named `inventory-agent`, the protected CLI is:
+
+```bash
+blockwart-auth issue-token \
+  --login inventory-agent \
+  --name mcp-client \
+  --audience mcp \
+  --output-file /absolute/path/to/protected/blockwart-mcp-token
+```
+
+The output file must not exist; the CLI creates it with mode `0600` and never
+prints the token. If application and client are on different machines, provision
+that file securely onto the **client machine**, retaining restricted access.
+Use that client's absolute token-file path in the configuration below. See
+[token issuance and rotation](auth-rbac.md#bootstrap-and-credential-operations)
+and [scoped roles](auth-rbac.md#roles-and-scope) for the complete operator flow.
+Token possession, platform administration, and permission to read a credential
 reference do not grant catalog writes or access to secret values.
 
-At integration/upgrade time, verify the installed wrapper/API contract using
-`blockwart-mcp --doctor`. Discover tools with MCP `tools/list`; use
-`blockwart.describe_schema` for object/relationship writes and the tool input
-schemas for Project records/actions. REST clients use the installed OpenAPI
-contract and [REST reference](api-v1.md). A matching tool count alone is not
-proof of compatibility.
+## Install the local MCP wrapper
+
+The remote application and the local stdio wrapper are separate processes.
+Install the Python package on the **MCP client machine**, even if the application
+runs in a remote container. Use **Python 3.12 or newer** and a reviewed checkout
+matching the application's installed revision. Replace the absolute paths here
+with your actual locations:
+
+```bash
+python3.12 -m venv /absolute/path/to/blockwart-client/.venv
+/absolute/path/to/blockwart-client/.venv/bin/python -m pip install /absolute/path/to/blockwart-checkout
+```
+
+This installs `blockwart-mcp`; it does not initialize a database or start the
+remote application. No database URL or database access is needed by the wrapper.
+For application installation, use the [human quickstart](quickstart.md).
+
+## Configure a stdio MCP client
+
+Add a server entry to your client's MCP configuration. This complete example
+uses the common `mcpServers` layout; adapt the outer configuration location/shape
+if your client requires it. Keep the command, stdio transport, and environment
+settings equivalent:
+
+```json
+{
+  "mcpServers": {
+    "blockwart": {
+      "command": "/absolute/path/to/blockwart-client/.venv/bin/blockwart-mcp",
+      "args": [],
+      "env": {
+        "BLOCKWART_API_BASE_URL": "https://blockwart.example.com",
+        "BLOCKWART_API_TOKEN_FILE": "/absolute/path/to/protected/blockwart-mcp-token"
+      }
+    }
+  }
+}
+```
+
+Use the **absolute installed command**, not a source module or an assumed shell
+`PATH`. The client launches it locally and speaks MCP over stdin/stdout; the
+wrapper then calls the configured application API. This is not a remote MCP
+HTTP/SSE endpoint. All paths must exist in the client's execution environment
+(including inside a client container). Do not rely on `~`, `$HOME`, or shell
+activation being expanded in JSON.
+
+Use HTTPS for remote applications. Plain HTTP is permitted **only for loopback**,
+for example `http://127.0.0.1:8000` when the API is reachable on the wrapper's own
+machine/network namespace; a private LAN or VPN address is not loopback.
+Redirects are rejected. Set only one token source: ensure the launched process
+does not also inherit `BLOCKWART_API_TOKEN`. Never put a token in a tool argument,
+chat, repository, or the JSON configuration itself. See
+[MCP configuration](mcp.md#configuration) for transport and rotation details.
+
+## First success: list → search → full context
+
+These are **read-only** MCP protocol requests, not shell commands. A compatible
+client performs `initialize` and the initialized notification automatically;
+then use its tool inspector or ask it to make the following calls. Client UIs
+may prefix tool names; select the tool whose published name matches below.
+
+1. **List tools** with MCP `tools/list`:
+
+   ```json
+   {"jsonrpc": "2.0", "id": 1, "method": "tools/list", "params": {}}
+   ```
+
+   Confirm `blockwart.search` and `blockwart.get_object_context` are available.
+   Listing tools proves the local MCP connection, **not** API connectivity or
+   catalog permissions. At integration/upgrade time, also run the installed
+   `blockwart-mcp --doctor` with the same URL and protected token-file environment
+   to verify wrapper/API compatibility. Matching tool counts alone prove nothing.
+
+2. **Find the service** with `blockwart.search`:
+
+   ```json
+   {
+     "jsonrpc": "2.0",
+     "id": 2,
+     "method": "tools/call",
+     "params": {
+       "name": "blockwart.search",
+       "arguments": {
+         "q": "Example service",
+         "kind": "service",
+         "projection": "compact",
+         "sort": "relevance",
+         "limit": 5
+       }
+     }
+   }
+   ```
+
+   In the tool's JSON result, inspect `results` and select the intended service.
+   Copy its exact returned `id` (not its label, `ref`, or an ID guessed from the
+   label). Resolve its `capability_set` through the response's `capability_sets`
+   table. Compact search results are candidate summaries, not full object data.
+
+3. **Read that exact object** with `blockwart.get_object_context`. Replace the
+   placeholder below with the returned ID, unchanged:
+
+   ```json
+   {
+     "jsonrpc": "2.0",
+     "id": 3,
+     "method": "tools/call",
+     "params": {
+       "name": "blockwart.get_object_context",
+       "arguments": {"object_id": "COPY_THE_RETURNED_ID_HERE"}
+     }
+   }
+   ```
+
+   Success is an `objects` entry with `visibility: "detail"`, the intended
+   identity, full authorized data, and its current strong `etag`. This tool
+   already requests the full single-object context; it has no `projection`
+   argument. If the account has only `discover`, it instead returns a strict
+   stub (`visibility: "stub"`), with no full data or writable ETag. Asking for
+   full context never upgrades permission. The operator must grant `read` on
+   that exact object if the full-context step is intended.
+
+For REST integrations, use `/api/v1`, the installed OpenAPI contract, and the
+[REST reference](api-v1.md). Channel-sensitive writes need an `mcp`-audience token
+on MCP or an `api`-audience token on REST; a caller-supplied channel header cannot
+change that audience. The sequence above does not authorize a write.
 
 ## Read → prepare → write → verify
 
@@ -66,22 +217,10 @@ not create a Project or grant the required root authority):
 }
 ```
 
-Example bounded candidate search:
-
-```json
-{
-  "q": "Example service",
-  "kind": "service",
-  "projection": "compact",
-  "sort": "relevance",
-  "limit": 5
-}
-```
-
-These JSON blocks are arguments for `blockwart.describe_schema` and
-`blockwart.search`, respectively, not shell commands. Use the generated minimal
-example as the starting point for an authorized write, not a remembered payload
-from a different kind or build.
+This JSON block contains arguments for `blockwart.describe_schema`, not a shell
+command. Use the generated minimal example as the starting point for an
+authorized write, not a remembered payload from a different kind or build. For
+Project records/actions, use the published tool input schemas instead.
 
 ## Use the right concurrency token
 
@@ -102,6 +241,17 @@ See [MCP intent guidance](mcp.md#agent-intent-guide) and
 [Project actions](project-management.md#task-discussion-and-explicit-commands).
 
 ## Recover without guessing
+
+If the first read does not succeed, distinguish connection and authorization
+problems before changing configuration:
+
+| Symptom | Check |
+| --- | --- |
+| Server will not launch or tools are absent | Confirm the absolute installed command exists in the client environment, Python is at least 3.12, and the client uses stdio. Inspect stderr, not stdout, for startup diagnostics. |
+| Tools list works but catalog calls fail | Tool discovery is local. Check the API base URL, reachability from the wrapper, HTTPS outside loopback, and the protected token file. Use the same environment for `--doctor`. |
+| `credential_configuration_error` | Check file readability, that only one token source is configured, and that the API URL uses safe transport without redirects. Do not print the credential to diagnose it. |
+| Search returns no results | Example service may not exist in this catalog, the query may not match, or this account may lack `discover` in that scope. Confirm the object and explicit grants with the operator. Empty results do not prove an empty catalog; never compensate by switching to broader credentials. |
+| Search finds only a stub; full-context call still returns a stub | The account has `discover` but not `read` on that object. Request the intended scoped `viewer` grant; a token, different projection, or repeated call cannot unlock details. |
 
 | Result | Next action |
 | --- | --- |

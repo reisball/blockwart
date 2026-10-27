@@ -1,0 +1,13 @@
+# Local evaluation only. Run Caddy on the same machine as Blockwart.
+# Trust Caddy's local CA before signing in; do not disable browser TLS checks.
+{
+	auto_https disable_redirects
+}
+
+https://localhost:8443 {
+	bind 127.0.0.1 ::1
+	tls internal
+	reverse_proxy 127.0.0.1:8000 {
+		header_up X-Forwarded-For {remote_host}
+	}
+}
