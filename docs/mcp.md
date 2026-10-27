@@ -279,7 +279,10 @@ a content-only writer must preserve all metadata. Omitted `reference` is
 preserved; explicit `{}` clears it. Ordinary `write` cannot change it.
 Explicit blind replacements always advance the revision, including equal values;
 previews publish one fixed redacted replacement, never equality, existence, or
-shape of hidden content. Omission retains normal no-op behavior.
+shape of hidden content. History/activity likewise show one opaque replacement,
+not hidden equality or leaf counts. Typed target checks never exempt an explicit
+blind proposal merely because its value matches hidden content; exemptions are
+location-specific for unchanged, preserved fields. Omission retains normal no-op behavior.
 Delegate the additive `reference_content_reader` / `reference_content_editor`
 roles with `self` scope on the reference itself. Existing Viewer/Editor and
 Global Catalog Reader grants gain neither capability; Owner and Global Catalog

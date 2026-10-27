@@ -3,7 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
-from collections.abc import Collection, Mapping
+from collections.abc import Iterable, Mapping
 from copy import deepcopy
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
@@ -265,6 +265,7 @@ class ObjectUpdatePlan:
     expected_revision: int
     upsert: ObjectUpsertPlan
     context: WriteContext
+    blind_reference_replacement: bool = False
 
     @property
     def changed(self) -> bool:
@@ -348,17 +349,17 @@ def plan_object_update(
                 )
         if payload.kind == CREDENTIAL_REFERENCE_KIND:
             payload = _reference_update_payload(row, payload, current_context)
-    preexisting_typed_references = frozenset(
-        iter_typed_reference_strings(stored_data)
-        if isinstance(stored_data, Mapping)
-        else ()
-    )
     _require_knowledge_reference_access(
         session,
         current_context,
         payload,
         all_typed_references=True,
-        preexisting_typed_references=preexisting_typed_references,
+        preserved_data=stored_data,
+        revalidate_reference_content=(
+            replaces_reference
+            and CREDENTIAL_REFERENCE_KIND in {row.kind, payload.kind}
+            and not current_context.policy.can(Permission.READ_REFERENCE_CONTENT, object_id)
+        ),
     )
     try:
         upsert_plan = plan_object_upsert(
@@ -376,12 +377,13 @@ def plan_object_update(
                 snapshot["data"].pop("reference", None)
         if _canonical_json(before_metadata) != _canonical_json(after_metadata):
             raise CommandAuthorizationDenied(object_id=object_id, permission=Permission.WRITE)
-    if (
-        payload.kind == CREDENTIAL_REFERENCE_KIND
-        and replaces_reference
+    blind_reference_replacement = (
+        CREDENTIAL_REFERENCE_KIND in {row.kind, payload.kind}
+        and (replaces_reference or row.kind != payload.kind)
         and not current_context.policy.can(Permission.READ_REFERENCE_CONTENT, object_id)
         and current_context.policy.can(Permission.WRITE_REFERENCE_CONTENT, object_id)
-    ):
+    )
+    if blind_reference_replacement:
         # A blind replacement is always a write, even if its bytes match.
         # No-op answers/revisions would otherwise validate hidden locator guesses.
         upsert_plan = replace(upsert_plan, unchanged=False)
@@ -391,6 +393,7 @@ def plan_object_update(
         expected_revision=resolved_revision,
         upsert=upsert_plan,
         context=current_context,
+        blind_reference_replacement=blind_reference_replacement,
     )
 
 
@@ -483,6 +486,9 @@ def update_catalog_object(
             before=before,
             after=after,
             changes=_structured_changes(before, after),
+            extra=(
+                {"reference_content_replaced": True} if plan.blind_reference_replacement else None
+            ),
         )
     return ObjectCommandResult(
         catalog_object=result,
@@ -2735,13 +2741,41 @@ def _canonical_relationship_metadata(
     return validate_relationship_metadata(relation_type, metadata)
 
 
+def _changed_typed_reference_strings(
+    proposed: object,
+    stored: object,
+    *,
+    revalidate_reference_content: bool = False,
+    force: bool = False,
+    root: bool = True,
+) -> Iterable[str]:
+    """Yield proposed references not preserved at their exact stored location."""
+    if isinstance(proposed, Mapping):
+        previous = stored if isinstance(stored, Mapping) else {}
+        for key, value in proposed.items():
+            yield from _changed_typed_reference_strings(
+                value, previous.get(key), root=False,
+                force=force or (root and key == "reference" and revalidate_reference_content),
+            )
+    elif isinstance(proposed, list | tuple):
+        previous = stored if isinstance(stored, list | tuple) else ()
+        for index, value in enumerate(proposed):
+            yield from _changed_typed_reference_strings(
+                value, previous[index] if index < len(previous) else None,
+                root=False, force=force,
+            )
+    elif force or not isinstance(stored, str) or proposed != stored:
+        yield from iter_typed_reference_strings(proposed)
+
+
 def _require_knowledge_reference_access(
     session: Session,
     context: WriteContext,
     payload: CatalogObjectIn,
     *,
     all_typed_references: bool = False,
-    preexisting_typed_references: Collection[str] = (),
+    preserved_data: object = None,
+    revalidate_reference_content: bool = False,
 ) -> None:
     """Fail closed when a projected write names an unreadable typed target.
 
@@ -2751,11 +2785,11 @@ def _require_knowledge_reference_access(
 
     Existing create commands and declared knowledge fields retain their
     reviewed knowledge-reference contract. The full-object update planner opts
-    into all other typed references, exempting only byte-identical values
-    already present in the stored canonical data. Newly introduced or changed
-    values therefore cannot distinguish an unreadable target from an absent or
-    kind-mismatched one, while an unrelated edit does not re-authorize an
-    unchanged stored reference.
+    into all other typed references. Only unchanged values at the exact same
+    location are preserved without target reauthorization. Explicitly supplied
+    blind content is never exempted based on hidden stored values. Thus neither
+    a hidden equality guess nor relocation can borrow another field's exemption,
+    while an unrelated edit can preserve inaccessible stored targets.
     """
     if payload.kind == "runbook":
         knowledge_references = iter_runbook_references(payload.data)
@@ -2773,12 +2807,10 @@ def _require_knowledge_reference_access(
         reference.value for reference in knowledge_references
     }
     if all_typed_references:
-        reference_values = {
-            reference_value
-            for reference_value in iter_typed_reference_strings(payload.data)
-            if reference_value not in preexisting_typed_references
-            or reference_value in knowledge_reference_values
-        }
+        reference_values = knowledge_reference_values | set(_changed_typed_reference_strings(
+            payload.data, preserved_data,
+            revalidate_reference_content=revalidate_reference_content,
+        ))
     else:
         reference_values = knowledge_reference_values
     references: set[TypedReference] = set()

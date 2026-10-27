@@ -254,7 +254,10 @@ writing content does not authorize echoing its current or previous values.
 An explicit blind replacement always advances the revision, even if its bytes
 match; its preview always reports one opaque redacted replacement and the same
 next-revision prediction. Hidden equality, branch presence, and locator shape
-cannot affect its diff or digest. Omitting content retains ordinary no-op
+cannot affect its diff or digest. The command records blind replacement intent;
+history and activity show one opaque content change even for equal values, not
+actual leaf counts or equality. Authorized content readers retain canonical
+snapshots and actual differences. Omitting content retains ordinary no-op
 semantics. Content-only writers must preserve metadata with type-sensitive JSON
 equality (`true`, `1`, and `1.0` are distinct).
 Kind conversion into or out of a credential reference additionally requires
@@ -263,8 +266,14 @@ away, omit `data.reference`; retaining a locator under another kind is rejected.
 Historical reference snapshots remain content-protected after conversion.
 Unclassified legacy events also remain protected when immutable object history
 shows a former reference kind; activity resolves this for page candidates only.
+Untyped snapshots, whole-object/data changes and dotted/JSON-pointer reference
+paths obey the same boundary; aggregate values never reopen the protected branch.
 Global Catalog Owner content authority applies even to nonmaterialized activity
-policy snapshots.
+policy snapshots. Typed-reference preservation is location-specific: unrelated
+edits may retain an unchanged inaccessible target at its exact stored key/index,
+but newly introduced or relocated values require target read authority. Explicit
+blind content proposals always authorize their typed targets independently of
+hidden stored values; omitted copied content does not reauthorize its targets.
 
 **Compatibility:** migration `20261026_0031` expands only the database role
 constraint and preserves every existing grant (IDs, roles, scopes, creators,

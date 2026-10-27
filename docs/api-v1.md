@@ -635,7 +635,11 @@ Update previews enforce these same gates and redact both protected values and
 protected digest material for actors without content read. An explicit blind
 replacement is always a revision-advancing write, including an equal value;
 its preview emits one fixed opaque replacement, independent of hidden equality,
-existence, or shape. Omission preserves content and normal no-op semantics.
+existence, or shape. The replacement intent is persisted so history/activity
+also expose one fixed opaque change, never equality or leaf counts. Explicit
+blind typed-reference proposals require target readability independently of
+hidden old values; preservation exemptions apply only at unchanged locations.
+Omission preserves content and normal no-op semantics.
 Access inspection
 publishes the effective capabilities; role-aware grant previews accept `role`
 and publish the proposed permissions.
