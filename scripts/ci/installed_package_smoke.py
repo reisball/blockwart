@@ -206,8 +206,10 @@ def check_root_project_creator(token: str) -> None:
         "discover",
         "manage_access",
         "read",
+        "read_reference_content",
         "rename",
         "write",
+        "write_reference_content",
     ]
 
     denied_status, denied = post_json(
