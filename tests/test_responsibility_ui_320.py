@@ -16,14 +16,14 @@ from blockwart.ui.security import AUTH_CSRF_COOKIE_NAME, AUTH_SESSION_COOKIE_NAM
 
 
 @contextmanager
-def _client(factory):
+def _client(factory, *, role="owner", scope="responsibility"):
     with factory() as session, transaction(session):
         _seed(session)
         actor = create_human_principal(session, login="browser.responsible",
                                        display_name="Browser Responsible",
                                        password="browser-responsibility-test-password")
         create_object_grant(session, principal_id=actor.id, object_id="lxc",
-                            role="owner", scope="responsibility")
+                            role=role, scope=scope)
         create_object_grant(session, principal_id=actor.id, object_id="service",
                             role="viewer", scope="self")
         browser = issue_browser_session(session, principal_id=actor.id, ttl_seconds=3600)
@@ -142,3 +142,19 @@ assert.equal(otherKind.option.disabled, true);
 '''
     completed = subprocess.run([node, '-e', program, str(source)], capture_output=True, text=True)
     assert completed.returncode == 0, completed.stderr
+
+
+def test_access_manager_browser_cannot_request_hidden_responsibility_preview(
+    alembic_session_factory,
+):
+    with _client(alembic_session_factory, role="access_manager", scope="self") as client:
+        hidden = client.get('/objects/operations')
+        assert hidden.status_code == 404
+        page = client.get('/objects/lxc', params={
+            'edit': 'permissions', 'preview_role': 'owner', 'preview_scope': 'responsibility',
+        })
+        assert page.status_code == 200
+        preview = page.text.split('data-grant-preview-selection>', 1)[1].split('</ul>', 1)[0]
+        assert 'operations' not in page.text
+        assert 'Full operational responsibility' not in preview
+        assert 'Discoverer' in preview

@@ -17,11 +17,13 @@ from blockwart.mcp.server import TOOLS, local_contract_metadata, validate_runtim
 def test_integrated_mcp_contract_has_reviewed_manifest_evidence() -> None:
     metadata = contract_metadata(TOOLS, build_revision="issue-188-236-245-248-249-250-251")
 
-    # The activity read joins the reviewed credential, grant, relationship and schema tools.
+    # Reviewed #320 delta: responsibility scope + description for create/update/preview
+    # grants; operations_runbook_for for create/delete relationships and describe_schema.
+    # All other manifest fields, the 47 tools and contract version remain unchanged.
     assert metadata == {
         "build_revision": "issue-188-236-245-248-249-250-251",
         "contract_version": "1",
-        "manifest_digest": "2bdacee31d8db48e4963e037262b4565faf7a61e0c0d716afaf5f33e2a9d4097",
+        "manifest_digest": "16c952d4cdba91351ac35b98831c4d396b8190436472fe29b761549d8b18bb9e",
         "tool_count": 47,
     }
 

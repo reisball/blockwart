@@ -12,6 +12,7 @@ from blockwart.services.grant_reach import (
     AUTHORITY_RELATION_TYPES,
     RESPONSIBILITY_KINDS,
     grant_reach_cte,
+    valid_owner_grant_condition,
 )
 
 
@@ -264,7 +265,7 @@ def ensure_owner_coverage_after_exclusions(
     affected_ids = {
         object_id
         for grant in affected_grants
-        for object_id in _grant_affected_object_ids(session, grant)
+        for object_id in grant_affected_object_ids(session, grant)
     }
     if not affected_ids:
         return
@@ -352,7 +353,7 @@ def inherited_owner_grant_ids(
         .join(ObjectGrant, ObjectGrant.object_id == CatalogObject.id)
         .join(Principal, Principal.id == ObjectGrant.principal_id)
         .where(
-            ObjectGrant.role == Role.OWNER,
+            valid_owner_grant_condition(),
             ObjectGrant.scope.in_((GrantScope.SUBTREE, GrantScope.RESPONSIBILITY)),
             ObjectGrant.object_id != object_id,
             Principal.active.is_(True),
@@ -476,9 +477,7 @@ def _owner_grant_reach(
         .join(ObjectGrant, ObjectGrant.object_id == CatalogObject.id)
         .join(Principal, Principal.id == ObjectGrant.principal_id)
         .where(
-            ObjectGrant.role == Role.OWNER,
-            or_(ObjectGrant.scope != GrantScope.RESPONSIBILITY,
-                CatalogObject.kind.in_(RESPONSIBILITY_KINDS)),
+            valid_owner_grant_condition(),
             Principal.active.is_(True),
         )
     )
@@ -574,15 +573,24 @@ def _locked_active_owner_grants(
     return list(session.scalars(statement).all())
 
 
-def _grant_affected_object_ids(
+def grant_affected_object_ids(
     session: Session,
     grant: ObjectGrant,
 ) -> set[str]:
+    """Return actual reach of an existing valid grant, empty for malformed rows.
+
+    Recovery/removal must not interpret rejected raw grants as coverage or fail
+    before an authorized actor can remove or repair them.
+    """
+    anchor = session.get(CatalogObject, grant.object_id)
+    if anchor is None:
+        return set()
     try:
+        validate_grant_target(grant.role, grant.scope, object_kind=anchor.kind)
         return grant_scope_object_ids(
             session,
             object_id=grant.object_id,
             scope=grant.scope,
         )
-    except AccessGrantError:
+    except ValueError:
         return set()

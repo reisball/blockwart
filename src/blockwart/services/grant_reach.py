@@ -4,13 +4,25 @@ from __future__ import annotations
 from sqlalchemy import and_, literal, or_, select
 from sqlalchemy.orm import aliased
 
-from blockwart.domain.auth import GrantScope
+from blockwart.domain.auth import GrantScope, Role
 from blockwart.domain.placement import CANONICAL_PLACEMENT_RELATION_TYPE
-from blockwart.models import CatalogObject, Relationship
+from blockwart.models import CatalogObject, ObjectGrant, Relationship
 
 OPERATIONS_RUNBOOK_RELATION = "operations_runbook_for"
 RESPONSIBILITY_KINDS = ("host", "system", "service")
 AUTHORITY_RELATION_TYPES = (CANONICAL_PLACEMENT_RELATION_TYPE, OPERATIONS_RUNBOOK_RELATION)
+
+
+def valid_owner_grant_condition():
+    """Match only Owner grants that the policy accepts for their anchor kind."""
+    return and_(
+        ObjectGrant.role == Role.OWNER,
+        or_(
+            ObjectGrant.scope.in_((GrantScope.SELF, GrantScope.SUBTREE)),
+            and_(ObjectGrant.scope == GrantScope.RESPONSIBILITY,
+                 CatalogObject.kind.in_(RESPONSIBILITY_KINDS)),
+        ),
+    )
 
 
 def grant_reach_cte(roots, *, name: str):

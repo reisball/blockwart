@@ -44,6 +44,7 @@ from blockwart.services.access import (
     lock_principal_rows,
     owner_grant_covered_object_ids,
 )
+from blockwart.services.grant_reach import valid_owner_grant_condition
 from blockwart.services.identity import IdentityError, principal_by_login
 
 OwnerlessPlacement = Literal["top_level", "placed"]
@@ -189,9 +190,10 @@ def assign_initial_owner(
     existing = session.scalar(
         select(ObjectGrant.id)
         .join(Principal, Principal.id == ObjectGrant.principal_id)
+        .join(CatalogObject, CatalogObject.id == ObjectGrant.object_id)
         .where(
             ObjectGrant.object_id == object_id,
-            ObjectGrant.role == Role.OWNER,
+            valid_owner_grant_condition(),
             Principal.active.is_(True),
         )
         .limit(1)
@@ -258,9 +260,10 @@ def object_owner_coverage(
         session.execute(
             select(Principal.active, func.count(ObjectGrant.id))
             .join(Principal, Principal.id == ObjectGrant.principal_id)
+            .join(CatalogObject, CatalogObject.id == ObjectGrant.object_id)
             .where(
                 ObjectGrant.object_id == object_id,
-                ObjectGrant.role == Role.OWNER,
+                valid_owner_grant_condition(),
             )
             .group_by(Principal.active)
         ).all()
@@ -307,9 +310,10 @@ def find_ownerless_objects(session: Session) -> tuple[OwnerlessObjectReport, ...
         session.execute(
             select(ObjectGrant.object_id, func.count(ObjectGrant.id))
             .join(Principal, Principal.id == ObjectGrant.principal_id)
+            .join(CatalogObject, CatalogObject.id == ObjectGrant.object_id)
             .where(
                 ObjectGrant.object_id.in_(sorted(ownerless_ids)),
-                ObjectGrant.role == Role.OWNER,
+                valid_owner_grant_condition(),
                 Principal.active.is_(False),
             )
             .group_by(ObjectGrant.object_id)

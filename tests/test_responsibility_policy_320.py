@@ -235,3 +235,78 @@ def test_migration_preserves_existing_grants_and_refuses_lossy_downgrade(alembic
     with database.sessions() as session, transaction(session):
         session.get(ObjectGrant, grant_id).scope = "self"
     command.downgrade(config, "20261026_0031")
+
+
+@pytest.mark.parametrize('kind', ['runbook', 'credential_reference'])
+def test_malformed_responsibility_grant_is_ownerless_and_adoptable(
+    alembic_session_factory, kind,
+):
+    from blockwart.domain.auth import CatalogRole
+    from blockwart.services.grant_management import adopt_ownerless_object
+    from blockwart.services.ownership import object_owner_coverage
+
+    with alembic_session_factory() as session, transaction(session):
+        session.add(_object('broken', kind))
+        actor = create_service_account(
+            session, login='recovery', display_name='Recovery',
+            catalog_role=CatalogRole.CATALOG_OWNER,
+        )
+        malformed = ObjectGrant(
+            principal_id=actor.id, object_id='broken', role='owner', scope='responsibility',
+        )
+        session.add(malformed)
+        session.flush()
+        assert not policy_for_principal(session, actor.id).grants_for('broken')
+        assert object_owner_coverage(session, 'broken', lock=False).ownerless
+        assert 'broken' not in owner_grant_covered_object_ids(session, lock=False)
+        context = WriteContext(
+            principal=principal_context(
+                session.get(Principal, actor.id), service_token_audience='api',
+            ),
+            policy=policy_for_principal(session, actor.id), channel='api',
+        )
+        result = adopt_ownerless_object(
+            session, context, object_id='broken', principal_id=actor.id,
+            expected_revision=session.get(CatalogObject, 'broken').revision,
+        )
+        assert result.changed
+        assert result.previous_owner_count == 0
+        coverage = object_owner_coverage(session, 'broken', lock=False)
+        assert coverage.direct_active_owner_grants == 1
+        assert not coverage.ownerless
+
+
+@pytest.mark.parametrize('operation', ['revoke', 'update'])
+@pytest.mark.parametrize('kind', ['runbook', 'credential_reference'])
+def test_owner_can_remove_or_repair_malformed_responsibility_grant(
+    alembic_session_factory, kind, operation,
+):
+    from blockwart.services.grant_management import revoke_managed_grant
+    from blockwart.services.ownership import object_owner_coverage
+
+    with alembic_session_factory() as session, transaction(session):
+        session.add(_object('broken', kind))
+        actor = create_service_account(session, login='owner', display_name='Owner')
+        invalid_target = create_service_account(session, login='invalid', display_name='Invalid')
+        create_object_grant(session, principal_id=actor.id, object_id='broken',
+                            role='owner', scope='self')
+        malformed = ObjectGrant(
+            principal_id=invalid_target.id, object_id='broken',
+            role='owner', scope='responsibility',
+        )
+        session.add(malformed)
+        session.flush()
+        args = dict(
+            object_id='broken', grant_id=malformed.id,
+            expected_revision=session.get(CatalogObject, 'broken').revision,
+        )
+        context = _context(session, actor.id)
+        if operation == 'revoke':
+            result = revoke_managed_grant(session, context, **args)
+            assert session.get(ObjectGrant, malformed.id) is None
+        else:
+            result = update_managed_grant(session, context, role='owner', scope='self', **args)
+            assert session.get(ObjectGrant, malformed.id).scope == 'self'
+        assert result.changed
+        assert not object_owner_coverage(session, 'broken', lock=False).ownerless
+        assert policy_for_principal(session, actor.id).can(Permission.MANAGE_ACCESS, 'broken')

@@ -1957,10 +1957,18 @@ def _render_object_detail(
             )
         except ValueError:
             selected_role, selected_scope = Role.DISCOVERER, GrantScope.SELF
-        grant_scope_preview = preview_grant_scope(
-            session, grant_context, object_id=object_id,
-            scope=selected_scope, role=selected_role,
-        )
+        try:
+            grant_scope_preview = preview_grant_scope(
+                session, grant_context, object_id=object_id,
+                scope=selected_scope, role=selected_role,
+            )
+        except CommandAuthorizationDenied:
+            # A manually selected Owner-only scope must not expose hidden
+            # reach or turn an otherwise accessible detail page into a 500.
+            grant_scope_preview = preview_grant_scope(
+                session, grant_context, object_id=object_id,
+                scope=GrantScope.SELF, role=Role.DISCOVERER,
+            )
         can_manage_owner_grants = actor_can_manage_owner_grants(
             grant_context,
             object_id=object_id,

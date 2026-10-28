@@ -38,3 +38,54 @@ parallel authorization system. Delivery includes review, merge and verified depl
 Full CI, independent exact-head review, merge, deployment, live verification and
 OpenHAVoice association/grant reconciliation remain pending at this implementation
 snapshot. Local focused results are not full CI or production evidence.
+
+
+## Exact-head review follow-up (2026-10-28)
+
+Independent Kutscher Quality review of `99e0619bc96f0af4b1d8cc5c94d56403d12ea953`
+was **not approved**. Its three findings are delivery gates, not accepted risks:
+
+1. Responsibility preview required `manage_access` but not prior Owner authority,
+   disclosing a linked Runbook to an access-manager-only actor. Reproduced through
+   actual REST and MCP adapters (hidden object GET 404, preview unexpectedly 200).
+   Responsibility preview now applies the same Owner delegation gate as grant
+   creation before resolving or returning reach; existing self/subtree semantics
+   remain unchanged. A manually selected denied browser scope falls back to a
+   safe Discoverer/self preview (regression reproduced 500 before that adapter
+   correction), without exposing hidden labels or changing the service denial.
+2. Raw malformed Owner/responsibility grants on Runbook or CredentialReference
+   anchors were ignored by policy but counted as direct ownership by recovery;
+   managed removal/repair then rejected their prospective scope. Reproduced both
+   count disagreement and update/revoke exceptions. A shared valid-Owner SQL
+   predicate now aligns direct/inherited coverage and initial-owner recovery.
+   Existing-grant reach validates the full stored target before preserving its
+   actual coverage, allowing authorized repair/removal without bypassing Owner,
+   revision, audit, last-owner or self-lockout protections.
+3. The reviewed MCP manifest digest still described the old schemas. Its
+   intentional contract delta was compared in full against the parent manifest:
+   exactly six tools change (grant create/update/preview and relationship
+   create/delete/schema); all other fields, 47 tools and contract version remain
+   unchanged. The reviewed digest is now `16c952d4…`.
+
+The initial delayed `ember-wharf` failure was a test savepoint ordering error
+already corrected before the reviewed commit: the expected exception must cross
+`begin_nested()` before `pytest.raises` handles it. The reviewed HEAD was
+independently rechecked: 11 policy cases and Ruff passed. This stale notification
+is distinct from the three actionable independent-review findings above.
+
+The follow-up revision requires fresh exact-head independent review and full CI.
+The prebuilt image/migration rehearsal for 99e0619 is superseded as a deployment
+candidate; it is retained only as evidence and must not be deployed as the fix.
+
+Follow-up verification before re-review:
+
+- 82 current policy, REST/MCP boundary, UI/Node and MCP manifest cases passed.
+- 114 policy/boundary/UI plus adjacent ownerless recovery and grant-management
+  cases passed before the final browser adapter change; 17 PostgreSQL-only cases
+  were explicitly skipped in that SQLite-focused run, not counted as passed.
+- Both focused PostgreSQL responsibility reach/unique-target and real competing
+  scope-revocation lock-wait cases passed using the existing isolated test server.
+  An earlier attempt used the wrong test URL and skipped; only the corrected
+  credential-bound run is PostgreSQL execution evidence.
+- Repository Ruff and diff whitespace checks passed.
+- No live changes, merge, acceptance or issue closure have occurred.

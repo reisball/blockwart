@@ -149,7 +149,10 @@ def boundary(request, responsibility_client, responsibility_state):
         elif tool == "get_object_access":
             fetcher(f"{path}/access", {})
         elif tool == "preview_grant_scope":
-            fetcher(f"{path}/access/preview", {"scope": args["scope"], "role": args["role"]})
+            fetcher(f"{path}/access/preview", {
+                "scope": args["scope"],
+                **({"role": args["role"]} if "role" in args else {}),
+            })
         elif tool == "update_object":
             requester("PUT", path, args["object"], headers)
         elif tool in {"create_grant", "update_grant"}:
@@ -432,3 +435,28 @@ def test_operating_runbook_inherits_responsibility_from_host_or_system_target(
     assert edited.status_code == 200, edited.text
     with alembic_session_factory() as session:
         assert get_object(session, "operations").summary == args["object"]["summary"]
+
+
+@pytest.mark.parametrize("explicit_owner_role", [True, False])
+def test_access_manager_cannot_preview_hidden_responsibility_runbooks(
+    alembic_session_factory, responsibility_state, boundary, explicit_owner_role,
+):
+    with alembic_session_factory() as session, transaction(session):
+        create_object_grant(
+            session, principal_id=responsibility_state['principals']['candidate'],
+            object_id='lxc', role='access_manager', scope='self',
+        )
+    hidden = boundary('get_object_context', {'object_id': 'operations'}, actor='candidate')
+    assert hidden.status_code == 404
+    preview = boundary('preview_grant_scope', {
+        'object_id': 'lxc', 'scope': 'responsibility',
+        **({'role': 'owner'} if explicit_owner_role else {}),
+    }, actor='candidate')
+    assert preview.status_code == 403
+    assert 'operations' not in preview.text
+    assert 'affected_objects' not in preview.json()
+    # Existing non-Owner scopes retain the access-manager preview contract.
+    own = boundary('preview_grant_scope', {
+        'object_id': 'lxc', 'role': 'viewer', 'scope': 'self',
+    }, actor='candidate')
+    assert own.status_code == 200

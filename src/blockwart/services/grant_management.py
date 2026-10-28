@@ -21,6 +21,7 @@ from blockwart.models import CatalogObject, ObjectGrant, Principal
 from blockwart.services.access import (
     LastOwnerError,
     ensure_owner_coverage_preserved,
+    grant_affected_object_ids,
     grant_scope_object_ids,
     lock_grant_command_state,
     lock_owner_coverage_state,
@@ -324,6 +325,10 @@ def preview_grant_scope(
     )
     if resolved_role is not None:
         _validate_grant_target(row, resolved_role, resolved_scope)
+    if resolved_scope == GrantScope.RESPONSIBILITY:
+        _require_owner_for_owner_grant(
+            session, context, object_id=object_id, roles=(Role.OWNER,),
+        )
     affected_ids = grant_scope_object_ids(
         session,
         object_id=object_id,
@@ -646,11 +651,7 @@ def update_managed_grant(
 
     before = _grant_snapshot(grant)
     previously_owned = (
-        grant_scope_object_ids(
-            session,
-            object_id=object_id,
-            scope=GrantScope(grant.scope),
-        )
+        grant_affected_object_ids(session, grant)
         if grant.role == Role.OWNER and target.active
         else set()
     )
@@ -750,11 +751,7 @@ def revoke_managed_grant(
         raise CommandConflict("grant principal does not exist")
     before = _grant_snapshot(grant)
     previously_owned = (
-        grant_scope_object_ids(
-            session,
-            object_id=object_id,
-            scope=GrantScope(grant.scope),
-        )
+        grant_affected_object_ids(session, grant)
         if grant.role == Role.OWNER and target.active
         else set()
     )
