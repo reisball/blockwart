@@ -89,3 +89,22 @@ Follow-up verification before re-review:
   credential-bound run is PostgreSQL execution evidence.
 - Repository Ruff and diff whitespace checks passed.
 - No live changes, merge, acceptance or issue closure have occurred.
+
+
+## Final CI packaging follow-up (2026-10-28)
+
+- Exact `a20e9b61c19ddd6b01a069b7e7edabeeb6e5ba21` received independent
+  Kutscher Quality **APPROVE**, run `1793209118-e158cd62`: no reproducible
+  findings, 82 focused cases and seven additional boundary/migration probes.
+- CI run [40710091505](https://github.com/reisball/blockwart/actions/runs/40710091505)
+  passed all 2,902 tests, lint and reviewed OpenAPI, then failed the installed-wheel
+  smoke's exact relationship vocabulary assertion. Its expected list omitted
+  the intentional `operations_runbook_for` addition. This is a smoke contract
+  expectation correction, not a product-policy change.
+- The original assertion failure was reproduced in an isolated checkout. Adding
+  only the expected relationship type made the real Python 3.12 installed-wheel
+  smoke pass outside the repository, including MCP compatibility/drift checks.
+  Three focused contract tests, Ruff and whitespace checks also passed.
+- This final test/documentation revision still requires its own exact-head
+  independent review and green CI. No merge, live migration or grant/Runbook
+  association is claimed here. Existing production is still the #321 build.
