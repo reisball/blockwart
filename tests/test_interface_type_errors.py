@@ -171,3 +171,17 @@ def test_api_rejections_leave_revision_unchanged(write_client, owner_headers):  
         after = write_client.get("/api/v1/objects/synthetic-service", headers=owner_headers)
         assert after.headers["etag"] == before.headers["etag"]
         assert after.json() == before.json()
+
+
+@pytest.mark.parametrize("field", ["endpoints", "access_methods"])
+def test_public_type_defaults_require_omission_not_explicit_null(field):
+    omitted = service_data()
+    omitted[field][0].pop("type")
+    CatalogObjectIn(id="omitted-type", kind="service", label="Test", data=omitted)
+    explicit_null = service_data()
+    explicit_null[field][0]["type"] = None
+    with pytest.raises(ValidationError) as raised:
+        CatalogObjectIn(id="null-type", kind="service", label="Test", data=explicit_null)
+    detail = detail_from_validation_error(raised.value.errors()[0])
+    assert detail["code"] == "type_mismatch"
+    assert detail["path"] == f"data.{field}[0].type"

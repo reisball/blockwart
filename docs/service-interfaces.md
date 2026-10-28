@@ -93,7 +93,9 @@ automatic during application startup.
 
 `blockwart.describe_schema` (projection version 10) publishes a `type_contract`
 next to each `endpoints[].type` and `access_methods[].type` field. It includes
-canonical values, supported aliases, normalization and the missing/null default.
+canonical values, supported aliases, normalization and the omission-only default.
+Public writes reject explicit `null` type values; only the domain normalizer
+also accepts null for legacy/internal callers.
 Endpoint types additionally publish the case-sensitive `x-` extension pattern;
 they are not a closed enum. Custom types still require a protocol, either from
 the URL or explicitly supplied.
