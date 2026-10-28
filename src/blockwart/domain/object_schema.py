@@ -10,7 +10,11 @@ from typing import Any, Literal
 from urllib.parse import parse_qsl, urlsplit
 
 from blockwart.domain.input_validation import INPUT_RULES
-from blockwart.domain.interfaces import CANONICAL_EXPOSURES, CANONICAL_TRANSPORTS
+from blockwart.domain.interfaces import (
+    CANONICAL_EXPOSURES,
+    CANONICAL_TRANSPORTS,
+    INTERFACE_TYPE_RULES,
+)
 from blockwart.domain.monitoring import (
     GATUS_DOCUMENT_KEYS,
     MAX_GATUS_ENDPOINT_LENGTH,
@@ -2629,6 +2633,7 @@ PUBLIC_SCHEMA_RULE_CONTRACTS: Mapping[str, str] = MappingProxyType(
             for name, description in SCHEMA_RULE_CONTRACTS.items()
         },
         **{name: contract[1] for name, contract in INPUT_RULES.items()},
+        **INTERFACE_TYPE_RULES,
     }
 )
 PUBLIC_SCHEMA_RULE_VIOLATIONS: Mapping[str, str] = MappingProxyType(
