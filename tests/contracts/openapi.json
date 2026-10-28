@@ -24502,8 +24502,54 @@
               "path": "endpoints[].type",
               "requirement": "optional",
               "type": "string",
+              "type_contract": {
+                "aliases": {
+                  "api": "REST API",
+                  "database": "Database",
+                  "db": "Database",
+                  "hec": "HEC",
+                  "http": "HTTP",
+                  "https": "HTTP",
+                  "mcp": "MCP",
+                  "metrics": "Metrics",
+                  "rest api": "REST API",
+                  "rest_api": "REST API",
+                  "s2s": "S2S",
+                  "smb": "SMB",
+                  "splunk s2s": "S2S",
+                  "ssh": "SSH",
+                  "tcp": "TCP",
+                  "udp": "UDP",
+                  "web": "Web",
+                  "webhook": "Webhook"
+                },
+                "canonical_values": [
+                  "Web",
+                  "REST API",
+                  "MCP",
+                  "HEC",
+                  "SSH",
+                  "SMB",
+                  "Database",
+                  "S2S",
+                  "Metrics",
+                  "Webhook",
+                  "HTTP",
+                  "TCP",
+                  "UDP"
+                ],
+                "custom_case_sensitive": true,
+                "custom_pattern": "^x-[a-z0-9][a-z0-9-]*$",
+                "default": "inferred from URL/protocol, otherwise TCP",
+                "normalization": [
+                  "strip_whitespace",
+                  "casefold_alias_lookup"
+                ],
+                "rule": "interface_endpoint_type"
+              },
               "violations": [
-                "type_mismatch"
+                "type_mismatch",
+                "value_not_allowed"
               ]
             },
             {
@@ -24702,8 +24748,32 @@
               "path": "access_methods[].type",
               "requirement": "optional",
               "type": "string",
+              "type_contract": {
+                "aliases": {
+                  "api": "admin_api",
+                  "web": "admin_web"
+                },
+                "canonical_values": [
+                  "ssh",
+                  "admin_web",
+                  "admin_api",
+                  "database",
+                  "smb",
+                  "sudo",
+                  "token",
+                  "other"
+                ],
+                "default": "other",
+                "normalization": [
+                  "strip_whitespace",
+                  "lowercase",
+                  "alias_lookup"
+                ],
+                "rule": "interface_access_type"
+              },
               "violations": [
-                "type_mismatch"
+                "type_mismatch",
+                "value_not_allowed"
               ]
             },
             {
@@ -25310,8 +25380,54 @@
               "path": "endpoints[].type",
               "requirement": "optional",
               "type": "string",
+              "type_contract": {
+                "aliases": {
+                  "api": "REST API",
+                  "database": "Database",
+                  "db": "Database",
+                  "hec": "HEC",
+                  "http": "HTTP",
+                  "https": "HTTP",
+                  "mcp": "MCP",
+                  "metrics": "Metrics",
+                  "rest api": "REST API",
+                  "rest_api": "REST API",
+                  "s2s": "S2S",
+                  "smb": "SMB",
+                  "splunk s2s": "S2S",
+                  "ssh": "SSH",
+                  "tcp": "TCP",
+                  "udp": "UDP",
+                  "web": "Web",
+                  "webhook": "Webhook"
+                },
+                "canonical_values": [
+                  "Web",
+                  "REST API",
+                  "MCP",
+                  "HEC",
+                  "SSH",
+                  "SMB",
+                  "Database",
+                  "S2S",
+                  "Metrics",
+                  "Webhook",
+                  "HTTP",
+                  "TCP",
+                  "UDP"
+                ],
+                "custom_case_sensitive": true,
+                "custom_pattern": "^x-[a-z0-9][a-z0-9-]*$",
+                "default": "inferred from URL/protocol, otherwise TCP",
+                "normalization": [
+                  "strip_whitespace",
+                  "casefold_alias_lookup"
+                ],
+                "rule": "interface_endpoint_type"
+              },
               "violations": [
-                "type_mismatch"
+                "type_mismatch",
+                "value_not_allowed"
               ]
             },
             {
@@ -25510,8 +25626,32 @@
               "path": "access_methods[].type",
               "requirement": "optional",
               "type": "string",
+              "type_contract": {
+                "aliases": {
+                  "api": "admin_api",
+                  "web": "admin_web"
+                },
+                "canonical_values": [
+                  "ssh",
+                  "admin_web",
+                  "admin_api",
+                  "database",
+                  "smb",
+                  "sudo",
+                  "token",
+                  "other"
+                ],
+                "default": "other",
+                "normalization": [
+                  "strip_whitespace",
+                  "lowercase",
+                  "alias_lookup"
+                ],
+                "rule": "interface_access_type"
+              },
               "violations": [
-                "type_mismatch"
+                "type_mismatch",
+                "value_not_allowed"
               ]
             },
             {
@@ -26131,8 +26271,54 @@
               "path": "endpoints[].type",
               "requirement": "optional",
               "type": "string",
+              "type_contract": {
+                "aliases": {
+                  "api": "REST API",
+                  "database": "Database",
+                  "db": "Database",
+                  "hec": "HEC",
+                  "http": "HTTP",
+                  "https": "HTTP",
+                  "mcp": "MCP",
+                  "metrics": "Metrics",
+                  "rest api": "REST API",
+                  "rest_api": "REST API",
+                  "s2s": "S2S",
+                  "smb": "SMB",
+                  "splunk s2s": "S2S",
+                  "ssh": "SSH",
+                  "tcp": "TCP",
+                  "udp": "UDP",
+                  "web": "Web",
+                  "webhook": "Webhook"
+                },
+                "canonical_values": [
+                  "Web",
+                  "REST API",
+                  "MCP",
+                  "HEC",
+                  "SSH",
+                  "SMB",
+                  "Database",
+                  "S2S",
+                  "Metrics",
+                  "Webhook",
+                  "HTTP",
+                  "TCP",
+                  "UDP"
+                ],
+                "custom_case_sensitive": true,
+                "custom_pattern": "^x-[a-z0-9][a-z0-9-]*$",
+                "default": "inferred from URL/protocol, otherwise TCP",
+                "normalization": [
+                  "strip_whitespace",
+                  "casefold_alias_lookup"
+                ],
+                "rule": "interface_endpoint_type"
+              },
               "violations": [
-                "type_mismatch"
+                "type_mismatch",
+                "value_not_allowed"
               ]
             },
             {
@@ -26331,8 +26517,32 @@
               "path": "access_methods[].type",
               "requirement": "optional",
               "type": "string",
+              "type_contract": {
+                "aliases": {
+                  "api": "admin_api",
+                  "web": "admin_web"
+                },
+                "canonical_values": [
+                  "ssh",
+                  "admin_web",
+                  "admin_api",
+                  "database",
+                  "smb",
+                  "sudo",
+                  "token",
+                  "other"
+                ],
+                "default": "other",
+                "normalization": [
+                  "strip_whitespace",
+                  "lowercase",
+                  "alias_lookup"
+                ],
+                "rule": "interface_access_type"
+              },
               "violations": [
-                "type_mismatch"
+                "type_mismatch",
+                "value_not_allowed"
               ]
             },
             {
@@ -26730,8 +26940,54 @@
               "path": "endpoints[].type",
               "requirement": "optional",
               "type": "string",
+              "type_contract": {
+                "aliases": {
+                  "api": "REST API",
+                  "database": "Database",
+                  "db": "Database",
+                  "hec": "HEC",
+                  "http": "HTTP",
+                  "https": "HTTP",
+                  "mcp": "MCP",
+                  "metrics": "Metrics",
+                  "rest api": "REST API",
+                  "rest_api": "REST API",
+                  "s2s": "S2S",
+                  "smb": "SMB",
+                  "splunk s2s": "S2S",
+                  "ssh": "SSH",
+                  "tcp": "TCP",
+                  "udp": "UDP",
+                  "web": "Web",
+                  "webhook": "Webhook"
+                },
+                "canonical_values": [
+                  "Web",
+                  "REST API",
+                  "MCP",
+                  "HEC",
+                  "SSH",
+                  "SMB",
+                  "Database",
+                  "S2S",
+                  "Metrics",
+                  "Webhook",
+                  "HTTP",
+                  "TCP",
+                  "UDP"
+                ],
+                "custom_case_sensitive": true,
+                "custom_pattern": "^x-[a-z0-9][a-z0-9-]*$",
+                "default": "inferred from URL/protocol, otherwise TCP",
+                "normalization": [
+                  "strip_whitespace",
+                  "casefold_alias_lookup"
+                ],
+                "rule": "interface_endpoint_type"
+              },
               "violations": [
-                "type_mismatch"
+                "type_mismatch",
+                "value_not_allowed"
               ]
             },
             {
@@ -26930,8 +27186,32 @@
               "path": "access_methods[].type",
               "requirement": "optional",
               "type": "string",
+              "type_contract": {
+                "aliases": {
+                  "api": "admin_api",
+                  "web": "admin_web"
+                },
+                "canonical_values": [
+                  "ssh",
+                  "admin_web",
+                  "admin_api",
+                  "database",
+                  "smb",
+                  "sudo",
+                  "token",
+                  "other"
+                ],
+                "default": "other",
+                "normalization": [
+                  "strip_whitespace",
+                  "lowercase",
+                  "alias_lookup"
+                ],
+                "rule": "interface_access_type"
+              },
               "violations": [
-                "type_mismatch"
+                "type_mismatch",
+                "value_not_allowed"
               ]
             },
             {
@@ -27450,8 +27730,54 @@
               "path": "endpoints[].type",
               "requirement": "optional",
               "type": "string",
+              "type_contract": {
+                "aliases": {
+                  "api": "REST API",
+                  "database": "Database",
+                  "db": "Database",
+                  "hec": "HEC",
+                  "http": "HTTP",
+                  "https": "HTTP",
+                  "mcp": "MCP",
+                  "metrics": "Metrics",
+                  "rest api": "REST API",
+                  "rest_api": "REST API",
+                  "s2s": "S2S",
+                  "smb": "SMB",
+                  "splunk s2s": "S2S",
+                  "ssh": "SSH",
+                  "tcp": "TCP",
+                  "udp": "UDP",
+                  "web": "Web",
+                  "webhook": "Webhook"
+                },
+                "canonical_values": [
+                  "Web",
+                  "REST API",
+                  "MCP",
+                  "HEC",
+                  "SSH",
+                  "SMB",
+                  "Database",
+                  "S2S",
+                  "Metrics",
+                  "Webhook",
+                  "HTTP",
+                  "TCP",
+                  "UDP"
+                ],
+                "custom_case_sensitive": true,
+                "custom_pattern": "^x-[a-z0-9][a-z0-9-]*$",
+                "default": "inferred from URL/protocol, otherwise TCP",
+                "normalization": [
+                  "strip_whitespace",
+                  "casefold_alias_lookup"
+                ],
+                "rule": "interface_endpoint_type"
+              },
               "violations": [
-                "type_mismatch"
+                "type_mismatch",
+                "value_not_allowed"
               ]
             },
             {
@@ -27650,8 +27976,32 @@
               "path": "access_methods[].type",
               "requirement": "optional",
               "type": "string",
+              "type_contract": {
+                "aliases": {
+                  "api": "admin_api",
+                  "web": "admin_web"
+                },
+                "canonical_values": [
+                  "ssh",
+                  "admin_web",
+                  "admin_api",
+                  "database",
+                  "smb",
+                  "sudo",
+                  "token",
+                  "other"
+                ],
+                "default": "other",
+                "normalization": [
+                  "strip_whitespace",
+                  "lowercase",
+                  "alias_lookup"
+                ],
+                "rule": "interface_access_type"
+              },
               "violations": [
-                "type_mismatch"
+                "type_mismatch",
+                "value_not_allowed"
               ]
             },
             {
@@ -33505,7 +33855,7 @@
       "raw_secret_values_rejected": true
     },
     "source": "blockwart.domain.object_schema",
-    "version": 9,
+    "version": 10,
     "violation_policy": {
       "description": "A rejected write names the canonical public data path, one violation code, and the published rule when a schema postcondition rejected it. Rejected values are never returned.",
       "detail_fields": [
@@ -33631,6 +33981,18 @@
           "description": "Relation and target pairs must be unique.",
           "rule": "unique_relations",
           "violation": "rule_violation"
+        }
+      ],
+      "interface_type_rules": [
+        {
+          "description": "Access types use a canonical value or a supported alias.",
+          "rule": "interface_access_type",
+          "violation": "value_not_allowed"
+        },
+        {
+          "description": "Endpoint types use a canonical value, a supported alias, or an x- extension.",
+          "rule": "interface_endpoint_type",
+          "violation": "value_not_allowed"
         }
       ],
       "unknown_violations_fall_back_to_generic": true,

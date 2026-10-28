@@ -31,9 +31,7 @@ CANONICAL_ACCESS_TYPES = (
     "token",
     "other",
 )
-CANONICAL_EXPOSURES = frozenset(
-    {"loopback", "lan", "vpn", "internal", "public", "unknown"}
-)
+CANONICAL_EXPOSURES = frozenset({"loopback", "lan", "vpn", "internal", "public", "unknown"})
 CANONICAL_TRANSPORTS = frozenset({"tcp", "udp"})
 SERVICE_INTERFACE_STATES = frozenset({"available", "not_applicable", "incomplete"})
 
@@ -87,8 +85,52 @@ _DEFAULT_PORTS = {
 }
 
 
+INTERFACE_TYPE_RULES = {
+    "interface_endpoint_type": (
+        "Endpoint types use a canonical value, a supported alias, or an x- extension."
+    ),
+    "interface_access_type": "Access types use a canonical value or a supported alias.",
+}
+
+
+def interface_type_contract(field_path: str) -> dict[str, Any] | None:
+    """Publish the same vocabulary and normalization used by the runtime."""
+    if field_path == "endpoints[].type":
+        return {
+            "canonical_values": list(CANONICAL_ENDPOINT_TYPES),
+            "aliases": dict(_TYPE_ALIASES),
+            "normalization": ["strip_whitespace", "casefold_alias_lookup"],
+            "custom_pattern": _CUSTOM_ENDPOINT_TYPE.pattern,
+            "custom_case_sensitive": True,
+            "default": "inferred from URL/protocol, otherwise TCP",
+            "rule": "interface_endpoint_type",
+        }
+    if field_path == "access_methods[].type":
+        return {
+            "canonical_values": list(CANONICAL_ACCESS_TYPES),
+            "aliases": dict(_ACCESS_TYPE_ALIASES),
+            "normalization": ["strip_whitespace", "lowercase", "alias_lookup"],
+            "default": "other",
+            "rule": "interface_access_type",
+        }
+    return None
+
+
 class InterfaceContractError(ValueError):
-    pass
+    """An interface rejection; only explicitly supplied public metadata is projected."""
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        path: str | None = None,
+        violation: str = "invalid_value",
+        rule: str | None = None,
+    ) -> None:
+        self.path = path
+        self.violation = violation
+        self.rule = rule
+        super().__init__(message)
 
 
 @dataclass(frozen=True, order=True)
@@ -128,6 +170,7 @@ def normalize_interface_data(
             _require_mapping(raw_endpoint, location),
             used_ids=endpoint_ids,
             location=location,
+            type_path=f"data.endpoints[{index}].type",
         )
         fingerprint = endpoint_url_fingerprint(endpoint)
         if fingerprint and fingerprint in endpoint_by_url:
@@ -154,9 +197,7 @@ def normalize_interface_data(
         endpoint_url = access_method.get("endpoint")
         endpoint_id = access_method.get("endpoint_id")
         remove_empty_endpoint = (
-            allow_legacy
-            and isinstance(endpoint_url, str)
-            and not endpoint_url.strip()
+            allow_legacy and isinstance(endpoint_url, str) and not endpoint_url.strip()
         )
         if remove_empty_endpoint:
             endpoint_url = None
@@ -215,7 +256,9 @@ def normalize_interface_data(
                     f"{location}.endpoint_id references a missing endpoint"
                 )
 
-        access_type = _normalize_access_type(access_method.get("type"), location)
+        access_type = _normalize_access_type(
+            access_method.get("type"), location, path=f"data.access_methods[{index}].type"
+        )
         access_id = access_method.get("id")
         if access_id is None:
             access_id = _unique_identifier(
@@ -315,6 +358,7 @@ def normalize_endpoint(
     *,
     used_ids: set[str] | None = None,
     location: str = "endpoint",
+    type_path: str | None = None,
 ) -> dict[str, Any]:
     endpoint = dict(raw_endpoint)
     endpoint_url = endpoint.get("url")
@@ -339,6 +383,7 @@ def normalize_endpoint(
         endpoint.get("type"),
         protocol=url_protocol or (raw_protocol if isinstance(raw_protocol, str) else None),
         location=location,
+        path=type_path,
     )
     transport = endpoint.get("transport")
     if transport is None and raw_protocol in CANONICAL_TRANSPORTS:
@@ -353,9 +398,7 @@ def normalize_endpoint(
         protocol = raw_protocol.lower()
     protocol = protocol or _TYPE_PROTOCOLS.get(endpoint_type)
     if protocol is None:
-        raise InterfaceContractError(
-            f"{location}.protocol is required for custom endpoint types"
-        )
+        raise InterfaceContractError(f"{location}.protocol is required for custom endpoint types")
     if not _PROTOCOL.fullmatch(protocol):
         raise InterfaceContractError(f"{location}.protocol is invalid")
 
@@ -454,29 +497,47 @@ def _normalize_endpoint_type(
     *,
     protocol: str | None,
     location: str,
+    path: str | None = None,
 ) -> str:
     if value is None:
         return _TYPE_ALIASES.get((protocol or "").casefold(), "TCP")
-    text = _require_nonempty_string(value, f"{location}.type").strip()
+    if not isinstance(value, str) or not value.strip():
+        raise InterfaceContractError(
+            f"{location}.type must be a non-empty string", path=path,
+            violation="type_mismatch" if not isinstance(value, str) else "value_not_allowed",
+            rule="interface_endpoint_type",
+        )
+    text = value.strip()
     canonical = _TYPE_ALIASES.get(text.casefold())
     if canonical is not None:
         return canonical
     if text in CANONICAL_ENDPOINT_TYPES or _CUSTOM_ENDPOINT_TYPE.fullmatch(text):
         return text
     raise InterfaceContractError(
-        "endpoint type must be one of: "
-        f"{', '.join(CANONICAL_ENDPOINT_TYPES)} or an x- extension"
+        f"endpoint type must be one of: {', '.join(CANONICAL_ENDPOINT_TYPES)} or an x- extension",
+        path=path,
+        violation="value_not_allowed",
+        rule="interface_endpoint_type",
     )
 
 
-def _normalize_access_type(value: Any, location: str) -> str:
+def _normalize_access_type(value: Any, location: str, *, path: str | None = None) -> str:
     if value is None:
         return "other"
-    text = _require_nonempty_string(value, f"{location}.type").strip().lower()
+    if not isinstance(value, str) or not value.strip():
+        raise InterfaceContractError(
+            f"{location}.type must be a non-empty string", path=path,
+            violation="type_mismatch" if not isinstance(value, str) else "value_not_allowed",
+            rule="interface_access_type",
+        )
+    text = value.strip().lower()
     text = _ACCESS_TYPE_ALIASES.get(text, text)
     if text not in CANONICAL_ACCESS_TYPES:
         raise InterfaceContractError(
-            f"{location}.type must be one of: {', '.join(CANONICAL_ACCESS_TYPES)}"
+            f"{location}.type must be one of: {', '.join(CANONICAL_ACCESS_TYPES)}",
+            path=path,
+            violation="value_not_allowed",
+            rule="interface_access_type",
         )
     return text
 

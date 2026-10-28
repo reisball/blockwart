@@ -88,3 +88,21 @@ Running the dry run again after a successful apply must report zero changes.
 
 The live-data apply is a deployment operation and is deliberately not
 automatic during application startup.
+
+## Discovering type constraints and rejected writes
+
+`blockwart.describe_schema` (projection version 10) publishes a `type_contract`
+next to each `endpoints[].type` and `access_methods[].type` field. It includes
+canonical values, supported aliases, normalization and the omission-only default.
+Public writes reject explicit `null` type values; only the domain normalizer
+also accepts null for legacy/internal callers.
+Endpoint types additionally publish the case-sensitive `x-` extension pattern;
+they are not a closed enum. Custom types still require a protocol, either from
+the URL or explicitly supplied.
+
+Invalid type strings return `value_not_allowed` with a canonical indexed path
+(`data.endpoints[0].type` or `data.access_methods[0].type`) and the published
+`interface_endpoint_type` / `interface_access_type` rule. Preview and update use
+the same validator. Public details contain no rejected values, object identifiers
+or raw exception text. Other interface failures without structured metadata
+retain the generic redacted rejection. Rejections do not advance revisions.

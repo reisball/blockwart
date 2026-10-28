@@ -24,6 +24,7 @@ from blockwart.domain.asset_state import (
 )
 from blockwart.domain.decisions import decision_contract_projection
 from blockwart.domain.input_validation import INPUT_RULES
+from blockwart.domain.interfaces import INTERFACE_TYPE_RULES, interface_type_contract
 from blockwart.domain.monitoring import service_monitoring_contract_projection
 from blockwart.domain.object_schema import (
     BUILTIN_SCHEMAS,
@@ -53,6 +54,7 @@ from blockwart.domain.runbooks import runbook_contract_projection
 from blockwart.domain.security import FORBIDDEN_ACL_DATA_KEYS, FORBIDDEN_SECRET_KEYS
 from blockwart.domain.service_components import service_component_contract_projection
 
+# Version 10 publishes the runtime interface-type vocabularies and safe rule ids.
 # Version 9 additively publishes the service-bound credential-reference write
 # intent and, for every write intent, its creation path and the permission or
 # catalog authority it requires. Version 7 additively published opt-in service
@@ -60,7 +62,7 @@ from blockwart.domain.service_components import service_component_contract_proje
 # observation vocabulary, and integer value bounds. Version 6 additively
 # published bounded service-local components and their directed dependency
 # graph.
-SCHEMA_PROJECTION_VERSION = 9
+SCHEMA_PROJECTION_VERSION = 10
 SCHEMA_DATA_VERSION = 1
 OBJECT_STATUS_VALUES: tuple[str, ...] = get_args(LegacyObjectStatus)
 DEFAULT_OBJECT_STATUS = "active"
@@ -164,6 +166,10 @@ def violation_policy_projection() -> dict[str, Any]:
             {"rule": name, "violation": contract[0], "description": contract[1]}
             for name, contract in sorted(INPUT_RULES.items())
         ],
+        "interface_type_rules": [
+            {"rule": name, "violation": "value_not_allowed", "description": description}
+            for name, description in sorted(INTERFACE_TYPE_RULES.items())
+        ],
         "unknown_violations_fall_back_to_generic": True,
         "violations": [
             {"code": code, "description": SCHEMA_VIOLATION_CONTRACTS[code]}
@@ -248,6 +254,9 @@ def field_projection(field: FieldSpec) -> dict[str, Any]:
         "requirement": _requirement(field),
         "normalization": ["strip_whitespace"] if field.strip_whitespace else [],
     }
+    type_contract = interface_type_contract(field.path)
+    if type_contract is not None:
+        projected["type_contract"] = type_contract
     if field.field_type in _FORMATS:
         projected["format"] = _FORMATS[field.field_type]
     if field.field_type == "url":
@@ -295,6 +304,8 @@ def field_violations(field: FieldSpec) -> set[str]:
     violations: set[str] = set(_TYPE_VIOLATIONS[field.field_type])
     if field.required or field.required_in_item:
         violations.add(VIOLATION_REQUIRED_FIELD_MISSING)
+    if interface_type_contract(field.path) is not None:
+        violations.add(VIOLATION_VALUE_NOT_ALLOWED)
     if field.enum_values:
         violations.add(VIOLATION_VALUE_NOT_ALLOWED)
     if field.reference_kinds:

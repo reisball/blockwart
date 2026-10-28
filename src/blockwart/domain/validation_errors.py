@@ -22,6 +22,7 @@ from collections.abc import Iterable, Mapping, Sequence
 from typing import Any
 
 from blockwart.domain.input_validation import INPUT_RULES, InputRuleError
+from blockwart.domain.interfaces import InterfaceContractError
 from blockwart.domain.object_schema import (
     BUILTIN_SCHEMAS,
     FORBIDDEN_DATA_VALUE_KEYS,
@@ -501,6 +502,15 @@ def detail_from_validation_error(error: Mapping[str, Any]) -> dict[str, str | No
             location=".".join(str(part) for part in safe_parts) or "body",
             code=INPUT_RULES[cause.rule][0],
             path=_input_path(relative),
+            rule=cause.rule,
+        )
+    if isinstance(cause, InterfaceContractError):
+        path = public_data_path(cause.path)
+        root = public_location(location)
+        return public_detail(
+            location=root if path is None or root == UNKNOWN_LOCATION else f"{root}.{path}",
+            code=cause.violation,
+            path=path,
             rule=cause.rule,
         )
     if isinstance(cause, ObjectSchemaError):
