@@ -430,6 +430,7 @@ async def check_mcp(
             relationship_types = {entry["relation_type"]: entry for entry in relationships["types"]}
             assert relationships["relation_types"] == [
                 "hosts",
+                "operations_runbook_for",
                 "depends_on",
                 "supports",
                 "feeds",
