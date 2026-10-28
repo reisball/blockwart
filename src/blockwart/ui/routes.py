@@ -19,7 +19,7 @@ from blockwart.domain.attention import (
     ATTENTION_CATEGORY_VALUES,
     ATTENTION_SEVERITY_VALUES,
 )
-from blockwart.domain.auth import GrantScope, Permission, Role
+from blockwart.domain.auth import GrantScope, Permission, Role, validate_grant_target
 from blockwart.domain.comment_markdown import render_comment_source
 from blockwart.domain.decisions import (
     DECISION_SOURCE_TYPE_VALUES,
@@ -1747,7 +1747,12 @@ def _detail_template_context(
             if is_credential_reference
             or role not in {Role.REFERENCE_CONTENT_READER, Role.REFERENCE_CONTENT_EDITOR}
         ),
-        "grant_scopes": tuple(GrantScope),
+        "grant_scopes": tuple(
+            scope for scope in GrantScope
+            if scope != GrantScope.RESPONSIBILITY
+            or catalog_object.kind in {"host", "system", "service"}
+        ),
+        "grant_responsibility_eligible": catalog_object.kind in {"host", "system", "service"},
         "can_delete": Permission.DELETE in catalog_object.capabilities,
         "object_etag": revision_etag(catalog_object.revision),
         "csrf_token": request.cookies.get(AUTH_CSRF_COOKIE_NAME, ""),
@@ -1944,12 +1949,26 @@ def _render_object_detail(
             grant_context,
             object_id=object_id,
         )
-        grant_scope_preview = preview_grant_scope(
-            session,
-            grant_context,
-            object_id=object_id,
-            scope=GrantScope.SUBTREE,
-        )
+        try:
+            selected_role = Role(request.query_params.get("preview_role", "discoverer"))
+            selected_scope = GrantScope(request.query_params.get("preview_scope", "self"))
+            validate_grant_target(
+                selected_role, selected_scope, object_kind=detail_read_model.catalog_object.kind,
+            )
+        except ValueError:
+            selected_role, selected_scope = Role.DISCOVERER, GrantScope.SELF
+        try:
+            grant_scope_preview = preview_grant_scope(
+                session, grant_context, object_id=object_id,
+                scope=selected_scope, role=selected_role,
+            )
+        except CommandAuthorizationDenied:
+            # A manually selected Owner-only scope must not expose hidden
+            # reach or turn an otherwise accessible detail page into a 500.
+            grant_scope_preview = preview_grant_scope(
+                session, grant_context, object_id=object_id,
+                scope=GrantScope.SELF, role=Role.DISCOVERER,
+            )
         can_manage_owner_grants = actor_can_manage_owner_grants(
             grant_context,
             object_id=object_id,

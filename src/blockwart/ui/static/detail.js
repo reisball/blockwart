@@ -71,4 +71,29 @@
     button.closest("tr")?.remove();
   });
 
+  document.querySelectorAll("[data-grant-form]").forEach((form) => {
+    const role = form.querySelector("[name='role'], [data-grant-role]");
+    const scope = form.querySelector("[name='scope'], [data-grant-scope]");
+    if (!role || !scope) return;
+    const responsibility = scope.querySelector("[value='responsibility']");
+    const updateScope = (changedRole = false) => {
+      const eligible = form.dataset.responsibilityEligible === "true" && role.value === "owner";
+      if (responsibility) responsibility.disabled = !eligible;
+      if (!eligible && scope.value === "responsibility") scope.value = "self";
+      if (eligible && changedRole && form.hasAttribute("data-grant-new")) {
+        scope.value = "responsibility";
+      }
+    };
+    role.addEventListener("change", () => updateScope(true));
+    updateScope();
+    form.querySelector("[data-preview-grant]")?.addEventListener("click", () => {
+      const url = new URL(window.location.href);
+      url.searchParams.set("edit", "permissions");
+      url.searchParams.set("preview_role", role.value);
+      url.searchParams.set("preview_scope", scope.value);
+      // Never serialize a mutation form: it contains private CSRF state.
+      window.location.assign(url.toString());
+    });
+  });
+
 })();

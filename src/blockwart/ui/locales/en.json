@@ -685,10 +685,10 @@
   "grant.adopt_submit": "Assign first Owner",
   "grant.adopt_unavailable": "Only an active catalog owner can adopt it. Ask a catalog owner to assign the first Owner.",
   "grant.panel": "Access control",
-  "grant.panel_help": "Direct grants are stored on this asset. Effective access also includes inherited subtree grants.",
+  "grant.panel_help": "Direct grants apply here; inherited rights follow the selected scope.",
   "grant.permissions": "Effective permissions",
-  "grant.preview": "Subtree coverage preview",
-  "grant.preview_help": "Canonical placement only; unrelated relationships are not included.",
+  "grant.preview": "Selected grant scope preview",
+  "grant.preview_help": "Shows the selected role and exact reach. Owner responsibility includes explicitly assigned Operations Runbooks; credentials receive metadata visibility only.",
   "grant.principal": "Principal",
   "grant.revoke": "Revoke",
   "grant.role": "Role",
@@ -1517,5 +1517,8 @@
   "reference_content.invalid": "Reference content was not saved. Enter a valid JSON object and ensure the object revision is current.",
   "reference_content.metadata_invalid": "Reference metadata was not saved. Check the submitted metadata.",
   "field.primary_name.credential_reference.label": "Reference name",
-  "kind.credential_reference": "Credential reference"
+  "kind.credential_reference": "Credential reference",
+  "scope.responsibility": "Full operational responsibility",
+  "grant.preview_selection": "Preview selection",
+  "relationship_type.operations_runbook_for": "Operations Runbook for"
 }

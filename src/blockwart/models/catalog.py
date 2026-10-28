@@ -104,8 +104,13 @@ class Relationship(Base):
         CheckConstraint(
             "relation_type IN "
             "('hosts','depends_on','supports','feeds','exposes','documents','uses','related_to',"
-            "'attached_to','uplinks_to')",
+            "'attached_to','uplinks_to','operations_runbook_for')",
             name="ck_relationships_known_type",
+        ),
+        Index(
+            "uq_relationships_operations_runbook_target", "from_ref", unique=True,
+            sqlite_where=text("relation_type = 'operations_runbook_for'"),
+            postgresql_where=text("relation_type = 'operations_runbook_for'"),
         ),
         Index(
             "uq_relationships_placement_parent",

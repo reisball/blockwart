@@ -437,7 +437,11 @@ GRANT_ROLE_SCHEMA: JSON = {
 }
 GRANT_SCOPE_SCHEMA: JSON = {
     "type": "string",
-    "enum": ["self", "subtree"],
+    "enum": ["self", "subtree", "responsibility"],
+    "description": (
+        "responsibility requires owner on host/system/service; includes Operations "
+        "Runbooks, not credential ownership."
+    ),
 }
 
 QUERY_FILTER_PROPERTIES: JSON = {

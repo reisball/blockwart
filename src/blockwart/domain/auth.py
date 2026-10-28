@@ -62,6 +62,7 @@ class Role(StrEnum):
 class GrantScope(StrEnum):
     SELF = "self"
     SUBTREE = "subtree"
+    RESPONSIBILITY = "responsibility"
 
 
 class ObjectVisibility(StrEnum):
@@ -256,6 +257,10 @@ def validate_grant_target(
     """
     resolved_role = Role(role)
     resolved_scope = GrantScope(scope)
+    if resolved_scope == GrantScope.RESPONSIBILITY and (
+        resolved_role != Role.OWNER or object_kind not in {"host", "system", "service"}
+    ):
+        raise ValueError("responsibility requires owner on a host, system, or service")
     if resolved_role in REFERENCE_CONTENT_ROLES and (
         object_kind != "credential_reference" or resolved_scope != GrantScope.SELF
     ):

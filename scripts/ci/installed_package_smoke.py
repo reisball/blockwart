@@ -430,6 +430,7 @@ async def check_mcp(
             relationship_types = {entry["relation_type"]: entry for entry in relationships["types"]}
             assert relationships["relation_types"] == [
                 "hosts",
+                "operations_runbook_for",
                 "depends_on",
                 "supports",
                 "feeds",
@@ -1074,7 +1075,7 @@ def main() -> None:
         token=api_token,
     )["objects"][0]
 
-    assert readiness["revision"] == "20261026_0031"
+    assert readiness["revision"] == "20261028_0032"
     assert "Blockwart" in index
     assert static_content_type == "text/css"
     assert not any(

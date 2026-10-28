@@ -291,3 +291,18 @@ the caller's task or authorization. Store credential references, never raw
 secrets, in the catalog. Historical plans and test reports are evidence for
 their named revision; use current contracts and current authorized reads for
 the next operation.
+
+## One operational responsibility anchor
+
+For an explicitly authorized operational area, assign `role: owner` and
+`scope: responsibility` to its Host, System or Service, after reviewing
+`blockwart.preview_grant_scope` for that exact role/scope. Assign the Operations
+Runbook with `operations_runbook_for` from Runbook to the responsible asset.
+For example, an Owner responsibility grant on `system:example-lxc`, with
+`system:example-lxc hosts service:example-app` and
+`runbook:example-operations operations_runbook_for service:example-app`, covers
+all three objects without copied grants. Existing-object links require prior
+Owner authority on both sides; descriptive `documents` links confer nothing.
+Credential references add metadata visibility only; request content authorization
+separately. Preview, then use the actual strong ETag unchanged and verify effective
+rights and original grant sources through the normal access view.

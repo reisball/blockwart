@@ -55,7 +55,7 @@ value. Unauthenticated, revoked, expired, or inactive callers receive the unifor
 
 Each item is `{target_kind, target_id, role, scope}`: `target_kind` is `project` when the
 granted object is a top-level `project`, otherwise `catalog_object`; `role` and `scope`
-(`self` or `subtree`) are the grant's own values. Only direct grants are returned, never
+(`self`, `subtree` or `responsibility`) are the grant's own values. Only direct grants are returned, never
 inherited or effective access, and nothing about other principals, labels, or object
 contents. Different roles or scopes on one target are separate items.
 
@@ -112,7 +112,7 @@ Blockwart stores independent authorization axes on a principal:
 | global catalog read-only | `catalog_role = catalog_viewer` | exactly `discover` and `read` on every object |
 | global root-project creation | `project_creator = true` | create a top-level root of `kind = project` and nothing else, additively to the catalog role |
 | legacy root-project creation | `catalog_role = project_creator` | still recognized for existing principals; use the independent capability for new assignments |
-| scoped catalog access | `object_grants` rows | one role at one object, `self` or `subtree` |
+| scoped catalog access | `object_grants` rows | one role at one object with `self`, `subtree` or Owner-only `responsibility` |
 
 The axes never imply each other. A platform admin has no catalog permission
 unless it also holds grants or a catalog role, and a catalog owner, viewer, or
@@ -168,7 +168,7 @@ and MCP processes observe the same global, source, and token-fingerprint limits.
 ## Roles and scope
 
 An object grant assigns one role to one principal at one object with either
-`self` or `subtree` scope:
+`self`, `subtree` or Owner-only `responsibility` scope:
 
 | Role | Permissions |
 |---|---|
@@ -295,9 +295,63 @@ role automatically.
 - `host -> service`
 - `system -> service`
 
-Other relationship types do not propagate grants. Effective authorization is
+For `subtree`, other relationship types do not propagate grants. Effective authorization is
 calculated from the current graph in one recursive database query, so
 reparenting changes access without a stale application cache.
+
+## Explicit operational responsibility (revision 0032)
+
+`owner/responsibility` is an additional scope in the existing grant model, only
+valid on `host`, `system`, or `service`. It covers the anchor, all canonical
+placement descendants, and Runbooks with an explicit `operations_runbook_for`
+edge **from the Runbook to any infrastructure object in that reach**. Runbooks
+are terminal; their descriptive links do not extend ownership. New descendants
+are included immediately. Existing `self` and `subtree` grants retain their
+meaning and are never rewritten by migration.
+
+An Operations Runbook has at most one responsible target. Additional `documents`
+or `data.applies_to` associations may describe shared use but confer no rights.
+To change responsibility online, the actor must already be an effective Owner
+of both endpoints, or Global Catalog Owner, before the change. Ordinary write
+or access-manager permission is insufficient. Removal preserves per-object Owner
+coverage and refuses administrative self-lockout. Grant changes and both
+inheriting relationship types use the same ordered principal/Owner/edge locks.
+SQLite and PostgreSQL enforce single-target uniqueness in the database too.
+
+The same graph reach drives policy, role-aware scope preview, Owner coverage,
+revocation protection and inherited-source reporting. Rights name the original
+grant ID and anchor; no grants are copied onto descendants or Runbooks. Preview
+lists exactly the objects receiving the selected role, not credential objects
+that receive only metadata visibility. UI, REST and MCP use the same commands.
+For new Owner assignments on infrastructure the UI preselects responsibility;
+editing an existing grant always preserves its stored scope.
+
+### Credential exception
+
+Credential references are **never** Owner descendants. A responsibility grant
+adds only effective Viewer (`discover/read`) on existing credential references
+listed in `data.auth.credential_references`, `data.access_methods[].credential_references`
+or `data.credential_references` of covered objects. These lists are not traversed
+recursively and arbitrary text, descriptive relationships and protected reference
+content do not seed metadata reach. The effective source retains the original
+grant ID, anchor and responsibility scope with effective role Viewer. This is
+not an Owner source and cannot cover the reference's Owner invariant.
+
+Protected `data.reference`, previews and historical content remain governed by
+the separate content capabilities from #315. Metadata visibility gives no
+write, content, manage-access or self-delegation rights on a reference. An
+independently authorized content grant remains additive. The existing narrow
+service-bound creation command is unchanged: a newly created credential
+reference receives its explicit creator Owner/self atomically, not by inheritance.
+
+### Compatibility and recovery
+
+Revision `20261028_0032` changes only scope/type constraints and a partial unique
+index. Every existing grant, ID, timestamp, principal and descriptive link is
+preserved. Downgrade refuses while any responsibility grant or Operations link
+remains, including inactive grants; it never widens or silently reinterprets
+permissions. Explicitly revoke/reassign first or restore the paired pre-upgrade
+backup. Do not use downgrade as a lossy automatic rollback.
 
 ## Global catalog roles
 
@@ -1077,7 +1131,7 @@ trust boundary and do not expose a weaker online mutation route.
 
 Online mutations lock and reload authorization in the existing shared order:
 principals in ID order, active Owner grants, canonical placements, then
-authority/anchor grants. These are held until transaction end. Comments and
+authority/anchor grants. Operations responsibility edges are included in the edge locks. These are held until transaction end. Comments and
 chronology then lock the current object instance before any idempotency
 reservation, append, revision bump or successful replay. Object, relationship,
 new-object, Project-record/action/sync and legacy-import commands use the same

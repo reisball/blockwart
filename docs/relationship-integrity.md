@@ -6,6 +6,7 @@ Blockwart stores every cross-object graph edge as one directed relationship. The
 | Type | Direction |
 |---|---|
 | `hosts` | `host → system`, `host → service`, `system → service` |
+| `operations_runbook_for` | runbook → host, system or service; one responsible target at most |
 | `depends_on` | asset → asset; the source depends on the target |
 | `supports` | service → service |
 | `feeds` | service → service |
@@ -154,3 +155,15 @@ Alembic revision `20260801_0013` rebuilds both SQLite tables after validating th
 catalog and relationship set, and copies existing edges with `{}` metadata. Its downgrade is
 intentionally refused. Application rollback requires the paired pre-upgrade database backup and
 matching previous image.
+
+## Operations Runbook authority
+
+`operations_runbook_for` is the only non-placement edge that carries Owner
+responsibility, and only for a valid `owner/responsibility` grant. It points from
+the Runbook to one responsible infrastructure object, never the reverse.
+`documents`, `applies_to`, arbitrary associations and linked credentials do not
+carry ownership. Both endpoints must already be owned by the actor (or the actor
+must be Global Catalog Owner); endpoint write alone does not authorize changes.
+A second target is rejected with `multiple_responsibility_targets`, including
+concurrent writes through the partial unique database index. Detachment preserves
+Owner coverage and administrative self-access. See [RBAC](auth-rbac.md#explicit-operational-responsibility-revision-0032).

@@ -3746,7 +3746,8 @@
       "GrantScope": {
         "enum": [
           "self",
-          "subtree"
+          "subtree",
+          "responsibility"
         ],
         "title": "GrantScope",
         "type": "string"
@@ -6459,6 +6460,7 @@
                   "missing_source",
                   "multiple_placement_parents",
                   "multiple_primary_relationships",
+                  "multiple_responsibility_targets",
                   "no_http_endpoint",
                   "obsolete_data_dependencies",
                   "orphaned_catalog_reference",
@@ -8920,6 +8922,27 @@
             "if": {
               "properties": {
                 "relation_type": {
+                  "const": "operations_runbook_for"
+                }
+              },
+              "required": [
+                "relation_type"
+              ]
+            },
+            "then": {
+              "properties": {
+                "metadata": {
+                  "additionalProperties": false,
+                  "properties": {},
+                  "type": "object"
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "relation_type": {
                   "const": "depends_on"
                 }
               },
@@ -9250,6 +9273,7 @@
           "relation_type": {
             "enum": [
               "hosts",
+              "operations_runbook_for",
               "depends_on",
               "supports",
               "feeds",
