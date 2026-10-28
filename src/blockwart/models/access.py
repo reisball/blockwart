@@ -26,8 +26,12 @@ class ObjectGrant(Base):
             name="ck_object_grants_role",
         ),
         CheckConstraint(
-            "scope IN ('self','subtree')",
+            "scope IN ('self','subtree','responsibility')",
             name="ck_object_grants_scope",
+        ),
+        CheckConstraint(
+            "scope <> 'responsibility' OR role = 'owner'",
+            name="ck_object_grants_responsibility_owner",
         ),
         UniqueConstraint(
             "principal_id",

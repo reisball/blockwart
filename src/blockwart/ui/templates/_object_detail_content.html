@@ -1630,7 +1630,7 @@
                         </td>
                         {% if edit_section == "permissions" and (grant.role.value != "owner" or can_manage_owner_grants) %}
                           <td colspan="3">
-                            <form class="form-grid" method="post" action="/objects/{{ object.id }}/permissions/grants/{{ grant.id }}?{{ detail_query_string }}">
+                            <form class="form-grid" method="post" action="/objects/{{ object.id }}/permissions/grants/{{ grant.id }}?{{ detail_query_string }}" data-grant-form data-responsibility-eligible="{{ 'true' if grant_responsibility_eligible else 'false' }}">
                               <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
                               <input type="hidden" name="if_match" value="{{ object_etag }}" />
                               <label>{{ t("grant.role") }}
@@ -1651,6 +1651,7 @@
                               </label>
                               <div class="button-row">
                                 <button class="button button-small" type="submit">{{ t("grant.update") }}</button>
+                                <button class="button button-small button-muted" type="button" data-preview-grant>{{ t("grant.preview_selection") }}</button>
                               </div>
                             </form>
                             <form class="button-row" method="post" action="/objects/{{ object.id }}/permissions/grants/{{ grant.id }}/revoke?{{ detail_query_string }}">
@@ -1691,7 +1692,7 @@
               <p class="meta">{{ t("grant.search_help") }}</p>
 
               {% if grant_principal_results %}
-                <form class="form-grid" method="post" action="{{ detail_post_urls.grants }}">
+                <form class="form-grid" method="post" action="{{ detail_post_urls.grants }}" data-grant-form data-grant-new data-responsibility-eligible="{{ 'true' if grant_responsibility_eligible else 'false' }}">
                   <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
                   <input type="hidden" name="if_match" value="{{ object_etag }}" />
                   <label>{{ t("grant.principal") }}
@@ -1705,7 +1706,7 @@
                     <select name="role">
                       {% for role in grant_roles %}
                         {% if role.value != "owner" or can_manage_owner_grants %}
-                          <option value="{{ role.value }}">{{ t("role." ~ role.value) }}</option>
+                          <option value="{{ role.value }}"{% if grant_scope_preview and role == grant_scope_preview.role %} selected{% endif %}>{{ t("role." ~ role.value) }}</option>
                         {% endif %}
                       {% endfor %}
                     </select>
@@ -1713,12 +1714,13 @@
                   <label>{{ t("grant.scope") }}
                     <select name="scope">
                       {% for scope in grant_scopes %}
-                        <option value="{{ scope.value }}">{{ t("scope." ~ scope.value) }}</option>
+                        <option value="{{ scope.value }}"{% if grant_scope_preview and scope == grant_scope_preview.scope %} selected{% endif %}>{{ t("scope." ~ scope.value) }}</option>
                       {% endfor %}
                     </select>
                   </label>
                   <div class="button-row">
                     <button type="submit">{{ t("grant.add") }}</button>
+                    <button class="button button-muted" type="button" data-preview-grant>{{ t("grant.preview_selection") }}</button>
                   </div>
                 </form>
               {% elif grant_principal_query %}
@@ -1750,6 +1752,28 @@
 
               <h3>{{ t("grant.preview") }}</h3>
               <p class="meta">{{ t("grant.preview_help") }}</p>
+              <form class="form-grid" method="get" action="/objects/{{ object.id }}" data-grant-form data-responsibility-eligible="{{ 'true' if grant_responsibility_eligible else 'false' }}" data-grant-preview-form>
+                <input type="hidden" name="edit" value="permissions" />
+                <input type="hidden" name="principal_q" value="{{ grant_principal_query }}" />
+                <label>{{ t("grant.role") }}
+                  <select name="preview_role" data-grant-role>
+                    {% for role in grant_roles %}
+                      {% if role.value != "owner" or can_manage_owner_grants %}
+                        <option value="{{ role.value }}"{% if role == grant_scope_preview.role %} selected{% endif %}>{{ t("role." ~ role.value) }}</option>
+                      {% endif %}
+                    {% endfor %}
+                  </select>
+                </label>
+                <label>{{ t("grant.scope") }}
+                  <select name="preview_scope" data-grant-scope>
+                    {% for scope in grant_scopes %}
+                      <option value="{{ scope.value }}"{% if scope == grant_scope_preview.scope %} selected{% endif %}>{{ t("scope." ~ scope.value) }}</option>
+                    {% endfor %}
+                  </select>
+                </label>
+                <button class="button button-small" type="submit">{{ t("grant.preview_selection") }}</button>
+              </form>
+              <p data-grant-preview-selection>{{ t("role." ~ grant_scope_preview.role.value) }} · {{ t("scope." ~ grant_scope_preview.scope.value) }}</p>
               <p><strong>{{ t("grant.affected_count", count=grant_scope_preview.affected_objects|length) }}</strong></p>
               <ul class="rel">
                 {% for affected in grant_scope_preview.affected_objects %}

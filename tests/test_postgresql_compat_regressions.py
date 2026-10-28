@@ -69,7 +69,7 @@ OBJECT_RENAME_REVISION = "20260909_0022"
 ADDITIVE_PROJECT_CREATOR_REVISION = "20260925_0024"
 CREDENTIAL_REFERENCE_CREATOR_REVISION = "20260926_0025"
 ACTIVITY_INDEX_REVISION = "20260926_0026"
-HEAD_REVISION = "20261026_0031"
+HEAD_REVISION = "20261028_0032"
 
 
 def _pg_url(database: str) -> str:
@@ -2893,3 +2893,111 @@ def test_postgresql_297_comment_waits_for_committed_authority_change(
     with factory() as session:
         assert len(session.scalars(select(ObjectComment)).all()) == int(replay)
         assert session.get(Principal, actor_id).active is (change != 'deactivate')
+
+
+@PG_SKIP
+def test_postgresql_320_responsibility_reach_and_single_target(migrated_pg_engine):
+    from sqlalchemy import select
+    from test_responsibility_policy_320 import _seed
+
+    from blockwart.db.session import transaction
+    from blockwart.domain.auth import Permission
+    from blockwart.models import Relationship
+    from blockwart.services.access import grant_scope_object_ids, owner_grant_covered_object_ids
+    from blockwart.services.policy import policy_for_principal
+
+    with Session(migrated_pg_engine) as session, transaction(session):
+        actor_id, _ = _seed(session)
+        owned = {"lxc", "service", "operations"}
+        assert grant_scope_object_ids(session, object_id="lxc", scope="responsibility") == owned
+        assert owner_grant_covered_object_ids(session) == owned
+        policy = policy_for_principal(session, actor_id)
+        assert policy.can(Permission.MANAGE_ACCESS, "operations")
+        assert policy.permissions_for("ref") == {Permission.DISCOVER, Permission.READ}
+        # The DB guard independently rejects a second responsibility target.
+        with pytest.raises(IntegrityError), session.begin_nested():
+            session.add(Relationship(from_ref="runbook:operations",
+                                     relation_type="operations_runbook_for",
+                                     to_ref="service:other"))
+            session.flush()
+        assert len(session.scalars(select(Relationship).where(
+            Relationship.relation_type == "operations_runbook_for",
+        )).all()) == 1
+
+
+@PG_SKIP
+def test_postgresql_320_relationship_write_waits_for_scope_revocation(migrated_pg_engine):
+    """A stale Runbook-owner snapshot must wait for and observe a committed revoke."""
+    from concurrent.futures import ThreadPoolExecutor
+
+    from sqlalchemy import select
+    from test_responsibility_policy_320 import _context, _seed
+
+    from blockwart.db.session import transaction
+    from blockwart.models import ObjectGrant, Principal
+    from blockwart.services.access import create_object_grant, revoke_object_grant
+    from blockwart.services.commands import (
+        CommandAuthorizationDenied,
+        CommandNotFound,
+        create_object_relationship,
+    )
+    from blockwart.services.identity import create_service_account
+
+    factory = sessionmaker(bind=migrated_pg_engine, autoflush=False)
+    with factory() as session, transaction(session):
+        actor_id, grant_id = _seed(session)
+        backup = create_service_account(session, login="standby-320", display_name="Standby")
+        for identity in ("lxc", "service", "operations"):
+            create_object_grant(session, principal_id=backup.id, object_id=identity,
+                                role="owner", scope="self")
+        # Keep discover/editor rights so the denied mutation reaches its Owner gate.
+        for identity in ("operations", "service"):
+            create_object_grant(session, principal_id=actor_id, object_id=identity,
+                                role="editor", scope="self")
+        context = _context(session, actor_id)
+        revision = session.get(CatalogObject, "operations").revision
+    with factory() as revoker:
+        revoke_object_grant(revoker, grant_id=grant_id)
+        application = f'bw-320-{uuid.uuid4().hex}'
+        writer_engine = create_engine(migrated_pg_engine.url,
+                                     connect_args={'application_name': application})
+
+        def writer():
+            with Session(writer_engine) as session:
+                try:
+                    with transaction(session):
+                        create_object_relationship(
+                            session, context, object_id="operations",
+                            from_ref="runbook:operations", relation_type="operations_runbook_for",
+                            to_ref="service:service", expected_revision=revision,
+                        )
+                except (CommandNotFound, CommandAuthorizationDenied):
+                    return 'denied'
+                return 'incorrect-success'
+
+        try:
+            with ThreadPoolExecutor(max_workers=1) as pool:
+                future = pool.submit(writer)
+                observed = False
+                deadline = time.monotonic() + 10
+                while time.monotonic() < deadline:
+                    with migrated_pg_engine.connect() as connection:
+                        observed = connection.execute(text(
+                            "SELECT wait_event_type = 'Lock' FROM pg_stat_activity "
+                            "WHERE application_name = :application"
+                        ), {'application': application}).scalar_one_or_none() is True
+                    if observed or future.done():
+                        break
+                    time.sleep(0.02)
+                revoker.commit()
+                assert future.result(timeout=10) == 'denied'
+                assert observed, 'relationship writer must serialize with scope revocation'
+        finally:
+            revoker.rollback()
+            writer_engine.dispose()
+    with factory() as session:
+        assert session.get(ObjectGrant, grant_id) is None
+        assert session.get(Principal, actor_id).active
+        assert session.scalar(select(ObjectGrant.id).where(
+            ObjectGrant.principal_id == actor_id, ObjectGrant.role == 'owner',
+        )) is None

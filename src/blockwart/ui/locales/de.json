@@ -685,10 +685,10 @@
   "grant.adopt_submit": "Ersten Owner zuweisen",
   "grant.adopt_unavailable": "Nur ein aktiver Katalog-Owner kann es übernehmen. Bitte einen Katalog-Owner, den ersten Owner zuzuweisen.",
   "grant.panel": "Berechtigungen",
-  "grant.panel_help": "Direkte Freigaben liegen auf diesem Objekt. Der effektive Zugriff enthält zusätzlich geerbte Teilbaum-Freigaben.",
+  "grant.panel_help": "Direkte Freigaben gelten hier; geerbte Rechte folgen dem gewählten Geltungsbereich.",
   "grant.permissions": "Effektive Rechte",
-  "grant.preview": "Vorschau der Teilbaum-Abdeckung",
-  "grant.preview_help": "Nur die kanonische Zuordnung; andere Beziehungen werden nicht einbezogen.",
+  "grant.preview": "Vorschau des gewählten Geltungsbereichs",
+  "grant.preview_help": "Zeigt die gewählte Rolle und Reichweite. Owner-Verantwortung umfasst ausdrücklich zugeordnete Operations-Runbooks; Credentials erhalten nur Metadatensicht.",
   "grant.principal": "Principal",
   "grant.revoke": "Entziehen",
   "grant.role": "Rolle",
@@ -1517,5 +1517,8 @@
   "reference_content.invalid": "Der Referenzinhalt wurde nicht gespeichert. Gib ein gültiges JSON-Objekt ein und prüfe, ob die Objektversion aktuell ist.",
   "reference_content.metadata_invalid": "Die Referenzmetadaten wurden nicht gespeichert. Prüfe die übermittelten Metadaten.",
   "field.primary_name.credential_reference.label": "Referenzname",
-  "kind.credential_reference": "Zugangsdatenreferenz"
+  "kind.credential_reference": "Zugangsdatenreferenz",
+  "scope.responsibility": "Vollständiger Verantwortungsbereich",
+  "grant.preview_selection": "Auswahl prüfen",
+  "relationship_type.operations_runbook_for": "Operations-Runbook für"
 }

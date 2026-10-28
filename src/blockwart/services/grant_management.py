@@ -319,7 +319,9 @@ def preview_grant_scope(
 ) -> GrantScopePreview:
     row = _require_manage_access(session, context, object_id=object_id)
     resolved_scope = GrantScope(scope)
-    resolved_role = Role(role) if role is not None else None
+    resolved_role = Role(role) if role is not None else (
+        Role.OWNER if resolved_scope == GrantScope.RESPONSIBILITY else None
+    )
     if resolved_role is not None:
         _validate_grant_target(row, resolved_role, resolved_scope)
     affected_ids = grant_scope_object_ids(

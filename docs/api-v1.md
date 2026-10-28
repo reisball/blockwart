@@ -1137,3 +1137,14 @@ revision plus record ETag bind the source snapshot; source changes reject the
 completion rather than overwriting changes. Each further credential/GET phase
 checks current authority. No record/event/idempotency mutation is committed
 before acquisition, and a successful cached replay performs no external GET.
+
+### Owner responsibility scope
+
+Grant scope accepts `self`, `subtree`, and Owner-only `responsibility` for a
+host/system/service anchor. The same role-aware preview includes canonical
+children and explicitly assigned Operations Runbooks, never credential ownership.
+Existing scopes are unchanged. `operations_runbook_for` uses the normal
+relationship commands from Runbook to its one responsible infrastructure target;
+these commands require prior Owner authority on both endpoints (or Global Catalog
+Owner), retain ETag/audit/coverage protections, and reject editor-only capture.
+See [the complete shared contract](auth-rbac.md#explicit-operational-responsibility-revision-0032).

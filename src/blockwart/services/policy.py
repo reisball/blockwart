@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from enum import StrEnum
 
 from sqlalchemy import and_, literal, or_, select
-from sqlalchemy.orm import Session, aliased
+from sqlalchemy.orm import Session
 
 from blockwart.domain.auth import (
     REFERENCE_CONTENT_ROLES,
@@ -20,9 +20,9 @@ from blockwart.domain.auth import (
     permissions_for_role,
     root_kinds_for_catalog_role,
 )
-from blockwart.domain.placement import CANONICAL_PLACEMENT_RELATION_TYPE
-from blockwart.models import CatalogObject, ObjectGrant, Principal, Relationship
+from blockwart.models import CatalogObject, ObjectGrant, Principal
 from blockwart.schemas.catalog import OBJECT_KINDS
+from blockwart.services.grant_reach import RESPONSIBILITY_KINDS, grant_reach_cte
 
 
 class AuthorizationDenied(PermissionError):
@@ -184,9 +184,7 @@ def policy_for_principal(
     the default materialized form.
     """
     global_authorities = _global_authorities_for_principal(session, principal_id)
-    child = aliased(CatalogObject)
     object_ref = CatalogObject.kind + literal(":") + CatalogObject.id
-    child_ref = child.kind + literal(":") + child.id
     roots = (
         select(
             ObjectGrant.id.label("grant_id"),
@@ -208,6 +206,11 @@ def policy_for_principal(
         .where(
             ObjectGrant.principal_id == principal_id,
             Principal.active.is_(True),
+            or_(
+                ObjectGrant.scope != GrantScope.RESPONSIBILITY,
+                and_(ObjectGrant.role == Role.OWNER,
+                     CatalogObject.kind.in_(RESPONSIBILITY_KINDS)),
+            ),
             # Raw/legacy malformed content-role grants are not authority, even
             # for metadata, and must never seed placement inheritance.
             or_(
@@ -219,39 +222,7 @@ def policy_for_principal(
             ),
         )
     )
-    reach = roots.cte("authorized_object_reach", recursive=True)
-    descendants = (
-        select(
-            reach.c.grant_id,
-            reach.c.anchor_object_id,
-            child.id.label("object_id"),
-            child_ref.label("object_ref"),
-            child.kind.label("object_kind"),
-            reach.c.role,
-            reach.c.scope,
-        )
-        .select_from(reach)
-        .join(
-            Relationship,
-            and_(
-                reach.c.scope == GrantScope.SUBTREE,
-                Relationship.relation_type == CANONICAL_PLACEMENT_RELATION_TYPE,
-                Relationship.from_ref == reach.c.object_ref,
-            ),
-        )
-        .join(child, Relationship.to_ref == child_ref)
-        .where(
-            (
-                (reach.c.object_kind == "host")
-                & child.kind.in_(("system", "service"))
-            )
-            | (
-                (reach.c.object_kind == "system")
-                & (child.kind == "service")
-            )
-        )
-    )
-    reach = reach.union(descendants)
+    reach = grant_reach_cte(roots, name="authorized_object_reach")
     rows = session.execute(
         select(
             reach.c.grant_id,
@@ -296,6 +267,9 @@ def policy_for_principal(
                 scope=scope,
             )
         )
+    _add_responsibility_reference_metadata(
+        session, rows, permissions_by_object, grants_by_object,
+    )
     return PolicySnapshot(
         principal_id=principal_id,
         _permissions={
@@ -337,3 +311,60 @@ def _global_authorities_for_principal(
             root_kinds=frozenset({"project"}),
         ))
     return tuple(authorities)
+
+
+def _add_responsibility_reference_metadata(
+    session: Session, rows, permissions_by_object, grants_by_object,
+) -> None:
+    responsibility_rows = [row for row in rows if row.scope == GrantScope.RESPONSIBILITY]
+    if not responsibility_rows:
+        return
+    object_ids = {row.object_id for row in responsibility_rows}
+    documents = dict(session.execute(
+        select(CatalogObject.id, CatalogObject.data_json)
+        .where(CatalogObject.id.in_(object_ids))
+    ).all())
+    references = {}
+    for object_id, raw in documents.items():
+        try:
+            data = json.loads(raw)
+        except (TypeError, ValueError):
+            continue
+        if not isinstance(data, dict):
+            continue
+        values = list(data.get("credential_references", [])) if isinstance(
+            data.get("credential_references"), list,
+        ) else []
+        auth = data.get("auth")
+        if isinstance(auth, dict) and isinstance(auth.get("credential_references"), list):
+            values.extend(auth["credential_references"])
+        methods = data.get("access_methods")
+        if isinstance(methods, list):
+            for method in methods:
+                if (isinstance(method, dict)
+                        and isinstance(method.get("credential_references"), list)):
+                    values.extend(method["credential_references"])
+        references[object_id] = {
+            value.split(":", 1)[1] for value in values
+            if isinstance(value, str) and value.startswith("credential_reference:")
+        }
+    targets = {ref for refs in references.values() for ref in refs}
+    if not targets:
+        return
+    valid_targets = set(session.scalars(select(CatalogObject.id).where(
+        CatalogObject.id.in_(targets), CatalogObject.kind == "credential_reference",
+    )).all())
+    seen = set()
+    for row in responsibility_rows:
+        for reference_id in references.get(row.object_id, set()) & valid_targets:
+            key = (row.grant_id, reference_id)
+            if key in seen:
+                continue
+            seen.add(key)
+            permissions_by_object[reference_id].update(permissions_for_role(Role.VIEWER))
+            # The effective role here is Viewer, not an Owner source. The real
+            # grant ID, responsibility scope and anchor remain inspectable.
+            grants_by_object[reference_id].append(EffectiveGrant(
+                grant_id=int(row.grant_id), anchor_object_id=str(row.anchor_object_id),
+                object_id=reference_id, role=Role.VIEWER, scope=GrantScope.RESPONSIBILITY,
+            ))

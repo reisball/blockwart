@@ -90,6 +90,10 @@ CATEGORY_SENSITIVE_PREDICATES = frozenset({"attached_endpoint_allowed", "network
 # validator.
 GRAPH_RULE_CONTRACTS: Mapping[str, str] = MappingProxyType(
     {
+        "single_responsibility_target": (
+            "An Operations Runbook has exactly one responsible target at most; "
+            "other descriptive relationships do not confer access."
+        ),
         "single_placement_parent": (
             "A child object may have at most one canonical placement parent."
         ),
@@ -102,7 +106,9 @@ GRAPH_RULE_CONTRACTS: Mapping[str, str] = MappingProxyType(
         ),
     }
 )
-_COLLECTION_GRAPH_RULES = frozenset({"single_primary_per_source", "acyclic_edges"})
+_COLLECTION_GRAPH_RULES = frozenset({
+    "single_primary_per_source", "acyclic_edges", "single_responsibility_target",
+})
 
 
 @dataclass(frozen=True)
@@ -187,6 +193,13 @@ RELATIONSHIP_RULES: dict[str, RelationshipRule] = {
         to_kinds=frozenset({"system", "service"}),
         description="Canonical parent-to-child asset placement.",
         graph_rules=frozenset({"single_placement_parent"}),
+    ),
+    "operations_runbook_for": RelationshipRule(
+        relation_type="operations_runbook_for",
+        from_kinds=frozenset({"runbook"}),
+        to_kinds=frozenset({"host", "system", "service"}),
+        description="Explicit single operational responsibility target of this Runbook.",
+        graph_rules=frozenset({"single_responsibility_target"}),
     ),
     "depends_on": RelationshipRule(
         relation_type="depends_on",
@@ -353,6 +366,10 @@ RELATIONSHIP_REJECTIONS: Mapping[str, RelationshipRejection] = MappingProxyType(
                 "multiple_placement_parents",
                 "graph",
                 "The child object would have more than one canonical placement parent.",
+            ),
+            RelationshipRejection(
+                "multiple_responsibility_targets", "graph",
+                "An Operations Runbook would have more than one responsible target.",
             ),
             RelationshipRejection(
                 "multiple_primary_relationships",
@@ -818,6 +835,7 @@ def relationship_graph_diagnostics(
     primary_by_source: dict[tuple[str, str], list[str]] = {}
     attachment_edges: dict[str, set[str]] = {}
     uplink_edges: dict[str, set[str]] = {}
+    operations_targets: dict[str, set[str]] = {}
 
     for relationship in rows:
         relation_type = str(_record_value(relationship, "relation_type"))
@@ -825,6 +843,8 @@ def relationship_graph_diagnostics(
             continue
         from_ref = str(_record_value(relationship, "from_ref"))
         to_ref = str(_record_value(relationship, "to_ref"))
+        if relation_type == "operations_runbook_for":
+            operations_targets.setdefault(from_ref, set()).add(to_ref)
         metadata = relationship_metadata(relationship, relation_type=relation_type)
         if metadata.get("primary") is True:
             primary_by_source.setdefault((from_ref, relation_type), []).append(to_ref)
@@ -839,6 +859,14 @@ def relationship_graph_diagnostics(
             attachment_edges.setdefault(from_ref, set()).add(to_ref)
         elif relation_type == "uplinks_to":
             uplink_edges.setdefault(from_ref, set()).add(to_ref)
+
+    for from_ref, target_refs in sorted(operations_targets.items()):
+        if len(target_refs) > 1:
+            diagnostics.append(RelationshipDiagnostic(
+                "multiple_responsibility_targets", from_ref,
+                "Operations Runbook has multiple responsible targets",
+                (from_ref, *sorted(target_refs)), "operations_runbook_for",
+            ))
 
     for (from_ref, relation_type), target_refs in sorted(primary_by_source.items()):
         if len(target_refs) > 1:

@@ -57,6 +57,7 @@ from blockwart.services.audit import (
     load_audit_details,
     render_audit_summary_english,
 )
+from blockwart.services.grant_reach import AUTHORITY_RELATION_TYPES
 from blockwart.services.record_integrity import read_catalog_record_data
 
 
@@ -468,7 +469,7 @@ def delete_relationship(
         owner_grant_covered_object_ids(session)
         if (
             enforce_owner_coverage
-            and row.relation_type == CANONICAL_PLACEMENT_RELATION_TYPE
+            and row.relation_type in AUTHORITY_RELATION_TYPES
         )
         else set()
     )

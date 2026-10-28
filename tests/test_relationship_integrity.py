@@ -50,6 +50,7 @@ def _add_object(session: Session, object_id: str, kind: str, data: dict | None =
 def test_relationship_registry_is_explicit_and_stable() -> None:
     assert RELATIONSHIP_TYPES == (
         "hosts",
+        "operations_runbook_for",
         "depends_on",
         "supports",
         "feeds",

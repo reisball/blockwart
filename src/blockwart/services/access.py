@@ -2,13 +2,17 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 
-from sqlalchemy import and_, literal, or_, select
-from sqlalchemy.orm import Session, aliased
+from sqlalchemy import literal, or_, select
+from sqlalchemy.orm import Session
 
 from blockwart.domain.auth import CatalogRole, GrantScope, Role, validate_grant_target
-from blockwart.domain.placement import CANONICAL_PLACEMENT_RELATION_TYPE
 from blockwart.models import CatalogObject, ObjectGrant, Principal, Relationship
 from blockwart.services.audit import add_audit_event
+from blockwart.services.grant_reach import (
+    AUTHORITY_RELATION_TYPES,
+    RESPONSIBILITY_KINDS,
+    grant_reach_cte,
+)
 
 
 class AccessGrantError(ValueError):
@@ -349,17 +353,12 @@ def inherited_owner_grant_ids(
         .join(Principal, Principal.id == ObjectGrant.principal_id)
         .where(
             ObjectGrant.role == Role.OWNER,
-            ObjectGrant.scope == GrantScope.SUBTREE,
+            ObjectGrant.scope.in_((GrantScope.SUBTREE, GrantScope.RESPONSIBILITY)),
             ObjectGrant.object_id != object_id,
             Principal.active.is_(True),
         )
     )
-    reach = _subtree_cte(
-        roots,
-        name="inherited_owner_reach",
-        scope_column=True,
-        grant_column=True,
-    )
+    reach = grant_reach_cte(roots, name="inherited_owner_reach")
     return {
         int(value)
         for value in session.scalars(
@@ -452,8 +451,7 @@ def _lock_placement_relationships(session: Session) -> None:
         session.scalars(
             select(Relationship)
             .where(
-                Relationship.relation_type
-                == CANONICAL_PLACEMENT_RELATION_TYPE
+                Relationship.relation_type.in_(AUTHORITY_RELATION_TYPES)
             )
             .order_by(Relationship.id)
             .with_for_update(of=Relationship)
@@ -479,6 +477,8 @@ def _owner_grant_reach(
         .join(Principal, Principal.id == ObjectGrant.principal_id)
         .where(
             ObjectGrant.role == Role.OWNER,
+            or_(ObjectGrant.scope != GrantScope.RESPONSIBILITY,
+                CatalogObject.kind.in_(RESPONSIBILITY_KINDS)),
             Principal.active.is_(True),
         )
     )
@@ -486,11 +486,7 @@ def _owner_grant_reach(
         roots = roots.where(ObjectGrant.id.not_in(excluded_grant_ids))
     if excluded_principal_ids:
         roots = roots.where(ObjectGrant.principal_id.not_in(excluded_principal_ids))
-    reach = _subtree_cte(
-        roots,
-        name="active_owner_reach",
-        scope_column=True,
-    )
+    reach = grant_reach_cte(roots, name="active_owner_reach")
     return set(session.scalars(select(reach.c.object_id).distinct()).all())
 
 
@@ -544,13 +540,17 @@ def grant_scope_object_ids(
     catalog_object = session.get(CatalogObject, object_id)
     if catalog_object is None:
         raise AccessGrantError("catalog object not found")
+    if (resolved_scope == GrantScope.RESPONSIBILITY
+            and catalog_object.kind not in RESPONSIBILITY_KINDS):
+        raise AccessGrantError("responsibility requires a host, system, or service")
     if resolved_scope == GrantScope.SELF:
         return {catalog_object.id}
-    reach = _subtree_cte(
+    reach = grant_reach_cte(
         select(
             CatalogObject.id.label("object_id"),
             (CatalogObject.kind + literal(":") + CatalogObject.id).label("object_ref"),
             CatalogObject.kind.label("object_kind"),
+            literal(resolved_scope.value).label("scope"),
         ).where(CatalogObject.id == catalog_object.id),
         name="grant_scope_reach",
     )
@@ -586,47 +586,3 @@ def _grant_affected_object_ids(
         )
     except AccessGrantError:
         return set()
-
-
-def _subtree_cte(
-    roots,
-    *,
-    name: str,
-    scope_column: bool = False,
-    grant_column: bool = False,
-):
-    child = aliased(CatalogObject)
-    child_ref = child.kind + literal(":") + child.id
-    reach = roots.cte(name, recursive=True)
-    columns = [
-        child.id.label("object_id"),
-        child_ref.label("object_ref"),
-        child.kind.label("object_kind"),
-    ]
-    if scope_column:
-        columns.append(reach.c.scope)
-    if grant_column:
-        columns.append(reach.c.grant_id)
-    join_conditions = [
-        Relationship.relation_type == CANONICAL_PLACEMENT_RELATION_TYPE,
-        Relationship.from_ref == reach.c.object_ref,
-    ]
-    if scope_column:
-        join_conditions.append(reach.c.scope == GrantScope.SUBTREE)
-    descendants = (
-        select(*columns)
-        .select_from(reach)
-        .join(Relationship, and_(*join_conditions))
-        .join(child, Relationship.to_ref == child_ref)
-        .where(
-            (
-                (reach.c.object_kind == "host")
-                & child.kind.in_(("system", "service"))
-            )
-            | (
-                (reach.c.object_kind == "system")
-                & (child.kind == "service")
-            )
-        )
-    )
-    return reach.union(descendants)

@@ -26,7 +26,6 @@ from blockwart.domain.auth import (
     permissions_for_role,
 )
 from blockwart.domain.decisions import iter_decision_references
-from blockwart.domain.placement import CANONICAL_PLACEMENT_RELATION_TYPE
 from blockwart.domain.projects import iter_project_references
 from blockwart.domain.references import TypedReference
 from blockwart.domain.relationships import (
@@ -77,6 +76,7 @@ from blockwart.services.catalog import (
     typed_reference_holders,
     upsert_object,
 )
+from blockwart.services.grant_reach import AUTHORITY_RELATION_TYPES, OPERATIONS_RUNBOOK_RELATION
 from blockwart.services.identity import principal_context, record_security_event
 from blockwart.services.ownership import InitialOwnerError, assign_initial_owner
 from blockwart.services.policy import GlobalPolicySource, PolicySnapshot, policy_for_principal
@@ -1855,7 +1855,7 @@ def create_object_relationship(
         expected_revision=expected_revision,
     )
     canonical_metadata = _canonical_relationship_metadata(relation_type, metadata)
-    if relation_type == CANONICAL_PLACEMENT_RELATION_TYPE:
+    if relation_type in AUTHORITY_RELATION_TYPES:
         lock_owner_coverage_state(
             session,
             extra_principal_ids=(context.principal.id,),
@@ -1874,9 +1874,10 @@ def create_object_relationship(
             to_ref=to_ref,
             expected_revision=expected_revision,
         )
-    if relation_type == CANONICAL_PLACEMENT_RELATION_TYPE:
-        _require_placement_authority(
-            session, context, from_ref=from_ref, to_ref=to_ref, attaching=True,
+    if relation_type in AUTHORITY_RELATION_TYPES:
+        _require_authority_relationship(
+            session, context, from_ref=from_ref, to_ref=to_ref,
+            relation_type=relation_type, attaching=True,
         )
     existing = session.scalar(
         select(Relationship).where(
@@ -2101,7 +2102,7 @@ def delete_object_relationship(
         relationship,
         relation_type=relation_type,
     )
-    if relation_type == CANONICAL_PLACEMENT_RELATION_TYPE:
+    if relation_type in AUTHORITY_RELATION_TYPES:
         lock_owner_coverage_state(
             session,
             extra_principal_ids=(context.principal.id,),
@@ -2135,9 +2136,10 @@ def delete_object_relationship(
             relationship,
             relation_type=relation_type,
         )
-    if relation_type == CANONICAL_PLACEMENT_RELATION_TYPE:
-        _require_placement_authority(
-            session, context, from_ref=from_ref, to_ref=to_ref, attaching=False,
+    if relation_type in AUTHORITY_RELATION_TYPES:
+        _require_authority_relationship(
+            session, context, from_ref=from_ref, to_ref=to_ref,
+            relation_type=relation_type, attaching=False,
         )
     old_revision = target.revision
     new_revision = _claim_object_revision(
@@ -2152,6 +2154,12 @@ def delete_object_relationship(
         touch_revisions=False,
     ):
         raise CommandNotFound("relationship not found")
+    if relation_type == OPERATIONS_RUNBOOK_RELATION:
+        after_policy = policy_for_principal(session, context.principal.id)
+        for endpoint in (target.id, peer.id):
+            if (context.policy.can(Permission.MANAGE_ACCESS, endpoint)
+                    and not after_policy.can(Permission.MANAGE_ACCESS, endpoint)):
+                raise CommandConflict("responsibility change would remove your own access")
     peer_revision = _bump_object_revision(session, peer.id)
     _write_command_audit(
         session,
@@ -2219,6 +2227,31 @@ def refresh_write_context(
         ),
         policy=policy_for_principal(session, actor.id),
     )
+
+
+def _require_authority_relationship(
+    session: Session, context: WriteContext, *, from_ref: str, to_ref: str,
+    relation_type: str, attaching: bool,
+) -> None:
+    if relation_type != OPERATIONS_RUNBOOK_RELATION:
+        _require_placement_authority(
+            session, context, from_ref=from_ref, to_ref=to_ref, attaching=attaching,
+        )
+        return
+    # Both endpoints must already be owned. A Runbook editor cannot attach a
+    # new responsibility source; a target Owner cannot capture another Runbook.
+    # Evaluate before the graph mutation, never using the access it would grant.
+    for reference in (from_ref, to_ref):
+        object_id = reference.split(":", 1)[-1]
+        _require_permission(session, context, object_id=object_id, permission=Permission.READ)
+        if not (
+            context.policy.has_global_authority(GlobalPolicySource.CATALOG_OWNER)
+            or any(grant.role == Role.OWNER for grant in context.policy.grants_for(object_id))
+        ):
+            raise CommandAuthorizationDenied(
+                object_id=object_id, permission=Permission.MANAGE_ACCESS,
+                code="owner_required_to_change_responsibility",
+            )
 
 
 def _require_placement_authority(
