@@ -31,3 +31,5 @@ exports, live environment files, or credentials disguised as test fixtures.
 Examples must use reserved domains and documentation address ranges. Report
 vulnerabilities through [`SECURITY.md`](SECURITY.md), not through a public
 issue.
+
+A documentation-only acceptance probe must retain the stable required CI check.
