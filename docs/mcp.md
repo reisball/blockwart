@@ -102,6 +102,7 @@ It wraps the object-authorized v1 API:
 - blockwart.save_project_record -> POST or PUT /api/v1/projects/{object_id}/workspace/{kind}[/{record_id}]
 - blockwart.list_project_record_history -> GET /api/v1/projects/{object_id}/workspace/history/{record_id}
 - blockwart.search_project_workspace -> GET /api/v1/projects/{object_id}/workspace/search
+- blockwart.search_workspaces -> GET /api/v1/workspace/search
 - blockwart.list_project_chronology -> GET /api/v1/projects/{object_id}/chronology
 - blockwart.append_project_chronology -> POST /api/v1/projects/{object_id}/chronology
 - blockwart.list_comments -> GET /api/v1/objects/{object_id}/comments

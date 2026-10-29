@@ -204,7 +204,9 @@ project labels, excerpts, totals or pagination are computed.
 
 Each result has `project_id`, `project_label`, `kind`, record/entry `id`, `title`,
 a match-centered, case-preserving `excerpt` of at most 300 characters and a
-relative browser `url`. Record URLs open the existing record detail; chronology
+relative browser `url`. For chronology hits, `title` is the machine kind code
+(such as `note` or `milestone`), not a separately curated title.
+Record URLs open the existing record detail; chronology
 URLs open the exact instance-scoped entry, including entries older than the
 project timeline's first page. Browser output escapes prose and uses the existing
 safe chronology Markdown renderer.

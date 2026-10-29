@@ -1,6 +1,7 @@
 """Browser search and instance-scoped deep links for workspace results."""
 
 from typing import Annotated
+from urllib.parse import urlencode
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.templating import Jinja2Templates
@@ -48,8 +49,15 @@ def workspace_search(
         raise HTTPException(400, "Invalid cursor") from exc
     except CommandValidationFailed as exc:
         raise HTTPException(422, "Invalid workspace search") from exc
+    params = {
+        "q": q,
+        "project_id": project_id,
+        "kind": kind,
+        "limit": limit,
+        "cursor": page.next_cursor if page else None,
+    }
     next_url = (
-        str(request.url.include_query_params(cursor=page.next_cursor))
+        f"/workspace/search?{urlencode({key: value for key, value in params.items() if value})}"
         if page and page.next_cursor
         else None
     )

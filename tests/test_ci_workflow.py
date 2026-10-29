@@ -85,10 +85,6 @@ def test_real_prose_only_push_runs_the_actual_lightweight_commands(tmp_path: Pat
     inputs = [
         ".github/workflows/ci.yml",
         ".gitea/workflows/ci.yml",
-        "CONTRIBUTING.md",
-        "SECURITY.md",
-        "docs/ci.md",
-        "docs/security.md",
     ]
     inputs += [
         str(path.relative_to(ROOT))
@@ -99,6 +95,13 @@ def test_real_prose_only_push_runs_the_actual_lightweight_commands(tmp_path: Pat
         destination = tmp_path / name
         destination.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(ROOT / name, destination)
+
+    # Real eligible prose is deliberately not a full-suite fixture: future valid
+    # links or eligible deletions must not make this isolated proof fail.
+    (tmp_path / "CONTRIBUTING.md").write_text(
+        "# Contributing\n\nRead the [security policy](SECURITY.md).\n"
+    )
+    (tmp_path / "SECURITY.md").write_text("# Security\n\nSynthetic disclosure guidance.\n")
 
     def git(*args: str) -> str:
         return subprocess.run(

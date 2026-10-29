@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from datetime import timedelta
+from urllib.parse import parse_qs, urlsplit
 from uuid import uuid4
 
 from sqlalchemy import select
@@ -317,3 +318,34 @@ def test_project_incarnation_and_chronology_entry_identity(root_client, root_sta
     assert rejected.status_code == 400
     _browser(client, state)
     assert client.get(f"/projects/work/chronology/{entry_id}").status_code == 404
+
+
+def test_browser_next_page_stays_relative_behind_untrusted_tls_proxy(root_client, root_state):  # noqa: F811
+    client, state = root_client, root_state
+    _create_project(client, state["owner_token"], "work")
+    for index in range(2):
+        _made(client, state, "work", "item", title=f"Needle & context {index}")
+    _browser(client, state)
+    headers = {"Host": "internal.example.invalid:8000", "X-Forwarded-Proto": "https"}
+    first = client.get(
+        "/workspace/search",
+        params={"q": "Needle &", "project_id": "work", "kind": "item", "limit": 1},
+        headers=headers,
+    )
+    assert first.status_code == 200, first.text
+    next_url = first.context["next_url"]
+    assert next_url.startswith("/workspace/search?"), next_url
+    assert not urlsplit(next_url).scheme and not urlsplit(next_url).netloc
+    query = parse_qs(urlsplit(next_url).query)
+    assert {key: value for key, value in query.items() if key != "cursor"} == {
+        "q": ["Needle &"],
+        "project_id": ["work"],
+        "kind": ["item"],
+        "limit": ["1"],
+    }
+    assert len(query["cursor"]) == 1
+    assert f'href="{next_url.replace("&", "&amp;")}"' in first.text
+    second = client.get(next_url, headers=headers)
+    assert second.status_code == 200, second.text
+    assert first.context["page"].items[0].id != second.context["page"].items[0].id
+    assert second.context["next_url"] is None
