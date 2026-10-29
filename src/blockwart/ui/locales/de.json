@@ -1526,5 +1526,13 @@
   "relationship_type.operations_runbook_for": "Operations-Runbook für",
   "attention.category.task_deadline": "Aufgabenfristen",
   "attention.reason.task_deadline_overdue": "Projektaufgabe überfällig",
-  "attention.reason_help.task_deadline_overdue": "Die aktive Aufgabe hat ihren Fälligkeitstermin überschritten und ist nicht effektiv abgeschlossen."
+  "attention.reason_help.task_deadline_overdue": "Die aktive Aufgabe hat ihren Fälligkeitstermin überschritten und ist nicht effektiv abgeschlossen.",
+  "workspace.search.title": "Arbeitsbereich durchsuchen",
+  "workspace.search.help": "Aufgaben, Wissensseiten und Chronologie aller lesbaren Projekte durchsuchen. Die Katalogsuche bleibt separat.",
+  "workspace.search.kind": "Inhaltstyp",
+  "workspace.search.kind.item": "Aufgabe / Eintrag",
+  "workspace.search.kind.page": "Wissensseite",
+  "workspace.search.kind.chronology": "Chronologie",
+  "workspace.search.results": "{count} Treffer",
+  "workspace.search.empty": "Keine passenden Arbeitsbereichsinhalte."
 }

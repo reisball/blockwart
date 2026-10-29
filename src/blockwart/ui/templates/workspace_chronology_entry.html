@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="{{ locale }}">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>{{ project.label }} - Blockwart</title>
+    <link rel="stylesheet" href="/static/app.css" />
+  </head>
+  <body>
+    <main class="page stack">
+      <header>
+        <a href="/projects/{{ project.id|urlencode }}#chronology">← {{ project.label }}</a>
+        <h1>{{ t('project.workspace.chronology') }}</h1>
+      </header>
+      <article class="panel" id="chronology-{{ entry.id }}">
+        <h2>{{ t('project.chronology.kind.' ~ entry.kind) }}</h2>
+        <p class="meta">{{ entry.created_at }} · {{ entry.author_display_name or t('comment.legacy_author') }}</p>
+        <div class="comment-body">{{ body_html }}</div>
+      </article>
+    </main>
+  </body>
+</html>

@@ -220,7 +220,7 @@ docker build \
 The package smoke builds a wheel, installs it into a clean virtual environment, changes to a
 directory outside the repository, starts `blockwart-start`, loads packaged templates and static
 assets, runs the relationship-integrity diagnostic, and verifies the complete
-47-tool catalog. Its read/write, preview, Project-workspace, coverage, attention,
+48-tool catalog. Its read/write, preview, Project-workspace, coverage, attention,
 activity, comment, audit, grant-management, and ownerless-adoption calls use the
 installed `blockwart-mcp` console command. The smoke's `mcp_calls` summary is a
 fixed label, not an independently measured count of calls or per-tool coverage.

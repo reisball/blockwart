@@ -1581,6 +1581,30 @@ TOOLS.extend(
             "annotations": READ_ONLY_ANNOTATIONS,
         },
         {
+            "name": "blockwart.search_workspaces",
+            "description": (
+                "Search current items, knowledge pages and chronology across DETAIL-authorized "
+                "projects, without choosing a project first. Returns project identity, record "
+                "kind, a bounded excerpt and direct browser link. Excludes access/repository "
+                "records, credential references, secret locations, extensions and historical "
+                "versions. "
+                "Separate from ranked catalog search; ordered by project id, kind, record id."
+            ),
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "q": {"type": "string", "minLength": 1, "maxLength": 200},
+                    "project_id": {"type": "string", "minLength": 1, "maxLength": 128},
+                    "kind": {"type": "string", "enum": ["item", "page", "chronology"]},
+                    "limit": {"type": "integer", "minimum": 1, "maximum": 100},
+                    "cursor": {"type": "string", "maxLength": 2048},
+                },
+                "required": ["q"],
+                "additionalProperties": False,
+            },
+            "annotations": READ_ONLY_ANNOTATIONS,
+        },
+        {
             "name": "blockwart.search_project_workspace",
             "description": (
                 "Search all curated project fields, current items/pages/access metadata and the "
@@ -2393,6 +2417,8 @@ def call_tool(
                 "include_total": args.get("include_total", False),
             },
         )
+    elif name == "blockwart.search_workspaces":
+        payload = fetch("/api/v1/workspace/search", args)
     elif name in {
         "blockwart.list_project_records",
         "blockwart.list_project_record_history",

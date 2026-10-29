@@ -1526,5 +1526,13 @@
   "relationship_type.operations_runbook_for": "Operations Runbook for",
   "attention.category.task_deadline": "Task deadlines",
   "attention.reason.task_deadline_overdue": "Project task overdue",
-  "attention.reason_help.task_deadline_overdue": "The active task passed its due date and is not effectively completed."
+  "attention.reason_help.task_deadline_overdue": "The active task passed its due date and is not effectively completed.",
+  "workspace.search.title": "Workspace search",
+  "workspace.search.help": "Search items, pages and chronology across projects you can read. Catalog search stays separate.",
+  "workspace.search.kind": "Content type",
+  "workspace.search.kind.item": "Item",
+  "workspace.search.kind.page": "Knowledge page",
+  "workspace.search.kind.chronology": "Chronology",
+  "workspace.search.results": "{count} results",
+  "workspace.search.empty": "No matching workspace content."
 }

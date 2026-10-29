@@ -761,3 +761,18 @@ relationship commands from Runbook to its one responsible infrastructure target;
 these commands require prior Owner authority on both endpoints (or Global Catalog
 Owner), retain ETag/audit/coverage protections, and reject editor-only capture.
 See [the complete shared contract](auth-rbac.md#explicit-operational-responsibility-revision-0032).
+
+### Cross-project workspace search
+
+- `blockwart.search_workspaces` → `GET /api/v1/workspace/search`
+- Requires `q`; optional `project_id`, `kind` (`item`, `page`, `chronology`),
+  `limit` (1–100, default 50) and query/authorization-bound `cursor`.
+- Searches only current records and chronology in readable projects; never
+  discover-only content, credentials, secret locations, imported extensions or
+  old versions. Returns project identity, kind, a bounded match excerpt and a
+  direct browser URL. Orders by `(project_id, kind, id)` ascending.
+- Separate from `blockwart.search` (ranked catalog) and
+  `blockwart.search_project_workspace` (one project's curated local scope).
+
+See [the workspace search contract](project-workspace.md#cross-project-workspace-search)
+for the exact field projection, exclusions and pagination behavior.

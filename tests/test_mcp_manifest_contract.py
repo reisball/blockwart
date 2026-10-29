@@ -17,15 +17,13 @@ from blockwart.mcp.server import TOOLS, local_contract_metadata, validate_runtim
 def test_integrated_mcp_contract_has_reviewed_manifest_evidence() -> None:
     metadata = contract_metadata(TOOLS, build_revision="issue-188-236-245-248-249-250-251")
 
-    # Reviewed #320 delta: responsibility scope + description for create/update/preview
-    # grants; operations_runbook_for for create/delete relationships and describe_schema.
-    # #312 adds only task_deadline / task_deadline_overdue to get_attention filter enums.
-    # All other manifest fields, the 47 tools and contract version remain unchanged.
+    # Reviewed #311/#312: workspace search tool and task deadline attention enums.
+    # Existing catalog search and contract projection version remain unchanged.
     assert metadata == {
         "build_revision": "issue-188-236-245-248-249-250-251",
         "contract_version": "1",
-        "manifest_digest": "a7894d0b438c3ec3b45dfc0366c706bd35da3d18c74630d974c4340987e60185",
-        "tool_count": 47,
+        "manifest_digest": "69cf6585eb7f3e2cf71ec38ef2ee6abf2d706df8f1b175687452fc8f2402d8a0",
+        "tool_count": 48,
     }
 
 
@@ -56,7 +54,7 @@ def test_reduced_catalog_is_incompatible_before_normal_tool_use() -> None:
 
     diagnosis = diagnose_contract(local, api=reduced)
 
-    assert local["tool_count"] == 47
+    assert local["tool_count"] == 48
     assert reduced["tool_count"] == 22
     assert diagnosis["status"] == "incompatible"
     assert diagnosis["classification"] == "wrapper_drift"
