@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="{{ locale }}">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>{{ t('workspace.search.title') }} - Blockwart</title>
+    <link rel="stylesheet" href="/static/app.css" />
+  </head>
+  <body>
+    <main class="page stack">
+      <header>
+        <a href="/projects">← {{ t('project.workspace.overview_title') }}</a>
+        <h1>{{ t('workspace.search.title') }}</h1>
+        <p>{{ t('workspace.search.help') }}</p>
+      </header>
+      <section class="panel">
+        <form class="form-grid" method="get" action="/workspace/search">
+          <label>{{ t('search.submit') }}
+            <input type="search" name="q" value="{{ q }}" required maxlength="200" />
+          </label>
+          {% if project_id %}<input type="hidden" name="project_id" value="{{ project_id }}" />{% endif %}
+          <input type="hidden" name="limit" value="{{ limit }}" />
+          <label>{{ t('workspace.search.kind') }}
+            <select name="kind">
+              <option value="">{{ t('project.records.all') }}</option>
+              {% for value in ['item', 'page', 'chronology'] %}
+                <option value="{{ value }}"{% if kind == value %} selected{% endif %}>{{ t('workspace.search.kind.' ~ value) }}</option>
+              {% endfor %}
+            </select>
+          </label>
+          <button>{{ t('search.submit') }}</button>
+        </form>
+      </section>
+      {% if page %}
+        <section class="panel">
+          <h2>{{ t('workspace.search.results', count=page.total) }}</h2>
+          {% for hit in page.items %}
+            <article>
+              <p class="meta"><a href="/projects/{{ hit.project_id|urlencode }}">{{ hit.project_label }}</a> · {{ t('workspace.search.kind.' ~ hit.kind) }}</p>
+              <h3><a href="{{ hit.url }}">{{ t('project.chronology.kind.' ~ hit.title) if hit.kind == 'chronology' else hit.title }}</a></h3>
+              <p class="preserve-lines">{{ hit.excerpt }}</p>
+            </article>
+          {% else %}
+            <p>{{ t('workspace.search.empty') }}</p>
+          {% endfor %}
+          {% if next_url %}<a class="button button-muted" href="{{ next_url }}">{{ t('project.workspace.next_page') }}</a>{% endif %}
+        </section>
+      {% endif %}
+    </main>
+  </body>
+</html>

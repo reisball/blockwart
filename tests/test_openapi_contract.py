@@ -42,6 +42,7 @@ EXPECTED_OPERATIONS = {
     "/api/v1/objects/{object_id}/rename-preview": {"post"},
     "/api/v1/objects/{object_id}/comments": {"get", "post"},
     "/api/v1/projects": {"get"},
+    "/api/v1/workspace/search": {"get"},
     "/api/v1/projects/{object_id}/workspace/search": {"get"},
     "/api/v1/projects/{object_id}/workspace/history/{record_id}": {"get"},
     "/api/v1/projects/{object_id}/workspace/overview": {"get"},

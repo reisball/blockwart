@@ -12,8 +12,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from blockwart.domain.auth import ObjectVisibility, Permission
-from blockwart.domain.projects import project_authorized_data
-from blockwart.domain.provenance import parse_rfc3339_utc
+from blockwart.domain.projects import project_authorized_data, project_record_overdue
 from blockwart.domain.references import TypedReference
 from blockwart.domain.search import normalize_search_text
 from blockwart.domain.timestamps import format_rfc3339_utc
@@ -125,7 +124,7 @@ def record_out(session, access, row):
         short_code=row.short_code or row.id,
         record_etag=record_etag(row),
         requirement_revision=row.requirement_revision,
-        overdue=bool(due and effective != "done" and parse_rfc3339_utc(due) < datetime.now(UTC)),
+        overdue=project_record_overdue(due, effective, now=datetime.now(UTC)),
     )
 
 

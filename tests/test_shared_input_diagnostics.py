@@ -553,6 +553,10 @@ def test_every_declared_rest_and_mcp_parameter_retains_its_location():
             "/api/v1/attention?severity=invalid&signal_state=invalid",
             {"query.severity", "query.signal_state"},
         ),
+        (
+            "/api/v1/workspace/search?q=Needle&project_id=&kind=invalid",
+            {"query.project_id", "query.kind"},
+        ),
     ],
 )
 def test_simultaneous_invalid_filters_remain_distinct(write_client, root_state, path, locations):  # noqa: F811

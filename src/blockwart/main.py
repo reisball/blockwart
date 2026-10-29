@@ -23,6 +23,7 @@ from blockwart.ui.i18n import persist_locale_cookie, validate_locale_catalogs
 from blockwart.ui.paths import STATIC_DIR
 from blockwart.ui.project_workspace import router as project_records_ui_router
 from blockwart.ui.routes import router as ui_router
+from blockwart.ui.workspace_search import router as workspace_search_ui_router
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
@@ -59,6 +60,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(admin_ui_router)
     app.include_router(ui_router)
     app.include_router(project_records_ui_router)
+    app.include_router(workspace_search_ui_router)
     install_request_context(app)
     default_openapi = app.openapi
 
