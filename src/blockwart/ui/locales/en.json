@@ -1,4 +1,7 @@
 {
+  "attention.kind_label": "Object kind",
+  "attention.all_kinds": "All object kinds",
+  "attention.all_reasons": "All reasons",
   "access.add_method": "Add access method",
   "access.auth": "Authentication",
   "access.empty": "No access data recorded.",

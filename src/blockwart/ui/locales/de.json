@@ -1,4 +1,7 @@
 {
+  "attention.kind_label": "Objekttyp",
+  "attention.all_kinds": "Alle Objekttypen",
+  "attention.all_reasons": "Alle Hinweisgründe",
   "access.add_method": "Zugriffsmethode hinzufügen",
   "access.auth": "Authentifizierung",
   "access.empty": "Keine Zugriffsdaten erfasst.",

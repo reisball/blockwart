@@ -176,3 +176,18 @@ single objects take the same statement path.
 All three call `blockwart.services.attention.query_attention_page` and therefore
 share one vocabulary, one deduplication rule, one order, and one authorization
 decision.
+
+## Browser filters
+
+The browser filter form exposes object kind (`kind`) and reason code
+(`reason_code`) alongside category, severity, and signal state. Its options
+come from the canonical object-kind and attention-reason vocabularies, with
+English and German labels. Filters can be combined; an empty selection imposes
+no restriction. Unsupported values receive the existing HTTP 400 invalid-filter
+response through the shared resolver.
+
+The summary and rows describe the same authorized, filtered set. Next-page
+links retain every selected filter. Submitting the form normalizes non-empty
+values and starts a new result set without the previous cursor; reusing a
+cursor with changed filters is rejected. **Clear filters** returns to
+`/attention`. The REST and MCP filtering contracts are unchanged.

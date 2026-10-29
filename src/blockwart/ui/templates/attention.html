@@ -45,6 +45,18 @@
       <section class="panel">
         <form class="form-grid" method="get" action="/attention/filters/normalize">
           <div class="project-filter-grid">
+            <label>{{ t("attention.kind_label") }}
+              <select name="kind">
+                <option value="">{{ t("attention.all_kinds") }}</option>
+                {% for option in kinds %}<option value="{{ option }}"{% if selected_kind == option %} selected{% endif %}>{{ t("kind." ~ option) }}</option>{% endfor %}
+              </select>
+            </label>
+            <label>{{ t("attention.reason_label") }}
+              <select name="reason_code">
+                <option value="">{{ t("attention.all_reasons") }}</option>
+                {% for option in reason_codes %}<option value="{{ option }}"{% if selected_reason_code == option %} selected{% endif %}>{{ t("attention.reason." ~ option) }}</option>{% endfor %}
+              </select>
+            </label>
             <label>{{ t("attention.category_label") }}
               <select name="category">
                 <option value="">{{ t("attention.all_categories") }}</option>
