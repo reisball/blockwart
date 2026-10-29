@@ -1523,5 +1523,8 @@
   "kind.credential_reference": "Zugangsdatenreferenz",
   "scope.responsibility": "Vollständiger Verantwortungsbereich",
   "grant.preview_selection": "Auswahl prüfen",
-  "relationship_type.operations_runbook_for": "Operations-Runbook für"
+  "relationship_type.operations_runbook_for": "Operations-Runbook für",
+  "attention.category.task_deadline": "Aufgabenfristen",
+  "attention.reason.task_deadline_overdue": "Projektaufgabe überfällig",
+  "attention.reason_help.task_deadline_overdue": "Die aktive Aufgabe hat ihren Fälligkeitstermin überschritten und ist nicht effektiv abgeschlossen."
 }

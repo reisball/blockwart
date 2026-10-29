@@ -233,12 +233,14 @@ class V1AttentionTargetOut(BaseModel):
 
     model_config = ConfigDict(from_attributes=True, extra="forbid")
 
-    scope: Literal["object", "catalog"]
+    scope: Literal["object", "catalog", "project_record"]
     ref: str = Field(min_length=1, max_length=256)
     object_id: str | None = Field(default=None, max_length=128)
     kind: ObjectKind | None = None
     label: str | None = Field(default=None, max_length=255)
     detail_path: str | None = Field(default=None, max_length=512)
+    record_id: str | None = Field(default=None, max_length=36)
+    project_label: str | None = Field(default=None, max_length=255)
 
 
 class V1AttentionItemOut(BaseModel):

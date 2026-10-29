@@ -1523,5 +1523,8 @@
   "kind.credential_reference": "Credential reference",
   "scope.responsibility": "Full operational responsibility",
   "grant.preview_selection": "Preview selection",
-  "relationship_type.operations_runbook_for": "Operations Runbook for"
+  "relationship_type.operations_runbook_for": "Operations Runbook for",
+  "attention.category.task_deadline": "Task deadlines",
+  "attention.reason.task_deadline_overdue": "Project task overdue",
+  "attention.reason_help.task_deadline_overdue": "The active task passed its due date and is not effectively completed."
 }

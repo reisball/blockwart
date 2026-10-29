@@ -6402,7 +6402,8 @@
               "provenance",
               "runbook",
               "knowledge",
-              "source_coverage"
+              "source_coverage",
+              "task_deadline"
             ],
             "title": "Category",
             "type": "string"
@@ -6539,7 +6540,8 @@
               "knowledge_review_unscheduled",
               "coverage_import_drift",
               "coverage_mapping_ambiguous",
-              "coverage_not_collected"
+              "coverage_not_collected",
+              "task_deadline_overdue"
             ],
             "title": "Reason Code",
             "type": "string"
@@ -6693,7 +6695,8 @@
                 "provenance",
                 "runbook",
                 "knowledge",
-                "source_coverage"
+                "source_coverage",
+                "task_deadline"
               ]
             },
             "title": "By Category",
@@ -6734,7 +6737,8 @@
                 "knowledge_review_unscheduled",
                 "coverage_import_drift",
                 "coverage_mapping_ambiguous",
-                "coverage_not_collected"
+                "coverage_not_collected",
+                "task_deadline_overdue"
               ]
             },
             "title": "By Reason",
@@ -6779,7 +6783,8 @@
                 "provenance",
                 "runbook",
                 "knowledge",
-                "source_coverage"
+                "source_coverage",
+                "task_deadline"
               ]
             },
             "title": "Signals",
@@ -6864,6 +6869,30 @@
             ],
             "title": "Object Id"
           },
+          "project_label": {
+            "anyOf": [
+              {
+                "maxLength": 255,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Project Label"
+          },
+          "record_id": {
+            "anyOf": [
+              {
+                "maxLength": 36,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Record Id"
+          },
           "ref": {
             "maxLength": 256,
             "minLength": 1,
@@ -6873,7 +6902,8 @@
           "scope": {
             "enum": [
               "object",
-              "catalog"
+              "catalog",
+              "project_record"
             ],
             "title": "Scope",
             "type": "string"
@@ -14741,7 +14771,8 @@
                     "provenance",
                     "runbook",
                     "knowledge",
-                    "source_coverage"
+                    "source_coverage",
+                    "task_deadline"
                   ],
                   "type": "string"
                 },
@@ -14810,7 +14841,8 @@
                     "knowledge_review_unscheduled",
                     "coverage_import_drift",
                     "coverage_mapping_ambiguous",
-                    "coverage_not_collected"
+                    "coverage_not_collected",
+                    "task_deadline_overdue"
                   ],
                   "type": "string"
                 },

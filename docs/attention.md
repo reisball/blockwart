@@ -14,7 +14,7 @@ that owns it.
 ## Signals
 
 `blockwart.domain.attention` owns the closed vocabulary; `blockwart.services.attention`
-is the FastAPI-independent application resolver every surface consumes. Ten
+is the FastAPI-independent application resolver every surface consumes. The
 categories stay semantically distinct, because they answer different questions
 and are corrected in different places:
 
@@ -31,6 +31,7 @@ and are corrected in different places:
 | `runbook` | Is the Runbook reviewed and verified, and does a critical service have one? | `runbooks.md` and explicit service criticality |
 | `knowledge` | Is the Decision/Project review current? | canonical review timestamps |
 | `source_coverage` | Does the mapped inventory still match? | `source-coverage.md` |
+| `task_deadline` | Which unfinished project tasks passed their deadline? | structured task due dates and canonical effective status |
 
 Severities are `critical`, `warning`, and `info`. Item signal states are
 `current` (present evidence asserts the problem now), `stale` (evidence exists
@@ -73,6 +74,7 @@ The closed reason codes are:
 | `coverage_import_drift` | `source_coverage` | `warning` | `stale` |
 | `coverage_mapping_ambiguous` | `source_coverage` | `warning` | `current` |
 | `coverage_not_collected` | `source_coverage` | `info` | `unknown` |
+| `task_deadline_overdue` | `task_deadline` | `warning` | `current` |
 
 An item carries only bounded safe content: the closed classification, a fixed
 English `description`, an optional `detail_code` taken from an existing closed
@@ -81,6 +83,47 @@ navigation reference (`kind:id` plus its detail path). No message, exception
 text, endpoint, path, credential, source excerpt, or private mapping is part of
 this contract. The browser view translates `reason_code` through the EN/DE
 catalogs rather than rendering the machine `description`.
+
+## Project-task deadlines
+
+`task_deadline_overdue` is a `warning` with `current` evidence, distinct from
+Project knowledge-review signals. A structured `item` whose `item_type` is
+`task` contributes when it is not archived, has `due_at < generated_at`, and
+its canonical effective status is not `done`. The instant exactly equal to
+`due_at` is **not** overdue; timestamp offsets represent the same instant.
+Undated tasks, future deadlines, completed tasks, archived tasks, and other
+item types produce no deadline signal. The containing Project must be readable,
+schema-valid and live (`planned`, `active`, or `paused`); finished Projects
+produce no task signals.
+
+Effective status uses the same resolver as the project workspace: local
+authority uses the local status, while GitHub authority uses the fresh leading
+issue observation, including repository-version validity. Unknown effective
+status is not proof of completion, so it retains the overdue signal, just as
+the workspace overdue flag does. Attention does not fetch GitHub or schedule
+anything. Completing or reopening a task, archiving or unarchiving it, changing
+or clearing its due date, or changing its effective external status is visible
+on the next query.
+
+Task targets have `scope="project_record"`, `ref="project_record:<UUID>"`,
+`record_id`, and a direct `/projects/<project-id>/workspace/record/<UUID>`
+`detail_path`. `object_id` and `kind="project"` identify the containing Project;
+`label` is the task title and `project_label` identifies the Project in the UI.
+Consequently `kind=project` includes its task deadlines. These two optional
+record/context fields are null for ordinary object and catalog targets.
+The target identity is the task UUID, not the Project, so multiple overdue
+tasks in a Project each appear once without collapsing into a project-wide
+review signal.
+
+Project READ authorization is applied before workspace records/events are
+loaded, then records are bound to the Project's immutable current instance.
+Discover-only and concealed Projects, and orphaned records of older instances,
+cannot contribute items, counts, evaluation states, or cursor contents. Only
+the task's safe title, deadline and derived status reach the classifier;
+external observation payloads and related references are never returned.
+Filtered summaries, ordering, and keyset pagination use the same shared item
+set as the browser, REST and MCP. `signals.task_deadline.evaluated` counts
+non-archived tasks of readable, live Projects before item filters.
 
 ## Deduplication and ordering
 
@@ -163,6 +206,8 @@ platform-admin boundary of
 The resolver loads catalog rows and relationships once and reuses that snapshot
 for placement, Runbook applicability, and relationship diagnostics. It also
 loads the observation index and bounded coverage snapshot once per request.
+Project workspace records and events are loaded in two additional batched
+queries, never per Project or per task; no full record-context graph is derived.
 Database access does not grow per readable object, and concealed and absent
 single objects take the same statement path.
 

@@ -235,7 +235,7 @@ def sync_record(session, context, project, row):
     }
 
 
-def external_state(events, data):
+def external_state(events, data, *, now=None):
     """Failures keep last success separately; closure never changes local status."""
     observations = [json.loads(e.data_json) for e in events if e.kind == "sync_github"]
     last = observations[-1] if observations else None
@@ -258,7 +258,8 @@ def external_state(events, data):
         fresh = False
     if fresh:
         age = (
-            datetime.now(UTC) - datetime.fromisoformat(last["observed_at"].replace("Z", "+00:00"))
+            (now or datetime.now(UTC))
+            - datetime.fromisoformat(last["observed_at"].replace("Z", "+00:00"))
         ).total_seconds()
         fresh = age <= 900
     return {

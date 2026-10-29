@@ -95,11 +95,19 @@ existing closed domain vocabulary, an optional evidence timestamp, and one
 `target` with the canonical `kind:id` reference plus its detail path. Categories
 are `record_integrity`, `monitoring`, `release`, `lifecycle`, `endpoint`, `placement`,
 `relationship_integrity`, `provenance`, `runbook`, `knowledge`,
-`source_coverage`, and `access` (including `access_owner_missing`). Severities are
+`source_coverage`, `task_deadline`, and `access` (including `access_owner_missing`). Severities are
 `critical`, `warning`, and `info`. Item signal states are `current`, `stale`,
 and `unknown`; the summary additionally reports `not_applicable` per category.
 The full reason vocabulary and its meaning are in [Needs
 attention](attention.md).
+
+Overdue project tasks use `task_deadline_overdue` (`warning`, `current`) and a
+task-specific target: `scope=project_record`, `ref=project_record:<UUID>`,
+`record_id`, direct workspace `detail_path`, and `project_label`. Its
+`object_id` and `kind=project` name the containing Project, so `kind=project`
+includes these items. Ordinary targets leave the two extra context fields null.
+Task completion, archival, deadline and effective-status changes are recomputed
+on every query; see [deadline lifecycle rules](attention.md#project-task-deadlines).
 
 Filters are exact `category`, `severity`, `reason_code`, `signal_state`, and
 `kind`; `direction` is `asc` or `desc`, and `limit` is 1..100. Ordering is

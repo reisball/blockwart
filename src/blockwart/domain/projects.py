@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections.abc import Callable, Iterable, Mapping
 from copy import deepcopy
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Any, Literal, cast
 
 from blockwart.domain.object_schema import (
@@ -18,6 +19,7 @@ from blockwart.domain.object_schema import (
 from blockwart.domain.object_schema import (
     PROJECT_STATUS_VALUES as OBJECT_SCHEMA_PROJECT_STATUS_VALUES,
 )
+from blockwart.domain.provenance import parse_rfc3339_utc
 from blockwart.domain.references import TypedReference
 
 ProjectCategory = Literal[
@@ -227,3 +229,10 @@ def _reference_is_discoverable(
         return can_discover(TypedReference.parse(value).object_id)
     except ValueError:
         return False
+
+
+def project_record_overdue(
+    due_at: str | None, effective_status: str | None, *, now: datetime
+) -> bool:
+    """Use the workspace's strict due boundary, including unknown effective status."""
+    return bool(due_at and effective_status != "done" and parse_rfc3339_utc(due_at) < now)

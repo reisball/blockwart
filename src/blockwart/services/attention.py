@@ -39,6 +39,7 @@ from blockwart.domain.attention import (
     AttentionObjectInput,
     AttentionRelationshipDiagnosticInput,
     AttentionSummary,
+    AttentionTaskInput,
     build_attention_derivation,
     summarize_attention,
 )
@@ -47,13 +48,14 @@ from blockwart.domain.references import TypedReference
 from blockwart.domain.relationships import diagnose_relationship_integrity
 from blockwart.domain.search import SEARCH_LIMIT_MAX, SEARCH_LIMIT_MIN
 from blockwart.domain.timestamps import format_rfc3339_utc
-from blockwart.models import CatalogObject, Relationship
+from blockwart.models import CatalogObject, ProjectRecord, ProjectRecordEvent, Relationship
 from blockwart.schemas.catalog import ObjectKind
 from blockwart.services.catalog import catalog_objects_from_snapshot
 from blockwart.services.grant_management import adoption_channel_matches
 from blockwart.services.ownership import ownerless_object_ids
 from blockwart.services.pagination import SortDirection, paginate_items
 from blockwart.services.policy import GlobalPolicySource
+from blockwart.services.project_management import effective_record_status
 from blockwart.services.queries import (
     build_monitoring_index,
     build_release_monitoring_index,
@@ -145,6 +147,7 @@ def query_attention_page(
         coverage=scoped_coverage,
         coverage_collected=bool(scoped_coverage),
         now=reference,
+        tasks=tuple(task for task in signals.tasks if task.project_id in scoped_ids),
         relationship_diagnostics=tuple(
             diagnostic
             for diagnostic in signals.relationship_diagnostics
@@ -219,6 +222,7 @@ def _matches_filters(
 @dataclass(frozen=True, slots=True)
 class _AttentionSignals:
     objects: tuple[AttentionObjectInput, ...]
+    tasks: tuple[AttentionTaskInput, ...]
     coverage: tuple[AttentionCoverageInput, ...]
     relationship_diagnostics: tuple[AttentionRelationshipDiagnosticInput, ...]
 
@@ -340,6 +344,7 @@ def _load_signals(
     )
     return _AttentionSignals(
         objects=objects,
+        tasks=_task_inputs(session, catalog_rows, readable_ids=readable_ids, now=now),
         coverage=coverage_rows,
         relationship_diagnostics=_relationship_diagnostic_inputs(
             canonical,
@@ -348,6 +353,66 @@ def _load_signals(
             readable_ids=readable_ids,
         ),
     )
+
+
+def _task_inputs(
+    session: Session,
+    catalog_rows: list[CatalogObject],
+    *,
+    readable_ids: set[str],
+    now: datetime,
+) -> tuple[AttentionTaskInput, ...]:
+    """Batch workspace facts only for readable, current project instances.
+
+    No record-context graph traversal or per-task database queries are needed.
+    Only the title, deadline, archive flag and canonical effective status leave
+    this boundary; external observations and typed references never do.
+    """
+    projects = {
+        row.instance_id: row
+        for row in catalog_rows
+        if row.kind == "project" and row.id in readable_ids
+    }
+    # Keep a constant statement path even when no projects are readable.
+    rows = session.scalars(
+        select(ProjectRecord)
+        .where(ProjectRecord.project_instance_id.in_(projects))
+        .execution_options(populate_existing=True)
+    ).all()
+    events = session.scalars(
+        select(ProjectRecordEvent)
+        .where(ProjectRecordEvent.project_instance_id.in_(projects))
+        .order_by(ProjectRecordEvent.created_at, ProjectRecordEvent.id)
+    ).all()
+    rows_by_project: dict[str, list[ProjectRecord]] = {key: [] for key in projects}
+    events_by_project: dict[str, list[ProjectRecordEvent]] = {key: [] for key in projects}
+    for row in rows:
+        rows_by_project[row.project_instance_id].append(row)
+    for event in events:
+        events_by_project[event.project_instance_id].append(event)
+    tasks = []
+    for row in rows:
+        if row.kind != "item":
+            continue
+        data = json.loads(row.data_json)
+        if data.get("item_type", "task") != "task":
+            continue
+        tasks.append(
+            AttentionTaskInput(
+                project_id=projects[row.project_instance_id].id,
+                record_id=row.id,
+                label=data["title"],
+                due_at=data.get("due_at"),
+                effective_status=effective_record_status(
+                    row,
+                    rows_by_project[row.project_instance_id],
+                    events_by_project[row.project_instance_id],
+                    now=now,
+                ),
+                archived=data.get("archived", False),
+            )
+        )
+    return tuple(tasks)
 
 
 def _object_input(
@@ -586,6 +651,8 @@ def _attention_view_digest(items: list[AttentionItem]) -> str:
                 "object_id": item.target.object_id,
                 "ref": item.target.ref,
                 "scope": item.target.scope,
+                "record_id": item.target.record_id,
+                "project_label": item.target.project_label,
             },
         }
         for item in items
