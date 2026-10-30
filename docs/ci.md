@@ -43,6 +43,9 @@ PYTHON_BIN=/tmp/blockwart-lock-venv/bin/python \
 
 The bootstrap and development extra pin the verified pip 26.2 / pip-tools 7.6.1 pair.
 Keep the compiler version in the bootstrap, development extra, and lock script aligned.
+For setuptools updates, keep `[build-system].requires`, the development extra, and the
+generated development lock aligned; a lock-only bump makes the constrained development
+install fail with `ResolutionImpossible`.
 
 The `--preserve` command seeds each temporary body from its committed lock and passes
 `--no-upgrade`, retaining compatible versions during focused updates. The default update
