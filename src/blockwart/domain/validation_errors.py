@@ -137,6 +137,7 @@ _INPUT_PATH_KEYS = frozenset(
         "exposure",
         "endpoint_type",
         "operational_only",
+        "project_id",
         "project_category",
         "project_status",
         "decision_status",

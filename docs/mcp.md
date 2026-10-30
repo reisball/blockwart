@@ -102,6 +102,7 @@ It wraps the object-authorized v1 API:
 - blockwart.save_project_record -> POST or PUT /api/v1/projects/{object_id}/workspace/{kind}[/{record_id}]
 - blockwart.list_project_record_history -> GET /api/v1/projects/{object_id}/workspace/history/{record_id}
 - blockwart.search_project_workspace -> GET /api/v1/projects/{object_id}/workspace/search
+- blockwart.search_workspaces -> GET /api/v1/workspace/search
 - blockwart.list_project_chronology -> GET /api/v1/projects/{object_id}/chronology
 - blockwart.append_project_chronology -> POST /api/v1/projects/{object_id}/chronology
 - blockwart.list_comments -> GET /api/v1/objects/{object_id}/comments
@@ -361,7 +362,7 @@ means it deliberately bundles lower-level API concerns behind one agent call.
 | `list_audit_events` | Read an object's system audit timeline | `directly sufficient` | Projects the existing redacted newest-first audit page without mixing in comment content. |
 | `add_comment` | Append an operational work note | `directly sufficient` | Keeps Markdown source and idempotency explicit without exposing audit internals. |
 | `get_context` | Find objects and read details | `directly sufficient` | Search, filters, full details, and per-object write-ready ETags already share one call. |
-| `get_attention` | Find what currently needs work | `directly sufficient` | Projects the shared application attention resolver: one closed category, severity, reason-code, and signal-state vocabulary over record and relationship integrity, placement, manual lifecycle, monitoring, endpoints, provenance, critical-service Runbook readiness, knowledge review, and source coverage, deduplicated to one item per target and category. |
+| `get_attention` | Find what currently needs work | `directly sufficient` | Projects the shared application attention resolver: one closed category, severity, reason-code, and signal-state vocabulary over record and relationship integrity, placement, manual lifecycle, monitoring, endpoints, provenance, critical-service Runbook readiness, knowledge review, task deadlines, and source coverage, deduplicated to one item per target and category. |
 | `get_source_coverage` | Inspect source inventory coverage and drift | `directly sufficient` | Projects the authorized REST snapshot with identical filters, state vocabulary, digest-bound cursor, and no workspace access. |
 | `create_child` | Create a placed child | `intent tool`, `response improved` | Resolves the parent internally and proves placement, ownership, revision, and idempotency. |
 | `create_root` | Create a disconnected catalog root | `intent tool`, `response improved` | Requires an already active principal whose catalog role covers the kind: `catalog_owner` for every kind, `project_creator` for `project` only. Proves ownership, revision, idempotency, and the absence of a placement parent. Never mutates any catalog role. |
@@ -439,6 +440,13 @@ closed classification, a fixed English description, an optional `detail_code`
 from an existing closed domain vocabulary, an optional evidence timestamp, and
 one authorized `kind:id` navigation reference. No message, exception text,
 endpoint, path, credential, or source excerpt is part of the contract.
+
+Overdue project tasks use the shared `task_deadline_overdue` reason
+(`task_deadline`, `warning`, `current`). The target is a `project_record` UUID
+with direct workspace `detail_path`, `record_id`, and `project_label`;
+`object_id`/`kind=project` name its containing Project. `kind=project` includes
+these tasks. READ authorization, effective status, strict due-date boundary,
+and next-query lifecycle updates are identical to REST and the browser.
 
 `blockwart.get_activity` forwards REST's authorized activity page and its
 `total_status`: `not_requested`, `exact`, or `budget_exhausted`. When the
@@ -754,3 +762,18 @@ relationship commands from Runbook to its one responsible infrastructure target;
 these commands require prior Owner authority on both endpoints (or Global Catalog
 Owner), retain ETag/audit/coverage protections, and reject editor-only capture.
 See [the complete shared contract](auth-rbac.md#explicit-operational-responsibility-revision-0032).
+
+### Cross-project workspace search
+
+- `blockwart.search_workspaces` → `GET /api/v1/workspace/search`
+- Requires `q`; optional `project_id`, `kind` (`item`, `page`, `chronology`),
+  `limit` (1–100, default 50) and query/authorization-bound `cursor`.
+- Searches only current records and chronology in readable projects; never
+  discover-only content, credentials, secret locations, imported extensions or
+  old versions. Returns project identity, kind, a bounded match excerpt and a
+  direct browser URL. Orders by `(project_id, kind, id)` ascending.
+- Separate from `blockwart.search` (ranked catalog) and
+  `blockwart.search_project_workspace` (one project's curated local scope).
+
+See [the workspace search contract](project-workspace.md#cross-project-workspace-search)
+for the exact field projection, exclusions and pagination behavior.

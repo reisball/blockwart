@@ -964,11 +964,11 @@ def _review_current(assessment, row, rows, events, seen=None):
     return True
 
 
-def _external_for(row, rows, events):
+def _external_for(row, rows, events, *, now=None):
     from blockwart.services.project_github import external_state
 
     data = json.loads(row.data_json)
-    external = external_state([e for e in events if e.record_id == row.id], data)
+    external = external_state([e for e in events if e.record_id == row.id], data, now=now)
     by_id = {r.id: r for r in rows}
     leading = data.get("leading_reference")
     for observation in (external.get("last_attempt") or {}).get("observations", []):
@@ -982,8 +982,13 @@ def _external_for(row, rows, events):
     return external
 
 
+def effective_record_status(row, rows, events, *, now=None):
+    """Resolve canonical status from a preloaded same-project record/event snapshot."""
+    return _external_for(row, rows, events, now=now)["effective_status"]
+
+
 def _work_status(row, rows, events):
-    return _external_for(row, rows, events)["effective_status"]
+    return effective_record_status(row, rows, events)
 
 
 def record_context(session, row):

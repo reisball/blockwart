@@ -19,6 +19,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from blockwart import __version__
+from blockwart.config import Settings
 from blockwart.db.session import build_engine, transaction
 from blockwart.domain.attention import (
     ATTENTION_CATEGORY_VALUES,
@@ -26,6 +27,7 @@ from blockwart.domain.attention import (
     ATTENTION_SEVERITY_VALUES,
 )
 from blockwart.domain.auth import CatalogRole, GrantScope, PlatformRole, Role
+from blockwart.main import create_app
 from blockwart.mcp.server import TOOLS
 from blockwart.models import CatalogObject
 from blockwart.schemas.catalog import CatalogObjectIn
@@ -298,6 +300,7 @@ async def check_mcp(
                 "blockwart.list_project_records",
                 "blockwart.save_project_record",
                 "blockwart.list_project_record_history",
+                "blockwart.search_workspaces",
                 "blockwart.search_project_workspace",
                 "blockwart.get_project_record",
                 "blockwart.get_project_overview",
@@ -318,6 +321,7 @@ async def check_mcp(
                         "blockwart.list_projects",
                         "blockwart.list_project_records",
                         "blockwart.list_project_record_history",
+                        "blockwart.search_workspaces",
                         "blockwart.search_project_workspace",
                         "blockwart.get_project_record",
                         "blockwart.get_project_overview",
@@ -627,6 +631,15 @@ async def check_mcp(
                 )
             )
             assert project_search["total"] == 1
+            workspace_search = _tool_payload(
+                await session.call_tool(
+                    "blockwart.search_workspaces",
+                    {"q": "PackageWorkspaceEvidence", "kind": "page", "limit": 1},
+                )
+            )
+            assert workspace_search["total"] == 1
+            assert workspace_search["items"][0]["project_id"] == "package-smoke-project"
+            assert workspace_search["items"][0]["id"] == project_record["record"]["id"]
             pm_task = _tool_payload(
                 await session.call_tool(
                     "blockwart.save_project_record",
@@ -1062,7 +1075,7 @@ def main() -> None:
         index = response.read().decode()
     with urlopen(f"{BASE_URL}/static/app.css", timeout=7) as response:
         static_content_type = response.headers.get_content_type()
-    openapi = fetch_json("/openapi.json")
+    openapi = create_app(settings=Settings()).openapi()
     assert openapi["info"]["version"] == __version__
     mcp_entrypoint = Path(sysconfig.get_path("scripts")) / "blockwart-mcp"
     wrapper_metadata = json.loads(
@@ -1103,7 +1116,7 @@ def main() -> None:
     print(
         "installed_package=ok "
         f"cwd={Path.cwd()} revision={readiness['revision']} "
-        f"openapi_paths={len(openapi['paths'])} mcp_protocol={protocol} mcp_calls=47 "
+        f"openapi_paths={len(openapi['paths'])} mcp_protocol={protocol} mcp_calls=48 "
         "mcp_contract=compatible mcp_contract_drift=fail_fast"
     )
 

@@ -17,6 +17,7 @@ from blockwart.api.deps import get_session
 from blockwart.domain.activity import ACTIVITY_EVENT_TYPES
 from blockwart.domain.attention import (
     ATTENTION_CATEGORY_VALUES,
+    ATTENTION_REASON_VALUES,
     ATTENTION_SEVERITY_VALUES,
 )
 from blockwart.domain.auth import GrantScope, Permission, Role, validate_grant_target
@@ -74,6 +75,9 @@ from blockwart.schemas.catalog import (
     PUBLIC_OBJECT_KINDS,
     CatalogObjectIn,
     CatalogObjectOut,
+)
+from blockwart.schemas.catalog import (
+    OBJECT_KINDS as ATTENTION_OBJECT_KINDS,
 )
 from blockwart.services.activity import (
     ActivityQueryError,
@@ -830,6 +834,8 @@ def attention_overview(
     category: str | None = None,
     severity: str | None = None,
     signal_state: str | None = None,
+    kind: str | None = None,
+    reason_code: str | None = None,
     cursor: str | None = None,
 ):
     """Render the authorized attention view from the shared application result."""
@@ -842,6 +848,8 @@ def attention_overview(
             category=category or None,
             severity=severity or None,
             signal_state=signal_state or None,
+            kind=kind or None,
+            reason_code=reason_code or None,
             limit=100,
             cursor=cursor,
             direction="asc",
@@ -855,6 +863,8 @@ def attention_overview(
         "category": category,
         "severity": severity,
         "signal_state": signal_state,
+        "kind": kind,
+        "reason_code": reason_code,
         "cursor": page.next_cursor,
     }
     next_url = (
@@ -871,11 +881,15 @@ def attention_overview(
             "summary": page.summary,
             "items": page.items,
             "categories": list(ATTENTION_CATEGORY_VALUES),
+            "kinds": list(ATTENTION_OBJECT_KINDS),
+            "reason_codes": list(ATTENTION_REASON_VALUES),
             "severities": list(ATTENTION_SEVERITY_VALUES),
             "signal_states": sorted(ATTENTION_ITEM_SIGNAL_STATES),
             "selected_category": category or "",
             "selected_severity": severity or "",
             "selected_signal_state": signal_state or "",
+            "selected_kind": kind or "",
+            "selected_reason_code": reason_code or "",
             "generated_at": page.generated_at,
             "next_url": next_url,
             **i18n,
@@ -982,6 +996,8 @@ def normalize_attention_filter_submission(
     category: str | None = None,
     severity: str | None = None,
     signal_state: str | None = None,
+    kind: str | None = None,
+    reason_code: str | None = None,
 ) -> RedirectResponse:
     """Redirect a native attention filter form to its canonical typed URL."""
     parameters = [
@@ -990,6 +1006,8 @@ def normalize_attention_filter_submission(
             ("category", category),
             ("severity", severity),
             ("signal_state", signal_state),
+            ("kind", kind),
+            ("reason_code", reason_code),
         )
         if value not in (None, "")
     ]
