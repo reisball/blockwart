@@ -19,6 +19,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from blockwart import __version__
+from blockwart.config import Settings
 from blockwart.db.session import build_engine, transaction
 from blockwart.domain.attention import (
     ATTENTION_CATEGORY_VALUES,
@@ -26,6 +27,7 @@ from blockwart.domain.attention import (
     ATTENTION_SEVERITY_VALUES,
 )
 from blockwart.domain.auth import CatalogRole, GrantScope, PlatformRole, Role
+from blockwart.main import create_app
 from blockwart.mcp.server import TOOLS
 from blockwart.models import CatalogObject
 from blockwart.schemas.catalog import CatalogObjectIn
@@ -1073,7 +1075,7 @@ def main() -> None:
         index = response.read().decode()
     with urlopen(f"{BASE_URL}/static/app.css", timeout=7) as response:
         static_content_type = response.headers.get_content_type()
-    openapi = fetch_json("/openapi.json")
+    openapi = create_app(settings=Settings()).openapi()
     assert openapi["info"]["version"] == __version__
     mcp_entrypoint = Path(sysconfig.get_path("scripts")) / "blockwart-mcp"
     wrapper_metadata = json.loads(

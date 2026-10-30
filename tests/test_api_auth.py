@@ -109,7 +109,7 @@ def test_missing_or_invalid_bearer_is_uniform_and_bucketed(
 def test_openapi_publishes_http_bearer_without_write_surface(
     api_auth_client: TestClient,
 ) -> None:
-    openapi = api_auth_client.get("/openapi.json").json()
+    openapi = api_auth_client.app.openapi()
 
     assert openapi["components"]["securitySchemes"]["HTTPBearer"] == {
         "scheme": "bearer",
@@ -119,6 +119,15 @@ def test_openapi_publishes_http_bearer_without_write_surface(
         {"HTTPBearer": []}
     ]
     assert set(openapi["paths"]["/api/objects"]) == {"get"}
+
+
+def test_docs_and_openapi_routes_are_disabled(
+    api_auth_client: TestClient,
+) -> None:
+    for path in ("/docs", "/redoc", "/openapi.json"):
+        assert api_auth_client.get(path).status_code == 404
+
+    assert api_auth_client.app.openapi()["info"]["title"] == "Blockwart"
 
 
 def test_mcp_contract_metadata_is_authorized_and_matches_the_local_wrapper(

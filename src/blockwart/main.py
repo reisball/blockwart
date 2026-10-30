@@ -33,6 +33,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         title="Blockwart",
         version=__version__,
         lifespan=_monitoring_lifespan(resolved_settings),
+        # Security hardening (T-0363): keep the OpenAPI/Swagger surface off the
+        # wire. Machine consumers read the schema through app.openapi() and the
+        # authenticated /api/v1/mcp-contract endpoint; the UI does not link the
+        # docs routes.
+        docs_url=None,
+        redoc_url=None,
+        openapi_url=None,
     )
     app.state.settings = resolved_settings
     app.state.login_protector = LoginProtector(
