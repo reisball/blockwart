@@ -173,3 +173,50 @@ existing form parser and cannot block an ordinary work-state save. Selecting a
 source type or entering any other metadata still creates an explicit source
 candidate, so incomplete entries remain validation errors. Existing selected
 source types and legacy metadata preservation are unchanged.
+
+### Cross-project workspace search
+
+`GET /api/v1/workspace/search?q=...` and MCP `blockwart.search_workspaces`
+search project content without first choosing a project. The browser has a
+separate **Workspace search** link from the catalog and Projects overview at
+`/workspace/search`. Existing ranked catalog search and project-local search
+are unchanged.
+
+The scope is the **current stored version** of items (including requirements,
+evidence and archived/completed items), knowledge pages (including pages marked
+historical/superseded), and complete project chronology (including legacy notes).
+It does not search catalog fields, access/repository records, record events,
+historical record/page versions, related-object/reference identifiers,
+credential-reference identifiers, secret-store locations or unknown extension
+payloads. Only explicitly curated prose fields are searched: title, description,
+assignee, blocked reason, body and issue URL; requirement original/change reason/
+source URL; evidence subject/scope/limitations/source URL; criterion descriptions;
+and chronology body. The projection never recursively indexes arbitrary JSON.
+Secret-looking free text remains subject to the existing write-time validation.
+
+A nonblank `q` (1–200 characters) is required. Matching uses a literal substring
+after Unicode NFKC normalization, case folding and whitespace collapsing; there
+is no semantic matching or relevance ranking. Optional filters are `project_id`
+(exact id) and `kind` (`item`, `page`, `chronology`). No filter includes all eligible
+content. An inaccessible, discover-only or nonexistent `project_id` returns the
+same empty page. Authorization requires DETAIL access **before** matching,
+project labels, excerpts, totals or pagination are computed.
+
+Each result has `project_id`, `project_label`, `kind`, record/entry `id`, `title`,
+a match-centered, case-preserving `excerpt` of at most 300 characters and a
+relative browser `url`. For chronology hits, `title` is the machine kind code
+(such as `note` or `milestone`), not a separately curated title.
+Record URLs open the existing record detail; chronology
+URLs open the exact instance-scoped entry, including entries older than the
+project timeline's first page. Browser output escapes prose and uses the existing
+safe chronology Markdown renderer.
+
+Results sort by ascending `(project_id, kind, id)`, not project label or activity.
+`limit` defaults to 50 and is constrained to 1–100. Pass `next_cursor` as `cursor`
+to continue; `total` always counts only authorized matches before pagination.
+Cursors are bound to the normalized query, filters, principal, current permission
+snapshot and selected project incarnations. Changing any of those invalidates a
+cursor (HTTP 400); changing only page size is allowed. Results are not a frozen
+snapshot: concurrent writes may change totals or subsequent pages. Filtering and
+matching scan the current authorized workspace rows in-process; no external index,
+embedding service, schema migration or background job is added.

@@ -101,6 +101,95 @@ results. CI provisions the equivalent service on port 5432 and explicitly sets
 the URL. Remove only your example server after testing with
 `docker stop blockwart-dev-postgres`.
 
+## Conservative Documentation Path
+
+Both hosts keep the required check named **`verify`**. The workflow is always
+created for pull requests and pushes to `main`; it has no workflow-level path
+exclusions. A small `classify` job selects `docs` or `full`, then the final
+`verify` job aggregates their results with `if: always()`.
+
+Eligibility is an **exact audited allowlist**, currently only these root files:
+
+- `CONTRIBUTING.md`
+- `SECURITY.md`
+
+These files are contributor/security-reporting prose, not runtime inputs,
+package metadata, image contents, or executable contract-test inputs. They are
+absent from the current wheel and source distribution and from Docker `COPY`
+inputs. Do not expand the allowlist based only on a Markdown suffix or directory.
+Re-audit packaging, runtime/script/test consumers and contracts before adding a
+file or changing how an allowlisted file is consumed.
+
+`README.md` supplies package metadata. All of `docs/` is copied into the image,
+and some pages are contract-test inputs. Therefore **every change under `docs/`
+(including this page), `README.md`, `CHANGELOG.md` (release evidence), examples,
+application code, migrations, dependencies, build/CI configuration, generated
+contracts, or any unknown path runs full verification**. Mixed changes do too.
+Only regular, non-executable allowlisted files qualify. Prose additions and
+deletions are eligible; renames examine both old and new paths, so renaming
+between prose and any unlisted path runs full verification.
+
+### Reliable changed-file detection
+
+Checkout fetches complete history. The dependency-free classifier reads the
+host's event JSON rather than interpolating event data into shell commands:
+
+- Pull requests use the merge base of the event's base/head commit IDs through
+  the head, not merely the last commit. A head checkout is supported. For a
+  synthetic merge checkout, both parents must match the event base/head, and
+  the diff from base to the actual merge result is also checked.
+- Pushes use the complete event `before..after` range, require `after` to match
+  the checkout and require a fast-forward history. This includes every commit
+  in a multi-commit push.
+- Missing/invalid event fields or commits, shallow or unrelated history,
+  ambiguous merge bases, new-branch/all-zero `before`, force pushes, unexpected checkout shapes,
+  unsupported events, empty diffs and any other uncertain diff select `full`.
+  An actual classifier job error (for example, failed checkout or failure to
+  write its output) fails the final gate instead of silently skipping proof.
+
+### Lightweight proof and the required gate
+
+The docs job has **no PostgreSQL service, dependency/application install, pytest
+application suite, wheel build, Docker build or smoke tests**. It sets up Python
+3.12 and runs only these offline, standard-library checks:
+
+```bash
+cmp .gitea/workflows/ci.yml .github/workflows/ci.yml
+python scripts/ci/check_docs.py
+python -m unittest discover -s tests/ci -p 'test_*.py' -v
+```
+
+The prose checker verifies UTF-8, nonempty files with final newlines, no trailing
+whitespace/conflict markers, closed fenced code blocks and existing in-repository
+inline local Markdown link targets (outside code fences). It does not fetch
+remote URLs or validate fragment anchors. Absent/deleted prose files are allowed.
+The regression suite builds disposable local Git histories to exercise PR and
+push ranges, merged/diverged PRs, mixed changes, renames, deletions, file modes,
+missing/shallow history, malformed events and fallback behavior.
+
+`verify` succeeds only when classification succeeded, the selected job succeeded
+and the unselected job was skipped. A failed, cancelled, unexpectedly skipped or
+missing required job, or a missing/unknown mode, is never accepted. Expected
+heavy-job skipping on the docs path is distinguished from missing required
+proof. Whole-workflow cancellation likewise cannot supply a successful required
+check. No branch-protection change is needed; `verify` keeps its existing name.
+The existing full proof and its **60-minute** job timeout are retained.
+
+Focused local routing/workflow checks (using the locked development environment)
+are:
+
+```bash
+python -m unittest discover -s tests/ci -p 'test_*.py' -v
+pytest -q -ra tests/ci/test_docs_ci.py tests/test_ci_workflow.py
+cmp .gitea/workflows/ci.yml .github/workflows/ci.yml
+actionlint .gitea/workflows/ci.yml .github/workflows/ci.yml
+```
+
+The workflow tests execute the actual required-gate shell across all combinations
+of classifier/docs/full outcomes, and execute the actual lightweight shell in a
+disposable repository after a concrete prose-only push. This is local routing
+and command proof, not a claim that a hosted GitHub/Gitea run has completed.
+
 ## Contract Proof
 
 The Gitea and GitHub workflows in `.gitea/workflows/ci.yml` and
@@ -131,7 +220,7 @@ docker build \
 The package smoke builds a wheel, installs it into a clean virtual environment, changes to a
 directory outside the repository, starts `blockwart-start`, loads packaged templates and static
 assets, runs the relationship-integrity diagnostic, and verifies the complete
-47-tool catalog. Its read/write, preview, Project-workspace, coverage, attention,
+48-tool catalog. Its read/write, preview, Project-workspace, coverage, attention,
 activity, comment, audit, grant-management, and ownerless-adoption calls use the
 installed `blockwart-mcp` console command. The smoke's `mcp_calls` summary is a
 fixed label, not an independently measured count of calls or per-tool coverage.

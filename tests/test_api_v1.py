@@ -473,7 +473,7 @@ def test_v1_can_enumerate_more_than_the_legacy_agent_limit(
 def test_v1_publishes_explicit_command_methods_and_compatibility_reads(
     client: TestClient,
 ) -> None:
-    openapi = client.get("/openapi.json").json()
+    openapi = client.app.openapi()
     v1_paths = {
         path: methods
         for path, methods in openapi["paths"].items()

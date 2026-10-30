@@ -37,6 +37,7 @@ from blockwart.domain.object_schema import (
     PROJECT_STATUS_VALUES,
     RUNBOOK_STATUS_VALUES,
 )
+from blockwart.domain.projects import project_record_overdue
 from blockwart.domain.provenance import parse_rfc3339_utc
 from blockwart.domain.relationships import RELATIONSHIP_DIAGNOSTIC_CODES
 from blockwart.domain.service_readiness import service_criticality
@@ -55,6 +56,7 @@ AttentionCategory = Literal[
     "runbook",
     "knowledge",
     "source_coverage",
+    "task_deadline",
 ]
 # Declaration order is the published tie-breaker between two items of equal
 # severity.  It is a stable part of the contract, not an implementation detail.
@@ -75,7 +77,7 @@ AttentionSignalState = Literal["current", "stale", "unknown", "not_applicable"]
 ATTENTION_SIGNAL_STATE_VALUES: tuple[str, ...] = get_args(AttentionSignalState)
 ATTENTION_SIGNAL_STATES = frozenset(ATTENTION_SIGNAL_STATE_VALUES)
 
-AttentionTargetScope = Literal["object", "catalog"]
+AttentionTargetScope = Literal["object", "catalog", "project_record"]
 
 # The one catalog-scoped target. It carries no object identity at all, so the
 # "coverage was never collected" fact cannot become an object hint.
@@ -112,6 +114,7 @@ AttentionReason = Literal[
     "coverage_import_drift",
     "coverage_mapping_ambiguous",
     "coverage_not_collected",
+    "task_deadline_overdue",
 ]
 ATTENTION_REASON_VALUES: tuple[str, ...] = get_args(AttentionReason)
 ATTENTION_REASONS = frozenset(ATTENTION_REASON_VALUES)
@@ -363,6 +366,13 @@ ATTENTION_REASON_SPECS: tuple[AttentionReasonSpec, ...] = (
         "unknown",
         "No authorized mapped source-coverage evidence is available, so coverage is unknown.",
     ),
+    _spec(
+        "task_deadline_overdue",
+        "task_deadline",
+        "warning",
+        "current",
+        "The active project task passed its due date and is not effectively completed.",
+    ),
 )
 
 REASON_SPEC_BY_CODE: Mapping[str, AttentionReasonSpec] = {
@@ -435,6 +445,8 @@ class AttentionTarget:
     kind: str | None = None
     label: str | None = None
     detail_path: str | None = None
+    record_id: str | None = None
+    project_label: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -532,6 +544,18 @@ class AttentionCoverageInput:
 
 
 @dataclass(frozen=True, slots=True)
+class AttentionTaskInput:
+    """One task from an authorized, instance-bound project workspace snapshot."""
+
+    project_id: str
+    record_id: str
+    label: str
+    due_at: str | None
+    effective_status: str | None
+    archived: bool = False
+
+
+@dataclass(frozen=True, slots=True)
 class AttentionDerivation:
     """The complete authorized item set plus its evaluation scope."""
 
@@ -547,6 +571,7 @@ def build_attention_derivation(
     coverage_collected: bool,
     now: datetime,
     relationship_diagnostics: Sequence[AttentionRelationshipDiagnosticInput] = (),
+    tasks: Sequence[AttentionTaskInput] = (),
 ) -> AttentionDerivation:
     """Classify every authorized signal into one deduplicated ordered set."""
 
@@ -564,9 +589,10 @@ def build_attention_derivation(
         *,
         detail_code: str | None = None,
         observed_at: str | None = None,
+        target: AttentionTarget | None = None,
     ) -> None:
         spec = REASON_SPEC_BY_CODE[reason_code]
-        target = (
+        target = target or (
             _object_target(candidate)
             if candidate is not None
             else AttentionTarget(
@@ -623,6 +649,35 @@ def build_attention_derivation(
         _derive_provenance(candidate, evaluated, emit, now=now)
         _derive_runbook(candidate, evaluated, emit, now=now)
         _derive_knowledge(candidate, evaluated, emit, now=now)
+
+    for task in tasks:
+        project = labels.get(task.project_id)
+        if (
+            project is None
+            or project.kind != "project"
+            or project.record_state != "valid"
+            or not _is_live(project)
+            or task.archived
+        ):
+            continue
+        evaluated["task_deadline"] += 1
+        if project_record_overdue(task.due_at, task.effective_status, now=now):
+            emit(
+                project,
+                "task_deadline_overdue",
+                target=AttentionTarget(
+                    scope="project_record",
+                    ref=f"project_record:{task.record_id}",
+                    object_id=project.object_id,
+                    kind=project.kind,
+                    label=task.label,
+                    detail_path=(
+                        f"/projects/{project.object_id}/workspace/record/{task.record_id}"
+                    ),
+                    record_id=task.record_id,
+                    project_label=project.label,
+                ),
+            )
 
     _derive_relationship_diagnostics(
         relationship_diagnostics,

@@ -447,7 +447,7 @@ def test_agent_routes_remain_get_only(
     client: TestClient,
     resolved_asset_graph: None,
 ) -> None:
-    openapi = client.get("/openapi.json").json()
+    openapi = client.app.openapi()
     agent_paths = {
         path: methods for path, methods in openapi["paths"].items() if path.startswith("/api/agent")
     }

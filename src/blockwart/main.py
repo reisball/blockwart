@@ -23,6 +23,7 @@ from blockwart.ui.i18n import persist_locale_cookie, validate_locale_catalogs
 from blockwart.ui.paths import STATIC_DIR
 from blockwart.ui.project_workspace import router as project_records_ui_router
 from blockwart.ui.routes import router as ui_router
+from blockwart.ui.workspace_search import router as workspace_search_ui_router
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
@@ -32,6 +33,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         title="Blockwart",
         version=__version__,
         lifespan=_monitoring_lifespan(resolved_settings),
+        # Security hardening (T-0363): keep the OpenAPI/Swagger surface off the
+        # wire. Machine consumers read the schema through app.openapi() and the
+        # authenticated /api/v1/mcp-contract endpoint; the UI does not link the
+        # docs routes.
+        docs_url=None,
+        redoc_url=None,
+        openapi_url=None,
     )
     app.state.settings = resolved_settings
     app.state.login_protector = LoginProtector(
@@ -59,6 +67,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(admin_ui_router)
     app.include_router(ui_router)
     app.include_router(project_records_ui_router)
+    app.include_router(workspace_search_ui_router)
     install_request_context(app)
     default_openapi = app.openapi
 
