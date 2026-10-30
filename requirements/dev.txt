@@ -29,7 +29,7 @@ build==1.5.0
     # via
     #   blockwart (pyproject.toml)
     #   pip-tools
-certifi==2026.10.19
+certifi==2026.10.23
     # via
     #   httpcore
     #   httpx
