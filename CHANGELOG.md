@@ -24,6 +24,10 @@ Notable product changes are recorded here. Versions follow the
   and supports explicit assignment of the new content roles. Omitted locator
   content is preserved during metadata updates; see `docs/auth-rbac.md`.
 
+### Fixed
+
+- Explorer shows explicit network addresses and known product models when no platform is recorded; missing values are not guessed.
+
 ## [0.2.0] - 2026-10-26
 
 Project management workflows, stronger access controls, and clearer validation errors.

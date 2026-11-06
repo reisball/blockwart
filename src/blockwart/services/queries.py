@@ -6,6 +6,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any, Literal, NotRequired, TypedDict
+from urllib.parse import urlsplit
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -1808,6 +1809,57 @@ def _refs_for_kind(
     ]
 
 
+def _explorer_address(
+    network: Mapping[str, Any] | None,
+    endpoints: list[Mapping[str, Any]],
+) -> str:
+    if isinstance(network, Mapping):
+        addresses = _list_of_mappings(network.get("addresses"))
+        for address in addresses:
+            ip = address.get("ip")
+            if isinstance(ip, str) and ip.strip():
+                return ip.strip()
+        hostnames = network.get("hostnames")
+        if isinstance(hostnames, list):
+            for hostname in hostnames:
+                if isinstance(hostname, str) and hostname.strip():
+                    return hostname.strip()
+
+    for endpoint in endpoints:
+        host = endpoint.get("host")
+        if isinstance(host, str) and host.strip():
+            return host.strip()
+        url = endpoint.get("url")
+        if not isinstance(url, str) or not url.strip():
+            continue
+        try:
+            hostname = urlsplit(url.strip()).hostname
+        except ValueError:
+            continue
+        if hostname:
+            return hostname
+    return ""
+
+
+def _explorer_platform(data: Mapping[str, Any]) -> str:
+    for key in ("platform", "type"):
+        value = data.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+
+    for key in ("hardware", "device", "network"):
+        details = data.get(key)
+        if not isinstance(details, Mapping):
+            continue
+        model = details.get("model")
+        if not isinstance(model, str) or not model.strip():
+            continue
+        manufacturer = details.get("manufacturer")
+        prefix = manufacturer.strip() if isinstance(manufacturer, str) else ""
+        return f"{prefix} {model.strip()}".strip()
+    return ""
+
+
 def _explorer_asset(
     catalog_object: CatalogObjectReadOut,
     monitoring_index: Mapping[str, dict[str, Any]],
@@ -1822,16 +1874,18 @@ def _explorer_asset(
             "capabilities": catalog_object.capabilities,
         }
     network = catalog_object.data.get("network")
-    addresses = _list_of_mappings(network.get("addresses")) if isinstance(network, Mapping) else []
     endpoints = _list_of_mappings(catalog_object.data.get("endpoints"))
-    first_address = str(addresses[0].get("ip") or "") if addresses else ""
+    first_address = _explorer_address(
+        network if isinstance(network, Mapping) else None,
+        endpoints,
+    )
     first_endpoint = endpoints[0] if endpoints else {}
     endpoint_type = str(first_endpoint.get("type") or "")
     endpoint_port = first_endpoint.get("port")
     endpoint = endpoint_type
     if endpoint_port is not None:
         endpoint = f"{endpoint_type} :{endpoint_port}".strip()
-    platform = str(catalog_object.data.get("platform") or catalog_object.data.get("type") or "")
+    platform = _explorer_platform(catalog_object.data)
     raw_labels = catalog_object.data.get("labels")
     labels = (
         [str(label) for label in raw_labels if isinstance(label, str)]

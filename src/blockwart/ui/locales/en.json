@@ -115,6 +115,7 @@
   "asset.none_relationship": "No relationship",
   "asset.no_value": "—",
   "asset.platform": "Platform",
+  "asset.platform_or_model": "Platform / model",
   "asset.reference": "Reference",
   "asset.save": "Save",
   "asset.status": "Status",
