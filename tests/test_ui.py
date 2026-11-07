@@ -106,6 +106,51 @@ def test_index_lists_seeded_objects_and_filters_search(client: TestClient) -> No
     assert "brieftraeger-ocr-worker" in response.text
 
 
+def test_catalog_explorer_displays_endpoint_host_and_known_model(
+    client: TestClient,
+    session_factory,
+) -> None:
+    object_id = "explorer-repeater-test"
+    with session_factory() as session:
+        upsert_object(
+            session,
+            CatalogObjectIn(
+                id=object_id,
+                kind="network",
+                label="Explorer Repeater Test",
+                data={
+                    "schema_version": 1,
+                    "network": {
+                        "category": "access_point",
+                        "manufacturer": "AVM",
+                        "model": "FRITZ!Repeater 6000",
+                    },
+                    "endpoints": [
+                        {
+                            "type": "Web",
+                            "url": "https://repeater.example.invalid:8443/admin",
+                        }
+                    ],
+                },
+            ),
+        )
+
+    response = client.get("/", params={"lang": "en"})
+    assert response.status_code == 200
+    assets_match = re.search(
+        r"window\.BLOCKWART_EXPLORER_ASSETS = (.+);",
+        response.text,
+    )
+    assert assets_match is not None
+    asset = json.loads(assets_match.group(1))[f"network:{object_id}"]
+    assert asset["address"] == "repeater.example.invalid"
+    assert asset["platform"] == "AVM FRITZ!Repeater 6000"
+    assert "Platform / model" in response.text
+
+    german = client.get("/", params={"lang": "de"})
+    assert "Plattform / Modell" in german.text
+
+
 def test_ui_assets_resolve_from_package_outside_repo_root(
     client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
