@@ -24,6 +24,11 @@
         <section class="panel"><p>{{ t("auth.stub_notice_short") }}</p></section>
       {% else %}
         {% if error %}<div class="error" role="alert">{{ error }}</div>{% endif %}
+        {% if not edit %}<section class="panel" aria-labelledby="project-instructions-title">
+          <h2 class="section-title" id="project-instructions-title">{{ t("project.field.agent_instructions.label") }}</h2>
+          <p class="meta">{{ t("project.field.agent_instructions.help") }}</p>
+          <p class="preserve-lines">{{ project.agent_instructions or t("project.workspace.empty_value") }}</p>
+        </section>{% endif %}
         <section class="panel">
           <div class="panel-head"><h2 class="section-title">{{ t("project.workspace.current_state") }}</h2>{% if can_write and not edit %}<a class="button button-small" href="/projects/{{ object.id }}?edit=true">{{ t("detail.edit") }}</a>{% endif %}</div>
           <dl class="fact-grid"><div><dt>{{ t("project.field.project_status.label") }}</dt><dd><span class="badge">{{ t("project.status." ~ project.project_status) if project.project_status else t("asset.no_value") }}</span></dd></div><div><dt>{{ t("project.field.category.label") }}</dt><dd>{{ t("project.category." ~ project.category) if project.category else t("asset.no_value") }}</dd></div></dl>
@@ -34,6 +39,10 @@
               {% for field in ['started_at', 'completed_at', 'review_after'] %}<label>{{ t('project.field.' ~ field ~ '.label') }}<input name="{{ field }}" value="{{ project_form[field] }}" placeholder="2026-11-01T09:00:00Z" /></label>{% endfor %}
               <label>{{ t('project.records.manager_kind') }}<select name="managed_by_kind"><option value="">—</option>{% for option in ['person', 'team', 'principal'] %}<option value="{{ option }}"{% if project_form.managed_by_kind == option %} selected{% endif %}>{{ t('project.records.manager.' ~ option) }}</option>{% endfor %}</select></label>
               <label>{{ t('project.records.manager_label') }}<input name="managed_by_label" value="{{ project_form.managed_by_label }}" /></label><label>{{ t('project.records.manager_principal') }}<input name="managed_by_principal_id" value="{{ project_form.managed_by_principal_id }}" /></label>
+              <fieldset><legend>{{ t("project.field.agent_instructions.label") }}</legend>
+                <label>{{ t("project.field.agent_instructions.label") }}<textarea name="agent_instructions" maxlength="16000" rows="8">{{ project_form.agent_instructions }}</textarea></label>
+                <p class="meta">{{ t("project.field.agent_instructions.help") }}</p>
+              </fieldset>
               <label>{{ t("project.field.objective.label") }}<textarea name="objective" maxlength="4000">{{ project_form.objective }}</textarea></label>
               <label>{{ t("project.field.in_scope.label") }}<textarea name="in_scope">{{ project_form.in_scope }}</textarea></label>
               <label>{{ t("project.field.out_of_scope.label") }}<textarea name="out_of_scope">{{ project_form.out_of_scope }}</textarea></label>

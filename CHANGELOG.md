@@ -7,6 +7,10 @@ Notable product changes are recorded here. Versions follow the
 
 ### Added
 
+- Optional multiline Project Instructions in DE/EN create/edit and detail views,
+  with complete authorized REST/MCP context and Project overview exposure (#333).
+  Instructions are project-specific user context, not permission or policy overrides.
+
 - Portable agent-skill template and optional, scoped quick-reference workflow,
   linked from the agent onboarding documentation (#317).
 

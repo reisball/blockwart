@@ -353,6 +353,10 @@
                     <span class="meta">{{ schema_fields_by_key.project_status.placeholder }}</span>
                   </label>
                 </fieldset>
+                <fieldset><legend>{{ t("project.field.agent_instructions.label") }}</legend>
+                  <label>{{ t("project.field.agent_instructions.label") }}<textarea name="agent_instructions" maxlength="16000" rows="8">{{ project_form.agent_instructions }}</textarea></label>
+                  <p class="meta">{{ t("project.field.agent_instructions.help") }}</p>
+                </fieldset>
                 {{ project_text_field("objective") }}
                 {{ project_line_field("in_scope") }}
                 {{ project_line_field("out_of_scope") }}
@@ -516,6 +520,11 @@
               </form>
             </section>
           {% else %}
+            <section class="panel" aria-labelledby="project-instructions-title">
+              <h2 class="section-title" id="project-instructions-title">{{ t("project.field.agent_instructions.label") }}</h2>
+              <p class="meta">{{ t("project.field.agent_instructions.help") }}</p>
+              {{ project_text(project_detail.agent_instructions) }}
+            </section>
             <section class="panel" aria-labelledby="project-classification-title">
               <div class="panel-head"><h2 class="section-title" id="project-classification-title">{{ t("project.section.classification") }}</h2>{% if can_write %}<a class="button button-small button-muted" href="{{ detail_edit_hrefs.project }}">{{ t("detail.edit") }}</a>{% endif %}</div>
               <dl class="fact-grid">

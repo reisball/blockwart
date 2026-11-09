@@ -62,6 +62,7 @@ class ProjectOverviewItemOut(BaseModel):
     revision: int = Field(ge=1)
     category: ProjectCategory | None = None
     project_status: ProjectStatus | None = None
+    agent_instructions: str | None = None
     current_summary: str | None = None
     next_action: str | None = None
     last_professional_activity: ProjectChronologyEntryOut | None = None

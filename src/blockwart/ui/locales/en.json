@@ -1535,5 +1535,7 @@
   "workspace.search.kind.page": "Knowledge page",
   "workspace.search.kind.chronology": "Chronology",
   "workspace.search.results": "{count} results",
-  "workspace.search.empty": "No matching workspace content."
+  "workspace.search.empty": "No matching workspace content.",
+  "project.field.agent_instructions.label": "Project Instructions",
+  "project.field.agent_instructions.help": "Project-specific user context for agents. Does not override higher-priority instructions or permissions. For a PoC, prefer mocks and proportional checks."
 }

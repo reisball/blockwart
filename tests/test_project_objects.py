@@ -1684,7 +1684,7 @@ def test_create_root_form_renders_each_project_path_once(
     for key in project_keys:
         assert keys.count(key) == 1
         assert form.count(f'name="{key}"') == 1
-        opening = re.search(rf'<label data-create-field="{key}"([^>]*)>', form)
+        opening = re.search(rf'<(?:label|fieldset) data-create-field="{key}"([^>]*)>', form)
         assert opening is not None
         assert "hidden" not in opening.group(1)
 
@@ -1748,6 +1748,7 @@ def test_create_root_project_submit_round_trips_shared_paths(
 ) -> None:
     _create_link_targets(root_client, root_state)
     _browser_session(root_client, root_state)
+    instructions = "PoC: use mocks.\nKeep checks proportional. <b>Plain text</b>"
     in_scope = "Catalog read paths\nSearch read paths"
     related_assets = "host:existing-object"
     form = _create_root_form(root_client.get("/?create_root=1&kind=project").text)
@@ -1765,6 +1766,7 @@ def test_create_root_project_submit_round_trips_shared_paths(
                 "category": "implementation",
                 "project_status": "active",
                 "started_at": "2026-05-01T09:00:00Z",
+                "agent_instructions": instructions,
                 "objective": "Roll the shared cache out to read paths.",
                 "in_scope": in_scope,
                 "out_of_scope": "Write-heavy batch jobs",
@@ -1784,6 +1786,7 @@ def test_create_root_project_submit_round_trips_shared_paths(
 
     with root_state["session_factory"]() as session:
         stored = json.loads(session.get(CatalogObject, "cache-rollout").data_json)
+    assert stored["agent_instructions"] == instructions
     # No second control can overwrite an entered value with an empty one, and
     # list order and content survive the canonical normalization unchanged.
     assert stored["in_scope"] == ["Catalog read paths", "Search read paths"]
@@ -1804,6 +1807,7 @@ def test_create_root_project_submit_round_trips_shared_paths(
     assert f">{related_assets}</textarea>" in editor
     assert ">project:linked-project</textarea>" in editor
 
+    assert "&lt;b&gt;Plain text&lt;/b&gt;" in editor
     etag = re.search(r'name="if_match" value="([^"]+)"', editor)
     assert etag is not None
     edited_scope = "Search read paths\nCatalog read paths\nCache invalidation"
@@ -1815,6 +1819,7 @@ def test_create_root_project_submit_round_trips_shared_paths(
             "category": "implementation",
             "project_status": "active",
             "started_at": "2026-05-01T09:00:00Z",
+            "agent_instructions": instructions + "\nUpdated",
             "objective": "Roll the shared cache out to read paths.",
             "in_scope": edited_scope,
             "out_of_scope": "Write-heavy batch jobs",
@@ -1831,6 +1836,7 @@ def test_create_root_project_submit_round_trips_shared_paths(
 
     with root_state["session_factory"]() as session:
         stored = json.loads(session.get(CatalogObject, "cache-rollout").data_json)
+    assert stored["agent_instructions"] == instructions + "\nUpdated"
     assert stored["in_scope"] == [
         "Search read paths",
         "Catalog read paths",

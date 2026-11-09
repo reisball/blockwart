@@ -121,6 +121,12 @@
     {{ runbook_create_table("recovery", ["id", "title", "description", "command", "expected_effect"], "recovery") }}
   {% elif key == "sources" %}
     {{ runbook_create_table("sources", ["id", "source_type", "title", "url", "author", "publisher", "published_at", "retrieved_at"], "runbook_source") }}
+  {% elif key == "agent_instructions" %}
+    <fieldset data-create-field="{{ key }}" {% if key not in form_ui_schema.create_fields %}hidden{% endif %}>
+      <legend data-field-label="{{ key }}">{{ field.label }}</legend>
+      <label>{{ field.label }}<textarea name="{{ key }}" data-field-input="{{ key }}" maxlength="16000" rows="8">{{ form[key] }}</textarea></label>
+      <p class="meta" data-field-help="{{ key }}">{{ field.placeholder }}</p>
+    </fieldset>
   {% elif key == "docs" %}
     {{ decision_docs_create() }}
   {% else %}

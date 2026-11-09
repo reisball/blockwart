@@ -1625,6 +1625,7 @@ PROJECT_COMMON_FIELDS = (
         retrieval_metadata=True,
         reference_kinds=PROJECT_EXTERNAL_REFERENCE_KINDS,
     ),
+    _field("agent_instructions", "text", strip_whitespace=True, max_length=16000),
     _field("current_summary", "text", strip_whitespace=True, max_length=4000),
     *_text_list("open_questions"),
     *_text_list("blockers"),

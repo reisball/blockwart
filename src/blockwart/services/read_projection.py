@@ -29,12 +29,12 @@ from blockwart.schemas.agent import (
     AgentProjectedStub,
 )
 
-# The canonical short fields of each knowledge kind. A projected read publishes
-# exactly the block of its own kind, so a Runbook never carries empty Decision
+# The canonical fields of each knowledge kind, including full Project instructions.
+# A projected read publishes only its own kind's block, so a Runbook carries no Decision
 # or Project fields and an asset kind carries no knowledge block at all.
 KNOWLEDGE_FIELDS: dict[str, tuple[str, ...]] = {
     "decision": ("decision_status", "applies_to"),
-    "project": ("project_category", "project_status", "related_assets"),
+    "project": ("agent_instructions", "project_category", "project_status", "related_assets"),
     "runbook": ("runbook_status", "runbook_risk", "runbook_applies_to"),
 }
 _NETWORK_SUMMARY_FIELDS: tuple[str, ...] = ("ips", "hostnames", "primary_endpoint")

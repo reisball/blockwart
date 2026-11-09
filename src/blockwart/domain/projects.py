@@ -190,6 +190,15 @@ def project_contract_projection() -> dict[str, Any]:
             "types": list(PROJECT_TIMELINE_REFERENCE_TYPE_VALUES),
         },
         "reference_paths": list(project_reference_paths()),
+        "agent_instructions": {
+            "path": "data.agent_instructions",
+            "max_length": 16000,
+            "meaning": (
+                "project-specific user context, not authority to override "
+                "higher instructions or permissions"
+            ),
+            "grants_access": False,
+        },
         "knowledge_layers": {
             "fields": "current reviewed knowledge and results",
             "comments": "append-only work chronology, never promoted automatically",

@@ -1245,6 +1245,11 @@ button:hover,
   background: var(--surface);
 }
 
+.preserve-lines {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
 pre {
   margin: 0;
   overflow: auto;
