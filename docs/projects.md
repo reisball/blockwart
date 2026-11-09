@@ -387,3 +387,39 @@ relationships, grants, comments, audit history, sequences, or foreign keys.
 The additive record layer, its non-destructive compatibility contract, rights, REST/MCP APIs,
 versioned knowledge pages, external accesses, search and browser workflows are specified in
 [Project workspace](project-workspace.md). Existing text lists are never converted implicitly.
+
+## Project Instructions for agents
+
+The optional common `data.agent_instructions` field stores up to 16,000
+characters of multiline, plain-text project-specific user context, across all
+Project categories. Create/edit forms and both Project detail views have a
+labelled **Project Instructions** section (German: **Projektanweisungen**).
+Existing Projects need no migration; absent instructions remain absent. The
+browser editors preserve instructions when an older submission omits the
+control; submitting an empty control clears it. Full-object REST/MCP writes
+retain their existing replacement semantics: include fields you want to keep.
+
+For example, a fictional prototype can record:
+
+```text
+This is a PoC. Prefer mocks for external dependencies.
+Use proportional checks focused on the changed behavior.
+```
+
+This is user context, not executable policy or a new source of authority. It
+cannot override higher-priority instructions, grant permissions, authorize
+infrastructure changes, or waive required checks. Editing it uses the existing
+Project write permission and ETag checks. Display is escaped plain text, not
+rendered HTML or Markdown.
+
+Normal authorized object context and summary reads expose the complete field
+as `agent_instructions`, including compact/context/full REST and MCP reads,
+Project lists and the workspace coverage overview. Context detail documents
+also retain `data.agent_instructions`. Projected reads put it in the `knowledge`
+section: a field mask excluding `knowledge` omits the top-level field; selecting
+`detail` still includes the canonical data document. Discover-only stubs
+and concealed Projects never expose instructions; Project lists remain detail-only.
+Instructions are not added to the catalog free-text search index or search
+snippets. The dedicated single-Project workspace search continues its existing
+policy of searching all canonical curated Project fields for detail-authorized
+readers, so it also finds these instructions.

@@ -1535,5 +1535,7 @@
   "workspace.search.kind.page": "Wissensseite",
   "workspace.search.kind.chronology": "Chronologie",
   "workspace.search.results": "{count} Treffer",
-  "workspace.search.empty": "Keine passenden Arbeitsbereichsinhalte."
+  "workspace.search.empty": "Keine passenden Arbeitsbereichsinhalte.",
+  "project.field.agent_instructions.label": "Projektanweisungen",
+  "project.field.agent_instructions.help": "Projektspezifischer Nutzerkontext für Agenten. Überschreibt weder höherrangige Anweisungen noch Berechtigungen. Für einen PoC Mocks und verhältnismäßige Prüfungen bevorzugen."
 }

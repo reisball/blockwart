@@ -34,6 +34,7 @@ PROJECT_KIND = "project"
 
 PROJECT_TEXT_FIELDS = (
     "objective",
+    "agent_instructions",
     "current_summary",
     "methodology",
     "hypothesis",
@@ -135,6 +136,7 @@ class ProjectForm:
         category: _OPTIONAL_TEXT = None,
         project_status: _OPTIONAL_TEXT = None,
         objective: _OPTIONAL_TEXT = None,
+        agent_instructions: _OPTIONAL_TEXT = None,
         current_summary: _OPTIONAL_TEXT = None,
         methodology: _OPTIONAL_TEXT = None,
         hypothesis: _OPTIONAL_TEXT = None,
@@ -273,10 +275,13 @@ def apply_project_form_data(
     Every canonical field the contract knows is rewritten from the submission,
     including the category-specific fields of *other* categories, which are
     removed. A category switch therefore cannot leave contradictory leftovers
-    behind. Unknown legacy extension fields are never touched.
+    behind. Unknown legacy extension fields are never touched. Instructions
+    omitted by older forms are preserved; an explicit empty string clears them.
     """
     data["schema_version"] = 1
     for field_name in PROJECT_SCALAR_FIELDS:
+        if field_name == "agent_instructions" and form.values[field_name] is None:
+            continue
         _assign(data, field_name, str(form.values.get(field_name) or "").strip())
     for field_name in PROJECT_LINE_FIELDS:
         items = split_form_lines(form.values.get(field_name))
@@ -342,6 +347,8 @@ def apply_project_workspace_form_data(
             data["managed_by"] = {key: value.strip() for key, value in manager.items() if value}
         else:
             data.pop("managed_by", None)
+    if "agent_instructions" in submitted_controls:
+        _assign(data, "agent_instructions", str(form.values["agent_instructions"] or "").strip())
     for field_name in ("objective", "current_summary"):
         _assign(data, field_name, str(form.values.get(field_name) or "").strip())
     for field_name in (

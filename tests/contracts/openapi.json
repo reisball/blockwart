@@ -133,6 +133,17 @@
       "AgentCatalogObjectContext": {
         "additionalProperties": false,
         "properties": {
+          "agent_instructions": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Agent Instructions"
+          },
           "applies_to": {
             "items": {
               "type": "string"
@@ -669,6 +680,17 @@
       "AgentCatalogObjectSummary": {
         "additionalProperties": false,
         "properties": {
+          "agent_instructions": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Agent Instructions"
+          },
           "applies_to": {
             "items": {
               "type": "string"
@@ -1257,6 +1279,17 @@
         "additionalProperties": false,
         "description": "One readable object under a non-default read projection.\n\nIdentity and state are always present, so a projected object publishes the\nsame id, ref, kind, revision, visibility decision, and effective\npermissions as the full contract. The effective permissions are published\nonce per distinct permission set in the response-level `capability_sets`\ntable, which `capability_set` keys into. A full read never carries that\nkey and a projected read never carries an inline capability list, so the\ntwo contracts can never be confused for one another.",
         "properties": {
+          "agent_instructions": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Agent Instructions"
+          },
           "applies_to": {
             "anyOf": [
               {
@@ -5263,6 +5296,17 @@
       },
       "ProjectOverviewItemOut": {
         "properties": {
+          "agent_instructions": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Agent Instructions"
+          },
           "capabilities": {
             "items": {
               "$ref": "#/components/schemas/Permission"
@@ -8146,7 +8190,7 @@
                 "type": "null"
               }
             ],
-            "description": "Closed server-defined read profile. compact keeps identity, state, and the type-aware short fields; context adds network, integrity, monitoring, and the detail document; full is the unchanged complete contract.",
+            "description": "Closed server-defined read profile. compact keeps identity, state, and the type-aware knowledge fields including full Project Instructions; context adds network, integrity, monitoring, and the detail document; full is the unchanged complete contract.",
             "title": "Projection"
           }
         },
@@ -15993,7 +16037,7 @@
             }
           },
           {
-            "description": "Closed server-defined read profile. compact keeps identity, state, and the type-aware short fields; context adds network, integrity, monitoring, and the detail document; full is the unchanged complete contract.",
+            "description": "Closed server-defined read profile. compact keeps identity, state, and the type-aware knowledge fields including full Project Instructions; context adds network, integrity, monitoring, and the detail document; full is the unchanged complete contract.",
             "in": "query",
             "name": "projection",
             "required": false,
@@ -16011,7 +16055,7 @@
                   "type": "null"
                 }
               ],
-              "description": "Closed server-defined read profile. compact keeps identity, state, and the type-aware short fields; context adds network, integrity, monitoring, and the detail document; full is the unchanged complete contract.",
+              "description": "Closed server-defined read profile. compact keeps identity, state, and the type-aware knowledge fields including full Project Instructions; context adds network, integrity, monitoring, and the detail document; full is the unchanged complete contract.",
               "title": "Projection"
             }
           },
@@ -17004,7 +17048,7 @@
             }
           },
           {
-            "description": "Closed server-defined read profile. compact keeps identity, state, and the type-aware short fields; context adds network, integrity, monitoring, and the detail document; full is the unchanged complete contract.",
+            "description": "Closed server-defined read profile. compact keeps identity, state, and the type-aware knowledge fields including full Project Instructions; context adds network, integrity, monitoring, and the detail document; full is the unchanged complete contract.",
             "in": "query",
             "name": "projection",
             "required": false,
@@ -17022,7 +17066,7 @@
                   "type": "null"
                 }
               ],
-              "description": "Closed server-defined read profile. compact keeps identity, state, and the type-aware short fields; context adds network, integrity, monitoring, and the detail document; full is the unchanged complete contract.",
+              "description": "Closed server-defined read profile. compact keeps identity, state, and the type-aware knowledge fields including full Project Instructions; context adds network, integrity, monitoring, and the detail document; full is the unchanged complete contract.",
               "title": "Projection"
             }
           },
@@ -32798,6 +32842,23 @@
               "json_types": [
                 "string"
               ],
+              "max_length": 16000,
+              "normalization": [
+                "strip_whitespace"
+              ],
+              "path": "agent_instructions",
+              "requirement": "optional",
+              "type": "text",
+              "violations": [
+                "type_mismatch",
+                "value_too_long"
+              ]
+            },
+            {
+              "format": "multiline-text",
+              "json_types": [
+                "string"
+              ],
               "max_length": 4000,
               "normalization": [
                 "strip_whitespace"
@@ -33983,6 +34044,12 @@
           "status": "active"
         },
         "project": {
+          "agent_instructions": {
+            "grants_access": false,
+            "max_length": 16000,
+            "meaning": "project-specific user context, not authority to override higher instructions or permissions",
+            "path": "data.agent_instructions"
+          },
           "category": {
             "fields_by_category": {
               "experiment": [

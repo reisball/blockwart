@@ -676,6 +676,7 @@ def project_overview(session, access, *, object_id):
             )
     mandatory = [r for r in requirements if r["mandatory"]]
     return {
+        "agent_instructions": project_data.get("agent_instructions"),
         "requirements": requirements,
         "legacy": legacy,
         "coverage": {

@@ -73,7 +73,8 @@ ACTIVITY_SECTION = "activity"
 
 PROJECTION_DESCRIPTION = (
     "Closed server-defined read profile. compact keeps identity, state, and the "
-    "type-aware short fields; context adds network, integrity, monitoring, and "
+    "type-aware knowledge fields including full Project Instructions; context adds "
+    "network, integrity, monitoring, and "
     "the detail document; full is the unchanged complete contract."
 )
 FIELDS_DESCRIPTION = (
