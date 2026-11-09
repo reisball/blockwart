@@ -23,6 +23,7 @@ from blockwart.ui.project_forms import (
     ProjectForm,
     apply_project_form_data,
     apply_project_workspace_form_data,
+    project_form_values,
 )
 
 INSTRUCTIONS = (
@@ -291,3 +292,104 @@ def test_legacy_nontext_instructions_remain_readable(
     with root_state["session_factory"]() as session:
         stored = json.loads(session.get(CatalogObject, "instructions").data_json)
     assert stored["agent_instructions"] == legacy_value
+
+
+@pytest.mark.parametrize("legacy_value", [["legacy extension"], {"legacy": "extension"}])
+def test_legacy_nontext_instructions_are_not_presented_as_ui_context(
+    root_client, root_state, legacy_value  # noqa: F811
+):
+    assert project_form_values({"agent_instructions": legacy_value})["agent_instructions"] == ""
+    _create(root_client, root_state)
+    with root_state["session_factory"]() as session:
+        with transaction(session):
+            project = session.get(CatalogObject, "instructions")
+            data = json.loads(project.data_json)
+            data["agent_instructions"] = legacy_value
+            project.data_json = json.dumps(data)
+    _browser_session(root_client, root_state)
+    for path in ("/projects/instructions", "/objects/instructions"):
+        response = root_client.get(path)
+        assert response.status_code == 200, response.text
+        section = re.search(
+            r'<section[^>]+aria-labelledby="project-instructions-title"[^>]*>(.*?)</section>',
+            response.text,
+            re.DOTALL,
+        )
+        assert section is not None
+        assert "legacy" not in section[1]
+    for path in ("/projects/instructions?edit=true", "/objects/instructions?edit=project"):
+        response = root_client.get(path)
+        assert response.status_code == 200, response.text
+        control = re.search(
+            r'<textarea name="agent_instructions"[^>]*>(.*?)</textarea>',
+            response.text,
+            re.DOTALL,
+        )
+        assert control is not None
+        assert control[1] == ""
+    with root_state["session_factory"]() as session:
+        stored = json.loads(session.get(CatalogObject, "instructions").data_json)
+    assert stored["agent_instructions"] == legacy_value
+
+
+@pytest.mark.parametrize("path", ["/roots", "/objects/instructions", "/projects/instructions/work"])
+@pytest.mark.parametrize("extra", [0, 1])
+def test_browser_instruction_newlines_use_textarea_length_before_validation(
+    root_client, root_state, path, extra  # noqa: F811
+):
+    _create(root_client, root_state)
+    _browser_session(root_client, root_state)
+    normalized = "x" * 15997 + "\nok" + "x" * extra
+    submitted = normalized.replace("\n", "\r\n")
+    data = {
+        "csrf_token": root_state["owner_session"].csrf_token,
+        "category": "experiment",
+        "project_status": "planned",
+        "agent_instructions": submitted,
+    }
+    object_id = "instructions"
+    if path == "/roots":
+        object_id = "browser-instructions"
+        data.update(
+            object_id=object_id,
+            kind="project",
+            primary_name="Browser instructions",
+            idempotency_key="browser-instructions-create-0001",
+        )
+    else:
+        current = root_client.get(
+            "/api/v1/objects/instructions", headers=_auth(root_state["owner_token"])
+        ).json()
+        data["if_match"] = current["etag"]
+    response = root_client.post(path, data=data, follow_redirects=False)
+    if extra:
+        # An actual 16,001-character value remains invalid after CRLF normalization.
+        if response.status_code == 303:
+            response = root_client.get(response.headers["location"])
+        expected_status = 400 if path == "/projects/instructions/work" else 422
+        assert response.status_code == expected_status
+    else:
+        assert response.status_code == 303, response.status_code
+    with root_state["session_factory"]() as session:
+        project = session.get(CatalogObject, object_id)
+        if extra:
+            if path == "/roots":
+                assert project is None
+            else:
+                assert json.loads(project.data_json)["agent_instructions"] == INSTRUCTIONS
+        else:
+            assert json.loads(project.data_json)["agent_instructions"] == normalized
+
+
+def test_rest_instruction_newline_contract_is_unchanged():
+    text = "First\r\nSecond\rThird"
+    assert _project("api", "experiment", agent_instructions=text).data["agent_instructions"] == text
+    with pytest.raises(ValidationError, match="agent_instructions"):
+        _project("api-long", "experiment", agent_instructions="x" * 15997 + "\r\nok")
+
+
+def test_browser_instruction_newline_normalization_preserves_other_form_fields():
+    form = ProjectForm(agent_instructions="First\r\nSecond\rThird", objective="A\r\nB")
+    assert form.values["agent_instructions"] == "First\nSecond\nThird"
+    assert form.values["objective"] == "A\r\nB"
+    assert ProjectForm().values["agent_instructions"] is None

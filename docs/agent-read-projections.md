@@ -123,6 +123,22 @@ An asset kind carries no knowledge block at all, and a Runbook never carries
 empty Decision or Project fields. Placement and operational state stay in the
 always-present `state` section.
 
+### Project instruction context
+
+The `knowledge` section includes the full optional `agent_instructions` of a
+DETAIL-authorized Project, even in `compact`. This bounded multiline field is
+project-specific user context, not authority to override higher instructions
+or permissions. It is deliberately not truncated to a search snippet and does
+not participate in catalog free-text search. The scoped Project workspace
+search still follows its existing all-canonical-fields policy.
+
+Masks excluding `knowledge` omit the top-level field; selecting `detail` still
+includes the canonical data document. Stubs and concealed placeholders never
+carry instructions. Full reads also expose it alongside Project category/status;
+context detail retains the canonical data field. Focused Project lists and
+workspace overviews include it without a secondary lookup. See
+[Projects](projects.md#project-instructions-for-agents).
+
 ## Surfaces
 
 | Surface | Projection controls |
@@ -247,17 +263,3 @@ authorized answer is serialized.
 - [MCP server](mcp.md)
 - [Object comments](object-comments.md)
 - [Authentication and object authorization](auth-rbac.md)
-
-### Project instruction context
-
-The `knowledge` section includes the full optional `agent_instructions` of a
-DETAIL-authorized Project, even in `compact`. This bounded multiline field is
-project-specific user context, not authority to override higher instructions
-or permissions. It is deliberately not truncated to a search snippet and does
-not participate in catalog free-text search. The scoped Project workspace
-search still follows its existing all-canonical-fields policy. Masks excluding `knowledge` omit the top-level field; selecting `detail`
-still includes the canonical data document. Stubs and concealed placeholders
-never carry instructions. Full reads also expose it
-alongside Project category/status; context detail retains the canonical data
-field. Focused Project lists and workspace overviews include it without a
-secondary lookup. See [Projects](projects.md#project-instructions-for-agents).

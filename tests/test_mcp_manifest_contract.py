@@ -17,14 +17,47 @@ from blockwart.mcp.server import TOOLS, local_contract_metadata, validate_runtim
 def test_integrated_mcp_contract_has_reviewed_manifest_evidence() -> None:
     metadata = contract_metadata(TOOLS, build_revision="issue-188-236-245-248-249-250-251")
 
-    # Reviewed #311/#312: workspace search tool and task deadline attention enums.
-    # Existing catalog search and contract projection version remain unchanged.
+    # Reviewed #333: only the three projection argument descriptions now explain
+    # full Project Instructions. The delta test below restores the pre-#333 digest.
+    # Tool count, input shapes, annotations and contract version remain unchanged.
     assert metadata == {
         "build_revision": "issue-188-236-245-248-249-250-251",
         "contract_version": "1",
-        "manifest_digest": "69cf6585eb7f3e2cf71ec38ef2ee6abf2d706df8f1b175687452fc8f2402d8a0",
+        "manifest_digest": "3d30cc14192c9369d1d0ac12ef4c796ebc3d35d104d2c6a5ae24a4a0dcd8802a",
         "tool_count": 48,
     }
+
+
+def test_project_instruction_manifest_delta_is_only_three_projection_descriptions() -> None:
+    """Reversing the reviewed description change restores the pre-#333 digest."""
+    # Each tool gets its own copy: registration reuses the projection dict.
+    previous = [copy.deepcopy(tool) for tool in TOOLS]
+    changed = set()
+    old_description = (
+        "Closed server-defined read profile. compact keeps identity, state, and the "
+        "type-aware short fields; context adds network, integrity, monitoring, and "
+        "the detail document; full is the unchanged complete contract."
+    )
+    new_description = old_description.replace(
+        "type-aware short fields",
+        "type-aware knowledge fields including full Project Instructions",
+    )
+    for tool in previous:
+        projection = tool["inputSchema"].get("properties", {}).get("projection")
+        if projection is not None:
+            assert projection["description"] == new_description
+            projection["description"] = old_description
+            changed.add(tool["name"])
+    assert changed == {
+        "blockwart.search",
+        "blockwart.get_context",
+        "blockwart.get_object_contexts",
+    }
+    # Generated independently from base 1574db2: no schema, permission,
+    # annotation, tool-count or unrelated description delta may hide here.
+    assert contract_metadata(previous, build_revision="base")["manifest_digest"] == (
+        "69cf6585eb7f3e2cf71ec38ef2ee6abf2d706df8f1b175687452fc8f2402d8a0"
+    )
 
 
 def test_manifest_bytes_and_digest_ignore_registered_tool_order() -> None:

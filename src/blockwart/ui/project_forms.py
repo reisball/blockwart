@@ -208,6 +208,14 @@ class ProjectForm:
             name: local[name]
             for name in (*PROJECT_SCALAR_FIELDS, *PROJECT_LINE_FIELDS)
         }
+        # Browsers submit textarea line breaks as CRLF but count each as one
+        # character for maxlength. Normalize this new field before validation;
+        # REST/MCP and the existing Project fields keep their text contracts.
+        instructions = self.values["agent_instructions"]
+        if instructions is not None:
+            self.values["agent_instructions"] = instructions.replace("\r\n", "\n").replace(
+                "\r", "\n"
+            )
         self.groups: dict[str, dict[str, str | None]] = {
             group: {key: local[f"{group}_{key}"] for key in keys}
             for group, keys in PROJECT_GROUP_FIELDS.items()
@@ -418,6 +426,10 @@ def project_form_values(data: Mapping[str, Any]) -> dict[str, str]:
         field_name: str(data.get(field_name) or "")
         for field_name in PROJECT_SCALAR_FIELDS
     }
+    # Historical free-form extensions may occupy this newly reserved name.
+    # Non-text values are not instructions and must not be shown as user context.
+    if not isinstance(data.get("agent_instructions"), str):
+        values["agent_instructions"] = ""
     for field_name in PROJECT_LINE_FIELDS:
         raw = data.get(field_name)
         values[field_name] = (

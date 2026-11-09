@@ -29,6 +29,7 @@ Every canonical Project requires `schema_version: 1`, one closed `category`, and
 | `related_decisions` | typed-reference array | Existing `decision` targets |
 | `related_projects` | typed-reference array | Existing `project` targets |
 | `sources` | source-entry array | Up to 50 closed, safe external references; Blockwart never fetches them |
+| `agent_instructions` | multiline text | Optional project-specific user context, at most 16,000 characters; no permission or policy overrides |
 | `current_summary` | text | Current reviewed state, at most 4,000 characters |
 | `open_questions`, `blockers`, `recommendations`, `next_actions` | text arrays | Distinct machine-readable current knowledge, impediments, and follow-up lists |
 | `lessons_learned` | text array | Retrospective knowledge shared by all categories |
@@ -396,8 +397,12 @@ Project categories. Create/edit forms and both Project detail views have a
 labelled **Project Instructions** section (German: **Projektanweisungen**).
 Existing Projects need no migration; absent instructions remain absent. The
 browser editors preserve instructions when an older submission omits the
-control; submitting an empty control clears it. Full-object REST/MCP writes
-retain their existing replacement semantics: include fields you want to keep.
+control; submitting an empty control clears it. Browser submissions normalize
+CRLF and CR line endings to LF before the character-limit check, matching the
+textarea length. Full-object REST/MCP writes retain their existing text and
+replacement semantics: include fields you want to keep. Historical non-text
+values under this newly reserved name remain stored but are not presented as
+Project Instructions in the UI or typed API context fields.
 
 For example, a fictional prototype can record:
 
