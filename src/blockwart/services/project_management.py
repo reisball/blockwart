@@ -605,6 +605,10 @@ def _apply_action_locked(
     return result
 
 
+def _optional_string(value: object) -> str | None:
+    return value if isinstance(value, str) else None
+
+
 def project_overview(session, access, *, object_id):
     project = read_project(session, access, object_id)
     rows = _rows(session, project)
@@ -676,7 +680,7 @@ def project_overview(session, access, *, object_id):
             )
     mandatory = [r for r in requirements if r["mandatory"]]
     return {
-        "agent_instructions": project_data.get("agent_instructions"),
+        "agent_instructions": _optional_string(project_data.get("agent_instructions")),
         "requirements": requirements,
         "legacy": legacy,
         "coverage": {

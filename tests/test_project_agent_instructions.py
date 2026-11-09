@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 from html import unescape
 
 import pytest
@@ -187,6 +188,10 @@ def test_workspace_safe_display_edit_preserve_and_clear(root_client, root_state)
     for path in ("/projects/instructions", "/objects/instructions"):
         response = root_client.get(path)
         assert 'id="project-instructions-title"' in response.text
+        assert (
+            '<p class="preserve-lines">Fictional PoC: use mocks.\nProportional checks.'
+            in response.text
+        )
         assert "&lt;script&gt;" in response.text
         assert "<script>alert(" not in response.text
     for path in ("/projects/instructions?edit=true", "/objects/instructions?edit=project"):
@@ -231,3 +236,58 @@ def test_workspace_safe_display_edit_preserve_and_clear(root_client, root_state)
         with root_state["session_factory"]() as session:
             data = json.loads(session.get(CatalogObject, "instructions").data_json)
         assert data.get("agent_instructions", "") == value
+
+
+def test_instruction_multiline_styles_are_served(root_client):  # noqa: F811
+    response = root_client.get("/static/app.css")
+    assert response.status_code == 200
+    rule = re.search(r"\.preserve-lines\s*\{([^}]+)\}", response.text)
+    assert rule is not None, "Instruction paragraphs need a preserve-lines CSS rule"
+    declarations = dict(re.findall(r"([\w-]+)\s*:\s*([^;]+);", rule[1]))
+    assert declarations["white-space"] == "pre-wrap"
+    assert declarations["overflow-wrap"] == "anywhere"
+
+
+@pytest.mark.parametrize("legacy_value", [["legacy extension"], {"legacy": "extension"}])
+@pytest.mark.parametrize(
+    ("method", "path", "profile", "key"),
+    [
+        ("GET", "/api/v1/objects?q=instructions", "compact", "items"),
+        ("GET", "/api/v1/context?q=instructions", "context", "items"),
+        ("GET", "/api/v1/objects/instructions", "full", None),
+        ("GET", "/api/agent/search?q=instructions", "compact", "results"),
+        ("GET", "/api/agent/context?q=instructions", "full", "objects"),
+        ("POST", "/api/v1/object-contexts", "compact", "objects"),
+        ("POST", "/api/v1/object-contexts", "context", "objects"),
+        ("POST", "/api/v1/object-contexts", "full", "objects"),
+        ("GET", "/api/v1/projects", None, "items"),
+        ("GET", "/api/v1/projects/instructions/workspace/overview", None, None),
+    ],
+)
+def test_legacy_nontext_instructions_remain_readable(
+    root_client, root_state, legacy_value, method, path, profile, key  # noqa: F811
+):
+    _create(root_client, root_state)
+    # Before this field was reserved, arbitrary Project extensions were valid.
+    # Seed the historical row directly rather than bypassing current write validation.
+    with root_state["session_factory"]() as session:
+        with transaction(session):
+            project = session.get(CatalogObject, "instructions")
+            data = json.loads(project.data_json)
+            data["agent_instructions"] = legacy_value
+            project.data_json = json.dumps(data)
+
+    kwargs = {"headers": _auth(root_state["owner_mcp_token"])}
+    if method == "POST":
+        kwargs["json"] = {"object_ids": ["instructions"], "projection": profile}
+    elif profile is not None:
+        kwargs["params"] = {"projection": profile}
+    response = root_client.request(method, path, **kwargs)
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    item = payload[key][0] if key else payload
+    assert item.get("agent_instructions") is None
+    # Reads must not rewrite historical extensions or stringify them as instructions.
+    with root_state["session_factory"]() as session:
+        stored = json.loads(session.get(CatalogObject, "instructions").data_json)
+    assert stored["agent_instructions"] == legacy_value

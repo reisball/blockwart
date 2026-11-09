@@ -630,7 +630,7 @@ class _AgentCatalogResolver:
                 else []
             ),
             agent_instructions=(
-                projected_knowledge_data.get("agent_instructions")
+                _optional_text(projected_knowledge_data.get("agent_instructions"))
                 if obj.kind == "project"
                 else None
             ),
