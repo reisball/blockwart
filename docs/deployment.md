@@ -113,6 +113,7 @@ docker compose -f compose.example.yaml up
 
 This is an example only. It binds the published port to `127.0.0.1` and does not set up TLS,
 backups, monitoring, or service registration.
+For the optional internal OpenBao backend, see [credential-safe setup and operation](credential-safe.md).
 
 The image command is `blockwart-start`. It runs the packaged Alembic upgrade against the effective
 `BLOCKWART_DATABASE_URL`, verifies the packaged head, full active effective Owner coverage, and an

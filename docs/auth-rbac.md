@@ -1093,7 +1093,8 @@ unchanged. Authentication is not authorization.
 
 The credential-reference capability creates new metadata through its narrow
 service command; a Project workspace reference creation additionally needs
-Project write authority. No role gives a secret value or external access.
+Project write authority. Optional [credential-safe](credential-safe.md) reveal
+requires `read_reference_content`; no role grants external target-system access.
 The last local Owner cannot be removed without replacement, even by a global
 Owner. Global Owner controls all present/future roots and objects, independent
 of local Owners, but is not an identity administrator. Ownerless repair remains

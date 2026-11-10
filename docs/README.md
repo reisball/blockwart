@@ -28,6 +28,7 @@ permission grants, and a historical test result is not evidence for your build.
 
 - [Product versioning, changelog and GitHub releases](versioning.md)
 - [Configuration](config.md) and [deployment readiness](deployment.md)
+- [Optional credential safe](credential-safe.md): internal OpenBao setup and operation
 - [Reproducible builds and CI](ci.md), including the host-neutral parity
   contract for `.gitea/workflows/ci.yml` and `.github/workflows/ci.yml`
 - [Atomic container release workflow](release-workflow.md), including the
