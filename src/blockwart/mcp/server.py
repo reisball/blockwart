@@ -2993,9 +2993,16 @@ def _http_json(
         request_headers.get("X-Correlation-ID") or correlation_id
     )
     request_headers["X-Blockwart-Channel"] = "mcp"
+    is_safe = urlsplit(url).path.endswith("/safe")
     api_token = _api_token()
-    if api_token is not None:
+    if is_safe or api_token is not None:
         _require_safe_token_transport(url)
+    if is_safe and api_token is None:
+        raise UpstreamError(
+            "credential_configuration_error",
+            "Credential safe operations require configured MCP bearer credentials.",
+        )
+    if api_token is not None:
         request_headers["Authorization"] = f"Bearer {api_token}"
     encoded_body = None
     if body is not None:
@@ -3016,7 +3023,6 @@ def _http_json(
         opener = build_opener(ProxyHandler({}), _RejectRedirectHandler())
         with opener.open(request, timeout=10) as response:
             try:
-                is_safe = urlsplit(url).path.endswith("/safe")
                 raw = response.read(1048577) if is_safe else response.read()
                 expected_length = response.headers.get("Content-Length")
                 if expected_length is not None and len(raw) != int(expected_length):
@@ -3151,7 +3157,39 @@ async def handle_call_tool(name: str, arguments: JSON) -> types.CallToolResult:
         )
 
 
+def _install_safe_sdk_logging() -> None:
+    """Remove SDK payloads before any handler, including SDK calls to root logging.
+
+    SDK protocol validation precedes our tool handler. Logger-level filters on
+    `mcp` cannot intercept its root calls or propagated child records, and a
+    handler filter misses independently configured handlers. Sanitize records
+    at creation instead; do not attempt to recognize secret-shaped strings.
+    """
+    previous = logging.getLogRecordFactory()
+    if getattr(previous, "_blockwart_safe_sdk_logging", False):
+        return
+    sdk_root = Path(mcp.server.stdio.__file__).resolve().parents[1]
+
+    def factory(name, level, pathname, lineno, msg, args, exc_info,
+                func=None, sinfo=None, **kwargs):
+        is_sdk = (name == "mcp" or name.startswith("mcp.")
+                  or Path(pathname).is_relative_to(sdk_root))
+        if is_sdk:
+            # Sanitize before delegating: custom factories may cache formatted
+            # messages in extra fields later emitted by structured handlers.
+            msg, args, exc_info, sinfo = "mcp_sdk_event", (), None, None
+        record = previous(name, level, pathname, lineno, msg, args, exc_info,
+                          func, sinfo, **kwargs)
+        if is_sdk:
+            record.exc_text = None
+        return record
+
+    factory._blockwart_safe_sdk_logging = True
+    logging.setLogRecordFactory(factory)
+
+
 async def run_server() -> None:
+    _install_safe_sdk_logging()
     async with mcp.server.stdio.stdio_server() as (read_stream, write_stream):
         await server.run(
             read_stream,

@@ -126,7 +126,16 @@ request/response body logging on secret endpoints in reverse proxies.
 
 REST clients POST to `/api/v1/objects/{id}/safe` using their existing bearer
 token. MCP clients use `blockwart.credential_safe` with the same fields plus
-`object_id`:
+`object_id`.
+
+Safe MCP transport requires configured bearer credentials before network I/O.
+Only trusted loopback may use HTTP; remote API targets require HTTPS. MCP clients,
+agent/model providers and conversation tooling can retain intentional safe inputs
+and results. Blockwart does not control that retention; catalog nonpersistence
+and `no-store` are not a guarantee of transcript deletion. Use safe operations
+only in approved receiving clients and conversations.
+
+Supported actions:
 
 - `action: read`: explicitly reveal current value, or a positive `version`.
 - `action: history`: return version metadata, never values.
