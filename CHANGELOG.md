@@ -35,6 +35,11 @@ Notable product changes are recorded here. Versions follow the
 
 ### Fixed
 
+- Credential-safe traffic ignores environment proxies and redirects; backend login
+  failures fail closed. Safe operations release catalog locks during backend I/O
+  and reauthorize before returning results. Operator recovery shares remain in
+  private control storage, separate from application runtime credentials (#335).
+
 - Explorer shows explicit network addresses and known product models when no platform is recorded; missing values are not guessed.
 
 ## [0.2.0] - 2026-10-26

@@ -18,7 +18,8 @@ Use the ordinary delivery image for Blockwart and the explicit
    on restart. The accepted trust boundary is the host and its administrators.
 2. Create a separate protected host control directory (0700), initially empty except for an empty `runtime/` subdirectory
    (0700).
-   It holds durable broker AppRole credentials and temporary bootstrap state.
+   It holds durable broker AppRole credentials, operator-only recovery material
+   and temporary bootstrap state.
    Set `BLOCKWART_SAFE_KEY_DIR` and `BLOCKWART_SAFE_CONTROL_DIR` to these absolute
    directory paths. Both containers must have the intended file-read rights;
    do not make credentials world-readable. The shipped images run as root;
@@ -50,6 +51,34 @@ root-token files are private (0600), are never runtime credentials, and are
 removed after recoverable finalization. Initialization response loss cannot
 be repaired by blindly reinitializing existing storage.
 
+### Operator recovery material
+
+Bootstrap durably saves the full initialization envelope to private `init.json`
+before splitting it into `root.json`, `stage.json` and operator-only
+`recovery.json`. An interruption between these file writes resumes from the
+same envelope without reinitializing storage. Once split, the envelope is
+removed; recovery shares remain in `recovery.json` (0600) in the protected
+control directory, **outside** `runtime/`. The application mount contains only
+`runtime/broker.json`; never mount the full control directory into Blockwart.
+Recovery shares are not unseal keys: keep the original static seal key as well.
+An initialization HTTP response lost before the envelope is durably saved still
+requires operator recovery; the supervisor fails closed, never reinitializes.
+
+For an explicitly authorized backend administration session, an operator with
+host access can use OpenBao's documented
+[`operator generate-root`](https://github.com/openbao/openbao/blob/v2.7.2/website/content/docs/commands/operator/generate-root.mdx)
+recovery-share procedure against the internal listener: initialize the attempt,
+supply the retained recovery share for the returned nonce using a private
+interactive CLI, and decode its result with that attempt's OTP. Keep shares,
+OTP and temporary root tokens out of shell history, command-line arguments,
+application settings and logs. Use the temporary root only for the authorized
+administration and revoke it with `bao token revoke -self` afterward. Never
+replace broker credentials with it. This is an operator procedure, not an
+application break-glass endpoint or implemented rotation workflow.
+
+The supervisor emits only readiness/unavailable markers and discards OpenBao
+stdout/stderr; detailed backend diagnostics are not retained by this bundle.
+
 OpenBao's native static seal performs auto-unseal. If the key is missing or
 wrong, the backend stays unavailable and the container restart policy retries.
 Restoring the original key permits automatic recovery on the next start;
@@ -67,7 +96,8 @@ The scoped policy allows only KV data read/create/update and metadata reads.
 Destroy, metadata deletion, policy administration and root operations are
 excluded. Internal plaintext HTTP is confined to the accepted single-host
 internal network; do not expose this listener or route it over an untrusted
-network.
+network. Broker, supervisor and MCP HTTP clients reject redirects and ignore
+environment proxies, including for loopback requests carrying secrets.
 
 ## Credential entries and operations
 
@@ -118,20 +148,32 @@ values. Current `write_reference_content` authorizes mutations, but never
 reveals values to a write-only client. Restore copies server-side and returns
 only the new version number. Metadata read/write alone grants neither.
 Existing effective Owner/catalog-owner permissions are unchanged; no parallel
-safe roles are introduced. The shared command lock/refresh boundary rechecks
-current principal activity and grants, including revocation. Secret values
+safe roles are introduced. Two short command lock/refresh transactions check
+current principal activity, grants, object instance and revision: before backend
+I/O, then again before audit and response. No catalog transaction or command
+locks remain open during backend calls. Revocation, deactivation, replacement or
+an intervening object edit prevents returning values. Already-authorized backend
+work may have completed before that second check; it cannot be rolled back by
+catalog authorization. Secret values
 never enter catalog persistence, object history, search, exports, ordinary
 audit events, or denial records. Audit records contain operation names only.
 
 Sealed/down/timeouts return 503; there is no plaintext fallback.
-Metadata/catalog/login remain independent. A timed-out write can have an
+Metadata/catalog/login remain independent. Backend mutation and catalog audit
+are not one atomic transaction: a DB/audit failure, mid-flight policy change or
+timeout can leave completed backend work without a successful catalog audit or
+response. A timed-out write can have an
 unknown outcome; do not blindly retry with a different CAS. Reconcile through
 authorized history/read or the prior CAS before deciding a next operation.
 
 There is no permanent-destroy operation. KV retention is explicitly set to
 2147483647 versions rather than the upstream default of 10. The broker stops
 writes before the configured limit instead of letting retention trim old
-values. Do not manually lower this limit or mutate the internal mount.
+values. This is bounded retention, not unlimited history: metadata responses
+also have a 1 MiB transport cap, so practical history retrieval can reach its
+bound much earlier (503, without truncation). A write-only caller cannot discover
+the current CAS through history; it must retain the version from a prior write
+or obtain it from an authorized reader. Do not manually lower this limit or mutate the internal mount.
 
 ## Pinned artifact and reproducible proof
 

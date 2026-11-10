@@ -21,4 +21,4 @@ def safe_action(request: Request, object_id: str, payload: SafeAction,
     context = api_write_context(request, access)
     return execute_api_command(session, context, lambda: operate(
         session, context, request.app.state.settings, object_id, payload,
-    ))
+    ), owns_transactions=True)

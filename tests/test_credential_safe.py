@@ -170,3 +170,71 @@ def test_provider_switch_requires_content_write(
             update_catalog_object(session, write_for(session, boundary_state, "editor"),
                                   object_id=REF_ID, payload=payload,
                                   expected_revision=row.revision)
+
+
+@pytest.mark.parametrize("channel", ["api", "mcp"])
+@pytest.mark.parametrize("change", ["revoke", "deactivate", "edit", "recreate"])
+def test_backend_gap_reauthorizes_before_return(
+    safe_client, alembic_session_factory, monkeypatch, channel, change,
+):
+    from blockwart.models import Principal
+
+    client, actors, _ = safe_client
+
+    def backend(self, method, path, body=None):
+        with alembic_session_factory() as session, transaction(session):
+            if change == "revoke":
+                session.query(ObjectGrant).filter_by(principal_id=actors["reader"][0]).delete()
+            elif change == "deactivate":
+                session.get(Principal, actors["reader"][0]).active = False
+            elif change == "recreate":
+                session.get(CatalogObject, REF_ID).instance_id = "replacement-instance"
+            else:
+                session.get(CatalogObject, REF_ID).revision += 1
+        return {"data": {"data": {"fields": {"token": VALUE}, "deleted": False},
+                         "metadata": {"version": 1}}}
+
+    monkeypatch.setattr(Bao, "request", backend)
+    response = client.post(f"/api/v1/objects/{REF_ID}/safe", json={"action": "read"},
+                           headers={"Authorization": "Bearer " + actors["reader"][1],
+                                    "X-Blockwart-Channel": channel})
+    assert response.status_code in {403, 404, 409}
+    assert VALUE not in response.text
+
+
+@pytest.mark.parametrize("action", ["read", "history", "write"])
+@pytest.mark.parametrize("data", [None, [], {}, {"data": []}, {"version": "invalid"}])
+def test_malformed_backend_document_is_unavailable(safe_client, monkeypatch, action, data):
+    client, actors, _ = safe_client
+    monkeypatch.setattr(Bao, "request", lambda *a, **kw: {"data": data})
+    response = invoke(client, actors, "owner", action=action, cas=0, fields={"token": VALUE})
+    assert response.status_code == 503
+    assert VALUE not in response.text
+
+
+def test_deleted_and_recreated_catalog_identity_gets_new_locator(
+    safe_client, alembic_session_factory, monkeypatch,
+):
+    from test_reference_content_boundary import write_for
+
+    from blockwart.services.commands import delete_catalog_object
+
+    client, actors, _ = safe_client
+    locators = []
+
+    def capture(self, method, path, body=None):
+        locators.append(path)
+        return {"data": {"version": 1}}
+
+    monkeypatch.setattr(Bao, "request", capture)
+    assert invoke(client, actors, "catalog-owner", action="write", cas=0,
+                  fields={"token": VALUE}).status_code == 200
+    with alembic_session_factory() as session, transaction(session):
+        delete_catalog_object(session, write_for(session, actors, "catalog-owner"),
+                              object_id=REF_ID,
+                              expected_revision=session.get(CatalogObject, REF_ID).revision)
+        upsert_object(session, document(data={"schema_version": 1, "provider": "safe",
+                                            "reference": {}, "secret_value_stored": False}))
+    assert invoke(client, actors, "catalog-owner", action="write", cas=0,
+                  fields={"token": VALUE}).status_code == 200
+    assert len(locators) == 2 and locators[0] != locators[1]

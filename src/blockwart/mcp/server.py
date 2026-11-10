@@ -8,12 +8,13 @@ import logging
 import os
 import re
 from collections.abc import Callable
+from http.client import HTTPException as HTTPProtocolError
 from pathlib import Path
 from typing import Any, get_args
 from typing import get_args as _get_type_args
 from urllib.error import HTTPError, URLError
 from urllib.parse import quote, urlencode, urlsplit
-from urllib.request import HTTPRedirectHandler, Request, build_opener
+from urllib.request import HTTPRedirectHandler, ProxyHandler, Request, build_opener
 from uuid import uuid4
 
 import mcp.server.stdio
@@ -3012,10 +3013,18 @@ def _http_json(
         method=method,
     )
     try:
-        with build_opener(_RejectRedirectHandler()).open(request, timeout=10) as response:
+        opener = build_opener(ProxyHandler({}), _RejectRedirectHandler())
+        with opener.open(request, timeout=10) as response:
             try:
-                return json.loads(response.read().decode("utf-8"))
-            except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+                is_safe = urlsplit(url).path.endswith("/safe")
+                raw = response.read(1048577) if is_safe else response.read()
+                expected_length = response.headers.get("Content-Length")
+                if expected_length is not None and len(raw) != int(expected_length):
+                    raise ValueError("incomplete response")
+                if is_safe and len(raw) > 1048576:
+                    raise ValueError("response bound")
+                return json.loads(raw.decode("utf-8"))
+            except (HTTPProtocolError, UnicodeDecodeError, ValueError) as exc:
                 raise UpstreamError(
                     "upstream_invalid_response",
                     "Blockwart Agent API returned an invalid response.",

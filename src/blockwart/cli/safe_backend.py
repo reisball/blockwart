@@ -8,7 +8,7 @@ import subprocess
 import time
 from pathlib import Path
 from urllib.error import HTTPError
-from urllib.request import Request, urlopen
+from urllib.request import HTTPRedirectHandler, ProxyHandler, Request, build_opener
 
 ROOT = Path(os.environ.get("SAFE_CONTROL_DIR", "/control"))
 URL = os.environ.get("SAFE_LOCAL_URL", "http://127.0.0.1:8200")
@@ -23,14 +23,28 @@ path "auth/token/revoke-self" { capabilities = ["update"] }
 MAX_VERSIONS = 2147483647
 
 
+class NoRedirect(HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return None
+
+
 def call(method, path, body=None, token=None, timeout=5):
     request = Request(URL + "/v1/" + path,
                       data=json.dumps(body).encode() if body is not None else None,
                       headers={"Content-Type": "application/json", **(
                           {"X-Vault-Token": token} if token else {}
                       )}, method=method)
-    with urlopen(request, timeout=timeout) as response:
-        return json.load(response) if response.status != 204 else {}
+    with build_opener(ProxyHandler({}), NoRedirect).open(request, timeout=timeout) as response:
+        raw = response.read(1048577)
+        expected_length = response.headers.get("Content-Length")
+        if expected_length is not None and len(raw) != int(expected_length):
+            raise ValueError("incomplete response")
+        if len(raw) > 1048576:
+            raise ValueError("safe_backend_response_bound")
+        result = json.loads(raw) if raw else {}
+        if not isinstance(result, dict):
+            raise ValueError("safe_backend_invalid_response")
+        return result
 
 
 def save(name, value):
@@ -83,10 +97,29 @@ def approle_token(auth):
     return call("POST", "auth/approle/login", auth)["auth"]["client_token"]
 
 
+def preserve_initialization():
+    # One durable init envelope closes the root/stage split-write crash window.
+    if not (ROOT / "init.json").exists():
+        return
+    result = load("init.json")
+    recovery = {key: result[key] for key in ("recovery_keys", "recovery_keys_base64")
+                if result.get(key)}
+    if not recovery or not result.get("root_token"):
+        raise RuntimeError("safe_backend_invalid_initialization")
+    save("recovery.json", recovery)
+    save("root.json", result["root_token"])
+    if not (ROOT / "stage.json").exists():
+        save("stage.json", "initialized")
+    (ROOT / "init.json").unlink()
+    sync_directory(ROOT)
+
+
 def bootstrap(process):
     status = wait_ready(process)
     if status["sealed"] and status["initialized"]:
         raise RuntimeError("safe_backend_sealed")
+    if status["initialized"]:
+        preserve_initialization()
     if (ROOT / "runtime/broker.json").exists():
         if not status["initialized"]:
             raise RuntimeError("safe_backend_state_missing")
@@ -117,8 +150,8 @@ def bootstrap(process):
             raise RuntimeError("safe_backend_control_without_state")
         result = call("POST", "sys/init",
                       {"recovery_shares": 1, "recovery_threshold": 1}, timeout=90)
-        save("root.json", result["root_token"])
-        save("stage.json", "initialized")
+        save("init.json", result)
+        preserve_initialization()
         wait_ready(process)
     if not (ROOT / "root.json").exists():
         raise RuntimeError("safe_backend_initialized_without_control")

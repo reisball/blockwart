@@ -69,3 +69,47 @@ def test_pending_auth_is_published_without_exposing_bootstrap_root(tmp_path, mon
     assert list((tmp_path / "runtime").iterdir()) == [tmp_path / "runtime/broker.json"]
     assert backend.load("runtime/broker.json")["role_id"] == "synthetic-role"
     assert ("auth/token/revoke-self", "synthetic-root") in called
+
+
+def test_initialization_preserves_operator_recovery_before_root_revocation(tmp_path, monkeypatch):
+    monkeypatch.setattr(backend, "ROOT", tmp_path)
+    (tmp_path / "runtime").mkdir(mode=0o700)
+    ready = iter([{"initialized": False, "sealed": False}])
+    monkeypatch.setattr(backend, "wait_ready", lambda _: next(ready))
+    monkeypatch.setattr(backend, "call", lambda *a, **kw: {
+        "root_token": "synthetic-root", "recovery_keys_base64": ["synthetic-recovery"],
+        "recovery_keys": ["synthetic-recovery-hex"],
+    })
+    with pytest.raises(StopIteration):
+        backend.bootstrap(SimpleNamespace())
+    recovery = tmp_path / "recovery.json"
+    assert recovery.exists()
+    assert backend.load("recovery.json")["recovery_keys_base64"] == ["synthetic-recovery"]
+    assert recovery.stat().st_mode & 0o777 == 0o600
+    assert list((tmp_path / "runtime").iterdir()) == []
+
+
+@pytest.mark.parametrize("interrupted_after", ["recovery.json", "root.json", "stage.json"])
+def test_initialization_envelope_resumes_split_file_crashes(
+    tmp_path, monkeypatch, interrupted_after,
+):
+    monkeypatch.setattr(backend, "ROOT", tmp_path)
+    backend.save("init.json", {"root_token": "synthetic-root",
+                              "recovery_keys_base64": ["synthetic-share"]})
+    original_save = backend.save
+
+    def interrupt(name, value):
+        original_save(name, value)
+        if name == interrupted_after:
+            raise RuntimeError("synthetic-interruption")
+
+    monkeypatch.setattr(backend, "save", interrupt)
+    with pytest.raises(RuntimeError, match="synthetic-interruption"):
+        backend.preserve_initialization()
+    assert (tmp_path / "init.json").exists()
+    monkeypatch.setattr(backend, "save", original_save)
+    backend.preserve_initialization()
+    assert backend.load("stage.json") == "initialized"
+    assert backend.load("root.json") == "synthetic-root"
+    assert backend.load("recovery.json")["recovery_keys_base64"] == ["synthetic-share"]
+    assert not (tmp_path / "init.json").exists()

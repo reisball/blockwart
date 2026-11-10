@@ -68,6 +68,10 @@ def main():
 
             ready()
             assert not (root / "control/root.json").exists()
+            recovery = root / "control/recovery.json"
+            assert recovery.stat().st_mode & 0o777 == 0o600
+            assert json.loads(recovery.read_text())["recovery_keys_base64"]
+            assert sorted(p.name for p in auth.parent.iterdir()) == ["broker.json"]
             assert set(json.loads(auth.read_text())) == {"role_id", "secret_id"}
             assert auth.stat().st_mode & 0o777 == 0o600
             path = "blockwart/data/synthetic-smoke"

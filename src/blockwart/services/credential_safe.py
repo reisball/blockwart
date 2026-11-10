@@ -3,16 +3,18 @@ from __future__ import annotations
 
 import hashlib
 import json
+from http.client import HTTPException as HTTPProtocolError
 from pathlib import Path
 from typing import Literal
 from urllib.error import HTTPError, URLError
-from urllib.request import HTTPRedirectHandler, Request, build_opener
+from urllib.request import HTTPRedirectHandler, ProxyHandler, Request, build_opener
 
 from fastapi import HTTPException
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 from sqlalchemy.orm import Session
 
 from blockwart.config import Settings
+from blockwart.db.session import transaction
 from blockwart.domain.auth import Permission
 from blockwart.models import CatalogObject
 from blockwart.services.audit import add_audit_event
@@ -72,11 +74,17 @@ class Bao:
                 )},
                 method=method,
             )
-            with build_opener(NoRedirect).open(request, timeout=5) as response:
+            with build_opener(ProxyHandler({}), NoRedirect).open(request, timeout=5) as response:
                 raw = response.read(1048577)
+                expected_length = response.headers.get("Content-Length")
+                if expected_length is not None and len(raw) != int(expected_length):
+                    raise ValueError("incomplete response")
                 if len(raw) > 1048576:
                     raise ValueError("response bound")
-                return json.loads(raw) if raw else {}
+                result = json.loads(raw) if raw else {}
+                if not isinstance(result, dict):
+                    raise ValueError("response shape")
+                return result
         except HTTPError as exc:
             exc.close()
             # Never publish OpenBao error text, request documents or tokens.
@@ -85,7 +93,7 @@ class Bao:
             if exc.code == 400:
                 raise HTTPException(409, "Safe version conflict or invalid operation") from None
             raise HTTPException(503, "Credential safe unavailable") from None
-        except (OSError, URLError, ValueError, TypeError):
+        except (HTTPProtocolError, OSError, URLError, ValueError, TypeError):
             raise HTTPException(503, "Credential safe unavailable") from None
 
     def token(self):
@@ -94,8 +102,11 @@ class Bao:
             result = self.call("POST", "auth/approle/login", {
                 "role_id": auth["role_id"], "secret_id": auth["secret_id"],
             })
-            return result["auth"]["client_token"]
-        except (OSError, ValueError, KeyError, TypeError):
+            token = result["auth"]["client_token"]
+            if not isinstance(token, str) or not token:
+                raise ValueError("invalid token")
+            return token
+        except (HTTPException, OSError, ValueError, KeyError, TypeError):
             raise HTTPException(503, "Credential safe unavailable") from None
 
     def request(self, method, path, body=None):
@@ -112,7 +123,28 @@ class Bao:
 
 def operate(session: Session, context: WriteContext, settings: Settings,
             object_id: str, command: SafeAction) -> dict:
-    # Same lock/refresh boundary as ordinary reference writes, also for reads.
+    # Own two short transactions; discard only the authentication read snapshot.
+    if session.new or session.dirty or session.deleted:
+        raise RuntimeError("safe operation requires a clean session")
+    session.rollback()
+    with transaction(session):
+        context, identity = _authorize(session, context, object_id, command)
+    locator = hashlib.sha256(identity[0].encode()).hexdigest()
+    # No DB transaction or command locks are retained during network I/O.
+    try:
+        result = _perform(Bao(settings), locator, command)
+    except (KeyError, TypeError, ValueError, AttributeError):
+        raise HTTPException(503, "Credential safe unavailable") from None
+    with transaction(session):
+        context, current = _authorize(session, context, object_id, command)
+        if current != identity:
+            raise HTTPException(409, "Credential reference changed during safe operation")
+        add_audit_event(session, object_id=object_id, action="credential_safe_" + command.action,
+                        actor=context.principal.id, details={"channel": context.channel})
+    return result
+
+
+def _authorize(session, context, object_id, command):
     context = refresh_write_context(session, context, object_id=object_id)
     permission = (Permission.READ_REFERENCE_CONTENT
                   if command.action in {"read", "history"} else Permission.WRITE_REFERENCE_CONTENT)
@@ -120,9 +152,10 @@ def operate(session: Session, context: WriteContext, settings: Settings,
     row = session.get(CatalogObject, object_id)
     if row.kind != "credential_reference" or json.loads(row.data_json).get("provider") != "safe":
         raise HTTPException(409, "Select the safe credential provider explicitly")
-    # Server-owned instance identity survives edits, not delete/recreate.
-    locator = hashlib.sha256(row.instance_id.encode()).hexdigest()
-    backend = Bao(settings)
+    return context, (row.instance_id, row.revision)
+
+
+def _perform(backend, locator, command):
     path = "blockwart/data/" + locator
     if command.action == "history":
         try:
@@ -131,18 +164,19 @@ def operate(session: Session, context: WriteContext, settings: Settings,
             if exc.status_code == 404:
                 return {"current_version": 0, "versions": {}}
             raise
-        add_audit_event(
-            session, object_id=object_id, action="credential_safe_history",
-            actor=context.principal.id, details={"channel": context.channel},
-        )
+        if (type(data["current_version"]) is not int
+                or not 0 <= data["current_version"] <= MAX_VERSIONS
+                or not isinstance(data["versions"], dict)
+                or any(not isinstance(v, dict) for v in data["versions"].values())):
+            raise ValueError("invalid history")
         return {"current_version": data["current_version"], "versions": data["versions"]}
     if command.action == "read":
         suffix = "?version=" + str(command.version) if command.version else ""
         data = backend.request("GET", path + suffix)["data"]
-        value = data["data"]
+        value = _value(data["data"])
         if value.get("deleted"):
             raise HTTPException(404, "Safe entry is deleted")
-        result = {"version": data["metadata"]["version"], **value}
+        result = {"version": _version(data["metadata"]["version"]), **value}
     else:
         if command.cas is None:
             raise HTTPException(428, "Safe CAS version required")
@@ -151,9 +185,9 @@ def operate(session: Session, context: WriteContext, settings: Settings,
         if command.action in {"restore", "undelete"}:
             if command.version is None:
                 raise HTTPException(422, "Source version required")
-            value = backend.request(
+            value = _value(backend.request(
                 "GET", path + "?version=" + str(command.version),
-            )["data"]["data"]
+            )["data"]["data"])
             if value.get("deleted"):
                 raise HTTPException(409, "Source version is deleted")
             # Restore is broker-internal copying, never an implicit value read to a writer.
@@ -167,7 +201,23 @@ def operate(session: Session, context: WriteContext, settings: Settings,
         result = backend.request("POST", path, {
             "options": {"cas": command.cas}, "data": value,
         })["data"]
-        result = {"version": result["version"]}
-    add_audit_event(session, object_id=object_id, action="credential_safe_" + command.action,
-                    actor=context.principal.id, details={"channel": context.channel})
+        result = {"version": _version(result["version"])}
     return result
+
+
+def _version(value):
+    if type(value) is not int or not 1 <= value <= MAX_VERSIONS:
+        raise ValueError("invalid version")
+    return value
+
+
+def _value(value):
+    if not isinstance(value, dict) or type(value.get("deleted")) is not bool:
+        raise ValueError("invalid entry")
+    if value["deleted"]:
+        return {"deleted": True}
+    validated = SafeAction(action="write", fields=value["fields"],
+                           preset=value.get("preset", "other"))
+    if validated.fields is None:
+        raise ValueError("invalid fields")
+    return {"fields": validated.fields, "preset": validated.preset, "deleted": False}

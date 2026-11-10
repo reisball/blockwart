@@ -39,7 +39,7 @@ def safe_action(request: Request, object_id: str,
         raise HTTPException(422, "Invalid safe action") from None
     result = execute_ui_command(session, context, lambda: operate(
         session, context, request.app.state.settings, object_id, payload,
-    ))
+    ), owns_transactions=True)
     # Escaped values only in this explicit response; never echo submitted fields on error.
     return HTMLResponse("<!doctype html><meta charset=utf-8><title>Credential safe</title>"
                         "<pre>" + html.escape(json.dumps(result, ensure_ascii=False, indent=2))
