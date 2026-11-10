@@ -211,6 +211,7 @@ ruff check --no-cache .
 python -m compileall -q src tests scripts
 pytest -q -ra
 PYTHONPATH=src python scripts/update_openapi_contract.py --check
+PYTHONPATH=src python scripts/ci/credential_safe_smoke.py
 ./scripts/ci/package-smoke.sh
 REVISION="$(git rev-parse HEAD)"
 docker build \
@@ -223,7 +224,7 @@ docker build \
 The package smoke builds a wheel, installs it into a clean virtual environment, changes to a
 directory outside the repository, starts `blockwart-start`, loads packaged templates and static
 assets, runs the relationship-integrity diagnostic, and verifies the complete
-48-tool catalog. Its read/write, preview, Project-workspace, coverage, attention,
+49-tool catalog. Its read/write, preview, Project-workspace, coverage, attention,
 activity, comment, audit, grant-management, and ownerless-adoption calls use the
 installed `blockwart-mcp` console command. The smoke's `mcp_calls` summary is a
 fixed label, not an independently measured count of calls or per-tool coverage.
@@ -308,3 +309,18 @@ same-source parity runs on:
 
 These are historical evidence only, not verification of current HEAD or a
 requirement to recreate the original host environment.
+
+### Credential-safe review regressions
+
+The focused suite covers local synthetic HTTP proxy/redirect/error boundaries,
+bootstrap recovery files and API/UI/MCP authorization across the backend gap:
+
+```bash
+pytest -q tests/test_credential_safe.py tests/test_credential_safe_ui.py tests/test_safe_transport.py tests/test_safe_backend_bootstrap.py tests/test_safe_postgresql.py
+```
+
+The PostgreSQL module uses `BLOCKWART_TEST_PG_URL` above and creates/drops its own
+random databases. Without that variable its six tests explicitly skip; a SQLite
+pass does not prove the PostgreSQL lock behavior. The real optional-backend smoke
+also checks operator recovery-share persistence and the runtime-only credential
+directory, without printing initialization material.

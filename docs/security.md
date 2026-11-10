@@ -1,6 +1,10 @@
 # Security Policy
 
-Blockwart stores operational knowledge and credential references. It does not store credential values.
+The Blockwart catalog stores operational knowledge and credential references,
+not credential values. The explicitly configured credential safe stores values
+only in its internal OpenBao backend and transports them through dedicated
+UI/REST/MCP operations; see [Credential safe](credential-safe.md). Values never
+enter catalog JSON, object history, search, exports or audit details.
 
 The global secret-shape validator runs before the fixed catalog object-schema
 registry and cannot be disabled by a kind or field declaration. The registry
@@ -8,14 +12,27 @@ also refuses to declare raw secret/value paths; see `object-validation.md`.
 Common database, cache, queue, and broker connection-string shapes are rejected
 as secret-like values even when they do not visibly include a password.
 
-Agents may read canonical records through API/MCP in the MVP. Agents must not receive raw credential values through prompts, issues, Markdown, exports, fixtures, logs, or screenshots.
+Agents may read authorized canonical records through API/MCP. Generic catalog
+operations do not resolve safe values. The explicit credential-safe operation
+may accept or reveal values under the existing content-write/content-read
+permissions, respectively; metadata rights alone do not authorize either.
+Only use that operation when the receiving client, agent/model provider and
+conversation are approved to handle the values. Client transcripts, provider
+retention and host-side recording are outside Blockwart's control: catalog
+nonpersistence and `no-store` do not prevent them. Never put real credentials in
+issues, Markdown, exports, test fixtures, logs or screenshots, or inject them
+into unrelated prompts.
 
-Credential-reference records must keep:
+Credential-reference catalog records retain these handling defaults:
 
 - `secret_value_stored: false`
 - `handling_rules.telegram_allowed: false`
 - `handling_rules.markdown_secret_allowed: false`
 - `handling_rules.agents_may_read_value: false`
+
+These catalog handling hints are not safe authorization grants or an enforcement
+mechanism for external clients. Safe operations use the existing effective
+reference-content permissions; they do not silently rewrite handling metadata.
 
 Creating credential-reference metadata for one service is delegable without
 catalog-wide authority. The service-scoped `create_credential_reference`
@@ -33,8 +50,10 @@ referenced ID is refused rather than reused. See
 The authentication foundation uses Argon2id password hashes, hashed opaque
 browser sessions and service tokens, one-time login challenges, session-bound
 CSRF validation, revocation, expiry, and a separate security-event stream.
-Plaintext credential material must never enter logs, audit details, database
-rows, command-line arguments, or generated documentation. See
+Plaintext credential material must never enter logs, audit details, catalog
+database rows, command-line arguments, or generated documentation. Explicit safe
+transport and protected backend/control storage are separate from that catalog
+persistence prohibition. See
 `auth-rbac.md`.
 
 Human login under `/auth` is non-persistent by default: its server-side session

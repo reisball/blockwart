@@ -279,7 +279,7 @@ def test_every_schema_rule_publishes_a_contract() -> None:
         "validate_runbook_timestamp_order",
     ]
     assert [rule["rule"] for rule in kinds["credential_reference"]["data"]["rules"]] == [
-        "reject_credential_value_keys"
+        "reject_credential_value_keys", "reject_safe_reference_locator",
     ]
 
 

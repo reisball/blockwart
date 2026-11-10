@@ -626,8 +626,11 @@ embedded lists can exceed a tool output limit.
 
 `blockwart.list_own_direct_grants` is not admin-only: it forwards `role`, `limit`, and
 `cursor` to the self-scoped REST route and returns the caller's own direct grants only.
-MCP intentionally provides no password, session-secret, or service-token-value
-operation; existing object grant tools remain the only MCP assignment writes.
+MCP provides no operation to reveal Blockwart login passwords, browser-session
+secrets or its authentication service-token values. The separate opt-in
+`blockwart.credential_safe` operation can transport credential-safe values under
+the existing reference-content permissions; it does not change catalog grants
+or provide an authentication-administration endpoint.
 
 For compatibility, MCP output retains the established `results` and `objects`
 fields. It additionally returns v1 `next_cursor`, `total`, `sort`, and
@@ -643,7 +646,12 @@ BLOCKWART_API_BASE_URL=http://127.0.0.1:8000 blockwart-mcp
 
 The server speaks MCP over stdio. Each compact JSON-RPC message occupies exactly one UTF-8 line;
 `Content-Length` headers are not used. Standard output is reserved for MCP messages. Library and
-application logs go to standard error.
+application logs go to standard error. During protocol serving, SDK/transport
+log records (including SDK calls to the root logger) are reduced to a fixed
+`mcp_sdk_event` marker before handlers run. Raw validation exceptions, protocol
+messages and tracebacks are not emitted, even with DEBUG or separately configured
+SDK handlers. Blockwart's own tool errors retain their value-free operation and
+correlation diagnostics.
 
 Protocol versions are negotiated during `initialize`. The minimum supported SDK version
 (`mcp` 1.28.1) supports `2024-11-05`, `2025-03-26`, `2025-06-18`, and `2025-11-25`; its current
@@ -652,7 +660,10 @@ notification and ping request through the SDK protocol implementation.
 
 ## Configuration
 
-- BLOCKWART_API_BASE_URL: base URL for the Blockwart HTTP API
+- BLOCKWART_API_BASE_URL: absolute HTTP(S) base URL for the Blockwart HTTP API;
+  an optional deployment path prefix is supported. Query strings, fragments,
+  embedded user credentials, invalid hosts/ports and control characters are
+  rejected before network access.
 - default: http://127.0.0.1:8000
 - BLOCKWART_API_TOKEN_FILE: protected file containing one service-account
   bearer token; preferred for deployed runtimes and re-read on every request
@@ -673,23 +684,42 @@ pre-existing tokens as `api`; rotate the exact deployed MCP token with
 enabling those writes. A caller-controlled header cannot change a
 token's audience.
 
-Bearer credentials may use plain HTTP only for loopback targets. Non-loopback
-targets require HTTPS, and the MCP client rejects redirects instead of risking
-credential forwarding across an origin or scheme boundary.
+Bearer credentials may use plain HTTP only for trusted loopback targets.
+Non-loopback targets require HTTPS. Safe operations require configured bearer
+credentials and enforce this transport rule before any network access, including
+when credentials are absent. Loopback is a trusted local-host boundary, not an
+unauthenticated safe mode. The MCP client rejects redirects and ignores
+environment proxies to prevent credential forwarding across an origin or scheme
+boundary.
 
 ## Secret Handling
 
-The MCP wrapper never resolves credential values. It only returns what the v1 API
-returns: sanitized object context, relationships, and credential-reference IDs.
-Canonical provenance is returned unchanged from v1; secret-shaped stored
-provenance is handled by the same safe record-integrity boundary.
+Generic catalog MCP tools return sanitized object context, relationships and
+credential-reference IDs/locators according to current permissions, not safe
+values. Canonical provenance is returned unchanged from v1; secret-shaped stored
+provenance is handled by the same safe record-integrity boundary. Generic catalog
+write tools reject secret-shaped payloads and require the corresponding object
+permission. Read tools conceal no-discover objects, emit strict discover-only
+stubs, and return authorized detail for readable objects.
 
-The bearer token authenticates every catalog tool call. Read tools are
-object-filtered: no-discover objects are concealed,
-discover-only objects are strict stubs, and readable objects return sanitized
-detail. Write tools reject secret-shaped payloads and require the corresponding
-object permission. Credential resolution and Gateway registration remain out
-of scope.
+The explicit opt-in `blockwart.credential_safe` tool is the exception to generic
+catalog secret rejection. It accepts named string values for authorized writes
+and returns current or historical values only for explicit reads authorized by
+`read_reference_content`. Mutations require `write_reference_content`, never
+implicitly return values to a write-only caller, and use the dedicated safe
+POST endpoint rather than catalog object storage. History returns metadata, not
+values. See [Credential safe](credential-safe.md) for CAS, retention and backend
+boundaries. Gateway registration and external target-system provisioning remain
+out of scope.
+
+The authentication bearer token is wrapper configuration, never a tool argument
+or result. Safe field values are intentional tool inputs/outputs: the MCP client,
+agent/model provider, conversation history, recording integrations or local host
+may retain them. Blockwart's catalog nonpersistence and `no-store` HTTP responses
+do not control that external retention. Only invoke safe read/write when this
+client and conversation are approved to receive the values; do not copy them to
+issues, Markdown, exports, screenshots or diagnostic logs. Protect clients and
+disable payload recording in surrounding infrastructure as appropriate.
 
 ## Error Contract
 

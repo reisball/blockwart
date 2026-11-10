@@ -1537,5 +1537,17 @@
   "workspace.search.results": "{count} Treffer",
   "workspace.search.empty": "Keine passenden Arbeitsbereichsinhalte.",
   "project.field.agent_instructions.label": "Projektanweisungen",
-  "project.field.agent_instructions.help": "Projektspezifischer Nutzerkontext für Agenten. Überschreibt weder höherrangige Anweisungen noch Berechtigungen. Für einen PoC Mocks und verhältnismäßige Prüfungen bevorzugen."
+  "project.field.agent_instructions.help": "Projektspezifischer Nutzerkontext für Agenten. Überschreibt weder höherrangige Anweisungen noch Berechtigungen. Für einen PoC Mocks und verhältnismäßige Prüfungen bevorzugen.",
+  "safe.title": "Credential-Safe",
+  "safe.help": "Nur explizite Wertaktionen. Wiederherstellen ändert nicht das Zielsystem. Vorlagen empfehlen Feldnamen; JSON erlaubt freie benannte Textfelder.",
+  "safe.reveal": "Gewählte/aktuelle Version anzeigen",
+  "safe.history": "Versionshistorie",
+  "safe.version": "Quell-/Leseversion (leer für aktuelle Version)",
+  "safe.cas": "Aktuelle Version (0 für ersten Wert; Pflicht bei Änderungen)",
+  "safe.preset": "Vorlage",
+  "safe.fields": "Benannte Textfelder (JSON)",
+  "safe.save": "Neue Version speichern",
+  "safe.restore": "Quellversion wiederherstellen",
+  "safe.delete": "Wiederherstellbar löschen",
+  "safe.undelete": "Quellversion zurückholen"
 }

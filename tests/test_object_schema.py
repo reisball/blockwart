@@ -409,6 +409,7 @@ def test_credential_reference_provider_enum_includes_infisical() -> None:
         "env_file",
         "local_file",
         "external",
+        "safe",
     }
     provider_field = next(
         field
@@ -428,7 +429,7 @@ def test_credential_reference_accepts_every_supported_provider(provider: str) ->
             "data": {
                 "schema_version": 1,
                 "provider": provider,
-                "reference": {"item_hint": "pointer only"},
+                "reference": {} if provider == "safe" else {"item_hint": "pointer only"},
                 "scope": {"access_type": "api"},
                 "secret_value_stored": False,
             },

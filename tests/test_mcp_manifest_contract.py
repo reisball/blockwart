@@ -17,21 +17,29 @@ from blockwart.mcp.server import TOOLS, local_contract_metadata, validate_runtim
 def test_integrated_mcp_contract_has_reviewed_manifest_evidence() -> None:
     metadata = contract_metadata(TOOLS, build_revision="issue-188-236-245-248-249-250-251")
 
-    # Reviewed #333: only the three projection argument descriptions now explain
-    # full Project Instructions. The delta test below restores the pre-#333 digest.
-    # Tool count, input shapes, annotations and contract version remain unchanged.
+    # Reviewed #335: exactly one dedicated POST safe-action tool is added.
+    # Removing it restores the complete pre-change digest below.
     assert metadata == {
         "build_revision": "issue-188-236-245-248-249-250-251",
         "contract_version": "1",
-        "manifest_digest": "3d30cc14192c9369d1d0ac12ef4c796ebc3d35d104d2c6a5ae24a4a0dcd8802a",
-        "tool_count": 48,
+        "manifest_digest": "4adaea66354cf559dd1ad6cc4465acb23bcf6e700a9d07291de53d1024f35cf8",
+        "tool_count": 49,
     }
+
+
+def test_safe_manifest_delta_is_one_new_tool():
+    previous = [tool for tool in TOOLS if tool["name"] != "blockwart.credential_safe"]
+    assert len(previous) == 48
+    assert contract_metadata(previous, build_revision="base")["manifest_digest"] == (
+        "3d30cc14192c9369d1d0ac12ef4c796ebc3d35d104d2c6a5ae24a4a0dcd8802a"
+    )
 
 
 def test_project_instruction_manifest_delta_is_only_three_projection_descriptions() -> None:
     """Reversing the reviewed description change restores the pre-#333 digest."""
     # Each tool gets its own copy: registration reuses the projection dict.
-    previous = [copy.deepcopy(tool) for tool in TOOLS]
+    previous = [copy.deepcopy(tool) for tool in TOOLS
+                if tool["name"] != "blockwart.credential_safe"]
     changed = set()
     old_description = (
         "Closed server-defined read profile. compact keeps identity, state, and the "
@@ -87,7 +95,7 @@ def test_reduced_catalog_is_incompatible_before_normal_tool_use() -> None:
 
     diagnosis = diagnose_contract(local, api=reduced)
 
-    assert local["tool_count"] == 48
+    assert local["tool_count"] == 49
     assert reduced["tool_count"] == 22
     assert diagnosis["status"] == "incompatible"
     assert diagnosis["classification"] == "wrapper_drift"
