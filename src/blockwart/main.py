@@ -11,7 +11,7 @@ from blockwart.api.errors import (
     install_batch_request_bound,
     install_request_context,
 )
-from blockwart.api.routes import admin, agent, auth, catalog, health, v1
+from blockwart.api.routes import admin, agent, auth, catalog, credential_safe, health, v1
 from blockwart.config import Settings, get_settings
 from blockwart.domain.schema_projection import object_schema_projection
 from blockwart.services.login_protection import LoginProtector
@@ -19,6 +19,7 @@ from blockwart.services.monitoring import run_monitoring_poller
 from blockwart.services.release_monitoring import run_release_monitoring_poller
 from blockwart.ui.admin import router as admin_ui_router
 from blockwart.ui.auth import router as auth_router
+from blockwart.ui.credential_safe import router as safe_ui_router
 from blockwart.ui.i18n import persist_locale_cookie, validate_locale_catalogs
 from blockwart.ui.paths import STATIC_DIR
 from blockwart.ui.project_workspace import router as project_records_ui_router
@@ -57,6 +58,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.middleware("http")(principal_scoped_cache_control)
 
     app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
+    app.include_router(credential_safe.router, prefix="/api")
+    app.include_router(safe_ui_router)
     app.include_router(health.router, prefix="/api")
     app.include_router(catalog.router, prefix="/api")
     app.include_router(agent.router, prefix="/api")

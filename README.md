@@ -124,3 +124,9 @@ Please report vulnerabilities through the process described in the
 ## License
 
 Blockwart is licensed under the [Apache License 2.0](LICENSE).
+
+## Optional credential safe
+
+An opt-in internal OpenBao backend supports explicit credential value actions over
+the UI, REST and MCP. Existing deployments and references are unchanged. See
+[Credential safe](docs/credential-safe.md) for the bundle, rights and limits.

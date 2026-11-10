@@ -1,0 +1,212 @@
+"""Standalone, standard-library-only supervisor for the optional OpenBao bundle."""
+from __future__ import annotations
+
+import json
+import os
+import signal
+import subprocess
+import time
+from pathlib import Path
+from urllib.error import HTTPError
+from urllib.request import Request, urlopen
+
+ROOT = Path(os.environ.get("SAFE_CONTROL_DIR", "/control"))
+URL = os.environ.get("SAFE_LOCAL_URL", "http://127.0.0.1:8200")
+CONFIG = os.environ.get("SAFE_CONFIG", "/etc/openbao/config.hcl")
+BINARY = os.environ.get("SAFE_BINARY", "/bin/bao")
+SENTINEL = {"bootstrap": "blockwart-safe-v1"}
+POLICY = """
+path "blockwart/data/*" { capabilities = ["create", "update", "read"] }
+path "blockwart/metadata/*" { capabilities = ["read"] }
+path "auth/token/revoke-self" { capabilities = ["update"] }
+"""
+MAX_VERSIONS = 2147483647
+
+
+def call(method, path, body=None, token=None, timeout=5):
+    request = Request(URL + "/v1/" + path,
+                      data=json.dumps(body).encode() if body is not None else None,
+                      headers={"Content-Type": "application/json", **(
+                          {"X-Vault-Token": token} if token else {}
+                      )}, method=method)
+    with urlopen(request, timeout=timeout) as response:
+        return json.load(response) if response.status != 204 else {}
+
+
+def save(name, value):
+    # Files live outside the catalog and OpenBao data volume; never stdout.
+    temporary = ROOT / (name + ".tmp")
+    with open(temporary, "w", opener=lambda path, flags: os.open(path, flags, 0o600)) as stream:
+        json.dump(value, stream)
+        stream.flush()
+        os.fsync(stream.fileno())
+    temporary.replace(ROOT / name)
+    sync_directory(temporary.parent)
+
+
+def sync_directory(path):
+    directory = os.open(path, os.O_RDONLY)
+    try:
+        os.fsync(directory)
+    finally:
+        os.close(directory)
+
+
+def load(name):
+    return json.loads((ROOT / name).read_text())
+
+
+def wait_ready(process):
+    for _ in range(600):
+        if process.poll() is not None:
+            raise RuntimeError("safe_backend_start_failed")
+        try:
+            status = call("GET", "sys/seal-status")
+            if not status["initialized"]:
+                return status
+            if not status["sealed"]:
+                call("GET", "sys/health")  # active, not merely unsealed standby
+                return status
+            time.sleep(0.1)
+        except OSError:
+            time.sleep(0.1)
+    raise RuntimeError("safe_backend_start_timeout")
+
+
+def verify(token):
+    data = call("GET", "blockwart/data/bootstrap", token=token)
+    if data["data"]["data"] != SENTINEL:
+        raise RuntimeError("safe_backend_persistence_check_failed")
+
+
+def approle_token(auth):
+    return call("POST", "auth/approle/login", auth)["auth"]["client_token"]
+
+
+def bootstrap(process):
+    status = wait_ready(process)
+    if status["sealed"] and status["initialized"]:
+        raise RuntimeError("safe_backend_sealed")
+    if (ROOT / "runtime/broker.json").exists():
+        if not status["initialized"]:
+            raise RuntimeError("safe_backend_state_missing")
+        token = approle_token(load("runtime/broker.json"))
+        verify(token)
+        call("POST", "auth/token/revoke-self", {}, token)
+        return False
+    if (ROOT / "pending.json").exists():
+        token = approle_token(load("pending.json"))
+        verify(token)
+        call("POST", "auth/token/revoke-self", {}, token)
+        # The initial root may have been revoked just before a previous crash.
+        try:
+            call("POST", "auth/token/revoke-self", {}, load("root.json"))
+        except HTTPError as exc:
+            if exc.code != 403:
+                raise
+        (ROOT / "pending.json").replace(ROOT / "runtime/broker.json")
+        sync_directory(ROOT / "runtime")
+        sync_directory(ROOT)
+        (ROOT / "root.json").unlink(missing_ok=True)
+        save("stage.json", "ready")
+        return False
+    if not status["initialized"]:
+        if any(item.name != "runtime" for item in ROOT.iterdir()) or any(
+            (ROOT / "runtime").iterdir()
+        ):
+            raise RuntimeError("safe_backend_control_without_state")
+        result = call("POST", "sys/init",
+                      {"recovery_shares": 1, "recovery_threshold": 1}, timeout=90)
+        save("root.json", result["root_token"])
+        save("stage.json", "initialized")
+        wait_ready(process)
+    if not (ROOT / "root.json").exists():
+        raise RuntimeError("safe_backend_initialized_without_control")
+    token = load("root.json")
+    stage = load("stage.json")
+    if stage == "mounting":
+        # An interrupted/failed first write is never retried on a possibly bad KV mount (#4331).
+        raise RuntimeError("safe_backend_incomplete_first_write")
+    if stage == "initialized":
+        mounts = call("GET", "sys/mounts", token=token)["data"]
+        if "blockwart/" not in mounts:
+            call("POST", "sys/mounts/blockwart", {"type": "kv", "options": {"version": "2"}}, token)
+        elif mounts["blockwart/"].get("type") != "kv":
+            raise RuntimeError("safe_backend_mount_mismatch")
+        # Newly enabled KV-v2 mounts briefly reject all requests during setup.
+        # Retry only value-free readiness reads, never the initial data write.
+        for attempt in range(100):
+            try:
+                call("GET", "blockwart/config", token=token)
+                break
+            except HTTPError as exc:
+                if exc.code not in {400, 503} or attempt == 99:
+                    raise
+                time.sleep(0.1)
+        call("POST", "blockwart/config",
+             {"cas_required": True, "max_versions": MAX_VERSIONS}, token)
+        save("stage.json", "mounting")
+        call("POST", "blockwart/data/bootstrap",
+             {"options": {"cas": 0}, "data": SENTINEL}, token)
+        save("stage.json", "sentinel")
+        return True  # force a real server restart before accepting credentials
+    if stage != "sentinel":
+        raise RuntimeError("safe_backend_invalid_bootstrap_stage")
+    verify(token)
+    call("PUT", "sys/policies/acl/blockwart-broker", {"policy": POLICY}, token)
+    if "approle/" not in call("GET", "sys/auth", token=token)["data"]:
+        call("POST", "sys/auth/approle", {"type": "approle"}, token)
+    call("POST", "auth/approle/role/blockwart",
+         {"token_policies": ["blockwart-broker"], "token_no_default_policy": True,
+          "token_ttl": "60s", "token_max_ttl": "60s", "secret_id_ttl": 0,
+          "secret_id_num_uses": 0}, token)
+    role_id = call("GET", "auth/approle/role/blockwart/role-id", token=token)["data"]["role_id"]
+    secret_id = call(
+        "POST", "auth/approle/role/blockwart/secret-id", {}, token,
+    )["data"]["secret_id"]
+    save("pending.json", {"role_id": role_id, "secret_id": secret_id})
+    # Re-enter the recoverable finalization path; root is not runtime auth.
+    return bootstrap(process)
+
+
+def main():
+    os.umask(0o077)
+    ROOT.mkdir(mode=0o700, parents=True, exist_ok=True)
+    (ROOT / "runtime").mkdir(mode=0o700, exist_ok=True)
+    process = None
+
+    def stop(_signum, _frame):
+        if process is not None:
+            process.terminate()
+        raise SystemExit(0)
+
+    signal.signal(signal.SIGTERM, stop)
+    signal.signal(signal.SIGINT, stop)
+    try:
+        while True:
+            process = subprocess.Popen(
+                [BINARY, "server", "-config=" + CONFIG],
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            )
+            if bootstrap(process):
+                process.terminate()
+                process.wait(timeout=15)
+                continue
+            print("safe_backend_ready", flush=True)
+            raise SystemExit(process.wait())
+    except Exception:
+        # Do not print raw urllib errors, tokens, initialization replies or secret data.
+        print("safe_backend_unavailable", flush=True)
+        raise SystemExit(1) from None
+    finally:
+        if process is not None and process.poll() is None:
+            process.terminate()
+            try:
+                process.wait(timeout=15)
+            except subprocess.TimeoutExpired:
+                process.kill()
+                process.wait()
+
+
+if __name__ == "__main__":
+    main()

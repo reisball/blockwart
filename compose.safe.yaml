@@ -1,0 +1,26 @@
+# Explicit opt-in overlay: docker compose -f compose.yaml -f compose.safe.yaml up --build
+services:
+  blockwart:
+    environment:
+      BLOCKWART_SAFE_URL: http://credential-safe:8200
+      BLOCKWART_SAFE_AUTH_FILE: /safe-control/broker.json
+    volumes:
+      - ${BLOCKWART_SAFE_CONTROL_DIR:?Set protected absolute control directory}/runtime:/safe-control:ro
+    networks: [default, safe]
+  credential-safe:
+    build:
+      context: .
+      dockerfile: Dockerfile.safe
+    volumes:
+      - credential-safe-data:/openbao/data
+      - ${BLOCKWART_SAFE_CONTROL_DIR:?Set protected absolute control directory}:/control
+      - ${BLOCKWART_SAFE_KEY_DIR:?Set protected absolute key directory}:/openbao/secrets:ro
+      - ./docs/credential-safe.hcl:/etc/openbao/config.hcl:ro
+    networks: [safe]
+    restart: unless-stopped
+    # No host port, no root token in environment, no Docker socket.
+networks:
+  safe:
+    internal: true
+volumes:
+  credential-safe-data:

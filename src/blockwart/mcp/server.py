@@ -1737,6 +1737,32 @@ for _tool in TOOLS:
         _tool["inputSchema"]["$defs"] = _record_schema.pop("$defs", {})
 
 
+TOOLS.append({
+    "name": "blockwart.credential_safe",
+    "description": (
+        "Explicit credential safe action. Requires current read_reference_content for read/history "
+        "or write_reference_content for changes. Named string fields never enter catalog storage. "
+        "Mutations require CAS; restore/undelete require a source version. No permanent destroy."
+    ),
+    "inputSchema": {
+        "type": "object", "additionalProperties": False,
+        "required": ["object_id", "action"],
+        "properties": {
+            "object_id": {"type": "string", "minLength": 1},
+            "action": {"type": "string", "enum": [
+                "read", "history", "write", "restore", "delete", "undelete",
+            ]},
+            "cas": {"type": "integer", "minimum": 0, "maximum": 2147483646},
+            "version": {"type": "integer", "minimum": 1, "maximum": 2147483647},
+            "preset": {"type": "string", "enum": ["login", "token", "key", "other"]},
+            "fields": {"type": "object", "maxProperties": 64,
+                       "additionalProperties": {"type": "string", "maxLength": 65536}},
+        },
+    },
+    "annotations": {"readOnlyHint": False, "destructiveHint": False,
+                    "idempotentHint": False, "openWorldHint": False},
+})
+
 TOOL_DEFINITIONS: dict[str, JSON] = {tool["name"]: tool for tool in TOOLS}
 
 
@@ -2365,6 +2391,10 @@ def call_tool(
             sections=args.get("sections"),
             relation_type=args.get("relation_type"),
         )
+    elif name == "blockwart.credential_safe":
+        object_id = _required_string(args, "object_id")
+        payload = request("POST", "/api/v1/objects/" + quote(object_id, safe="") + "/safe",
+                          {k: v for k, v in args.items() if k != "object_id"}, {})
     elif name == "blockwart.search":
         payload = _legacy_page_payload(
             fetch("/api/v1/objects", _clean_params(args, default_limit=10)),

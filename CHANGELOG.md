@@ -7,6 +7,11 @@ Notable product changes are recorded here. Versions follow the
 
 ### Added
 
+- Opt-in integrated credential safe with an internal, pinned OpenBao KV-v2 backend,
+  explicit UI/REST/MCP value actions, existing content rights, CAS version history,
+  reversible deletion and static-key auto-unseal (#335). Existing references and
+  deployments stay unchanged until explicitly configured.
+
 - Optional multiline Project Instructions in DE/EN create/edit and detail views,
   with complete authorized REST/MCP context and Project overview exposure (#333).
   Instructions are project-specific user context, not permission or policy overrides.

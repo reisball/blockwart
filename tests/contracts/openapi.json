@@ -6086,6 +6086,79 @@
         "title": "Role",
         "type": "string"
       },
+      "SafeAction": {
+        "additionalProperties": false,
+        "properties": {
+          "action": {
+            "enum": [
+              "read",
+              "history",
+              "write",
+              "restore",
+              "delete",
+              "undelete"
+            ],
+            "title": "Action",
+            "type": "string"
+          },
+          "cas": {
+            "anyOf": [
+              {
+                "exclusiveMaximum": 2147483647.0,
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cas"
+          },
+          "fields": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fields"
+          },
+          "preset": {
+            "default": "other",
+            "enum": [
+              "login",
+              "token",
+              "key",
+              "other"
+            ],
+            "title": "Preset",
+            "type": "string"
+          },
+          "version": {
+            "anyOf": [
+              {
+                "maximum": 2147483647.0,
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Version"
+          }
+        },
+        "required": [
+          "action"
+        ],
+        "title": "SafeAction",
+        "type": "object"
+      },
       "ServiceTokenIssueIn": {
         "properties": {
           "audience": {
@@ -20595,6 +20668,152 @@
         ]
       }
     },
+    "/api/v1/objects/{object_id}/safe": {
+      "post": {
+        "operationId": "safe_action_api_v1_objects__object_id__safe_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "object_id",
+            "required": true,
+            "schema": {
+              "title": "Object Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SafeAction"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Safe Action Api V1 Objects  Object Id  Safe Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Authentication required"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Permission denied"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Resource not found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "412": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Precondition failed"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Request validation failed"
+          },
+          "428": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Precondition required"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Internal server error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            },
+            "description": "Service unavailable"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Safe Action"
+      }
+    },
     "/api/v1/objects/{object_id}/topology": {
       "get": {
         "operationId": "get_v1_topology_api_v1_objects__object_id__topology_get",
@@ -29639,6 +29858,7 @@
                 "external",
                 "infisical",
                 "local_file",
+                "safe",
                 "secrets_json",
                 "vaultwarden"
               ],
@@ -30040,6 +30260,11 @@
               "description": "No key anywhere below data may name a raw credential or secret value.",
               "rule": "reject_credential_value_keys",
               "violation": "forbidden_key"
+            },
+            {
+              "description": "Safe credentials must not specify a backend locator in data.reference.",
+              "rule": "reject_safe_reference_locator",
+              "violation": "field_not_allowed"
             }
           ],
           "secret_policy": "global_enforced",
