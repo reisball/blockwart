@@ -18,6 +18,7 @@ from blockwart.api.errors import install_api_error_contract, install_request_con
 from blockwart.mcp import server as mcp_server
 from blockwart.schemas.catalog import CatalogObjectIn
 from blockwart.schemas.project_workspace import ProjectAccessIn, ProjectActionIn, ProjectItemIn
+from blockwart.services.credential_safe import SafeAction
 
 BASE = {"id": "diagnostic-service", "kind": "service", "label": "Diagnostic", "data": {}}
 MARKER = "Bearer " + "A" * 24
@@ -51,6 +52,10 @@ def probe():
 
     @app.post("/api/access")
     def access(payload: ProjectAccessIn):
+        return {"ok": True}
+
+    @app.post("/api/safe")
+    def safe(payload: SafeAction):
         return {"ok": True}
 
     with TestClient(app) as client:
@@ -570,4 +575,33 @@ def test_simultaneous_invalid_filters_remain_distinct(write_client, root_state, 
     details = response.json()["error"]["details"]
     assert len(details) == 2
     assert {detail["location"] for detail in details} == locations
+    assert mcp_server._upstream_details(response.json()["error"]) == details
+
+
+@pytest.mark.parametrize("field", ["object_id", "action", "cas", "version", "preset", "fields"])
+@pytest.mark.parametrize("prefix", ["", "arguments.", "body."])
+def test_safe_declared_names_retain_only_reviewed_locations(field, prefix):
+    from blockwart.domain.validation_errors import public_detail
+
+    location = prefix + field
+    assert public_detail(location=location, code="invalid_format")["location"] == location
+
+
+@pytest.mark.parametrize("field", ["cas", "version", "preset"])
+def test_safe_invalid_scalars_keep_location_without_reflecting_value(probe, field):
+    response = probe.post("/api/safe", json={"action": "write", field: MARKER})
+    assert response.status_code == 422
+    assert MARKER not in response.text
+    details = response.json()["error"]["details"]
+    assert {detail["location"] for detail in details} == {"body." + field}
+    assert mcp_server._upstream_details(response.json()["error"]) == details
+
+
+def test_safe_free_field_names_and_values_remain_private(probe):
+    marker = "ghp_" + "Q" * 24  # Valid path grammar, not published vocabulary.
+    response = probe.post("/api/safe", json={"action": "write", "fields": {marker: {"x": MARKER}}})
+    assert response.status_code == 422
+    assert marker not in response.text and MARKER not in response.text
+    details = response.json()["error"]["details"]
+    assert {detail["location"] for detail in details} == {"body.fields"}
     assert mcp_server._upstream_details(response.json()["error"]) == details

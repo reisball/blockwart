@@ -41,6 +41,7 @@ EXPECTED_OPERATIONS = {
     "/api/v1/objects/{object_id}/rename": {"post"},
     "/api/v1/objects/{object_id}/rename-preview": {"post"},
     "/api/v1/objects/{object_id}/comments": {"get", "post"},
+    "/api/v1/objects/{object_id}/safe": {"post"},
     "/api/v1/projects": {"get"},
     "/api/v1/workspace/search": {"get"},
     "/api/v1/projects/{object_id}/workspace/search": {"get"},
@@ -120,3 +121,15 @@ def test_update_preview_response_models_are_closed_and_fully_required() -> None:
     for name, required in expected_required.items():
         assert schemas[name]["additionalProperties"] is False
         assert set(schemas[name]["required"]) == required
+
+
+def test_safe_operation_uses_only_reviewed_closed_action_schema() -> None:
+    contract = create_app(settings=Settings()).openapi()
+    operation = contract["paths"]["/api/v1/objects/{object_id}/safe"]["post"]
+    assert operation["requestBody"]["content"]["application/json"]["schema"] == {
+        "$ref": "#/components/schemas/SafeAction",
+    }
+    schema = contract["components"]["schemas"]["SafeAction"]
+    assert schema["additionalProperties"] is False
+    assert set(schema["required"]) == {"action"}
+    assert set(schema["properties"]) == {"action", "cas", "version", "preset", "fields"}
