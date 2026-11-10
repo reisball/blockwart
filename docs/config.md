@@ -18,6 +18,8 @@ The MCP wrapper has separate [client settings](mcp.md#configuration).
 | `BLOCKWART_SQLITE_BUSY_TIMEOUT_MS` | `5000` | ge=100, le=60000 | Maximum SQLite lock wait in milliseconds. |
 | `BLOCKWART_SQLITE_WAL_ENABLED` | `true` | — | Enable WAL journal mode for persistent SQLite databases. |
 | `BLOCKWART_SECRET_REFERENCE` | `"local-dev-placeholder"` | — | Reference label only; never a secret value. |
+| `BLOCKWART_SAFE_URL` | `""` | — | Operator-approved internal OpenBao URL; see [credential-safe setup](credential-safe.md). |
+| `BLOCKWART_SAFE_AUTH_FILE` | `""` | — | Protected broker JSON file for the optional safe; empty defaults disable safe operations. |
 | `BLOCKWART_SCHEMA_OVERRIDES_PATH` | `""` | — | Optional JSON file for UI schema metadata overrides. |
 | `BLOCKWART_AUTH_SESSION_TTL_SECONDS` | `3600` | ge=300, le=3600 | Absolute lifetime of an authenticated browser session. |
 | `BLOCKWART_AUTH_REMEMBER_SESSION_TTL_SECONDS` | `2592000` | ge=86400, le=7776000 | Absolute lifetime of a browser session issued with the opt-in 'keep me signed in' choice. Server-selected and never sliding. |

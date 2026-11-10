@@ -638,6 +638,8 @@ content write respectively. They require a `credential_reference` target and
 are needed. Object Owner and Global Catalog Owner retain full control; existing
 Viewer, Editor and Global Catalog Reader grants do not gain content access.
 See [the permission matrix and migration policy](auth-rbac.md).
+For optional safe value actions via `POST /api/v1/objects/{id}/safe`, see
+[Credential safe](credential-safe.md).
 
 Update previews enforce these same gates and redact both protected values and
 protected digest material for actors without content read. An explicit blind
