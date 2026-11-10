@@ -660,7 +660,10 @@ notification and ping request through the SDK protocol implementation.
 
 ## Configuration
 
-- BLOCKWART_API_BASE_URL: base URL for the Blockwart HTTP API
+- BLOCKWART_API_BASE_URL: absolute HTTP(S) base URL for the Blockwart HTTP API;
+  an optional deployment path prefix is supported. Query strings, fragments,
+  embedded user credentials, invalid hosts/ports and control characters are
+  rejected before network access.
 - default: http://127.0.0.1:8000
 - BLOCKWART_API_TOKEN_FILE: protected file containing one service-account
   bearer token; preferred for deployed runtimes and re-read on every request

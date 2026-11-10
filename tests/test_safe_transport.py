@@ -50,7 +50,7 @@ def caller(kind, url, monkeypatch):
         return lambda: safe_backend.call("POST", "test", {"value": "synthetic"})
     monkeypatch.setattr(mcp, "_api_token", lambda: "synthetic-token")
     return lambda: mcp._http_json("POST", url + "/safe", body={"value": "synthetic"},
-                                  headers={}, base_url=url)
+                                  headers={}, base_url=url, safe_operation=True)
 
 
 @pytest.mark.parametrize("kind", ["broker", "supervisor", "mcp"])

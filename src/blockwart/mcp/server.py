@@ -2372,6 +2372,7 @@ def call_tool(
             headers,
             base_url=base_url,
             correlation_id=request_id,
+            safe_operation=name == "blockwart.credential_safe",
         )
     )
 
@@ -2919,6 +2920,24 @@ def call_tool(
     }
 
 
+def _api_root(base_url: str | None) -> str:
+    root = base_url or os.environ.get("BLOCKWART_API_BASE_URL") or DEFAULT_BASE_URL
+    try:
+        parsed = urlsplit(root)
+        if (parsed.scheme not in {"http", "https"} or not parsed.hostname
+                or not parsed.netloc or parsed.username is not None or parsed.password is not None
+                or "?" in root or "#" in root or "\\" in root
+                or any(character.isspace() or ord(character) < 32 or ord(character) == 127
+                       for character in root)
+                or "%" in parsed.netloc or parsed.netloc.endswith(":") or parsed.port == 0):
+            raise ValueError("invalid API base URL")
+    except ValueError:
+        raise UpstreamError(
+            "credential_configuration_error", "Blockwart MCP API base URL is invalid.",
+        ) from None
+    return root.rstrip("/")
+
+
 def fetch_json(
     path: str,
     params: JSON,
@@ -2926,7 +2945,7 @@ def fetch_json(
     base_url: str | None = None,
     correlation_id: str | None = None,
 ) -> JSON:
-    root = (base_url or os.environ.get("BLOCKWART_API_BASE_URL") or DEFAULT_BASE_URL).rstrip("/")
+    root = _api_root(base_url)
     # Publish list arguments as repeated query parameters. An empty field mask
     # is intentionally encoded as the present ``fields=`` marker rather than
     # disappearing under ``doseq``: it means the explicit core-only mask and
@@ -2952,6 +2971,7 @@ def fetch_json(
         headers={},
         base_url=base_url,
         correlation_id=correlation_id,
+        safe_operation=path.endswith("/safe"),
     )
 
 
@@ -2963,10 +2983,11 @@ def request_json(
     *,
     base_url: str | None = None,
     correlation_id: str | None = None,
+    safe_operation: bool = False,
 ) -> JSON:
     if method not in {"POST", "PUT", "DELETE"}:
         raise ValueError("unsupported MCP upstream method")
-    root = (base_url or os.environ.get("BLOCKWART_API_BASE_URL") or DEFAULT_BASE_URL).rstrip("/")
+    root = _api_root(base_url)
     url = f"{root}{path}"
     return _http_json(
         method,
@@ -2975,6 +2996,7 @@ def request_json(
         headers=headers,
         base_url=base_url,
         correlation_id=correlation_id,
+        safe_operation=safe_operation or path.endswith("/safe"),
     )
 
 
@@ -2986,6 +3008,7 @@ def _http_json(
     headers: dict[str, str],
     base_url: str | None,
     correlation_id: str | None = None,
+    safe_operation: bool = False,
 ) -> JSON:
     del base_url
     request_headers = dict(headers)
@@ -2993,7 +3016,8 @@ def _http_json(
         request_headers.get("X-Correlation-ID") or correlation_id
     )
     request_headers["X-Blockwart-Channel"] = "mcp"
-    is_safe = urlsplit(url).path.endswith("/safe")
+    # Sensitivity comes from the tool/logical endpoint, not assembled URL parsing.
+    is_safe = safe_operation
     api_token = _api_token()
     if is_safe or api_token is not None:
         _require_safe_token_transport(url)
