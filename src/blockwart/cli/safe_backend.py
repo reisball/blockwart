@@ -229,6 +229,9 @@ def bootstrap(process):
 
 
 def main():
+    if sys.argv[1:] and not (len(sys.argv) == 3 and sys.argv[1] == "--configure-audit"):
+        print("safe_backend_invalid_arguments", flush=True)
+        raise SystemExit(2)
     os.umask(0o077)
     ROOT.mkdir(mode=0o700, parents=True, exist_ok=True)
     (ROOT / "runtime").mkdir(mode=0o700, exist_ok=True)

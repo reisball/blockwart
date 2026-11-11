@@ -26,7 +26,13 @@ ordinary read responses omit it. CAS remains the backend concurrency boundary.
 | Competing CAS writer | A different operation at CAS+1 records conflict, never success. |
 
 Reconciliation does one exact-version read, not a history scan. Matching ID
-records success and returns only the version, even when later versions exist.
+records success and returns only the original version, even when later versions
+exist. This response is a receipt for the original operation, not a statement
+about the current credential value or deletion state. This also applies to
+legacy callers: retrying an old delete may return its old success after a later
+undelete. To change the current entry, obtain a fresh CAS through an authorized
+read/history path and submit a new intent; do not infer current state from an
+old-CAS success.
 An absent version returns 409 pending: absence cannot prove that a previously
 dispatched network request will never execute. No automatic cancellation,
 cleanup, deletion of originals or blind retry is inferred from a timeout.
@@ -90,7 +96,13 @@ Join Blockwart's actor/channel/operation records to native request headers, then
 native `request.id` to request/response records. This joins failed, denied and
 lost-response requests too, including AppRole login and revoke-self attempts.
 Native identity is the **broker AppRole**, not the individual Blockwart user.
-Denied catalog authorization is recorded locally without a backend request.
+Denied catalog authorization is recorded locally without a backend request;
+caller-supplied operation IDs are digested even on that path. Request audit
+outcomes distinguish `payload_mismatch`, `claim_lost`, `unavailable`, `pending`
+and malformed dispatched-response `uncertain` from durable custody states.
+Already-completed retries record `reconciled`, not another backend completion.
+A conditional completion update also prevents concurrent reconcilers from
+auditing the same successful backend completion more than once.
 Failed revoke-self emits only an operation-correlated fixed warning; token TTL
 still bounds exposure and the next operation logs in anew.
 
@@ -119,12 +131,15 @@ token with OpenBao ACL `create`, `update`, and `sudo` capabilities on
 capability, not operating-system sudo.
 The new supervisor deliberately refuses runtime startup without this marker.
 
-The helper `python /supervisor.py --configure-audit /protected/token.json`
-reads a protected JSON string token file, configures only that fixed allowlist,
-and writes the marker. Use its internal `SAFE_LOCAL_URL` and the existing
-protected control mount in the reviewed deployment procedure. Do this before
-replacing the old running supervisor; its old backend can serve this admin
-request. Revoke the temporary token and remove its protected file afterward.
+Run the helper `python /supervisor.py --configure-audit /protected/token.json`
+from the candidate/new image, never by executing the old container’s supervisor.
+The old binary does not implement this flag and may start a second backend.
+The helper reads a protected JSON string token file, configures only that fixed
+allowlist, and writes the marker. Give the new-image helper the existing backend’s
+network namespace (for default loopback), or an explicit internal `SAFE_LOCAL_URL`,
+and the existing protected control mount in the reviewed deployment procedure.
+Do this before replacing the old running supervisor; its old backend can serve
+this admin request. Malformed helper arguments exit before any backend startup. Revoke the temporary token and remove its protected file afterward.
 Never replace broker auth or initialize a new backend to satisfy this gate.
 
 Stage the audit-volume/config/header provisioning and additive DB migration

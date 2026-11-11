@@ -46,3 +46,19 @@ def test_existing_instance_requires_explicit_header_provisioning(monkeypatch, tm
     monkeypatch.setattr(backend, "call", unexpected)
     with pytest.raises(RuntimeError, match="safe_backend_audit_configuration_required"):
         backend.bootstrap(SimpleNamespace())
+
+
+@pytest.mark.parametrize("arguments", [["--configure-audit"], ["--unexpected"],
+                                      ["--configure-audit", "token", "extra"]])
+def test_malformed_helper_arguments_never_start_backend(monkeypatch, tmp_path, capsys, arguments):
+    monkeypatch.setattr(backend.sys, "argv", ["supervisor.py", *arguments])
+    root = tmp_path / "not-created"
+    monkeypatch.setattr(backend, "ROOT", root)
+    def unexpected(*args, **kwargs):
+        raise AssertionError("invalid CLI attempted to start backend")
+    monkeypatch.setattr(backend.subprocess, "Popen", unexpected)
+    with pytest.raises(SystemExit) as error:
+        backend.main()
+    assert error.value.code == 2
+    assert capsys.readouterr().out.strip() == "safe_backend_invalid_arguments"
+    assert not root.exists()

@@ -153,7 +153,13 @@ def _finish(session, operation_id, state, version=None):
     # must prevent revelation, not erase the fact that a write succeeded.
     with transaction(session):
         row = session.get(SafeOperation, operation_id)
-        row.state, row.result_version = state, version
+        # Another reconciler may finish while this request reads the backend.
+        # A committed successful receipt is immutable and audited only once.
+        changed = session.execute(update(SafeOperation).where(
+            SafeOperation.id == operation_id, SafeOperation.state != "succeeded",
+        ).values(state=state, result_version=version)).rowcount
+        if changed != 1:
+            return
         add_audit_event(session, object_id=row.object_id,
                         action="credential_safe_" + row.action, actor=row.actor,
                         details={"channel": row.channel, "operation_id": row.id, "state": state})
@@ -182,7 +188,10 @@ def operate(session: Session, context: WriteContext, settings: Settings,
     if session.new or session.dirty or session.deleted:
         raise RuntimeError("safe operation requires a clean session")
     session.rollback()
-    operation_id = command.operation_id or uuid4().hex + uuid4().hex
+    operation_id = hashlib.sha256(json.dumps([
+        "request", context.principal.id, context.channel, object_id,
+        command.operation_id or uuid4().hex + uuid4().hex,
+    ]).encode()).hexdigest()
     try:
         with transaction(session):
             context, identity = _authorize(session, context, object_id, command)
@@ -231,6 +240,8 @@ def operate(session: Session, context: WriteContext, settings: Settings,
                 # A competing first admission is not a database outage.
                 with transaction(session):
                     admitted = session.get(SafeOperation, operation_id) is not None
+                    if admitted:
+                        _audit(session, context, object_id, command, operation_id, "claim_lost")
                 if admitted:
                     raise HTTPException(
                         409, "Safe operation pending; retry reconciliation") from None
@@ -239,6 +250,9 @@ def operate(session: Session, context: WriteContext, settings: Settings,
         with transaction(session):
             _audit(session, context, object_id, command, operation_id, "intent")
 
+    reconciled = False
+    request_outcome = None
+
     def after_io(*, success=False):
         nonlocal context
         try:
@@ -246,8 +260,9 @@ def operate(session: Session, context: WriteContext, settings: Settings,
                 context, current = _authorize(session, context, object_id, command)
                 if current != identity:
                     raise HTTPException(409, "Credential reference changed during safe operation")
-                if success and not mutation:
-                    _audit(session, context, object_id, command, operation_id, "succeeded")
+                if success and (not mutation or reconciled):
+                    _audit(session, context, object_id, command, operation_id,
+                           "reconciled" if mutation else "succeeded")
         except (CommandAuthorizationDenied, CommandNotFound, HTTPException):
             with transaction(session):
                 _audit(session, context, None, command, operation_id, "denied_after_io")
@@ -256,12 +271,13 @@ def operate(session: Session, context: WriteContext, settings: Settings,
     dispatched_here = False
 
     def before_mutation():
-        nonlocal dispatched_here
+        nonlocal dispatched_here, request_outcome
         with transaction(session):
             claimed = session.execute(update(SafeOperation).where(
                 SafeOperation.id == operation_id, SafeOperation.state == "intent",
             ).values(state="dispatched")).rowcount
             if claimed != 1:
+                request_outcome = "claim_lost"
                 raise HTTPException(409, "Safe operation pending; retry reconciliation")
             _audit(session, context, object_id, command, operation_id, "dispatched")
         dispatched_here = True
@@ -281,15 +297,19 @@ def operate(session: Session, context: WriteContext, settings: Settings,
                 result = _perform(backend, locator, command, operation_id=operation_id)
                 _finish(session, operation_id, "succeeded", result["version"])
             else:
+                reconciled = True
                 value = None
-                if state == "dispatched" or (state == "succeeded" and command.action == "write"):
+                completed = state == "succeeded"
+                if state == "dispatched" or (completed and command.action == "write"):
                     state, version, value = _reconcile(backend, locator, row)
-                    _finish(session, operation_id, state, version)
+                    if not completed:
+                        _finish(session, operation_id, state, version)
                 if state != "succeeded":
                     raise HTTPException(409, "Safe operation outcome pending" if state in {
                         "intent", "dispatched"} else "Safe operation did not succeed")
                 if command.action == "write" and _value(value) != {
                         "fields": command.fields, "preset": command.preset, "deleted": False}:
+                    request_outcome = "payload_mismatch"
                     raise HTTPException(409, "Safe operation payload differs from completed write")
                 result = {"version": version}
         else:
@@ -300,12 +320,22 @@ def operate(session: Session, context: WriteContext, settings: Settings,
         else:
             with transaction(session):
                 row = session.get(SafeOperation, operation_id) if mutation else None
-                state = "failed" if row is None else (
-                    "uncertain" if row.state == "dispatched" else row.state)
-                _audit(session, context, object_id, command, operation_id, state)
+                if exc.status_code == 503:
+                    outcome = "uncertain" if row and row.state == "dispatched" else "unavailable"
+                elif exc.status_code == 409:
+                    outcome = ("pending" if row and row.state in {"intent", "dispatched"}
+                               else "conflict")
+                else:
+                    outcome = "rejected"
+                _audit(session, context, object_id, command, operation_id,
+                       request_outcome or outcome)
         after_io()
         raise
     except (KeyError, TypeError, ValueError, AttributeError):
+        with transaction(session):
+            row = session.get(SafeOperation, operation_id) if mutation else None
+            outcome = "uncertain" if row and row.state == "dispatched" else "unavailable"
+            _audit(session, context, object_id, command, operation_id, outcome)
         after_io()
         raise HTTPException(503, "Credential safe unavailable") from None
     after_io(success=True)

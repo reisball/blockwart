@@ -163,3 +163,16 @@ def test_pg_lost_response_recovers_from_ledger(safe_client, monkeypatch,
 def test_pg_terminal_rejection_can_retry(safe_client, alembic_session_factory):  # noqa: F811
     from test_safe_retry_binding import test_future_cas_rejection_does_not_poison_legacy_retry
     test_future_cas_rejection_does_not_poison_legacy_retry(safe_client, alembic_session_factory)
+
+
+@pytest.mark.parametrize("winner_state", ["dispatched", "succeeded"])
+def test_pg_claim_loser_audit(safe_client, alembic_session_factory, monkeypatch, winner_state):
+    from test_safe_request_audit import test_claim_loser_has_own_outcome
+    test_claim_loser_has_own_outcome(
+        safe_client, alembic_session_factory, monkeypatch, winner_state)
+
+
+def test_pg_completion_audited_once(safe_client, alembic_session_factory, monkeypatch):
+    from test_safe_request_audit import test_concurrent_reconciliation_records_completion_once
+    test_concurrent_reconciliation_records_completion_once(
+        safe_client, alembic_session_factory, monkeypatch)
