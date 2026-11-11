@@ -1,6 +1,7 @@
 """Real local HTTP boundaries; all payloads are synthetic."""
 import json
 import threading
+import time
 from http.client import HTTPException as HTTPProtocolError
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
@@ -19,6 +20,8 @@ def http_endpoint():
 
     class Handler(BaseHTTPRequestHandler):
         def do_POST(self):
+            if state.get("delay"):
+                time.sleep(state["delay"])
             state["calls"].append(self.rfile.read(int(self.headers.get("Content-Length", 0))))
             self.send_response(state["status"])
             self.send_header("Location", state.get("location", "/redirect"))
@@ -105,3 +108,30 @@ def test_malformed_login_unavailable(http_endpoint, tmp_path, body):
     with pytest.raises(HTTPException) as exc:
         Bao(Settings(safe_url=url, safe_auth_file=str(auth))).token()
     assert exc.value.status_code == 503
+
+
+def test_broker_timeout_is_bounded_and_redacted(http_endpoint):
+    url, state = http_endpoint
+    state["delay"] = 5.5
+    state["body"] = b'{"secret":"synthetic-must-not-escape"}'
+    started = time.monotonic()
+    with pytest.raises(HTTPException) as error:
+        Bao(Settings(safe_url=url, safe_auth_file="unused")).call("GET", "test")
+    assert error.value.status_code == 503
+    assert "synthetic-must-not-escape" not in str(error.value)
+    assert 4.8 <= time.monotonic() - started < 6.5
+
+
+def test_failed_token_revoke_is_visible_without_values(monkeypatch, caplog):
+    backend = Bao(Settings(safe_url="http://localhost.invalid", safe_auth_file="unused"))
+    backend.operation_id = "a" * 64
+    monkeypatch.setattr(backend, "token", lambda: "synthetic-token")
+    def call(method, path, body=None, *, token=None):
+        if path == "auth/token/revoke-self":
+            raise HTTPException(503, "synthetic-private-error")
+        return {"data": {"fields": {"token": "synthetic-private-value"}}}
+    monkeypatch.setattr(backend, "call", call)
+    assert backend.request("GET", "test")["data"]["fields"]["token"]
+    assert "safe_token_revoke_failed operation_id=" + "a" * 64 in caplog.text
+    assert "synthetic-private" not in caplog.text
+    assert "synthetic-token" not in caplog.text

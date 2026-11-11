@@ -132,4 +132,11 @@ def test_safe_operation_uses_only_reviewed_closed_action_schema() -> None:
     schema = contract["components"]["schemas"]["SafeAction"]
     assert schema["additionalProperties"] is False
     assert set(schema["required"]) == {"action"}
-    assert set(schema["properties"]) == {"action", "cas", "version", "preset", "fields"}
+    assert set(schema["properties"]) == {"action", "cas", "version", "preset", "fields",
+                                         "operation_id"}
+    assert set(schema["properties"]["action"]["enum"]) == {
+        "read", "history", "write", "restore", "delete", "undelete", "reconcile",
+    }
+    assert schema["properties"]["operation_id"]["anyOf"] == [
+        {"type": "string", "pattern": "^[a-f0-9]{64}$"}, {"type": "null"},
+    ]

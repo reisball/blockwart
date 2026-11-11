@@ -28,10 +28,12 @@ def safe_action(request: Request, object_id: str,
                 fields_json: Annotated[str, Form()] = "",
                 preset: Annotated[str, Form()] = "other",
                 version: Annotated[str, Form()] = "",
-                cas: Annotated[str, Form()] = ""):
+                cas: Annotated[str, Form()] = "",
+                operation_id: Annotated[str, Form()] = ""):
     context = ui_write_context(request, read_access_from_request(request))
     try:
         payload = SafeAction(action=action, preset=preset,
+                             operation_id=operation_id or None,
                              fields=json.loads(fields_json) if fields_json else None,
                              version=int(version) if version else None,
                              cas=int(cas) if cas else None)

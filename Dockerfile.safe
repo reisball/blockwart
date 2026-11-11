@@ -1,6 +1,16 @@
 # Optional internal backend only; existing Dockerfile/compose defaults are unchanged.
 FROM quay.io/openbao/openbao@sha256:5046911075e137e154ce49ab051502f4ec7cf367d484ae4a4dce665d9b90561f AS upstream
 FROM python:3.12-slim@sha256:9d3abd9fc11d06998ccdbdd93b4dd49b5ad7d67fcbbc11c016eb0eb2c2194891
+# Register maintained pinned tools and dependencies for package/SBOM scanners.
+# Debian depends on cron; policy-rc.d blocks startup and the Python entrypoint
+# never starts cron. Rotation remains exclusively owned by the supervisor.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends logrotate=3.22.0-1 libpopt0=1.19+dfsg-2 \
+    && dpkg --audit \
+    && rm -rf /var/lib/apt/lists/*
+COPY docs/credential-safe.logrotate /etc/logrotate-safe.conf
+# Host worktree modes must not make root logrotate reject its configuration.
+RUN chmod 0644 /etc/logrotate-safe.conf
 COPY --from=upstream /usr/bin/bao /bin/bao
 RUN echo "9c5f36287c673f386e1533e9c044169a248e4ee50dd54810fa766e95bd41b788  /bin/bao" | sha256sum -c -
 COPY docs/openbao-LICENSE /usr/share/licenses/openbao/LICENSE

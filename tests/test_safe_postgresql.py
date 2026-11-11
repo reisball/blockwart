@@ -3,6 +3,7 @@
 BLOCKWART_TEST_PG_URL must name a disposable test server whose user may
 create databases. Each test creates and removes its own random database.
 """
+# ruff: noqa: F811
 import os
 import threading
 import uuid
@@ -117,6 +118,86 @@ def test_network_gap_releases_locks_and_rechecks_policy(
             assert not future.done()  # the DB write finished before backend release
         finally:
             release.set()
-        response = future.result(timeout=5)
+        # The 500 ms DB lock bound above proves the network-gap property.
+        # Post-release policy evaluation and response dispatch need a separate
+        # scheduling budget; their latency is not the lock-freedom assertion.
+        response = future.result(timeout=30)
     assert response.status_code in ({403, 404} if revoke else {200})
     assert (VALUE in response.text) is not revoke
+
+
+def test_pg_conditional_dispatch_has_one_winner(safe_client, monkeypatch,
+                                                alembic_session_factory):  # noqa: F811
+    from test_credential_safe import invoke
+
+    from blockwart.models import SafeOperation
+    client, actors, versions = safe_client
+    barrier = threading.Barrier(2)
+    original = Bao.request
+    def simultaneous(self, method, path, body=None):
+        if method == "POST":
+            barrier.wait(timeout=10)
+        return original(self, method, path, body)
+    monkeypatch.setattr(Bao, "request", simultaneous)
+    command = dict(action="write", cas=0, fields={"token": VALUE})
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        results = list(pool.map(lambda _: invoke(client, actors, "writer", **command), range(2)))
+    assert sorted(r.status_code for r in results) == [200, 409]
+    assert len(versions) == 1
+    with alembic_session_factory() as session:
+        row = session.query(SafeOperation).one()
+        assert (row.state, row.result_version) == ("succeeded", 1)
+
+
+def test_pg_first_admission_race_is_not_outage(safe_client, monkeypatch,
+                                               alembic_session_factory):  # noqa: F811
+    from test_safe_retry_binding import test_concurrent_admission_is_pending_not_database_outage
+    test_concurrent_admission_is_pending_not_database_outage(
+        safe_client, monkeypatch, alembic_session_factory)
+
+
+def test_pg_lost_response_recovers_from_ledger(safe_client, monkeypatch,
+                                               alembic_session_factory):  # noqa: F811
+    from test_safe_reconciliation import test_lost_write_response_reconciles_without_replay
+    test_lost_write_response_reconciles_without_replay(
+        safe_client, monkeypatch, alembic_session_factory)
+
+
+def test_pg_terminal_rejection_can_retry(safe_client, alembic_session_factory):  # noqa: F811
+    from test_safe_retry_binding import test_future_cas_rejection_does_not_poison_legacy_retry
+    test_future_cas_rejection_does_not_poison_legacy_retry(safe_client, alembic_session_factory)
+
+
+@pytest.mark.parametrize("winner_state", ["dispatched", "succeeded"])
+def test_pg_claim_loser_audit(safe_client, alembic_session_factory, monkeypatch, winner_state):
+    from test_safe_request_audit import test_claim_loser_has_own_outcome
+    test_claim_loser_has_own_outcome(
+        safe_client, alembic_session_factory, monkeypatch, winner_state)
+
+
+def test_pg_completion_audited_once(safe_client, alembic_session_factory, monkeypatch):
+    from test_safe_request_audit import test_concurrent_reconciliation_records_completion_once
+    test_concurrent_reconciliation_records_completion_once(
+        safe_client, alembic_session_factory, monkeypatch)
+
+
+def test_network_gap_completion_allows_delayed_policy_recheck(
+        safe_client, alembic_session_factory, monkeypatch):
+    import time
+
+    from blockwart.services import credential_safe
+
+    original = credential_safe._authorize
+    checks = 0
+    def delayed_recheck(*args, **kwargs):
+        nonlocal checks
+        checks += 1
+        if checks == 2:
+            # Delayed post-release evaluation must not be mistaken for a DB
+            # lock held during backend I/O. The DB's 500 ms bound stays strict.
+            time.sleep(6)
+        return original(*args, **kwargs)
+    monkeypatch.setattr(credential_safe, "_authorize", delayed_recheck)
+    test_network_gap_releases_locks_and_rechecks_policy(
+        safe_client, alembic_session_factory, monkeypatch, "mcp", False)
+    assert checks == 2

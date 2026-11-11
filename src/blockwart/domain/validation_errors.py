@@ -152,6 +152,7 @@ _INPUT_PATH_KEYS = frozenset(
         "x-correlation-id",
         # Declared REST/MCP boundary names; pinned by contract-driven tests.
         "cas",
+        "operation_id",
         "preset",
         "Idempotency-Key",
         "If-Match",

@@ -1743,7 +1743,9 @@ TOOLS.append({
     "description": (
         "Explicit credential safe action. Requires current read_reference_content for read/history "
         "or write_reference_content for changes. Named string fields never enter catalog storage. "
-        "Mutations require CAS; restore/undelete require a source version. No permanent destroy."
+        "Mutations require CAS; restore/undelete require a source version. "
+        "Dispatched operations only reconcile; reconcile accepts its operation_id. "
+        "No permanent destroy."
     ),
     "inputSchema": {
         "type": "object", "additionalProperties": False,
@@ -1751,8 +1753,9 @@ TOOLS.append({
         "properties": {
             "object_id": {"type": "string", "minLength": 1},
             "action": {"type": "string", "enum": [
-                "read", "history", "write", "restore", "delete", "undelete",
+                "read", "history", "write", "restore", "delete", "undelete", "reconcile",
             ]},
+            "operation_id": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
             "cas": {"type": "integer", "minimum": 0, "maximum": 2147483646},
             "version": {"type": "integer", "minimum": 1, "maximum": 2147483647},
             "preset": {"type": "string", "enum": ["login", "token", "key", "other"]},

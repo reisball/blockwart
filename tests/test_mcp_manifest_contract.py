@@ -22,7 +22,7 @@ def test_integrated_mcp_contract_has_reviewed_manifest_evidence() -> None:
     assert metadata == {
         "build_revision": "issue-188-236-245-248-249-250-251",
         "contract_version": "1",
-        "manifest_digest": "4adaea66354cf559dd1ad6cc4465acb23bcf6e700a9d07291de53d1024f35cf8",
+        "manifest_digest": "797b5f6585ef30d1f71cd891df902f3b43444d0ab54f4f78ef3d092db581245e",
         "tool_count": 49,
     }
 
@@ -198,3 +198,16 @@ def test_doctor_separates_stale_runtime_catalog_from_wrapper_drift(
     assert diagnosis["runtime_catalog_status"] == "incompatible"
     assert diagnosis["status"] == "incompatible"
     assert diagnosis["classification"] == "stale_runtime_catalog"
+
+
+def test_safe_reconciliation_manifest_delta_is_explicit():
+    previous = copy.deepcopy(TOOLS)
+    safe_tool = next(tool for tool in previous if tool["name"] == "blockwart.credential_safe")
+    properties = safe_tool["inputSchema"]["properties"]
+    assert properties.pop("operation_id") == {"type": "string", "pattern": "^[a-f0-9]{64}$"}
+    properties["action"]["enum"].remove("reconcile")
+    safe_tool["description"] = safe_tool["description"].replace(
+        "Dispatched operations only reconcile; reconcile accepts its operation_id. ", "")
+    assert contract_metadata(previous, build_revision="base")["manifest_digest"] == (
+        "4adaea66354cf559dd1ad6cc4465acb23bcf6e700a9d07291de53d1024f35cf8"
+    )
