@@ -6096,7 +6096,8 @@
               "write",
               "restore",
               "delete",
-              "undelete"
+              "undelete",
+              "reconcile"
             ],
             "title": "Action",
             "type": "string"
@@ -6127,6 +6128,18 @@
               }
             ],
             "title": "Fields"
+          },
+          "operation_id": {
+            "anyOf": [
+              {
+                "pattern": "^[a-f0-9]{64}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Operation Id"
           },
           "preset": {
             "default": "other",

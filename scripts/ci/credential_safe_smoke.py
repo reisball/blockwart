@@ -28,6 +28,8 @@ def main():
     created = False
     docker("build", "-f", str(repo / "Dockerfile.safe"), "-t", image, str(repo))
     try:
+        from credential_safe_supervisor_smoke import prove
+        prove(docker, image, repo)
         with tempfile.TemporaryDirectory(prefix="blockwart-safe-smoke-") as directory:
             root = Path(directory)
             for part in ("data", "control", "secrets", "audit"):
@@ -152,18 +154,11 @@ def main():
             ready()
             assert backend.request("GET", path)["data"]["data"] == original
             assert not (root / "control/root.json").exists()
-            # Exercise maintained logrotate + native SIGHUP, including pruning.
+            # Root mainloop proof above already verified rotation and pruning.
+            # This separate nonroot scenario covers native sink failure/recovery.
             child_signal = ("import os,signal; "
                 "p=next(int(x) for x in os.listdir('/proc') if x.isdigit() and "
                 "open('/proc/'+x+'/comm').read().strip()=='bao'); os.kill(p,signal.SIGHUP)")
-            for _ in range(9):
-                with audit_file.open("ab") as stream:
-                    stream.truncate(10 * 1024 * 1024)
-                docker("exec", name, "logrotate", "--force", "--state",
-                       "/openbao/audit/rotation.state", "/etc/logrotate-safe.conf")
-                docker("exec", name, "python", "-c", child_signal)
-                time.sleep(0.1)
-            assert len(list(audit_file.parent.glob("audit.json.*"))) == 7
             assert backend.request("GET", path)["data"]["data"]["deleted"] is False
             # A directory at the native audit path forces reopen/append failure.
             # No second sink can mask the failure; restoring it recovers safely.

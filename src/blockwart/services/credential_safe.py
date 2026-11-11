@@ -13,10 +13,12 @@ from uuid import uuid4
 
 from fastapi import HTTPException
 from pydantic import BaseModel, ConfigDict, Field, model_validator
+from sqlalchemy import update
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from blockwart.config import Settings
-from blockwart.db.session import transaction
+from blockwart.db.session import DatabaseTransactionError, transaction
 from blockwart.domain.auth import Permission
 from blockwart.models import CatalogObject, SafeOperation
 from blockwart.services.audit import add_audit_event
@@ -48,6 +50,11 @@ class SafeAction(BaseModel):
 
     @model_validator(mode="after")
     def bounded_fields(self):
+        if self.action == "reconcile" and (
+            self.operation_id is None or self.cas is not None or self.version is not None
+            or self.fields is not None or self.preset != "other"
+        ):
+            raise ValueError("Reconciliation requires only an operation identity")
         if self.action in {"read", "history"} and self.operation_id is not None:
             raise ValueError("Operation identity is only accepted for mutations/reconciliation")
         if self.fields is not None and (
@@ -120,6 +127,10 @@ class Bao:
     def request(self, method, path, body=None):
         token = self.token()
         try:
+            if method == "POST" and path.startswith("blockwart/data/"):
+                before_send = getattr(self, "before_mutation", None)
+                if before_send is not None:
+                    before_send()
             return self.call(method, path, body, token=token)
         finally:
             # Short-lived tokens also expire if revocation is unavailable.
@@ -162,8 +173,8 @@ def _reconcile(backend, locator, row):
     if _version(data["metadata"]["version"]) != row.cas + 1:
         raise ValueError("unexpected reconciliation version")
     if data["data"].get("operation_id") == row.id:
-        return "succeeded", row.cas + 1
-    return "conflict", None
+        return "succeeded", row.cas + 1, data["data"]
+    return "conflict", None, None
 
 
 def operate(session: Session, context: WriteContext, settings: Settings,
@@ -182,90 +193,134 @@ def operate(session: Session, context: WriteContext, settings: Settings,
         raise
     locator = hashlib.sha256(identity[0].encode()).hexdigest()
     mutation = command.action not in {"read", "history"}
-    existing = False
     if mutation:
         if command.action != "reconcile":
             _validate_mutation(command)
-        with transaction(session):
-            if command.action == "reconcile":
-                if not command.operation_id:
-                    raise HTTPException(422, "Safe operation identity required")
-                row = session.get(SafeOperation, operation_id)
-                if row is None:
-                    raise HTTPException(404, "Safe operation not found")
-            else:
-                # Legacy clients need no extra field: fixed value-free intent
-                # identity means retrying the same CAS never replays a write.
-                operation_id = command.operation_id or hashlib.sha256(json.dumps([
-                    identity[0], context.principal.id, context.channel,
-                    command.action, command.cas, command.version,
-                ]).encode()).hexdigest()
-                row = session.get(SafeOperation, operation_id)
-            if row is not None:
-                existing = True
-                if (row.actor, row.channel, row.object_id, row.instance_id) != (
-                        context.principal.id, context.channel, object_id, identity[0]):
-                    raise HTTPException(404, "Safe operation not found")
-                if command.action != "reconcile" and (row.action, row.cas, row.source_version) != (
-                        command.action, command.cas, command.version):
-                    raise HTTPException(409, "Safe operation identity already bound")
-            else:
-                row = SafeOperation(id=operation_id, actor=context.principal.id,
-                    channel=context.channel, object_id=object_id, instance_id=identity[0],
-                    action=command.action, cas=command.cas, source_version=command.version,
-                    state="intent")
-                session.add(row)
-                _audit(session, context, object_id, command, operation_id, "intent")
-        # Resolve concurrent admissions without retrying backend work.
-        if not existing:
+        operation_id = _operation_identity(identity[0], context, command)
+        try:
             with transaction(session):
                 row = session.get(SafeOperation, operation_id)
-                row.state = "dispatched"
-    if not mutation:
+                if row is None:
+                    if command.action == "reconcile":
+                        raise HTTPException(404, "Safe operation not found")
+                    row = SafeOperation(id=operation_id, actor=context.principal.id,
+                        channel=context.channel, object_id=object_id, instance_id=identity[0],
+                        action=command.action, cas=command.cas, source_version=command.version,
+                        state="intent")
+                    session.add(row)
+                    _audit(session, context, object_id, command, operation_id, "intent")
+                else:
+                    if (row.actor, row.channel, row.object_id, row.instance_id) != (
+                            context.principal.id, context.channel, object_id, identity[0]):
+                        raise HTTPException(404, "Safe operation not found")
+                    if command.action != "reconcile" and (
+                            row.action, row.cas, row.source_version) != (
+                                command.action, command.cas, command.version):
+                        raise HTTPException(409, "Safe operation identity already bound")
+                    # Only definitive backend rejection is reusable by legacy
+                    # clients. Dispatched/unknown custody is never reset.
+                    if (command.operation_id is None and command.action != "reconcile"
+                            and row.state in {"conflict", "failed"}):
+                        session.execute(update(SafeOperation).where(
+                            SafeOperation.id == operation_id,
+                            SafeOperation.state.in_(["conflict", "failed"]),
+                        ).values(state="intent", result_version=None))
+                        _audit(session, context, object_id, command, operation_id, "intent")
+        except DatabaseTransactionError as exc:
+            if isinstance(exc.__cause__, IntegrityError):
+                # A competing first admission is not a database outage.
+                with transaction(session):
+                    admitted = session.get(SafeOperation, operation_id) is not None
+                if admitted:
+                    raise HTTPException(
+                        409, "Safe operation pending; retry reconciliation") from None
+            raise
+    else:
         with transaction(session):
             _audit(session, context, object_id, command, operation_id, "intent")
+
+    def after_io(*, success=False):
+        nonlocal context
+        try:
+            with transaction(session):
+                context, current = _authorize(session, context, object_id, command)
+                if current != identity:
+                    raise HTTPException(409, "Credential reference changed during safe operation")
+                if success and not mutation:
+                    _audit(session, context, object_id, command, operation_id, "succeeded")
+        except (CommandAuthorizationDenied, CommandNotFound, HTTPException):
+            with transaction(session):
+                _audit(session, context, None, command, operation_id, "denied_after_io")
+            raise
+
+    dispatched_here = False
+
+    def before_mutation():
+        nonlocal dispatched_here
+        with transaction(session):
+            claimed = session.execute(update(SafeOperation).where(
+                SafeOperation.id == operation_id, SafeOperation.state == "intent",
+            ).values(state="dispatched")).rowcount
+            if claimed != 1:
+                raise HTTPException(409, "Safe operation pending; retry reconciliation")
+            _audit(session, context, object_id, command, operation_id, "dispatched")
+        dispatched_here = True
+
     try:
         backend = Bao(settings)
         backend.operation_id = operation_id
-        if mutation and existing:
+        if mutation:
             with transaction(session):
                 row = session.get(SafeOperation, operation_id)
                 state, version = row.state, row.result_version
                 session.expunge(row)
-            if state in {"intent", "dispatched"}:
-                state, version = _reconcile(backend, locator, row)
-                _finish(session, operation_id, state, version)
-            if state != "succeeded":
-                raise HTTPException(409, "Safe operation did not succeed")
-            result = {"version": version}
+            if state == "intent" and command.action != "reconcile":
+                # Configuration, source reads and AppRole login all happen
+                # before the conditional committed dispatch immediately at POST.
+                backend.before_mutation = before_mutation
+                result = _perform(backend, locator, command, operation_id=operation_id)
+                _finish(session, operation_id, "succeeded", result["version"])
+            else:
+                value = None
+                if state == "dispatched" or (state == "succeeded" and command.action == "write"):
+                    state, version, value = _reconcile(backend, locator, row)
+                    _finish(session, operation_id, state, version)
+                if state != "succeeded":
+                    raise HTTPException(409, "Safe operation outcome pending" if state in {
+                        "intent", "dispatched"} else "Safe operation did not succeed")
+                if command.action == "write" and _value(value) != {
+                        "fields": command.fields, "preset": command.preset, "deleted": False}:
+                    raise HTTPException(409, "Safe operation payload differs from completed write")
+                result = {"version": version}
         else:
             result = _perform(backend, locator, command, operation_id=operation_id)
-            if mutation:
-                _finish(session, operation_id, "succeeded", result["version"])
     except HTTPException as exc:
-        # 503 is ambiguous, even if emitted by login or response audit. Keep
-        # dispatched custody so the next request can inspect the exact version.
-        if mutation and not existing and exc.status_code in {404, 409, 422, 428}:
+        if mutation and dispatched_here and exc.status_code in {404, 409, 422, 428}:
             _finish(session, operation_id, "conflict" if exc.status_code == 409 else "failed")
         else:
             with transaction(session):
-                _audit(session, context, object_id, command, operation_id,
-                       "uncertain" if mutation else "failed")
+                row = session.get(SafeOperation, operation_id) if mutation else None
+                state = "failed" if row is None else (
+                    "uncertain" if row.state == "dispatched" else row.state)
+                _audit(session, context, object_id, command, operation_id, state)
+        after_io()
         raise
     except (KeyError, TypeError, ValueError, AttributeError):
+        after_io()
         raise HTTPException(503, "Credential safe unavailable") from None
-    try:
-        with transaction(session):
-            context, current = _authorize(session, context, object_id, command)
-            if current != identity:
-                raise HTTPException(409, "Credential reference changed during safe operation")
-            if not mutation:
-                _audit(session, context, object_id, command, operation_id, "succeeded")
-    except (CommandAuthorizationDenied, CommandNotFound, HTTPException):
-        with transaction(session):
-            _audit(session, context, None, command, operation_id, "denied_after_io")
-        raise
+    after_io(success=True)
     return result
+
+
+def _operation_identity(instance_id, context, command):
+    # Separate actor-scoped caller IDs from derived legacy IDs. No value,
+    # preset or secret fingerprint enters this deterministic metadata digest.
+    binding = [instance_id, context.principal.id, context.channel]
+    if command.operation_id is not None:
+        binding += ["caller", command.operation_id]
+    else:
+        binding += ["legacy", command.action, command.cas, command.version]
+    return hashlib.sha256(json.dumps(binding).encode()).hexdigest()
 
 
 def _validate_mutation(command):

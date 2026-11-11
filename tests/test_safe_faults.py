@@ -9,7 +9,7 @@ from sqlalchemy.exc import OperationalError
 from test_credential_safe import VALUE, invoke, safe_client
 from test_reference_content_boundary import REF_ID, boundary_state
 
-from blockwart.models import ObjectGrant, SafeOperation
+from blockwart.models import AuditEvent, ObjectGrant, SafeOperation
 from blockwart.services import credential_safe as safe
 
 
@@ -22,7 +22,9 @@ def test_database_failure_never_blindly_replays(safe_client, monkeypatch,
         rows = [row for row in list(session.new) + list(session.dirty)
                 if isinstance(row, SafeOperation)]
         state = {"intent": "intent", "dispatch": "dispatched", "finish": "succeeded"}[point]
-        if any(row.state == state for row in rows):
+        if any(row.state == state for row in rows) or any(
+                isinstance(row, AuditEvent) and json.loads(row.details_json or "{}").get(
+                    "state") == state for row in session.new):
             raise OperationalError("synthetic", {}, Exception("synthetic"))
         return original_commit(session)
     monkeypatch.setattr(safe.Session, "commit", commit)
@@ -31,20 +33,19 @@ def test_database_failure_never_blindly_replays(safe_client, monkeypatch,
     assert len(versions) == (1 if point == "finish" else 0)
     monkeypatch.setattr(safe.Session, "commit", original_commit)
     retry = invoke(client, actors, "writer", **command)
-    if point == "dispatch":  # durable unsent intent; never replay
-        assert retry.status_code == 409
-        assert not versions
-    else:
-        assert retry.status_code == 200 and retry.json() == {"version": 1}
-        assert len(versions) == 1
+    # A failed dispatch commit leaves unsent intent retryable; only committed
+    # dispatch is ambiguous and must never be replayed.
+    assert retry.status_code == 200 and retry.json() == {"version": 1}
+    assert len(versions) == 1
 
 
 def test_dispatched_interruption_is_pending_until_exact_evidence(safe_client, monkeypatch,
                                                                alembic_session_factory):
     client, actors, versions = safe_client
     original = safe._perform
-    def interrupt(*a, **kw):
-        raise RuntimeError("synthetic interruption before send")
+    def interrupt(backend, *a, **kw):
+        backend.before_mutation()
+        raise RuntimeError("synthetic interruption after committed dispatch before send")
     monkeypatch.setattr(safe, "_perform", interrupt)
     assert invoke(client, actors, "writer", action="write", cas=0,
                   fields={"token": VALUE}).status_code == 500
@@ -61,7 +62,7 @@ def test_explicit_operation_reconciliation_is_writer_only_and_never_copies_new_f
     assert invoke(client, actors, "writer", action="write", cas=0,
                   fields={"token": VALUE}, operation_id=operation_id).status_code == 200
     assert invoke(client, actors, "writer", action="write", cas=0,
-                  fields={"token": "changed"}, operation_id=operation_id).json() == {"version": 1}
+                  fields={"token": "changed"}, operation_id=operation_id).status_code == 409
     assert len(versions) == 1 and versions[0]["fields"] == {"token": VALUE}
     assert invoke(client, actors, "writer", action="reconcile",
                   operation_id=operation_id).json() == {"version": 1}
@@ -120,7 +121,9 @@ def test_failed_audit_commit_recovers_even_after_later_version(safe_client, monk
     assert invoke(client, actors, "writer", action="write", cas=1,
                   fields={"token": "later"}).json() == {"version": 2}
     assert invoke(client, actors, "writer", action="write", cas=0,
-                  fields={"token": "ignored"}).json() == {"version": 1}
+                  fields={"token": "ignored"}).status_code == 409
+    assert invoke(client, actors, "writer", action="write", cas=0,
+                  fields={"token": VALUE}).json() == {"version": 1}
     assert len(versions) == 2
 
 
@@ -160,12 +163,15 @@ def test_concurrent_same_operation_only_one_dispatches(safe_client, monkeypatch)
     from concurrent.futures import ThreadPoolExecutor
     client, actors, versions = safe_client
     entered, release = threading.Event(), threading.Event()
-    original = safe._perform
-    def delayed(*a, **kw):
-        entered.set()
-        assert release.wait(timeout=10)
-        return original(*a, **kw)
-    monkeypatch.setattr(safe, "_perform", delayed)
+    original = safe.Bao.request
+    def delayed(self, method, path, body=None):
+        if method == "POST":
+            self.before_mutation()
+            self.before_mutation = None
+            entered.set()
+            assert release.wait(timeout=10)
+        return original(self, method, path, body)
+    monkeypatch.setattr(safe.Bao, "request", delayed)
     command = dict(action="write", cas=0, fields={"token": VALUE})
     with ThreadPoolExecutor(max_workers=1) as pool:
         first = pool.submit(invoke, client, actors, "writer", **command)

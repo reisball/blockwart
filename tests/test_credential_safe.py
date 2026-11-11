@@ -31,6 +31,8 @@ def safe_client(alembic_session_factory, boundary_state, monkeypatch):  # noqa: 
             return {"data": {"current_version": len(versions),
                              "versions": {str(i): {} for i in range(1, len(versions) + 1)}}}
         if method == "POST":
+            if getattr(_self, "before_mutation", None) is not None:
+                _self.before_mutation()
             if body["options"]["cas"] != len(versions):
                 raise HTTPException(409, "Safe version conflict")
             versions.append(body["data"])

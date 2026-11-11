@@ -7,6 +7,7 @@ from sqlalchemy import text
 from test_credential_safe import VALUE, invoke, safe_client  # noqa: F401
 from test_reference_content_boundary import REF_ID, boundary_state  # noqa: F401
 
+from blockwart.services import credential_safe as safe
 from blockwart.services.credential_safe import Bao
 
 
@@ -40,10 +41,16 @@ def test_intent_is_durable_before_backend(safe_client, monkeypatch, alembic_sess
     def inspect(self, method, path, body=None):
         if method == "POST":
             with alembic_session_factory() as session:
-                row = session.execute(text("SELECT * FROM safe_operations")).mappings().one()
-                assert row["state"] == "dispatched"
-                assert body["data"]["operation_id"] == row["id"]
-                assert VALUE not in json.dumps(dict(row))
+                assert session.query(safe.SafeOperation).one().state == "intent"
+            claim = self.before_mutation
+            def inspect_dispatch():
+                claim()
+                with alembic_session_factory() as session:
+                    row = session.execute(text("SELECT * FROM safe_operations")).mappings().one()
+                    assert row["state"] == "dispatched"
+                    assert body["data"]["operation_id"] == row["id"]
+                    assert VALUE not in json.dumps(dict(row))
+            self.before_mutation = inspect_dispatch
         return original(self, method, path, body)
     monkeypatch.setattr(Bao, "request", inspect)
     assert invoke(client, actors, "writer", action="write", cas=0,

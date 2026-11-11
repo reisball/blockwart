@@ -1744,7 +1744,7 @@ TOOLS.append({
         "Explicit credential safe action. Requires current read_reference_content for read/history "
         "or write_reference_content for changes. Named string fields never enter catalog storage. "
         "Mutations require CAS; restore/undelete require a source version. "
-        "Retrying an operation only reconciles; reconcile accepts its operation_id. "
+        "Dispatched operations only reconcile; reconcile accepts its operation_id. "
         "No permanent destroy."
     ),
     "inputSchema": {

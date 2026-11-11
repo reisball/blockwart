@@ -8,14 +8,17 @@ object ID, immutable object instance, action, CAS, source version, state and
 result version. There are no field names, values, request bodies, value hashes,
 tokens or replay responses. No scheduler or background reconciler is added.
 
-A mutation commits `intent`, then `dispatched`, before any backend call.
+A mutation commits value-free `intent` before backend work. Configuration,
+restore-source reads and AppRole login precede a conditional `intent` →
+`dispatched` update committed immediately before the KV mutation POST. Only one
+concurrent caller may claim that transition; no DB transaction spans backend I/O.
 KV-v2 writes include the operation ID alongside the internal credential envelope;
 ordinary read responses omit it. CAS remains the backend concurrency boundary.
 
 | Interruption | Next attempt |
 | --- | --- |
 | Intent commit fails | No backend call occurred; a later admitted attempt may write. |
-| Intent committed, before dispatch | No blind replay; inspect the expected version, or report pending. |
+| Intent committed, before dispatch | No mutation was admitted; a retry may claim intent and send. |
 | Dispatch committed, before send | Same as an in-flight request: bounded exact-version reconciliation. |
 | Backend wrote, response lost or response audit failed | Read only CAS+1 and compare its operation ID. |
 | Final DB/audit commit fails | The durable intent remains; the same exact-version comparison repairs completion. |
@@ -41,12 +44,20 @@ and `action: reconcile` with that ID. The caller retains an ID before submitting
 a new operation; mutation success remains the compatible `{"version": N}`.
 Reconciliation and retries require current content-write permission and the
 original actor, channel, object and instance. Reusing an ID for another action,
-CAS or source version is rejected. Changing submitted fields does not change or
-replay an existing operation. Read/history use fresh internal correlation IDs.
+CAS or source version is rejected. Write retries compare fields and preset in
+memory against the exact CAS+1 backend envelope, including already-completed
+rows. Changed content returns 409, never a success for content not stored; neither
+values nor value fingerprints are persisted locally. Explicit `reconcile` returns
+status only and never accepts a replacement payload. Read/history use fresh
+internal correlation IDs.
 
 Legacy UI/API/MCP callers need no new argument: a value-free digest of instance,
 actor, channel, action, CAS and source version binds their implicit intent.
-Repeating that tuple reconciles, never resends. UI POST also accepts explicit
+Repeating a dispatched tuple reconciles, never resends. A definitive backend
+400/404 rejection (locally conflict/failed) may be retried by legacy callers;
+unsent intent is retryable, but ambiguous dispatched custody is never reset.
+Caller-supplied IDs use a separate actor/channel/instance-scoped namespace and
+cannot preclaim another actor’s derived legacy ID. UI POST also accepts explicit
 operation IDs; existing forms retain their existing shape. All paths recheck
 current authorization after I/O before returning status or values.
 
@@ -85,8 +96,11 @@ still bounds exposure and the next operation logs in anew.
 
 The existing supervisor checks the file once per second. At 10 MiB it invokes
 Debian's maintained logrotate, retains seven archives (delayed compression),
-and signals native SIGHUP to reopen. No cron/systemd/service is installed or
-run. Retention is count/size-triggered, not a guaranteed age; the active file
+and signals native SIGHUP to reopen. Debian logrotate and libpopt are installed
+at reviewed versions through apt/dpkg, including Debian’s required cron package;
+package service startup is blocked and the Python entrypoint never runs cron.
+Only the supervisor schedules rotation. Pins require reviewed security updates;
+live apt repositories are not an immutable snapshot of transitive dependencies. Retention is count/size-triggered, not a guaranteed age; the active file
 can overshoot between checks under load. Storage exhaustion makes native
 operations fail closed. Rotation failure emits
 `safe_backend_audit_rotation_failed` and stops the backend; ordinary Safe
@@ -99,7 +113,10 @@ capacity and failure markers must be included in the deployment's monitoring.
 Fresh bootstrap configures the fixed header before revoking its initial root.
 An existing installation must first provision the same header against its
 running internal backend using an explicitly authorized temporary administration
-token, then persist `/control/audit.json` with `{"version":1}`.
+token with OpenBao ACL `create`, `update`, and `sudo` capabilities on
+`sys/config/auditing/request-headers/x-blockwart-operation`, then persist
+`/control/audit.json` with `{"version":1}`. Here `sudo` is an OpenBao ACL
+capability, not operating-system sudo.
 The new supervisor deliberately refuses runtime startup without this marker.
 
 The helper `python /supervisor.py --configure-audit /protected/token.json`
@@ -123,12 +140,23 @@ rollback shortcut. No live migration or configuration is performed by tests.
 
 `tests/test_safe_reconciliation.py` and `tests/test_safe_faults.py` cover
 durability before send, intent/dispatch/final-commit failures, lost responses,
-exact earlier versions, changed retry fields, CAS competition, postwrite
+exact earlier versions, changed retry fields/preset, CAS competition, postwrite
 revocation, and additive schema/no-drift/downgrade behavior.
+`tests/test_safe_retry_binding.py` also covers retryable unsent intent,
+definitive rejection recovery, actor-scoped namespaces, concurrent first
+admission and fresh policy checks before pending status responses.
+`tests/test_safe_postgresql.py` runs conditional-dispatch races, admission
+conflicts, lost responses and terminal-rejection recovery against a disposable
+PostgreSQL ledger.
 `tests/test_safe_native_audit.py` accepts an explicit
 `BLOCKWART_TEST_BAO_BINARY` pointing to a disposable v2.7.2 executable; it
-checks expiry/relogin/revocation, real lost-response correlation, native sink
-failure and actual independent catalog/password-login availability.
+checks expiry/relogin/revocation, real lost-response correlation, retry after
+login/source-read failures, native sink failure and actual independent
+catalog/password-login availability.
 The existing `scripts/ci/credential_safe_smoke.py` additionally exercises the
 digest-pinned static-seal bundle, persistent private audit, native denials,
-redaction, nine rotations/pruning, and sink-failure/recovery.
+redaction and sink-failure/recovery. Its root-container supervisor proof uses the
+actual main loop for nine rotations/pruning and verifies Bao shutdown with fixed
+markers after rotation failure. A separate existing-instance rehearsal invokes
+`--configure-audit` against default loopback, proves `sudo` is required, and
+checks unchanged broker auth/data and removal/revocation of the temporary token.

@@ -1,5 +1,6 @@
 """Optional real pinned Bao audit fault bridge; synthetic disposable local server."""
 # ruff: noqa: F401, F811
+import hashlib
 import json
 import os
 import re
@@ -101,6 +102,7 @@ def test_native_audit_fault_leaves_catalog_and_login_usable(
     client, actors, _ = safe_client
     def bridge(self, method, path, body=None):
         backend.operation_id = self.operation_id
+        backend.before_mutation = getattr(self, "before_mutation", None)
         return _BAO_REQUEST(backend, method, path, body)
     monkeypatch.setattr(Bao, "request", bridge)
     command = dict(action="write", cas=0, fields={"token": VALUE})
@@ -159,6 +161,7 @@ def test_native_lost_response_is_joinable_and_reconciled(
     client, actors, _ = safe_client
     def lost(self, method, path, body=None):
         backend.operation_id = self.operation_id
+        backend.before_mutation = getattr(self, "before_mutation", None)
         result = _BAO_REQUEST(backend, method, path, body)
         if method == "POST":
             raise HTTPException(503, "Credential safe unavailable")
@@ -166,11 +169,54 @@ def test_native_lost_response_is_joinable_and_reconciled(
     monkeypatch.setattr(Bao, "request", lost)
     command = dict(action="write", cas=0, fields={"token": VALUE})
     assert invoke(client, actors, "writer", **command).status_code == 503
+    assert invoke(client, actors, "writer", **{**command,
+                  "fields": {"token": "synthetic-regenerated"}}).status_code == 409
     assert invoke(client, actors, "writer", **command).json() == {"version": 1}
+    assert invoke(client, actors, "writer", **{**command, "preset": "key"}).status_code == 409
     entries = [json.loads(line) for line in audit.read_text().splitlines()]
     writes = [row for row in entries if row["type"] == "request"
               and row["request"]["operation"] in {"create", "update"}
               and row["request"]["path"].startswith("blockwart/data/")]
     assert len(writes) == 1
     assert writes[0]["request"]["headers"]["x-blockwart-operation"] == [backend.operation_id]
+    assert VALUE not in audit.read_text()
+
+
+@pytest.mark.parametrize("stage", ["login", "source"])
+def test_native_presend_failures_retain_retryable_intent(
+        native, safe_client, monkeypatch, alembic_session_factory, stage):
+    from blockwart.models import SafeOperation
+    backend, _, audit, _ = native
+    client, actors, _ = safe_client
+    def bridge(self, method, path, body=None):
+        backend.operation_id = self.operation_id
+        backend.before_mutation = getattr(self, "before_mutation", None)
+        return _BAO_REQUEST(backend, method, path, body)
+    monkeypatch.setattr(Bao, "request", bridge)
+    command = dict(action="write", cas=0, fields={"token": VALUE})
+    if stage == "source":
+        assert invoke(client, actors, "writer", **command).status_code == 200
+        command = dict(action="restore", cas=1, version=1)
+    original = backend.call
+    def unavailable(method, path, body=None, **kwargs):
+        if path == ("auth/approle/login" if stage == "login" else
+                    "blockwart/data/" + hashlib.sha256(instance.encode()).hexdigest()
+                    + "?version=1"):
+            raise HTTPException(503, "Credential safe unavailable")
+        return original(method, path, body, **kwargs)
+    with alembic_session_factory() as session:
+        from blockwart.models import CatalogObject
+        instance = session.get(CatalogObject, REF_ID).instance_id
+    monkeypatch.setattr(backend, "call", unavailable)
+    assert invoke(client, actors, "writer", **command).status_code == 503
+    with alembic_session_factory() as session:
+        row = session.query(SafeOperation).filter_by(action=command["action"]).one()
+        assert row.state == "intent"
+    monkeypatch.setattr(backend, "call", original)
+    assert invoke(client, actors, "writer", **command).json() == {"version": command["cas"] + 1}
+    entries = [json.loads(line) for line in audit.read_text().splitlines()]
+    writes = [row for row in entries if row["type"] == "request"
+              and row["request"]["operation"] in {"create", "update"}
+              and row["request"]["path"].startswith("blockwart/data/")]
+    assert len(writes) == (1 if stage == "login" else 2)
     assert VALUE not in audit.read_text()
