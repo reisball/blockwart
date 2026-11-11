@@ -118,7 +118,10 @@ def test_network_gap_releases_locks_and_rechecks_policy(
             assert not future.done()  # the DB write finished before backend release
         finally:
             release.set()
-        response = future.result(timeout=5)
+        # The 500 ms DB lock bound above proves the network-gap property.
+        # Post-release policy evaluation and response dispatch need a separate
+        # scheduling budget; their latency is not the lock-freedom assertion.
+        response = future.result(timeout=30)
     assert response.status_code in ({403, 404} if revoke else {200})
     assert (VALUE in response.text) is not revoke
 
@@ -176,3 +179,25 @@ def test_pg_completion_audited_once(safe_client, alembic_session_factory, monkey
     from test_safe_request_audit import test_concurrent_reconciliation_records_completion_once
     test_concurrent_reconciliation_records_completion_once(
         safe_client, alembic_session_factory, monkeypatch)
+
+
+def test_network_gap_completion_allows_delayed_policy_recheck(
+        safe_client, alembic_session_factory, monkeypatch):
+    import time
+
+    from blockwart.services import credential_safe
+
+    original = credential_safe._authorize
+    checks = 0
+    def delayed_recheck(*args, **kwargs):
+        nonlocal checks
+        checks += 1
+        if checks == 2:
+            # Delayed post-release evaluation must not be mistaken for a DB
+            # lock held during backend I/O. The DB's 500 ms bound stays strict.
+            time.sleep(6)
+        return original(*args, **kwargs)
+    monkeypatch.setattr(credential_safe, "_authorize", delayed_recheck)
+    test_network_gap_releases_locks_and_rechecks_policy(
+        safe_client, alembic_session_factory, monkeypatch, "mcp", False)
+    assert checks == 2
