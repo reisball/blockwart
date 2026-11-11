@@ -13,6 +13,7 @@ services:
       dockerfile: Dockerfile.safe
     volumes:
       - credential-safe-data:/openbao/data
+      - credential-safe-audit:/openbao/audit
       - ${BLOCKWART_SAFE_CONTROL_DIR:?Set protected absolute control directory}:/control
       - ${BLOCKWART_SAFE_KEY_DIR:?Set protected absolute key directory}:/openbao/secrets:ro
       - ./docs/credential-safe.hcl:/etc/openbao/config.hcl:ro
@@ -24,3 +25,4 @@ networks:
     internal: true
 volumes:
   credential-safe-data:
+  credential-safe-audit:

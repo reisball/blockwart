@@ -76,8 +76,11 @@ administration and revoke it with `bao token revoke -self` afterward. Never
 replace broker credentials with it. This is an operator procedure, not an
 application break-glass endpoint or implemented rotation workflow.
 
-The supervisor emits only readiness/unavailable markers and discards OpenBao
-stdout/stderr; detailed backend diagnostics are not retained by this bundle.
+The supervisor emits readiness/unavailable and audit-rotation-failure markers.
+Operational OpenBao stdout/stderr are discarded. Native HMAC-redacted audit is
+retained separately in the protected persistent audit volume, with size-triggered
+logrotate retention. See [operation custody and audit](credential-safe-operations.md)
+for correlation, failure handling and the existing-instance configuration step.
 
 OpenBao's native static seal performs auto-unseal. If the key is missing or
 wrong, the backend stays unavailable and the container restart policy retries.
@@ -159,21 +162,26 @@ only the new version number. Metadata read/write alone grants neither.
 Existing effective Owner/catalog-owner permissions are unchanged; no parallel
 safe roles are introduced. Two short command lock/refresh transactions check
 current principal activity, grants, object instance and revision: before backend
-I/O, then again before audit and response. No catalog transaction or command
+I/O, then again before response. Backend completion is recorded before the
+second check, even if that check denies the response. No catalog transaction or command
 locks remain open during backend calls. Revocation, deactivation, replacement or
 an intervening object edit prevents returning values. Already-authorized backend
 work may have completed before that second check; it cannot be rolled back by
 catalog authorization. Secret values
 never enter catalog persistence, object history, search, exports, ordinary
-audit events, or denial records. Audit records contain operation names only.
+audit events, or denial records. Audit records contain only fixed operation,
+principal, channel, state and correlation metadata.
 
 Sealed/down/timeouts return 503; there is no plaintext fallback.
 Metadata/catalog/login remain independent. Backend mutation and catalog audit
-are not one atomic transaction: a DB/audit failure, mid-flight policy change or
-timeout can leave completed backend work without a successful catalog audit or
-response. A timed-out write can have an
-unknown outcome; do not blindly retry with a different CAS. Reconcile through
-authorized history/read or the prior CAS before deciding a next operation.
+are not one atomic transaction. A durable value-free intent precedes dispatch;
+the operation ID is written inside the internal KV envelope. Retry of the same
+intent only reconciles its exact expected version; it never repeats a backend
+write. This also works for write-only callers without returning values. A missing
+expected version remains explicitly pending, not falsely successful or failed:
+an original dispatched request might still be in flight. See
+[operation custody and audit](credential-safe-operations.md) for crash points,
+compatibility and migration/rollback constraints.
 
 There is no permanent-destroy operation. KV retention is explicitly set to
 2147483647 versions rather than the upstream default of 10. The broker stops

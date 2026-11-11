@@ -5,6 +5,7 @@ import json
 import os
 import signal
 import subprocess
+import sys
 import time
 from pathlib import Path
 from urllib.error import HTTPError
@@ -21,6 +22,28 @@ path "blockwart/metadata/*" { capabilities = ["read"] }
 path "auth/token/revoke-self" { capabilities = ["update"] }
 """
 MAX_VERSIONS = 2147483647
+AUDIT_FILE = Path("/openbao/audit/audit.json")
+AUDIT_MAX_BYTES = 10 * 1024 * 1024
+
+
+def configure_audit(token):
+    # Upstream supported header allowlist; never accept caller-supplied names.
+    call("POST", "sys/config/auditing/request-headers/x-blockwart-operation",
+         {"hmac": False}, token)
+    save("audit.json", {"version": 1})
+
+
+def rotate_audit(process):
+    try:
+        if AUDIT_FILE.stat().st_size < AUDIT_MAX_BYTES:
+            return
+        subprocess.run(["logrotate", "--force", "--state", "/openbao/audit/rotation.state",
+                        "/etc/logrotate-safe.conf"], check=True, timeout=15,
+                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        process.send_signal(signal.SIGHUP)
+    except (OSError, subprocess.SubprocessError):
+        raise RuntimeError("safe_backend_audit_rotation_failed") from None
+
 
 
 class NoRedirect(HTTPRedirectHandler):
@@ -121,6 +144,8 @@ def bootstrap(process):
     if status["initialized"]:
         preserve_initialization()
     if (ROOT / "runtime/broker.json").exists():
+        if not (ROOT / "audit.json").exists() or load("audit.json") != {"version": 1}:
+            raise RuntimeError("safe_backend_audit_configuration_required")
         if not status["initialized"]:
             raise RuntimeError("safe_backend_state_missing")
         token = approle_token(load("runtime/broker.json"))
@@ -186,6 +211,7 @@ def bootstrap(process):
     if stage != "sentinel":
         raise RuntimeError("safe_backend_invalid_bootstrap_stage")
     verify(token)
+    configure_audit(token)
     call("PUT", "sys/policies/acl/blockwart-broker", {"policy": POLICY}, token)
     if "approle/" not in call("GET", "sys/auth", token=token)["data"]:
         call("POST", "sys/auth/approle", {"type": "approle"}, token)
@@ -206,6 +232,17 @@ def main():
     os.umask(0o077)
     ROOT.mkdir(mode=0o700, parents=True, exist_ok=True)
     (ROOT / "runtime").mkdir(mode=0o700, exist_ok=True)
+    if len(sys.argv) == 3 and sys.argv[1] == "--configure-audit":
+        # Existing initialized installations: explicit offline/staged operator
+        # provisioning; no reinitialization, secret migration, or retained token.
+        try:
+            configure_audit(json.loads(Path(sys.argv[2]).read_text()))
+        except Exception:
+            print("safe_backend_audit_configuration_failed", flush=True)
+            raise SystemExit(1) from None
+        return
+    AUDIT_FILE.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    AUDIT_FILE.parent.chmod(0o700)
     process = None
 
     def stop(_signum, _frame):
@@ -226,8 +263,13 @@ def main():
                 process.wait(timeout=15)
                 continue
             print("safe_backend_ready", flush=True)
-            raise SystemExit(process.wait())
-    except Exception:
+            while process.poll() is None:
+                rotate_audit(process)
+                time.sleep(1)
+            raise SystemExit(process.returncode)
+    except Exception as exc:
+        if isinstance(exc, RuntimeError) and str(exc) == "safe_backend_audit_rotation_failed":
+            print("safe_backend_audit_rotation_failed", flush=True)
         # Do not print raw urllib errors, tokens, initialization replies or secret data.
         print("safe_backend_unavailable", flush=True)
         raise SystemExit(1) from None

@@ -30,7 +30,7 @@ def main():
     try:
         with tempfile.TemporaryDirectory(prefix="blockwart-safe-smoke-") as directory:
             root = Path(directory)
-            for part in ("data", "control", "secrets"):
+            for part in ("data", "control", "secrets", "audit"):
                 (root / part).mkdir(mode=0o700)
             key = root / "secrets/unseal.key"
             key.write_bytes(os.urandom(32))
@@ -38,6 +38,7 @@ def main():
             docker("run", "-d", "--name", name, "--user", f"{os.getuid()}:{os.getgid()}",
                    "-p", "127.0.0.1::8200",
                    "-v", f"{root / 'data'}:/openbao/data",
+                   "-v", f"{root / 'audit'}:/openbao/audit",
                    "-v", f"{root / 'control'}:/control",
                    "-v", f"{root / 'secrets'}:/openbao/secrets:ro",
                    "-v", f"{repo / 'docs/credential-safe.hcl'}:/etc/openbao/config.hcl:ro", image)
@@ -79,9 +80,31 @@ def main():
             def put(cas, value):
                 return backend.request("POST", path, {"options": {"cas": cas}, "data": value})
 
+            backend.operation_id = uuid4().hex + uuid4().hex
             original = {"fields": {"key": "synthetic-key\nline2", "passphrase": "synthetic"},
                         "preset": "key", "deleted": False}
             assert put(0, original)["data"]["version"] == 1
+            audit_file = root / "audit/audit.json"
+            audit_rows = [json.loads(line) for line in audit_file.read_text().splitlines()]
+            joined = [row for row in audit_rows if row.get("request", {}).get("headers", {}).get(
+                "x-blockwart-operation") == [backend.operation_id]]
+            assert {row["type"] for row in joined} == {"request", "response"}
+            assert any(row["request"]["path"] == path for row in joined)
+            assert "synthetic-key" not in audit_file.read_text()
+            assert "synthetic-runtime" not in audit_file.read_text()
+            assert audit_file.stat().st_mode & 0o777 == 0o600
+            assert audit_file.parent.stat().st_mode & 0o777 == 0o700
+            # Native denials retain the operation header even when the caller
+            # cannot receive a successful backend response.
+            try:
+                backend.call("GET", path, token="synthetic-invalid-token")
+                raise AssertionError("invalid token accepted")
+            except HTTPException as exc:
+                assert exc.status_code == 503
+            denied = [json.loads(line) for line in audit_file.read_text().splitlines()]
+            assert any(row.get("error") and row.get("request", {}).get("headers", {}).get(
+                "x-blockwart-operation") == [backend.operation_id] for row in denied)
+
             with ThreadPoolExecutor(max_workers=2) as pool:
                 futures = [pool.submit(put, 1, {"fields": {"token": f"synthetic-{i}"},
                                                "deleted": False}) for i in range(2)]
@@ -129,6 +152,36 @@ def main():
             ready()
             assert backend.request("GET", path)["data"]["data"] == original
             assert not (root / "control/root.json").exists()
+            # Exercise maintained logrotate + native SIGHUP, including pruning.
+            child_signal = ("import os,signal; "
+                "p=next(int(x) for x in os.listdir('/proc') if x.isdigit() and "
+                "open('/proc/'+x+'/comm').read().strip()=='bao'); os.kill(p,signal.SIGHUP)")
+            for _ in range(9):
+                with audit_file.open("ab") as stream:
+                    stream.truncate(10 * 1024 * 1024)
+                docker("exec", name, "logrotate", "--force", "--state",
+                       "/openbao/audit/rotation.state", "/etc/logrotate-safe.conf")
+                docker("exec", name, "python", "-c", child_signal)
+                time.sleep(0.1)
+            assert len(list(audit_file.parent.glob("audit.json.*"))) == 7
+            assert backend.request("GET", path)["data"]["data"]["deleted"] is False
+            # A directory at the native audit path forces reopen/append failure.
+            # No second sink can mask the failure; restoring it recovers safely.
+            fault_script = ("from pathlib import Path; p=Path('/openbao/audit/audit.json'); "
+                            "p.rename(p.with_name('saved')); p.mkdir()")
+            docker("exec", name, "python", "-c", fault_script)
+            docker("exec", name, "python", "-c", child_signal)
+            time.sleep(0.2)
+            try:
+                backend.request("GET", path)
+                raise AssertionError("audit sink fault did not fail closed")
+            except HTTPException as exc:
+                assert exc.status_code == 503
+            docker("exec", name, "python", "-c",
+                   "from pathlib import Path; p=Path('/openbao/audit/audit.json'); "
+                   "p.rmdir(); p.with_name('saved').rename(p)")
+            docker("exec", name, "python", "-c", child_signal)
+            ready()
             logs = docker("logs", name)
             assert "synthetic-key" not in logs
             docker("rm", "-f", name)

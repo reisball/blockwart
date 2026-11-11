@@ -3,11 +3,13 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 from http.client import HTTPException as HTTPProtocolError
 from pathlib import Path
 from typing import Literal
 from urllib.error import HTTPError, URLError
 from urllib.request import HTTPRedirectHandler, ProxyHandler, Request, build_opener
+from uuid import uuid4
 
 from fastapi import HTTPException
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -16,9 +18,11 @@ from sqlalchemy.orm import Session
 from blockwart.config import Settings
 from blockwart.db.session import transaction
 from blockwart.domain.auth import Permission
-from blockwart.models import CatalogObject
+from blockwart.models import CatalogObject, SafeOperation
 from blockwart.services.audit import add_audit_event
 from blockwart.services.commands import (
+    CommandAuthorizationDenied,
+    CommandNotFound,
     WriteContext,
     authorize_object_command,
     refresh_write_context,
@@ -35,7 +39,8 @@ PRESETS = {
 
 class SafeAction(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    action: Literal["read", "history", "write", "restore", "delete", "undelete"]
+    action: Literal["read", "history", "write", "restore", "delete", "undelete", "reconcile"]
+    operation_id: str | None = Field(default=None, pattern=r"^[a-f0-9]{64}$")
     version: int | None = Field(default=None, ge=1, le=MAX_VERSIONS)
     cas: int | None = Field(default=None, ge=0, lt=MAX_VERSIONS)
     fields: dict[str, str] | None = None
@@ -43,6 +48,8 @@ class SafeAction(BaseModel):
 
     @model_validator(mode="after")
     def bounded_fields(self):
+        if self.action in {"read", "history"} and self.operation_id is not None:
+            raise ValueError("Operation identity is only accepted for mutations/reconciliation")
         if self.fields is not None and (
             len(self.fields) > 64
             or any(not k or len(k) > 128 or len(v) > 65536 for k, v in self.fields.items())
@@ -69,7 +76,8 @@ class Bao:
             request = Request(
                 self.url + "/v1/" + path,
                 data=json.dumps(body).encode() if body is not None else None,
-                headers={"Content-Type": "application/json", **(
+                headers={"Content-Type": "application/json",
+                         "X-Blockwart-Operation": getattr(self, "operation_id", ""), **(
                     {"X-Vault-Token": token} if token else {}
                 )},
                 method=method,
@@ -118,30 +126,157 @@ class Bao:
             try:
                 self.call("POST", "auth/token/revoke-self", {}, token=token)
             except HTTPException:
-                pass
+                logging.getLogger(__name__).warning(
+                    "safe_token_revoke_failed operation_id=%s",
+                    getattr(self, "operation_id", "unassigned"))
+
+
+def _audit(session, context, object_id, command, operation_id, state):
+    add_audit_event(session, object_id=object_id, action="credential_safe_" + command.action,
+                    actor=context.principal.id, details={"channel": context.channel,
+                    "operation_id": operation_id, "state": state})
+
+
+def _finish(session, operation_id, state, version=None):
+    # Record backend completion BEFORE any post-I/O authorization: revocation
+    # must prevent revelation, not erase the fact that a write succeeded.
+    with transaction(session):
+        row = session.get(SafeOperation, operation_id)
+        row.state, row.result_version = state, version
+        add_audit_event(session, object_id=row.object_id,
+                        action="credential_safe_" + row.action, actor=row.actor,
+                        details={"channel": row.channel, "operation_id": row.id, "state": state})
+
+
+def _reconcile(backend, locator, row):
+    # One exact-version read, never a scan or another write. A missing version
+    # does not prove nonexecution: an original request may still be in flight.
+    try:
+        data = backend.request("GET", "blockwart/data/" + locator +
+                               "?version=" + str(row.cas + 1))["data"]
+    except HTTPException as exc:
+        if exc.status_code == 404:
+            raise HTTPException(
+                409, "Safe operation outcome pending; retry reconciliation") from None
+        raise
+    if _version(data["metadata"]["version"]) != row.cas + 1:
+        raise ValueError("unexpected reconciliation version")
+    if data["data"].get("operation_id") == row.id:
+        return "succeeded", row.cas + 1
+    return "conflict", None
 
 
 def operate(session: Session, context: WriteContext, settings: Settings,
             object_id: str, command: SafeAction) -> dict:
-    # Own two short transactions; discard only the authentication read snapshot.
     if session.new or session.dirty or session.deleted:
         raise RuntimeError("safe operation requires a clean session")
     session.rollback()
-    with transaction(session):
-        context, identity = _authorize(session, context, object_id, command)
-    locator = hashlib.sha256(identity[0].encode()).hexdigest()
-    # No DB transaction or command locks are retained during network I/O.
+    operation_id = command.operation_id or uuid4().hex + uuid4().hex
     try:
-        result = _perform(Bao(settings), locator, command)
+        with transaction(session):
+            context, identity = _authorize(session, context, object_id, command)
+    except (CommandAuthorizationDenied, CommandNotFound, HTTPException):
+        # Only fixed metadata, never exception text or command fields.
+        with transaction(session):
+            _audit(session, context, None, command, operation_id, "denied")
+        raise
+    locator = hashlib.sha256(identity[0].encode()).hexdigest()
+    mutation = command.action not in {"read", "history"}
+    existing = False
+    if mutation:
+        if command.action != "reconcile":
+            _validate_mutation(command)
+        with transaction(session):
+            if command.action == "reconcile":
+                if not command.operation_id:
+                    raise HTTPException(422, "Safe operation identity required")
+                row = session.get(SafeOperation, operation_id)
+                if row is None:
+                    raise HTTPException(404, "Safe operation not found")
+            else:
+                # Legacy clients need no extra field: fixed value-free intent
+                # identity means retrying the same CAS never replays a write.
+                operation_id = command.operation_id or hashlib.sha256(json.dumps([
+                    identity[0], context.principal.id, context.channel,
+                    command.action, command.cas, command.version,
+                ]).encode()).hexdigest()
+                row = session.get(SafeOperation, operation_id)
+            if row is not None:
+                existing = True
+                if (row.actor, row.channel, row.object_id, row.instance_id) != (
+                        context.principal.id, context.channel, object_id, identity[0]):
+                    raise HTTPException(404, "Safe operation not found")
+                if command.action != "reconcile" and (row.action, row.cas, row.source_version) != (
+                        command.action, command.cas, command.version):
+                    raise HTTPException(409, "Safe operation identity already bound")
+            else:
+                row = SafeOperation(id=operation_id, actor=context.principal.id,
+                    channel=context.channel, object_id=object_id, instance_id=identity[0],
+                    action=command.action, cas=command.cas, source_version=command.version,
+                    state="intent")
+                session.add(row)
+                _audit(session, context, object_id, command, operation_id, "intent")
+        # Resolve concurrent admissions without retrying backend work.
+        if not existing:
+            with transaction(session):
+                row = session.get(SafeOperation, operation_id)
+                row.state = "dispatched"
+    if not mutation:
+        with transaction(session):
+            _audit(session, context, object_id, command, operation_id, "intent")
+    try:
+        backend = Bao(settings)
+        backend.operation_id = operation_id
+        if mutation and existing:
+            with transaction(session):
+                row = session.get(SafeOperation, operation_id)
+                state, version = row.state, row.result_version
+                session.expunge(row)
+            if state in {"intent", "dispatched"}:
+                state, version = _reconcile(backend, locator, row)
+                _finish(session, operation_id, state, version)
+            if state != "succeeded":
+                raise HTTPException(409, "Safe operation did not succeed")
+            result = {"version": version}
+        else:
+            result = _perform(backend, locator, command, operation_id=operation_id)
+            if mutation:
+                _finish(session, operation_id, "succeeded", result["version"])
+    except HTTPException as exc:
+        # 503 is ambiguous, even if emitted by login or response audit. Keep
+        # dispatched custody so the next request can inspect the exact version.
+        if mutation and not existing and exc.status_code in {404, 409, 422, 428}:
+            _finish(session, operation_id, "conflict" if exc.status_code == 409 else "failed")
+        else:
+            with transaction(session):
+                _audit(session, context, object_id, command, operation_id,
+                       "uncertain" if mutation else "failed")
+        raise
     except (KeyError, TypeError, ValueError, AttributeError):
         raise HTTPException(503, "Credential safe unavailable") from None
-    with transaction(session):
-        context, current = _authorize(session, context, object_id, command)
-        if current != identity:
-            raise HTTPException(409, "Credential reference changed during safe operation")
-        add_audit_event(session, object_id=object_id, action="credential_safe_" + command.action,
-                        actor=context.principal.id, details={"channel": context.channel})
+    try:
+        with transaction(session):
+            context, current = _authorize(session, context, object_id, command)
+            if current != identity:
+                raise HTTPException(409, "Credential reference changed during safe operation")
+            if not mutation:
+                _audit(session, context, object_id, command, operation_id, "succeeded")
+    except (CommandAuthorizationDenied, CommandNotFound, HTTPException):
+        with transaction(session):
+            _audit(session, context, None, command, operation_id, "denied_after_io")
+        raise
     return result
+
+
+def _validate_mutation(command):
+    if command.cas is None:
+        raise HTTPException(428, "Safe CAS version required")
+    if command.cas >= MAX_VERSIONS - 1:
+        raise HTTPException(409, "Safe version limit reached")
+    if command.action in {"restore", "undelete"} and command.version is None:
+        raise HTTPException(422, "Source version required")
+    if command.action == "write" and command.fields is None:
+        raise HTTPException(422, "Named string fields required")
 
 
 def _authorize(session, context, object_id, command):
@@ -155,7 +290,7 @@ def _authorize(session, context, object_id, command):
     return context, (row.instance_id, row.revision)
 
 
-def _perform(backend, locator, command):
+def _perform(backend, locator, command, *, operation_id=None):
     path = "blockwart/data/" + locator
     if command.action == "history":
         try:
@@ -199,9 +334,12 @@ def _perform(backend, locator, command):
                 raise HTTPException(422, "Named string fields required")
             value = {"fields": command.fields, "preset": command.preset, "deleted": False}
         result = backend.request("POST", path, {
-            "options": {"cas": command.cas}, "data": value,
+            "options": {"cas": command.cas}, "data": {**value, "operation_id": operation_id},
         })["data"]
-        result = {"version": _version(result["version"])}
+        version = _version(result["version"])
+        if version != command.cas + 1:
+            raise ValueError("unexpected write version")
+        result = {"version": version}
     return result
 
 
