@@ -322,6 +322,9 @@ def operate(session: Session, context: WriteContext, settings: Settings,
                 row = session.get(SafeOperation, operation_id) if mutation else None
                 if exc.status_code == 503:
                     outcome = "uncertain" if row and row.state == "dispatched" else "unavailable"
+                elif exc.status_code == 409 and not reconciled:
+                    # Preparation rejected this request before its mutation POST.
+                    outcome = "rejected"
                 elif exc.status_code == 409:
                     outcome = ("pending" if row and row.state in {"intent", "dispatched"}
                                else "conflict")

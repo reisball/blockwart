@@ -117,3 +117,70 @@ def test_concurrent_reconciliation_records_completion_once(
     monkeypatch.setattr(safe, "_reconcile", competing_finish)
     assert invoke(client, actors, "writer", **command).status_code == 200
     assert states(alembic_session_factory).count("succeeded") == 1
+
+
+@pytest.mark.parametrize("action", ["restore", "undelete"])
+@pytest.mark.parametrize("source_error", ["deleted", "http400"])
+def test_definite_source_rejection_is_not_pending(
+        safe_client, alembic_session_factory, monkeypatch, action, source_error):
+    from types import SimpleNamespace
+    from urllib.error import HTTPError
+
+    client, actors, versions = safe_client
+    assert invoke(client, actors, "writer", action="write", cas=0,
+                  fields={"token": VALUE}).status_code == 200
+    assert invoke(client, actors, "writer", action="delete", cas=1).status_code == 200
+    if source_error == "http400":
+        original = safe.Bao.request
+        def reject(request, **kwargs):
+            raise HTTPError(request.full_url, 400, "synthetic-source-error", None, None)
+        monkeypatch.setattr(safe, "build_opener", lambda *args: SimpleNamespace(open=reject))
+        def source_read(self, method, path, body=None):
+            if method == "GET":
+                self.url = "http://127.0.0.1:1"
+                return self.call(method, path, token="synthetic-token")
+            return original(self, method, path, body)
+        monkeypatch.setattr(safe.Bao, "request", source_read)
+    response = invoke(client, actors, "writer", action=action, cas=2,
+                      version=2 if source_error == "deleted" else 1)
+    assert response.status_code == 409
+    assert len(versions) == 2
+    with alembic_session_factory() as session:
+        row = session.query(SafeOperation).filter_by(action=action).one()
+        assert (row.state, row.result_version) == ("intent", None)
+        audits = [json.loads(event.details_json) for event in session.query(AuditEvent).order_by(
+            AuditEvent.id) if event.action == "credential_safe_" + action]
+        assert [event["state"] for event in audits] == ["intent", "rejected"]
+        assert VALUE not in json.dumps(audits)
+
+
+@pytest.mark.parametrize("dispatched", [False, True])
+def test_reconciliation_keeps_true_pending_custody(
+        safe_client, alembic_session_factory, monkeypatch, dispatched):
+    client, actors, versions = safe_client
+    original_init, original_request = safe.Bao.__init__, safe.Bao.request
+    if dispatched:
+        def interrupted(self, method, path, body=None):
+            if method == "POST":
+                self.before_mutation()
+                raise safe.HTTPException(503, "unavailable")
+            return original_request(self, method, path, body)
+        monkeypatch.setattr(safe.Bao, "request", interrupted)
+    else:
+        def unavailable(*args):
+            raise safe.HTTPException(503, "unavailable")
+        monkeypatch.setattr(safe.Bao, "__init__", unavailable)
+    operation_id = "e" * 64
+    assert invoke(client, actors, "writer", action="write", cas=0, fields={"token": VALUE},
+                  operation_id=operation_id).status_code == 503
+    assert states(alembic_session_factory)[-1] == ("uncertain" if dispatched else "unavailable")
+    monkeypatch.setattr(safe.Bao, "__init__", original_init)
+    monkeypatch.setattr(safe.Bao, "request", original_request)
+    assert invoke(client, actors, "writer", action="reconcile",
+                  operation_id=operation_id).status_code == 409
+    with alembic_session_factory() as session:
+        row = session.query(SafeOperation).one()
+        assert row.state == ("dispatched" if dispatched else "intent")
+        event = session.query(AuditEvent).filter_by(action="credential_safe_reconcile").one()
+        assert json.loads(event.details_json)["state"] == "pending"
+    assert not versions
