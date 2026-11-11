@@ -19,7 +19,8 @@ Use the ordinary delivery image for Blockwart and the explicit
 2. Create a separate protected host control directory (0700), initially empty except for an empty `runtime/` subdirectory
    (0700).
    It holds durable broker AppRole credentials, operator-only recovery material
-   and temporary bootstrap state.
+   and temporary bootstrap state. Fresh setups also retain maintenance AppRole
+   credentials in the operator-only `operator/` subdirectory (0700).
    Set `BLOCKWART_SAFE_KEY_DIR` and `BLOCKWART_SAFE_CONTROL_DIR` to these absolute
    directory paths. Both containers must have the intended file-read rights;
    do not make credentials world-readable. The shipped images run as root;
@@ -64,17 +65,46 @@ Recovery shares are not unseal keys: keep the original static seal key as well.
 An initialization HTTP response lost before the envelope is durably saved still
 requires operator recovery; the supervisor fails closed, never reinitializes.
 
-For an explicitly authorized backend administration session, an operator with
-host access can use OpenBao's documented
-[`operator generate-root`](https://github.com/openbao/openbao/blob/v2.7.2/website/content/docs/commands/operator/generate-root.mdx)
-recovery-share procedure against the internal listener: initialize the attempt,
-supply the retained recovery share for the returned nonce using a private
-interactive CLI, and decode its result with that attempt's OTP. Keep shares,
-OTP and temporary root tokens out of shell history, command-line arguments,
-application settings and logs. Use the temporary root only for the authorized
-administration and revoke it with `bao token revoke -self` afterward. Never
-replace broker credentials with it. This is an operator procedure, not an
-application break-glass endpoint or implemented rotation workflow.
+### Recurring maintenance access (fresh setups)
+
+Before revoking the initial root, fresh bootstrap provisions the fixed
+`blockwart-maintenance` AppRole and policy. Its nonexpiring role/secret IDs are
+saved in `operator/maintenance.json` (0600) under the protected control directory,
+never under `runtime/` or in the application mount. The planned SecretID is saved
+before OpenBao's supported `custom-secret-id` call; interrupted creation looks up
+that same ID instead of allocating a new credential. Finalization revalidates the
+accepted policy/role, proves fresh maintenance and broker logins, then revokes the
+initial root. Bootstrap verification tokens are revoked too. Existing controls
+are not automatically provisioned or migrated.
+
+For authorized maintenance, POST this private JSON as the request body to the
+internal `auth/approle/login` endpoint. Keep its returned token in a protected
+0600 operator file only if needed; do not put credentials in argv, shell history,
+application settings or logs. Tokens have a maximum lifetime of **900 seconds**,
+including renewals. Revoke with `auth/token/revoke-self` after use; log in again
+when needed. The long-lived IDs survive backend restarts. Protect and back up
+them with the other control material. They grant only:
+
+- Read/create/update of the fixed `x-blockwart-operation` audit-header setting.
+- Read-only `sys/storage/raft/configuration`.
+- The authenticated `sys/generate-root-token/*` recovery-share ceremony.
+- Token lookup-self and revoke-self.
+
+They cannot read/write secret KV, administer arbitrary policies/auth methods, or
+create root tokens directly. Ordinary header maintenance can use the existing
+`--configure-audit` helper with this short-lived token; no root is needed.
+
+OpenBao 2.7.2 requires **both authenticated operator authority and recovery
+shares** for [root generation](https://github.com/openbao/openbao/blob/v2.7.2/website/content/docs/api/system/generate-root-token.mdx).
+Recovery shares alone are insufficient; the deprecated unauthenticated endpoints
+are disabled by default. For separately authorized exceptional administration,
+a maintenance token authenticates the attempt/update requests, while the retained
+recovery shares satisfy the quorum. Keep the nonce, OTP and encoded response
+private; decode the response using that attempt's OTP. Revoke any generated root
+afterward, never use it as broker auth. Lost final responses require operator
+reconciliation, not blind share replay or another root-generation attempt.
+Existing installations without this AppRole require an independently established
+administration route; this change does not retrofit one or enable legacy routes.
 
 The supervisor emits readiness/unavailable and audit-rotation-failure markers.
 Operational OpenBao stdout/stderr are discarded. Native HMAC-redacted audit is
@@ -226,6 +256,8 @@ Run the disposable proof using the locked development environment:
 ```bash
 PYTHONPATH=src python scripts/ci/credential_safe_smoke.py
 pytest -q tests/test_credential_safe.py tests/test_credential_safe_ui.py tests/test_safe_backend_bootstrap.py
+# Optional fresh maintenance/restart/interruption proof using a pinned local executable:
+BLOCKWART_TEST_BAO_BINARY=/protected/test/bao pytest -q tests/test_safe_maintenance.py
 ```
 
 The smoke builds the actual optional image, initializes synthetic Raft storage,

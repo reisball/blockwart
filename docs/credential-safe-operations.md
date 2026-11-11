@@ -122,7 +122,10 @@ capacity and failure markers must be included in the deployment's monitoring.
 
 ## Existing-instance configuration and rollback
 
-Fresh bootstrap configures the fixed header before revoking its initial root.
+Fresh bootstrap configures the fixed header and verifies a durable, narrowly
+scoped maintenance AppRole before revoking its initial root. See
+[recurring maintenance access](credential-safe.md#recurring-maintenance-access-fresh-setups).
+Its short-lived login token suffices for this fixed-header helper.
 An existing installation must first provision the same header against its
 running internal backend using an explicitly authorized temporary administration
 token with OpenBao ACL `create`, `update`, and `sudo` capabilities on
