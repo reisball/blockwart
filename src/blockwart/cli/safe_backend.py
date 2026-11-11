@@ -3,7 +3,9 @@ from __future__ import annotations
 
 import json
 import os
+import secrets
 import signal
+import stat
 import subprocess
 import sys
 import time
@@ -21,6 +23,22 @@ path "blockwart/data/*" { capabilities = ["create", "update", "read"] }
 path "blockwart/metadata/*" { capabilities = ["read"] }
 path "auth/token/revoke-self" { capabilities = ["update"] }
 """
+MAINTENANCE_POLICY = """
+path "sys/config/auditing/request-headers/x-blockwart-operation" {
+  capabilities = ["read", "create", "update", "sudo"]
+}
+path "sys/storage/raft/configuration" { capabilities = ["read", "sudo"] }
+path "sys/generate-root-token/*" { capabilities = ["read", "update", "delete", "sudo"] }
+path "auth/token/lookup-self" { capabilities = ["read"] }
+path "auth/token/revoke-self" { capabilities = ["update"] }
+"""
+MAINTENANCE_ROLE = {
+    "bind_secret_id": True, "secret_id_ttl": 0, "secret_id_num_uses": 0,
+    "token_policies": ["blockwart-maintenance"], "token_no_default_policy": True,
+    "token_ttl": 900, "token_max_ttl": 900, "token_explicit_max_ttl": 900,
+    "token_period": 0, "token_num_uses": 0, "token_type": "service",
+}
+MAINTENANCE_PATH = "auth/approle/role/blockwart-maintenance"
 MAX_VERSIONS = 2147483647
 AUDIT_FILE = Path("/openbao/audit/audit.json")
 AUDIT_MAX_BYTES = 10 * 1024 * 1024
@@ -120,6 +138,100 @@ def approle_token(auth):
     return call("POST", "auth/approle/login", auth)["auth"]["client_token"]
 
 
+def maintenance_credentials():
+    directory = ROOT / "operator"
+    directory.mkdir(mode=0o700, exist_ok=True)
+    info = directory.lstat()
+    if (not stat.S_ISDIR(info.st_mode) or stat.S_IMODE(info.st_mode) != 0o700
+            or info.st_uid != os.geteuid()):
+        raise RuntimeError("safe_backend_operator_directory_unsafe")
+    sync_directory(ROOT)  # persist the operator directory entry before credential dispatch
+    for name in ("maintenance.json", "maintenance.json.tmp"):
+        path = directory / name
+        if path.exists() or path.is_symlink():
+            info = path.lstat()
+            if (not stat.S_ISREG(info.st_mode) or stat.S_IMODE(info.st_mode) != 0o600
+                    or info.st_uid != os.geteuid()):
+                raise RuntimeError("safe_backend_operator_file_unsafe")
+    return directory / "maintenance.json"
+
+
+def verify_maintenance_login():
+    maintenance_credentials()
+    token = approle_token(load("operator/maintenance.json"))
+    try:
+        data = call("GET", "auth/token/lookup-self", token=token)["data"]
+        if (data["policies"] != ["blockwart-maintenance"]
+                or data.get("identity_policies") or not 0 < data["ttl"] <= 900
+                or data["explicit_max_ttl"] != 900):
+            raise RuntimeError("safe_backend_maintenance_token_mismatch")
+        header = call("GET", "sys/config/auditing/request-headers/x-blockwart-operation",
+                      token=token)["data"]
+        if header["x-blockwart-operation"]["hmac"] is not False:
+            raise RuntimeError("safe_backend_maintenance_header_mismatch")
+        call("GET", "sys/storage/raft/configuration", token=token)
+        call("GET", "sys/generate-root-token/attempt", token=token)
+    finally:
+        call("POST", "auth/token/revoke-self", {}, token)
+
+
+def verify_maintenance_configuration(token):
+    policy = call("GET", "sys/policies/acl/blockwart-maintenance", token=token)["data"]
+    role = call("GET", MAINTENANCE_PATH, token=token)["data"]
+    if (policy["policy"].strip() != MAINTENANCE_POLICY.strip()
+            or any(role.get(key) != value for key, value in MAINTENANCE_ROLE.items())
+            or role.get("secret_id_bound_cidrs") or role.get("token_bound_cidrs")):
+        raise RuntimeError("safe_backend_maintenance_configuration_mismatch")
+    auth = load("operator/maintenance.json")
+    role_id = call("GET", MAINTENANCE_PATH + "/role-id", token=token)["data"]["role_id"]
+    if role_id != auth["role_id"]:
+        raise RuntimeError("safe_backend_maintenance_role_mismatch")
+    secret = call("POST", MAINTENANCE_PATH + "/secret-id/lookup",
+                  {"secret_id": auth["secret_id"]}, token)["data"]
+    if (secret["secret_id_ttl"] != 0 or secret["secret_id_num_uses"] != 0
+            or secret.get("cidr_list") or secret.get("token_bound_cidrs")):
+        raise RuntimeError("safe_backend_maintenance_secret_mismatch")
+
+
+def provision_maintenance(token):
+    # Only new initialization envelopes opt in; never migrate an existing control set.
+    if not (ROOT / "maintenance-required.json").exists():
+        return
+    credentials = maintenance_credentials()
+    call("PUT", "sys/policies/acl/blockwart-maintenance", {"policy": MAINTENANCE_POLICY}, token)
+    call("POST", MAINTENANCE_PATH, MAINTENANCE_ROLE, token)
+    if not credentials.exists():
+        role_id = call("GET", MAINTENANCE_PATH + "/role-id", token=token)["data"]["role_id"]
+        # Persist the planned ID BEFORE dispatch. A lost response is reconciled by
+        # lookup of this same ID, never by issuing another random backend SecretID.
+        save("operator/maintenance.json", {"role_id": role_id, "secret_id": secrets.token_hex(32)})
+    auth = load("operator/maintenance.json")
+    existing = call("POST", MAINTENANCE_PATH + "/secret-id/lookup",
+                    {"secret_id": auth["secret_id"]}, token)
+    # Pinned 2.7.2 returns 204 (empty body) for an absent SecretID, not 404.
+    if existing == {}:
+        call("POST", MAINTENANCE_PATH + "/custom-secret-id",
+             {"secret_id": auth["secret_id"], "ttl": 0, "num_uses": 0}, token)
+    verify_maintenance_configuration(token)
+    verify_maintenance_login()
+
+
+def finalize_maintenance(token):
+    if not (ROOT / "maintenance-required.json").exists():
+        return
+    # Re-read private files and prove a fresh login on every finalization, also
+    # after a crash following successful initial-root revocation.
+    verify_maintenance_login()
+    try:
+        call("GET", "auth/token/lookup-self", token=token)
+    except HTTPError as exc:
+        if exc.code != 403 or load("maintenance-verified.json") != {"version": 1}:
+            raise
+    else:
+        verify_maintenance_configuration(token)
+        save("maintenance-verified.json", {"version": 1})
+
+
 def preserve_initialization():
     # One durable init envelope closes the root/stage split-write crash window.
     if not (ROOT / "init.json").exists():
@@ -129,6 +241,8 @@ def preserve_initialization():
                 if result.get(key)}
     if not recovery or not result.get("root_token"):
         raise RuntimeError("safe_backend_invalid_initialization")
+    if result.get("blockwart_maintenance") == 1:
+        save("maintenance-required.json", {"version": 1})
     save("recovery.json", recovery)
     save("root.json", result["root_token"])
     if not (ROOT / "stage.json").exists():
@@ -156,6 +270,7 @@ def bootstrap(process):
         token = approle_token(load("pending.json"))
         verify(token)
         call("POST", "auth/token/revoke-self", {}, token)
+        finalize_maintenance(load("root.json"))
         # The initial root may have been revoked just before a previous crash.
         try:
             call("POST", "auth/token/revoke-self", {}, load("root.json"))
@@ -175,6 +290,7 @@ def bootstrap(process):
             raise RuntimeError("safe_backend_control_without_state")
         result = call("POST", "sys/init",
                       {"recovery_shares": 1, "recovery_threshold": 1}, timeout=90)
+        result["blockwart_maintenance"] = 1
         save("init.json", result)
         preserve_initialization()
         wait_ready(process)
@@ -215,6 +331,7 @@ def bootstrap(process):
     call("PUT", "sys/policies/acl/blockwart-broker", {"policy": POLICY}, token)
     if "approle/" not in call("GET", "sys/auth", token=token)["data"]:
         call("POST", "sys/auth/approle", {"type": "approle"}, token)
+    provision_maintenance(token)
     call("POST", "auth/approle/role/blockwart",
          {"token_policies": ["blockwart-broker"], "token_no_default_policy": True,
           "token_ttl": "60s", "token_max_ttl": "60s", "secret_id_ttl": 0,
