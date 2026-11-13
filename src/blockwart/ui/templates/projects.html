@@ -5,11 +5,12 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>{{ title }}</title>
     <link rel="stylesheet" href="/static/app.css" />
+    {% include "_navigation_head.html" %}
   </head>
   <body>
+    {% include "_main_navigation.html" %}
     <main class="page stack">
       <header class="integrated-detail-heading">
-        <a class="detail-back-button" href="/">← {{ t("project.workspace.catalog") }}</a>
         <div>
           <p class="eyebrow">{{ t("project.workspace.eyebrow") }}</p>
           <h1>{{ t("project.workspace.overview_title") }}</h1>

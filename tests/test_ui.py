@@ -188,7 +188,7 @@ def test_explicit_german_locale_translates_the_explorer(client: TestClient) -> N
     assert response.status_code == 200
     assert '<html lang="de" data-view="catalog" data-page="catalog">' in response.text
     assert "Objektkatalog" in response.text
-    assert "Netzwerke" in response.text
+    assert "Netzwerk" in response.text
     assert "Asset catalog" not in response.text
     assert response.cookies["blockwart-language"] == "de"
 
@@ -318,8 +318,10 @@ def test_index_shows_kind_counts(client: TestClient) -> None:
     assert "service" in response.text
     assert "host" in response.text
     assert "kind=decision" in response.text
-    assert 'value="project"' not in response.text
-    assert 'value="runbook"' not in response.text
+    # Global smart search includes all object types; it is not the create select.
+    assert 'name="object_kind"' in response.text
+    assert 'value="project"' in response.text
+    assert 'value="runbook"' in response.text
     assert "Add asset" in response.text
     assert 'href="/?view=topology' in response.text
     assert 'href="/settings"' in response.text
@@ -628,7 +630,11 @@ def test_create_form_schema_gates_fields_by_type(client: TestClient) -> None:
 
 
 def _kind_option_attributes(document: str, kind: str) -> str:
-    match = re.search(rf'<option value="{kind}"([^>]*)>', document)
+    # The global search has its own type options. Assert the actual creation
+    # select, not an unrelated hidden dialog that happens to precede it.
+    create_select = re.search(r"<select[^>]*data-kind-select[^>]*>(.*?)</select>", document, re.S)
+    assert create_select is not None
+    match = re.search(rf'<option value="{kind}"([^>]*)>', create_select[1])
     assert match is not None, kind
     return match[1]
 
@@ -1518,9 +1524,11 @@ def test_catalog_tree_starts_collapsed_and_keeps_filtered_results_visible(
 
     assert catalog.status_code == 200
     assert "tree-controls" in catalog.text
-    assert "Collapse all" in catalog.text
-    assert "Expand through hosts" in catalog.text
-    assert "Expand through services" in catalog.text
+    assert "Roots" in catalog.text
+    assert "Through hosts" in catalog.text
+    assert "Through services" in catalog.text
+    assert 'role="radio"' in catalog.text
+    assert "data-tree-manual" in catalog.text
     assert re.search(
         r'data-asset-ref="host:tree-hardware"\s+data-tree-node="host:tree-hardware"',
         catalog.text,
@@ -1567,9 +1575,10 @@ def test_catalog_tree_localizes_its_controls_in_german(client: TestClient) -> No
     response = client.get("/?lang=de")
 
     assert response.status_code == 200
-    assert "Alles zuklappen" in response.text
-    assert "Bis Hosts aufklappen" in response.text
-    assert "Bis Dienste aufklappen" in response.text
+    assert "Wurzeln" in response.text
+    assert "Hosts" in response.text
+    assert "Dienste" in response.text
+    assert "Tiefe:" in response.text
     assert 'aria-label="Nicht zugeordnet einklappen"' not in response.text
     assert 'aria-label="Nicht zugeordnet aufklappen"' in response.text
 
@@ -1620,8 +1629,9 @@ def test_object_detail_is_integrated_into_the_explorer_shell(
     document = unescape(response.text)
 
     assert '<html lang="en" data-view="catalog" data-page="detail">' in document
-    assert '<header class="explorer-topbar">' in document
-    assert 'class="filter-rail"' in document
+    assert '<header class="main-header">' in document
+    assert 'class="main-navigation"' in document
+    assert 'class="filter-rail"' not in document
     assert 'class="asset-inspector"' in document
     assert 'class="integrated-detail"' in document
     assert 'href="/?view=catalog&q=&kind="' in document

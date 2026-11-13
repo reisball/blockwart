@@ -25,6 +25,7 @@ approximate count is advertised.
 
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import UTC, datetime
 
 from sqlalchemy import and_, bindparam, or_, select, text
@@ -46,6 +47,7 @@ from blockwart.domain.placement import CANONICAL_PLACEMENT_RELATION_TYPE
 from blockwart.domain.search import SEARCH_LIMIT_MAX, SEARCH_LIMIT_MIN
 from blockwart.domain.timestamps import format_rfc3339_utc
 from blockwart.models import AuditEvent, CatalogObject
+from blockwart.models.auth import Principal
 from blockwart.services.audit import load_audit_details, render_audit_summary_english
 from blockwart.services.pagination import (
     InvalidCursor,
@@ -161,7 +163,10 @@ def query_activity_page(
     page_cap = min(limit + 1, ACTIVITY_MAX_SCAN_EVENTS)
     rows = list(session.scalars(page_statement.limit(page_cap)).all())
     readable = _readable_objects(
-        session, access, {row.object_id for row in rows}, include_reference_history=True,
+        session,
+        access,
+        {row.object_id for row in rows},
+        include_reference_history=True,
     )
     items: list[ActivityItem] = []
     for row in rows[:limit]:
@@ -175,6 +180,7 @@ def query_activity_page(
         )
         if item is not None:
             items.append(item)
+    items = _resolve_actor_identities(session, access, items)
     has_more = len(rows) > limit or (page_cap <= limit and len(rows) == page_cap)
     next_cursor = None
     if has_more and items:
@@ -322,8 +328,11 @@ def _global_read(access: ReadAccess) -> bool:
 
 
 def _readable_objects(
-    session: Session, access: ReadAccess, candidate_ids: set[str | None],
-    *, include_reference_history: bool = False,
+    session: Session,
+    access: ReadAccess,
+    candidate_ids: set[str | None],
+    *,
+    include_reference_history: bool = False,
 ) -> _ReadableCatalog:
     """Resolve only scanned candidates against the current catalog and policy."""
     readable = _ReadableCatalog()
@@ -462,7 +471,9 @@ def _project_event(
     # REST activity intentionally keeps global permissions nonmaterialized;
     # generic per-object policy checks alone cannot recognize Catalog Owners.
     if reference_audit_requires_projection(
-        object_kind, details, was_reference=object_id in readable.historical_reference_ids,
+        object_kind,
+        details,
+        was_reference=object_id in readable.historical_reference_ids,
     ) and not (
         access.policy.can(Permission.READ_REFERENCE_CONTENT, object_id)
         or any(
@@ -491,3 +502,39 @@ def _project_event(
         actor=(row.actor or None)[:128] if row.actor else None,
         detail_path=activity_detail_path(resolved_type, object_id),
     )
+
+
+def _resolve_actor_identities(
+    session: Session,
+    access: ReadAccess,
+    items: list[ActivityItem],
+) -> list[ActivityItem]:
+    # Existing principal discovery permits admins, self, or an access manager
+    # on the event target. Do not expand identity/profile visibility here.
+    actors = {
+        item.actor
+        for item in items
+        if item.actor
+        and (
+            access.principal.is_admin
+            or item.actor == access.principal.id
+            or Permission.MANAGE_ACCESS in access.policy.permissions_for(item.object.object_id)
+        )
+    }
+    if not actors:
+        return items
+    identities = {
+        row.id: (row.display_name, row.principal_type)
+        for row in session.scalars(
+            select(Principal).where(
+                Principal.id.in_(actors),
+                Principal.active.is_(True),
+            )
+        )
+    }
+    return [
+        replace(item, actor_display=identities[item.actor][0], actor_kind=identities[item.actor][1])
+        if item.actor in identities
+        else item
+        for item in items
+    ]

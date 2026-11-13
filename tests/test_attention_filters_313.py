@@ -45,12 +45,23 @@ def _next_url(text):
     return unescape(re.search(r'href="([^"]+)">More items</a>', text)[1])
 
 
-@pytest.mark.parametrize("filters,total", [
-    ({"kind": "host", "category": "lifecycle"}, 102),
-    ({"reason_code": "lifecycle_health_down"}, 103),
-    ({"kind": "service", "reason_code": "lifecycle_health_down",
-      "severity": "critical", "signal_state": "current", "category": "lifecycle"}, 1),
-])
+@pytest.mark.parametrize(
+    "filters,total",
+    [
+        ({"kind": "host", "category": "lifecycle"}, 102),
+        ({"reason_code": "lifecycle_health_down"}, 103),
+        (
+            {
+                "kind": "service",
+                "reason_code": "lifecycle_health_down",
+                "severity": "critical",
+                "signal_state": "current",
+                "category": "lifecycle",
+            },
+            1,
+        ),
+    ],
+)
 def test_browser_filter_rows_and_summary_match_shared_api(attention_browser, filters, total):
     api = attention_browser.get("/api/v1/attention", params={**filters, "include_total": True})
     assert api.status_code == 200
@@ -62,7 +73,15 @@ def test_browser_filter_rows_and_summary_match_shared_api(attention_browser, fil
         assert item["target"]["label"] in page.text
     if filters.get("kind") == "service":
         assert "Host 000" not in page.text
-        assert "Critical: 1" in page.text
+        summary = re.search(
+            r"attention-severity-critical[^>]*>\s*Critical\s*<b>(\d+)</b>",
+            page.text,
+        )
+        assert summary is not None
+        # The UI severity count must match the shared API totals for the
+        # same filtered set.
+        assert int(summary[1]) == 1
+        assert int(summary[1]) == api.json()["total"]
 
 
 def test_normalization_pagination_validation_and_reset(attention_browser):

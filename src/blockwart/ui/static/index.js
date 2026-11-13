@@ -6,7 +6,7 @@
   const explorerContext = window.BLOCKWART_EXPLORER_CONTEXT || {};
   const detailQuery = window.BLOCKWART_DETAIL_QUERY || "";
   const selectableNodes = Array.from(document.querySelectorAll("[data-asset-ref]"));
-  const stateStoragePrefix = "blockwart-explorer-state:";
+  const stateStoragePrefix = "blockwart-explorer-state:" + explorerContext.principalScope + ":";
   let selectedAssetRef = "";
 
   function setInspectorValue(root, selector, value) {
@@ -96,16 +96,18 @@
   const treeExpanded = new Map(
     Array.from(treeNodes.keys()).map((treeNode) => [treeNode, false]),
   );
+  const treeChildLevels = new Map(Array.from(treeNodes.keys()).map(key => [key, 0]));
   const treeToggles = Array.from(document.querySelectorAll("[data-tree-toggle]"));
   const treeLevelButtons = Array.from(document.querySelectorAll("[data-tree-level]"));
   let maximumTreeDepth = 0;
+  let manualTreeMode = false;
 
   function treeNodeIsExpanded(treeNode) {
     return treeExpanded.get(treeNode) === true;
   }
 
   function treeRowIsVisible(row) {
-    if (Number(row.dataset.treeDepth) > maximumTreeDepth) {
+    if (Number(row.dataset.treeDepth) > (treeChildLevels.get(row.dataset.treeParent) ?? maximumTreeDepth)) {
       return false;
     }
     let parent = row.dataset.treeParent;
@@ -135,21 +137,51 @@
     for (const row of treeRows) {
       row.hidden = !treeRowIsVisible(row);
     }
+    const visibleRows = document.querySelectorAll("tr[data-asset-ref]:not([hidden])").length;
     for (const toggle of treeToggles) {
       updateTreeToggle(toggle);
     }
     for (const button of treeLevelButtons) {
-      button.classList.toggle(
-        "active",
-        Number(button.dataset.treeLevel) === maximumTreeDepth,
+      const active = Number(button.dataset.treeLevel) === maximumTreeDepth && !manualTreeMode;
+      button.classList.toggle("active", active);
+      button.setAttribute("aria-checked", String(active));
+      button.tabIndex = active || (manualTreeMode && button === treeLevelButtons[0]) ? 0 : -1;
+    }
+    updateVisibleRowCount(visibleRows);
+  }
+
+  function updateVisibleRowCount(visibleRows) {
+    const counter = document.querySelector("[data-visible-row-count]");
+    if (counter) {
+      counter.textContent = String(visibleRows);
+    }
+    const label = document.querySelector("[data-visible-row-label]");
+    if (label) {
+      label.setAttribute(
+        "aria-label",
+        (copy.visibleRows || "{visible} rows visible").replace("{visible}", String(visibleRows)),
       );
+    }
+  }
+
+  function setManualMode(isManual) {
+    manualTreeMode = isManual;
+    const marker = document.querySelector("[data-tree-manual]");
+    if (marker) {
+      marker.hidden = !isManual;
     }
   }
 
   function setTreeLevel(level) {
     maximumTreeDepth = level;
+    manualTreeMode = false;
     for (const [treeNode, node] of treeNodes) {
       treeExpanded.set(treeNode, Number(node.dataset.treeDepth) < level);
+      treeChildLevels.set(treeNode, level);
+    }
+    const marker = document.querySelector("[data-tree-manual]");
+    if (marker) {
+      marker.hidden = true;
     }
     applyTreeState();
   }
@@ -159,16 +191,41 @@
       event.preventDefault();
       event.stopPropagation();
       const treeNode = toggle.dataset.treeTarget;
-      maximumTreeDepth = 2;
-      treeExpanded.set(treeNode, !treeNodeIsExpanded(treeNode));
+      const opening = !treeNodeIsExpanded(treeNode);
+      treeExpanded.set(treeNode, opening);
+      if (opening) treeChildLevels.set(treeNode, 2);
+      setManualMode(true);
       applyTreeState();
     });
   }
   for (const button of treeLevelButtons) {
     button.addEventListener("click", () => setTreeLevel(Number(button.dataset.treeLevel)));
+    button.addEventListener("keydown", (event) => {
+      const keys = ["ArrowRight", "ArrowDown", "ArrowLeft", "ArrowUp", "Home", "End"];
+      if (!keys.includes(event.key)) {
+        return;
+      }
+      event.preventDefault();
+      const current = treeLevelButtons.findIndex(
+        (candidate) => candidate.classList.contains("active"),
+      );
+      let next = current;
+      if (event.key === "Home") {
+        next = 0;
+      } else if (event.key === "End") {
+        next = treeLevelButtons.length - 1;
+      } else {
+        const step = event.key === "ArrowRight" || event.key === "ArrowDown" ? 1 : -1;
+        next = Math.max(0, Math.min(treeLevelButtons.length - 1, current + step));
+      }
+      treeLevelButtons[next].focus();
+      setTreeLevel(Number(treeLevelButtons[next].dataset.treeLevel));
+    });
   }
   if (treeNodes.size) {
     setTreeLevel(0);
+  } else {
+    updateVisibleRowCount(document.querySelectorAll("tr[data-asset-ref]:not([hidden])").length);
   }
 
   function readStoredState(token) {
@@ -211,10 +268,13 @@
       scrollTop: Number(mainScroll?.scrollTop || 0),
       windowScrollY: Number(window.scrollY || 0),
       maximumTreeDepth,
+      manualTreeMode,
+      treeChildLevels: Object.fromEntries(treeChildLevels),
       expandedTreeNodes: Array.from(treeExpanded)
         .filter(([, expanded]) => expanded)
         .map(([treeNode]) => treeNode),
-      triggerKind: trigger.classList.contains("row-detail") ? "row-detail" : "inspector",
+      triggerKind: trigger.hasAttribute("data-save-view") ? "saved-view"
+        : trigger.classList.contains("row-detail") ? "row-detail" : "inspector",
     };
     try {
       sessionStorage.setItem(`${stateStoragePrefix}${token}`, JSON.stringify(state));
@@ -228,6 +288,46 @@
     }
     return token;
   }
+
+  const savedViewsSelect = document.querySelector("[data-saved-views]");
+  const savedViewsKey = "blockwart-saved-catalog-views:v1:" + explorerContext.principalScope;
+  function savedViews() {
+    try {
+      const entries = JSON.parse(sessionStorage.getItem(savedViewsKey) || "[]");
+      return Array.isArray(entries) ? entries.filter(entry => (
+        typeof entry.name === "string" && typeof entry.token === "string"
+        && readStoredState(entry.token)
+      )).slice(0, 20) : [];
+    } catch { return []; }
+  }
+  function renderSavedViews() {
+    if (!savedViewsSelect) return;
+    while (savedViewsSelect.options.length > 1) savedViewsSelect.remove(1);
+    for (const entry of savedViews()) savedViewsSelect.add(new Option(entry.name, entry.token));
+  }
+  document.querySelector("[data-save-view]")?.addEventListener("click", event => {
+    const input = document.querySelector("[data-view-name]");
+    if (!input.value.trim()) { input.focus(); return; }
+    const status = document.querySelector("[data-view-status]");
+    const token = captureExplorerState(event.currentTarget);
+    if (!token) { status.textContent = status.dataset.errorCopy; return; }
+    try {
+      // Each save has its own immutable snapshot, even when names coincide.
+      sessionStorage.setItem(savedViewsKey, JSON.stringify([
+        ...savedViews().slice(-19), {name: input.value.trim().slice(0, 60), token},
+      ]));
+      renderSavedViews(); savedViewsSelect.value = token;
+      status.textContent = status.dataset.savedCopy;
+    } catch { status.textContent = status.dataset.errorCopy; }
+  });
+  document.querySelector("[data-load-view]")?.addEventListener("click", () => {
+    const token = savedViewsSelect.value;
+    const state = readStoredState(token);
+    if (!state || state.view !== "catalog") return;
+    const params = new URLSearchParams({view: "catalog", q: state.query || "", kind: state.kind || "", restore: token});
+    location.assign("/?" + params);
+  });
+  renderSavedViews();
 
   function restoredStateToken() {
     const url = new URL(location.href);
@@ -248,6 +348,9 @@
     ) {
       return false;
     }
+    if (savedViewsSelect && Array.from(savedViewsSelect.options).some(option => option.value === token)) {
+      savedViewsSelect.value = token;
+    }
     if (treeNodes.size) {
       const restoredDepth = Number(state.maximumTreeDepth);
       maximumTreeDepth = Number.isInteger(restoredDepth)
@@ -258,7 +361,21 @@
       );
       for (const treeNode of treeNodes.keys()) {
         treeExpanded.set(treeNode, expandedNodes.has(treeNode));
+        const savedLevel = state.treeChildLevels?.[treeNode];
+        treeChildLevels.set(treeNode, Number.isInteger(savedLevel) ? Math.max(0, Math.min(2, savedLevel)) : maximumTreeDepth);
       }
+      // A restored snapshot carries an explicit branch state; reflecting any
+      // deviation from the pure level state as manual mode keeps the level
+      // buttons honest instead of claiming a level the tree does not show.
+      const pureExpanded = new Set(
+        Array.from(treeNodes.entries())
+          .filter(([, node]) => Number(node.dataset.treeDepth) < maximumTreeDepth)
+          .map(([treeNode]) => treeNode),
+      );
+      setManualMode(
+        state.manualTreeMode === true || expandedNodes.size !== pureExpanded.size
+        || Array.from(expandedNodes).some((treeNode) => !pureExpanded.has(treeNode)),
+      );
       applyTreeState();
     }
     if (typeof state.selectedRef === "string" && assets[state.selectedRef]) {
@@ -284,7 +401,8 @@
       const selectedSelector = state.selectedRef
         ? `[data-asset-ref="${CSS.escape(state.selectedRef)}"]`
         : "";
-      const focusTarget = state.triggerKind === "row-detail" && selectedSelector
+      const focusTarget = state.triggerKind === "saved-view" ? document.querySelector("[data-saved-views]")
+        : state.triggerKind === "row-detail" && selectedSelector
         ? document.querySelector(`${selectedSelector} .row-detail`)
         : document.querySelector("[data-inspector-details]");
       focusTarget?.focus({preventScroll: true});

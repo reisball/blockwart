@@ -96,6 +96,8 @@ class ActivityItem:
     summary: str
     actor: str | None
     detail_path: str
+    actor_display: str | None = None
+    actor_kind: str | None = None
 
 
 @dataclass(frozen=True, slots=True)

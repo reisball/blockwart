@@ -8,7 +8,7 @@ from urllib.parse import urlencode
 from uuid import uuid4
 
 from fastapi import APIRouter, Depends, Form, HTTPException, Request
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 from pydantic import ValidationError
 from sqlalchemy.orm import Session
@@ -91,6 +91,7 @@ from blockwart.services.attention import (
 from blockwart.services.catalog import get_object
 from blockwart.services.commands import (
     CommandAuthorizationDenied,
+    CommandValidationFailed,
     authorize_object_command,
     create_attached_device,
     create_catalog_root,
@@ -122,6 +123,7 @@ from blockwart.services.project_workspace import item_summary
 from blockwart.services.queries import (
     CatalogBrowseReadModel,
     RelatedRelationshipReadModel,
+    list_catalog_objects,
     object_id_from_ref,
     primary_name_value,
     query_catalog_browse,
@@ -135,8 +137,11 @@ from blockwart.services.release_monitoring import (
     query_release_overview,
     release_monitoring_settings,
 )
+from blockwart.services.source_coverage import query_source_coverage_page
+from blockwart.services.workspace_search import search_workspaces
 from blockwart.ui.i18n import translation_context
 from blockwart.ui.paths import TEMPLATE_DIR
+from blockwart.ui.presentation import activity_time
 from blockwart.ui.project_forms import (
     PROJECT_CATEGORY_OPTIONS,
     PROJECT_EVIDENCE_GRADE_OPTIONS,
@@ -556,6 +561,7 @@ def _index_template_context(
         "index_relationships": read_model.index_relationships,
         "explorer": explorer,
         "selected_asset_ref": selected_asset_ref,
+        "principal_scope": acting_principal.id,
         "detail_mode": detail_mode,
         "detail_query_string": detail_query_string or urlencode(default_detail_params),
         "unassigned_count": (
@@ -887,6 +893,23 @@ def attention_overview(
             "signal_states": sorted(ATTENTION_ITEM_SIGNAL_STATES),
             "selected_category": category or "",
             "selected_severity": severity or "",
+            "priority_urls": {
+                value: "/attention" + ("?" + urlencode(parameters) if parameters else "")
+                for value in ("", *ATTENTION_SEVERITY_VALUES)
+                for parameters in [
+                    {
+                        key: item
+                        for key, item in {
+                            "category": category,
+                            "kind": kind,
+                            "reason_code": reason_code,
+                            "signal_state": signal_state,
+                            "severity": value if value != severity else None,
+                        }.items()
+                        if item
+                    }
+                ]
+            },
             "selected_signal_state": signal_state or "",
             "selected_kind": kind or "",
             "selected_reason_code": reason_code or "",
@@ -897,22 +920,136 @@ def attention_overview(
     )
 
 
+@router.get("/navigation/updates")
+def navigation_updates(request: Request, session: Annotated[Session, Depends(get_session)]):
+    """Count available service updates using the existing authorized release query.
+
+    Args:
+        request: Authenticated browser request.
+        session: Request-scoped database session.
+
+    Returns:
+        Exact count of readable services with an available update, not messages.
+    """
+    page = query_release_overview(
+        session,
+        read_access_from_request(request),
+        status="update_available",
+        limit=1,
+        include_total=True,
+    )
+    return JSONResponse({"count": page.total}, headers={"Cache-Control": "private, no-store"})
+
+
+@router.get("/search", response_class=HTMLResponse)
+def smart_search(
+    request: Request,
+    session: Annotated[Session, Depends(get_session)],
+    q: str = "",
+    object_kind: str = "",
+    content_cursor: str | None = None,
+    fragment: bool = False,
+):
+    """Search authorized objects and project content in independent result groups.
+
+    Args:
+        request: Authenticated browser request.
+        session: Request-scoped database session.
+        q: Shared search text, retained when broadening the object scope.
+        object_kind: Explicit object-only restriction; empty means all types.
+        content_cursor: Existing project-content continuation cursor.
+        fragment: Return only results for the progressively enhanced dialog.
+
+    Returns:
+        Rendered search page or results fragment with exact server counts.
+    """
+    if len(q) > 200 or (object_kind and object_kind not in PUBLIC_OBJECT_KINDS):
+        raise HTTPException(status_code=400, detail="Invalid search scope")
+    access = read_access_from_request(request)
+    q = q.strip()
+    read_model = query_catalog_browse(session, access, query=q, kind=object_kind or None)
+    page = None
+    if q:
+        try:
+            page = search_workspaces(session, access, q=q, cursor=content_cursor, limit=20)
+        except (InvalidCursor, CommandValidationFailed) as exc:
+            raise HTTPException(status_code=400, detail="Invalid search cursor") from exc
+    next_url = None
+    if page and page.next_cursor:
+        next_url = "/search?" + urlencode(
+            {
+                "q": q,
+                "object_kind": object_kind,
+                "content_cursor": page.next_cursor,
+            }
+        )
+    return templates.TemplateResponse(
+        request,
+        "_smart_search_results.html" if fragment else "smart_search.html",
+        headers={"Cache-Control": "private, no-store"},
+        context={
+            "q": q,
+            "object_kind": object_kind,
+            "object_kinds": OBJECT_KINDS,
+            "search_objects": read_model.objects if q else [],
+            "content_page": page,
+            "next_url": next_url,
+            **translation_context(request),
+        },
+    )
+
+
 @router.get("/activity", response_class=HTMLResponse)
 def activity_overview(
     request: Request,
     session: Annotated[Session, Depends(get_session)],
     event_type: str | None = None,
     since: str | None = None,
+    kind: str | None = None,
+    object_id: str | None = None,
+    parent: str | None = None,
     cursor: str | None = None,
 ):
     """Render the authorized activity feed from the shared application result."""
     access = read_access_from_request(request)
+    visible = list_catalog_objects(session, access)
+    targets = {
+        f"{item.kind}:{item.id}": item
+        for item in visible
+        if str(item.visibility) == "detail" and item.kind in PUBLIC_OBJECT_KINDS
+    }
+    target_error = ""
+    requested_target = request.query_params.get("target")
+    if requested_target is not None:
+        if not requested_target:
+            object_id = None
+        elif requested_target in targets:
+            object_id = targets[requested_target].id
+        else:
+            target_error = translation_context(request)["t"]("activity.target_invalid")
+            previous = request.query_params.get("previous_object_id", "")
+            object_id = (
+                previous
+                if any(item.id == previous for item in targets.values())
+                else "__invalid_target__"
+            )
+    # Both existing bare-ID deep links and canonical references are supported;
+    # neither unknown nor concealed targets silently broadens to all activity.
+    if object_id and ":" in object_id:
+        object_id = targets[object_id].id if object_id in targets else "__invalid_target__"
+    if parent and ":" in parent:
+        parent = targets[parent].id if parent in targets else "__invalid_target__"
+    if kind and kind not in ATTENTION_OBJECT_KINDS:
+        raise HTTPException(status_code=400, detail="Invalid activity kind")
     try:
         page = query_activity_page(
             session,
             access,
             since=since or None,
             event_type=event_type or None,
+            kind=kind or None,
+            object_id=object_id or None,
+            parent=parent or None,
             limit=100,
             cursor=cursor,
             direction="desc",
@@ -925,6 +1062,9 @@ def activity_overview(
     params = {
         "event_type": event_type,
         "since": since,
+        "kind": kind,
+        "object_id": object_id,
+        "parent": parent,
         "cursor": page.next_cursor,
     }
     next_url = (
@@ -933,6 +1073,20 @@ def activity_overview(
         else None
     )
     i18n = translation_context(request)
+    active_target_label = next(
+        (ref for ref, item in targets.items() if item.id == object_id), object_id or ""
+    )
+    reset_params = {
+        key: value
+        for key, value in {
+            "event_type": event_type,
+            "since": since,
+            "kind": kind,
+            "parent": parent,
+        }.items()
+        if value
+    }
+    target_reset_url = "/activity" + ("?" + urlencode(reset_params) if reset_params else "")
     return templates.TemplateResponse(
         request,
         "activity.html",
@@ -940,8 +1094,17 @@ def activity_overview(
             "title": i18n["t"]("activity.title"),
             "items": page.items,
             "event_types": list(ACTIVITY_EVENT_TYPES),
+            "kinds": list(ATTENTION_OBJECT_KINDS),
             "selected_event_type": event_type or "",
             "selected_since": since or "",
+            "selected_kind": kind or "",
+            "selected_parent": parent or "",
+            "selected_object_id": object_id or "",
+            "active_target_label": active_target_label,
+            "targets": targets,
+            "target_error": target_error,
+            "activity_time": lambda value: activity_time(value, i18n["locale"]),
+            "target_reset_url": target_reset_url,
             "generated_at": page.generated_at,
             "next_url": next_url,
             **i18n,
@@ -1117,8 +1280,12 @@ def _project_workspace_response(
         can_write = Permission.WRITE in project.capabilities
         try:
             chronology_page = query_project_chronology_page(
-                session, access, object_id=object_id, limit=100,
-                cursor=request.query_params.get("chronology_cursor"), include_total=False,
+                session,
+                access,
+                object_id=object_id,
+                limit=100,
+                cursor=request.query_params.get("chronology_cursor"),
+                include_total=False,
             )
         except InvalidCursor as exc:
             raise HTTPException(400, "Invalid pagination cursor") from exc
@@ -1345,6 +1512,38 @@ def schema_settings(
             request,
             selected_kind=selected_kind,
         ),
+    )
+
+
+@router.get("/settings/integrations", response_class=HTMLResponse)
+def settings_integrations(
+    request: Request,
+    session: Annotated[Session, Depends(get_session)],
+    cursor: str | None = None,
+):
+    """Display existing authorized source coverage without collecting sources.
+
+    Args:
+        request: Authenticated browser request.
+        session: Request-scoped database session.
+        cursor: Existing coverage continuation cursor.
+
+    Returns:
+        Read-only mapped source coverage; absent snapshots remain unknown.
+    """
+    try:
+        page = query_source_coverage_page(
+            session,
+            read_access_from_request(request),
+            cursor=cursor,
+            include_total=True,
+        )
+    except InvalidCursor as exc:
+        raise HTTPException(status_code=400, detail="Invalid pagination cursor") from exc
+    return templates.TemplateResponse(
+        request,
+        "integrations.html",
+        context={"page": page, **translation_context(request)},
     )
 
 
@@ -1766,7 +1965,8 @@ def _detail_template_context(
             or role not in {Role.REFERENCE_CONTENT_READER, Role.REFERENCE_CONTENT_EDITOR}
         ),
         "grant_scopes": tuple(
-            scope for scope in GrantScope
+            scope
+            for scope in GrantScope
             if scope != GrantScope.RESPONSIBILITY
             or catalog_object.kind in {"host", "system", "service"}
         ),
@@ -1971,21 +2171,29 @@ def _render_object_detail(
             selected_role = Role(request.query_params.get("preview_role", "discoverer"))
             selected_scope = GrantScope(request.query_params.get("preview_scope", "self"))
             validate_grant_target(
-                selected_role, selected_scope, object_kind=detail_read_model.catalog_object.kind,
+                selected_role,
+                selected_scope,
+                object_kind=detail_read_model.catalog_object.kind,
             )
         except ValueError:
             selected_role, selected_scope = Role.DISCOVERER, GrantScope.SELF
         try:
             grant_scope_preview = preview_grant_scope(
-                session, grant_context, object_id=object_id,
-                scope=selected_scope, role=selected_role,
+                session,
+                grant_context,
+                object_id=object_id,
+                scope=selected_scope,
+                role=selected_role,
             )
         except CommandAuthorizationDenied:
             # A manually selected Owner-only scope must not expose hidden
             # reach or turn an otherwise accessible detail page into a 500.
             grant_scope_preview = preview_grant_scope(
-                session, grant_context, object_id=object_id,
-                scope=GrantScope.SELF, role=Role.DISCOVERER,
+                session,
+                grant_context,
+                object_id=object_id,
+                scope=GrantScope.SELF,
+                role=Role.DISCOVERER,
             )
         can_manage_owner_grants = actor_can_manage_owner_grants(
             grant_context,
@@ -3726,9 +3934,12 @@ def check_service_release_from_ui(
     access = read_access_from_request(request)
     context = ui_write_context(request, access)
     execute_ui_command(
-        session, context,
+        session,
+        context,
         lambda: check_authorized_service_release(
-            session, context, object_id=object_id,
+            session,
+            context,
+            object_id=object_id,
             settings=release_monitoring_settings(request.app.state.settings),
         ),
     )
