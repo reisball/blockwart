@@ -7,6 +7,7 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from html.parser import HTMLParser
 
+import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
@@ -53,38 +54,77 @@ class _FilterFormParser(HTMLParser):
         self.action = ""
         self.method = ""
         self.controls: dict[str, list[str]] = {}
-        self._seen_form = False
+        self.forms: list[_FilterForm] = []
         self._in_form = False
         self._control = ""
 
     def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
         attributes = dict(attrs)
-        if tag == "form" and not self._seen_form:
-            self._seen_form = True
+        if tag == "form":
             self._in_form = True
+            self.controls = {}
+            self._control = ""
             self.action = attributes.get("action") or ""
             self.method = (attributes.get("method") or "get").lower()
         elif tag == "select" and self._in_form:
             self._control = attributes.get("name") or ""
             self.controls.setdefault(self._control, [])
-        elif tag == "option" and self._control:
+        elif tag == "option" and self._in_form and self._control:
             self.controls[self._control].append(attributes.get("value") or "")
 
     def handle_endtag(self, tag: str) -> None:
         if tag == "select":
             self._control = ""
-        elif tag == "form":
+        elif tag == "form" and self._in_form:
+            self.forms.append(
+                _FilterForm(
+                    action=self.action,
+                    method=self.method,
+                    controls={name: tuple(values) for name, values in self.controls.items()},
+                )
+            )
             self._in_form = False
 
 
 def _parse_project_filter_form(html: str) -> _FilterForm:
     parser = _FilterFormParser()
     parser.feed(html)
-    return _FilterForm(
-        action=parser.action,
-        method=parser.method,
-        controls={name: tuple(values) for name, values in parser.controls.items()},
+    candidates = [
+        form
+        for form in parser.forms
+        if {"project_category", "project_status"} <= form.controls.keys()
+    ]
+    assert len(candidates) == 1, "Expected one project category/status filter form"
+    form = candidates[0]
+    assert (form.action, form.method) == ("/projects/filters/normalize", "get")
+    return form
+
+
+@pytest.mark.parametrize(
+    ("action", "method", "status_control"),
+    [
+        ("/search", "get", True),
+        ("/projects/filters/normalize", "post", True),
+        ("/projects/filters/normalize", "get", False),
+    ],
+)
+def test_project_filter_parser_rejects_wrong_target_method_or_missing_control(
+    action,
+    method,
+    status_control,
+):
+    """Select by filter semantics but still reject a broken submission contract."""
+    status = (
+        '<select name="project_status"><option value="active"></select>' if status_control else ""
     )
+    document = (
+        '<form action="/search"><select name="object_kind"></select></form>'
+        f'<form action="{action}" method="{method}">'
+        '<select name="project_category"><option value="migration"></select>'
+        f"{status}</form>"
+    )
+    with pytest.raises(AssertionError):
+        _parse_project_filter_form(document)
 
 
 def _auth(token: str, *, key: str | None = None) -> dict[str, str]:

@@ -621,6 +621,17 @@
       </main>
     {% else %}
       <main class="topology-shell">
+        <form class="catalog-search" method="get" action="/" data-topology-search>
+          <input type="hidden" name="view" value="topology" />
+          <input type="hidden" name="kind" value="{{ kind }}" />
+          {% if topology_mode == "network" %}
+            <input type="hidden" name="topology_mode" value="network" />
+            {% if network_category %}<input type="hidden" name="network_category" value="{{ network_category }}" />{% endif %}
+            {% if include_inherited_services %}<input type="hidden" name="services" value="1" />{% endif %}
+          {% endif %}
+          <label>{{ t('search.submit') }}<input name="q" type="search" value="{{ q }}" maxlength="200" placeholder="{{ t('search.placeholder') }}" autocomplete="off" /></label>
+          <button type="submit">{{ t('search.submit') }}</button>
+        </form>
         <div class="catalog-create-actions">        {% if can_create_root %}
           <a class="primary-button" href="/?{{ detail_query_string }}&create_root=1" aria-label="{{ t('asset.create_root') }}">
             ＋ <span class="asset-create-full">{{ t("asset.create_root") }}</span><span class="asset-create-short">{{ t("asset.create_short") }}</span>

@@ -1557,10 +1557,13 @@ def test_catalog_tree_toggle_overrides_global_button_minimum_size(
     client: TestClient,
 ) -> None:
     catalog_response = client.get("/")
-    stylesheet_response = client.get("/static/explorer.css")
-
     assert catalog_response.status_code == 200
-    assert '/static/explorer.css?v=011"' in catalog_response.text
+    stylesheet_link = re.search(
+        r'<link\s+rel="stylesheet"\s+href="(?P<href>/static/explorer\.css\?v=[A-Za-z0-9._-]+)"',
+        catalog_response.text,
+    )
+    assert stylesheet_link is not None
+    stylesheet_response = client.get(stylesheet_link["href"])
     assert stylesheet_response.status_code == 200
     tree_toggle_rule = re.search(
         r"\.tree-toggle\s*\{(?P<body>[^}]*)\}",
