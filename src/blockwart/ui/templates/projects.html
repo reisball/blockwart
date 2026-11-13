@@ -4,17 +4,15 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>{{ title }}</title>
-    <link rel="stylesheet" href="/static/app.css" />
+    <link rel="stylesheet" href="/static/app.css?v=ux5-polish1" />
     {% include "_navigation_head.html" %}
   </head>
-  <body>
+  <body class="ux-primary ux-projects">
     {% include "_main_navigation.html" %}
     <main class="page stack">
       <header class="integrated-detail-heading">
         <div>
-          <p class="eyebrow">{{ t("project.workspace.eyebrow") }}</p>
           <h1>{{ t("project.workspace.overview_title") }}</h1>
-          <span>{{ t("project.workspace.overview_help") }}</span>
         </div>
         {% if can_create_root %}
           <a class="button" href="/?kind=project&create_root=1">{{ t("project.workspace.create") }}</a>
@@ -22,7 +20,7 @@
       </header>
 
       <p><a href="/workspace/search">{{ t('workspace.search.title') }}</a></p>
-      <section class="panel">
+      <details class="secondary-disclosure" {% if selected_category or selected_status %}open{% endif %}><summary>{{ t("project.workspace.filter") }}</summary>
         <form class="form-grid" method="get" action="/projects/filters/normalize">
           <div class="project-filter-grid">
             <label>{{ t("project.field.category.label") }}
@@ -40,7 +38,7 @@
           </div>
           <div class="button-row"><button type="submit">{{ t("project.workspace.filter") }}</button><a class="button button-muted" href="/projects">{{ t("project.workspace.clear") }}</a></div>
         </form>
-      </section>
+      </details>
 
       <section class="panel">
         {% if projects %}

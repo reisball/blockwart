@@ -243,8 +243,8 @@
         document.documentElement.dataset.theme = "light";
       }
     </script>
-    <link rel="stylesheet" href="/static/app.css?v=062" />
-    <link rel="stylesheet" href="/static/explorer.css?v=011" />
+    <link rel="stylesheet" href="/static/app.css?v=ux5-polish1" />
+    <link rel="stylesheet" href="/static/explorer.css?v=012" />
     <script>
       window.BLOCKWART_UI_SCHEMAS = {{ ui_schemas|tojson }};
       window.BLOCKWART_EXPLORER_ASSETS = {{ explorer.assets|tojson }};
@@ -298,7 +298,7 @@
     </script>
     <script src="/static/theme.js?v=054" defer></script>
     <script src="/static/create_field_order.js?v=001" defer></script>
-    <script src="/static/index.js?v=064" defer></script>
+    <script src="/static/index.js?v=065" defer></script>
     <script src="/static/detail.js?v=003" defer></script>
     {% include "_navigation_head.html" %}
   </head>
@@ -436,17 +436,6 @@
           {% if detail_mode %}
             {% include "_object_detail_content.html" %}
           {% else %}
-          <div class="catalog-create-actions">        {% if can_create_root %}
-          <a class="primary-button" href="/?{{ detail_query_string }}&create_root=1" aria-label="{{ t('asset.create_root') }}">
-            ＋ <span class="asset-create-full">{{ t("asset.create_root") }}</span><span class="asset-create-short">{{ t("asset.create_short") }}</span>
-          </a>
-        {% endif %}
-        {% if can_create %}
-          <a class="primary-button" href="/?{{ detail_query_string }}&create=1" aria-label="{{ t('asset.create') }}">
-            ＋ <span class="asset-create-full">{{ t("asset.create") }}</span><span class="asset-create-short">{{ t("asset.create_short") }}</span>
-          </a>
-        {% endif %}
-</div>
           <header class="content-heading">
             <div>
               <p class="eyebrow">{{ t("catalog.eyebrow") }}</p>
@@ -454,10 +443,30 @@
               <span>{% if is_filtered %}{{ t("catalog.results", count=objects|length) }}{% else %}{{ t("catalog.subtitle", count=total_objects) }}{% endif %}</span>
               <span class="muted" data-visible-row-label aria-live="polite">{{ t("catalog.visible_rows") }}: <b data-visible-row-count>{{ objects|length if is_filtered else explorer.clusters|length }}</b>{% if is_filtered %} · {{ t("catalog.stock") }}: <b>{{ total_objects }}</b>{% endif %}</span>
             </div>
+            <div class="catalog-create-actions">
+              {% if can_create_root %}
+                <a class="primary-button" href="/?{{ detail_query_string }}&create_root=1" aria-label="{{ t('asset.create_root') }}">
+                  ＋ <span class="asset-create-full">{{ t("asset.create_root") }}</span><span class="asset-create-short">{{ t("asset.create_short") }}</span>
+                </a>
+              {% endif %}
+              {% if can_create %}
+                <a class="primary-button" href="/?{{ detail_query_string }}&create=1" aria-label="{{ t('asset.create') }}">
+                  ＋ <span class="asset-create-full">{{ t("asset.create") }}</span><span class="asset-create-short">{{ t("asset.create_short") }}</span>
+                </a>
+              {% endif %}
+              <details class="view-menu" data-view-menu>
+                <summary>{{ t("catalog.view") }}</summary>
+                <div class="saved-view-controls">
+                  <label>{{ t('tree.view_name') }}<input data-view-name maxlength="60" /></label><button type="button" data-save-view>{{ t('tree.save_view') }}</button>
+                  <label>{{ t('tree.saved_view') }}<select data-saved-views><option value="">—</option></select></label><button type="button" data-load-view>{{ t('tree.load_view') }}</button>
+                  <span role="status" data-view-status data-saved-copy="{{ t('tree.view_saved') }}" data-error-copy="{{ t('tree.view_error') }}"></span>
+                </div>
+              </details>
+            </div>
           </header>
           <form class="catalog-search" method="get" action="/">
             <input type="hidden" name="view" value="catalog" /><input type="hidden" name="kind" value="{{ kind }}" />
-            <label>{{ t('catalog.search_scope') }}: {% if kind %}<a class="query-pill" href="/?view=catalog&q={{ q|urlencode }}">{{ t('kind.' ~ kind) }} ×</a>{% else %}<strong>{{ t('search.all_types') }}</strong>{% endif %}
+            <label><span class="catalog-scope">{{ t('catalog.search_scope') }}: {% if kind %}<a class="query-pill" href="/?view=catalog&q={{ q|urlencode }}">{{ t('kind.' ~ kind) }} ×</a>{% else %}<strong>{{ t('search.all_types') }}</strong>{% endif %}</span>
               <input type="search" name="q" value="{{ q }}" maxlength="200" placeholder="{{ t('search.placeholder') }}" />
             </label><button>{{ t('search.submit') }}</button>
             {% if kind and not objects %}<a href="/?view=catalog&q={{ q|urlencode }}">{{ t('search.expand') }}</a>{% endif %}
@@ -481,11 +490,6 @@
             {% endif %}
           </div>
 
-          <div class="saved-view-controls">
-            <label>{{ t('tree.view_name') }}<input data-view-name maxlength="60" /></label><button type="button" data-save-view>{{ t('tree.save_view') }}</button>
-            <label>{{ t('tree.saved_view') }}<select data-saved-views><option value="">—</option></select></label><button type="button" data-load-view>{{ t('tree.load_view') }}</button>
-            <span role="status" data-view-status data-saved-copy="{{ t('tree.view_saved') }}" data-error-copy="{{ t('tree.view_error') }}"></span>
-          </div>
           <div class="table-wrap">
             <table class="asset-table">
               <thead>
@@ -593,7 +597,8 @@
           {% endif %}
         </section>
 
-        <aside class="asset-inspector" data-inspector>
+        <aside class="asset-inspector" data-inspector hidden>
+          <button type="button" class="inspector-close" data-inspector-close aria-label="{{ t('asset.close') }}">×</button>
           <header class="inspector-head">
             <div class="selected-kind" data-inspector-kind>{{ t("catalog.inspector") }}</div>
             <h2 data-inspector-title>{{ t("catalog.select_asset") }}</h2>

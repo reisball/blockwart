@@ -13,3 +13,25 @@
   });
   target?.addEventListener('input', () => target.setCustomValidity(''));
 })();
+
+// Progressive enhancement only: retain exact RFC3339 until the user changes date.
+(() => {
+  const raw = document.querySelector('[data-activity-since]');
+  if (!raw) return;
+  const date = document.createElement('input');
+  date.type = 'date';
+  if (date.type !== 'date') return;
+  date.dataset.activityDate = '';
+  const parsed = raw.value ? new Date(raw.value) : null;
+  if (parsed && Number.isNaN(parsed.getTime())) return;
+  date.value = parsed ? parsed.toISOString().slice(0, 10) : '';
+  date.title = raw.value;
+  const label = document.createElement('label');
+  label.append(document.createTextNode(raw.dataset.dateLabel), date);
+  raw.parentElement.before(label);
+  raw.parentElement.hidden = true;
+  date.addEventListener('change', () => {
+    raw.value = date.value ? date.value + 'T00:00:00Z' : '';
+    date.title = raw.value;
+  });
+})();

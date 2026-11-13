@@ -2,7 +2,7 @@
 {% if q %}
 <section aria-label="{{ t('search.objects') }}">
   <h3>{{ t('search.objects') }} · {{ search_objects|length }}</h3>
-  {% for object in search_objects %}<p><a data-search-hit href="/objects/{{ object.id|urlencode }}">{{ object.label }}</a> <span class="badge">{{ t('kind.' ~ object.kind) }}</span> <code>{{ object.kind }}:{{ object.id }}</code></p>{% else %}<p>{{ t('catalog.empty') }}</p>{% if object_kind %}<a data-smart-expand href="/search?q={{ q|urlencode }}">{{ t('search.expand') }}</a>{% endif %}{% endfor %}
+  {% for object in search_objects %}<p class="palette-object-hit"><a data-search-hit href="/objects/{{ object.id|urlencode }}">{{ object.label }}</a> <span class="badge">{{ t('kind.' ~ object.kind) }}</span> <code>{{ object.kind }}:{{ object.id }}</code></p>{% else %}<p>{{ t('catalog.empty') }}</p>{% if object_kind %}<a data-smart-expand href="/search?q={{ q|urlencode }}">{{ t('search.expand') }}</a>{% endif %}{% endfor %}
 </section>
 <section aria-label="{{ t('search.contents') }}">
   <h3>{{ t('search.contents') }} · {{ content_page.total }}</h3>

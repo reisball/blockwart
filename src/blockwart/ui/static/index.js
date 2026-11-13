@@ -8,6 +8,7 @@
   const selectableNodes = Array.from(document.querySelectorAll("[data-asset-ref]"));
   const stateStoragePrefix = "blockwart-explorer-state:" + explorerContext.principalScope + ":";
   let selectedAssetRef = "";
+  let initializingSelection = true;
 
   function setInspectorValue(root, selector, value) {
     const target = root.querySelector(selector);
@@ -64,6 +65,7 @@
     }
     for (const inspector of document.querySelectorAll("[data-inspector]")) {
       updateInspector(inspector, asset);
+      if (inspector.classList.contains("asset-inspector") && !initializingSelection) inspector.hidden = false;
     }
   }
 
@@ -289,6 +291,16 @@
     return token;
   }
 
+  const viewMenu = document.querySelector('[data-view-menu]');
+  viewMenu?.addEventListener('keydown', event => {
+    if (event.key === 'Escape') {
+      event.preventDefault(); viewMenu.open = false;
+      viewMenu.querySelector('summary').focus();
+    }
+  });
+  document.addEventListener('click', event => {
+    if (viewMenu?.open && !viewMenu.contains(event.target)) viewMenu.open = false;
+  });
   const savedViewsSelect = document.querySelector("[data-saved-views]");
   const savedViewsKey = "blockwart-saved-catalog-views:v1:" + explorerContext.principalScope;
   function savedViews() {
@@ -401,10 +413,13 @@
       const selectedSelector = state.selectedRef
         ? `[data-asset-ref="${CSS.escape(state.selectedRef)}"]`
         : "";
-      const focusTarget = state.triggerKind === "saved-view" ? document.querySelector("[data-saved-views]")
+      const focusTarget = state.triggerKind === "saved-view" ? document.querySelector("[data-view-menu] > summary")
         : state.triggerKind === "row-detail" && selectedSelector
         ? document.querySelector(`${selectedSelector} .row-detail`)
         : document.querySelector("[data-inspector-details]");
+      if (state.triggerKind === "inspector" && focusTarget?.closest(".asset-inspector")) {
+        focusTarget.closest(".asset-inspector").hidden = false;
+      }
       focusTarget?.focus({preventScroll: true});
     });
     return true;
@@ -439,6 +454,12 @@
       selectAsset(initiallySelected.dataset.assetRef);
     }
   }
+
+  initializingSelection = false;
+  document.querySelector('[data-inspector-close]')?.addEventListener('click', () => {
+    document.querySelector('.asset-inspector').hidden = true;
+    selectableNodes.find(node => node.dataset.assetRef === selectedAssetRef)?.focus();
+  });
 
   if (!isDetailPage) {
     for (const trigger of document.querySelectorAll("[data-detail-trigger]")) {

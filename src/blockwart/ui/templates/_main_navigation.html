@@ -13,14 +13,17 @@
   </div>
 </header>
 <dialog class="smart-search-dialog" data-smart-dialog aria-labelledby="smart-search-title">
-  <div class="panel stack">
-    <div class="panel-head"><h2 id="smart-search-title">{{ t('search.smart') }}</h2><button type="button" data-smart-close aria-label="{{ t('asset.close') }}">×</button></div>
-    <form action="/search" method="get" data-smart-form class="stack">
-      <label>{{ t('search.submit') }}<input type="search" name="q" maxlength="200" autocomplete="off" /></label>
-      <label>{{ t('search.scope') }}<select name="object_kind"><option value="">{{ t('search.all_types') }}</option>{% for value in ['host','system','network','device','service','runbook','decision','project'] %}<option value="{{ value }}">{{ t('kind.' ~ value) }}</option>{% endfor %}</select></label>
-      <p class="meta">{{ t('search.scope_help') }}</p>
-      <button type="submit">{{ t('search.submit') }}</button>
+  <h2 id="smart-search-title" class="visually-hidden">{{ t('search.smart') }}</h2>
+  <div class="palette-head">
+    <form action="/search" method="get" data-smart-form class="palette-form">
+      <label class="visually-hidden" for="smart-query">{{ t('search.submit') }}</label>
+      <input id="smart-query" type="search" name="q" maxlength="200" autocomplete="off" placeholder="{{ t('search.placeholder') }}" />
+      <label class="visually-hidden" for="smart-kind">{{ t('search.scope') }}</label>
+      <select id="smart-kind" name="object_kind"><option value="">{{ t('search.all_types') }}</option>{% for value in ['host','system','network','device','service','runbook','decision','project'] %}<option value="{{ value }}">{{ t('kind.' ~ value) }}</option>{% endfor %}</select>
+      <button type="submit" class="visually-hidden" tabindex="-1">{{ t('search.submit') }}</button>
     </form>
-    <div data-smart-results aria-live="polite"><p>{{ t('search.prompt') }}</p></div>
+    <button class="palette-close" type="button" data-smart-close aria-label="{{ t('asset.close') }}">Esc</button>
   </div>
+  <div class="palette-results" data-smart-results aria-live="polite"><p>{{ t('search.prompt') }}</p></div>
+  <footer class="palette-help meta">{{ t('search.scope_help') }}</footer>
 </dialog>

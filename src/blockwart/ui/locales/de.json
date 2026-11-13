@@ -1552,7 +1552,7 @@
   "activity.parent_label": "Übergeordnet (Teilbaum)",
   "activity.target_filter_active": "Zielfilter aktiv: {target}.",
   "activity.actor_kind.human": "Mensch",
-  "activity.actor_kind.service_account": "Agent",
+  "activity.actor_kind.service_account": "Servicekonto",
   "activity.actor_kind.system": "System",
   "nav.main": "Hauptnavigation",
   "search.smart": "Smarte Suche",
@@ -1588,5 +1588,9 @@
   "tree.saved_view": "Gespeicherte Ansicht",
   "tree.load_view": "Ansicht laden",
   "tree.view_saved": "Ansicht gespeichert",
-  "tree.view_error": "Ansicht konnte nicht gespeichert werden"
+  "tree.view_error": "Ansicht konnte nicht gespeichert werden",
+  "catalog.view": "Ansicht",
+  "attention.diagnostics": "Technische Abdeckung & Diagnostik",
+  "activity.more_filters": "Weitere Filter",
+  "activity.date_utc": "Ab Datum (UTC)"
 }

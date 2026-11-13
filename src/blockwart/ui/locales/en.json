@@ -1552,7 +1552,7 @@
   "activity.parent_label": "Parent (subtree)",
   "activity.target_filter_active": "Target filter active: {target}.",
   "activity.actor_kind.human": "Human",
-  "activity.actor_kind.service_account": "Agent",
+  "activity.actor_kind.service_account": "Service account",
   "activity.actor_kind.system": "System",
   "nav.main": "Main navigation",
   "search.smart": "Smart search",
@@ -1588,5 +1588,9 @@
   "tree.saved_view": "Saved view",
   "tree.load_view": "Load view",
   "tree.view_saved": "View saved",
-  "tree.view_error": "Could not save view"
+  "tree.view_error": "Could not save view",
+  "catalog.view": "View",
+  "attention.diagnostics": "Technical coverage & diagnostics",
+  "activity.more_filters": "More filters",
+  "activity.date_utc": "Since date (UTC)"
 }

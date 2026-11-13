@@ -290,7 +290,7 @@ def test_activity_invalid_target_retains_previous_and_filter_reset_is_narrow(cli
     )
     assert response.status_code == 200 and "previous filter remains active" in response.text
     assert "service:ux-direct" in response.text
-    table = re.search(r'<table class="table attention-table">.*?</table>', response.text, re.S)[0]
+    table = re.search(r'<table class="table activity-table">.*?</table>', response.text, re.S)[0]
     assert "Direct Example Service" in table and "Nested Example Service" not in table
     assert 'href="/activity?event_type=object_revision"' in response.text
     assert 'datetime="' in table and "Europe/Berlin" in table
@@ -346,3 +346,60 @@ def test_updated_priority_count_assertion_rejects_wrong_rendered_number():
     )
     assert int(re.search(pattern, valid)[1]) == 1
     assert int(re.search(pattern, valid.replace("<b>1</b>", "<b>2</b>"))[1]) != 1
+
+
+def test_polish_disclosures_keep_controls_and_diagnostics_reachable(client, ux_seed):  # noqa: F811
+    """Preserve controls and coverage while making their default surfaces secondary."""
+    catalog = client.get("/").text
+    assert "data-view-menu" in catalog
+    view = re.search(r'<details class="view-menu".*?</details>', catalog, re.S)[0]
+    assert "<summary>View</summary>" in view
+    for control in ["data-view-name", "data-save-view", "data-saved-views", "data-load-view"]:
+        assert control in view
+    assert '<aside class="asset-inspector" data-inspector hidden>' in catalog
+    assert "data-inspector-close" in catalog and "data-inspector-details" in catalog
+    hints = client.get("/attention").text
+    diagnostic = re.search(
+        r"<details[^>]*data-attention-diagnostics[^>]*>.*?</details>", hints, re.S
+    )[0]
+    assert " open" not in diagnostic.split(">")[0]
+    assert "attention-signal-table" in diagnostic
+    assert hints.index("attention-table") < hints.index("data-attention-diagnostics")
+    assert 'name="signal_state"' in hints and 'name="reason_code"' in hints
+    projects = client.get("/projects").text
+    assert 'class="secondary-disclosure"' in projects
+    assert 'name="project_category"' in projects and 'name="project_status"' in projects
+    assert 'href="/projects/ux-project"' in projects
+
+
+def test_polish_activity_retains_rfc3339_fallback_and_evidenced_labels(
+    client,  # noqa: F811
+    ux_seed,
+    session_factory,  # noqa: F811
+):
+    """Keep exact input and attribution contracts, without a guessed timezone repair."""
+    since = "2026-01-01T12:34:56%2B02:00"
+    response = client.get("/activity?since=" + since)
+    assert response.status_code == 200
+    assert 'name="since"' in response.text and "data-activity-since" in response.text
+    assert 'value="2026-01-01T12:34:56+02:00"' in response.text
+    assert 'name="parent"' in response.text and 'name="kind"' in response.text
+    with session_factory() as session, session.begin():
+        session.add(
+            AuditEvent(
+                object_id="ux-direct",
+                action="update",
+                actor="ux-service",
+                summary="Example",
+                details_json=json.dumps({"event": "update", "version": 1, "changes": []}),
+                created_at=datetime.now(UTC).replace(tzinfo=None),
+            )
+        )
+    for lang, label in [("en", "Service account"), ("de", "Servicekonto")]:
+        content = client.get("/activity?lang=" + lang).text
+        assert label in content
+        assert ">Agent<" not in content
+    fallback = client.get("/search?q=Proxmox&object_kind=service").text
+    assert 'action="/search" method="get"' in fallback
+    assert 'name="q" value="Proxmox"' in fallback
+    assert "data-smart-expand" in fallback
