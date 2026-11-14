@@ -29,4 +29,8 @@ No auth-policy rewrite, data migration, timestamp-default/cache-header task, pro
 
 ## Source evidence
 
+The upstream-review corrections and their bounded, source-specific verification
+are recorded in [PR340-REPAIR.md](PR340-REPAIR.md). That evidence does not replace
+the unchanged requirements above or the independent review/final CI gates.
+
 The existing UX-v5 acceptance baseline is recorded in [ACCEPTANCE.md](ACCEPTANCE.md): five direct destinations, no left rail or global root-create, compact navigation, global grouped search, full catalog rows, separate stock/match/visible counts, and domain-safe activity display and filters. The requirements above make the follow-up local/global search contract explicit for review in PR #340.

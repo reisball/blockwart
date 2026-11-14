@@ -1,5 +1,12 @@
 # UX v5 acceptance and review status
 
+## PR #340 review-repair applicability
+
+The later local repair is documented in [PR340-REPAIR.md](PR340-REPAIR.md). Its
+real-role regressions and source-bound browser counterchecks are separate from
+the historical PASS matrix and release/CI evidence below. They do not authorize
+merge or deployment; independent review and final required remote CI remain open.
+
 The implementation and compact-mockup follow-up are committed. The previous isolated
 UI-only release is 8128797959d4b82ed1b6329e153110e0d02b01d5.
 The release coordinator recorded [full CI success](https://github.com/reisball/blockwart/actions/runs/43525957700)
