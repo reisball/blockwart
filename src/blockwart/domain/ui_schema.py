@@ -1,10 +1,13 @@
 import json
 import os
 import tempfile
-from collections.abc import Mapping
+from collections.abc import Iterator, Mapping
+from contextlib import contextmanager
+from contextvars import ContextVar
 from dataclasses import dataclass, field
 from functools import cache
 from pathlib import Path
+from types import MappingProxyType
 from typing import Any, Literal
 
 from blockwart.config import get_settings
@@ -834,9 +837,36 @@ if {
     raise RuntimeError("installed-software UI kinds drift from the domain schema")
 
 
+_render_schema_overrides: ContextVar[Mapping[str, Any] | None] = ContextVar(
+    "render_schema_overrides", default=None
+)
+
+
+@contextmanager
+def ui_schema_read_snapshot() -> Iterator[None]:
+    """Use one fresh override document for a synchronous render invocation.
+
+    Nested invocations load independently and restore their caller's snapshot.
+    Only schema metadata is retained; settings and unscoped reads stay uncached.
+    Schema-settings routes and persistence remain outside this render scope.
+
+    Yields:
+        Nothing; schema reads in this context share the loaded overrides.
+    """
+    overrides = MappingProxyType(_load_schema_overrides())
+    token = _render_schema_overrides.set(overrides)
+    try:
+        yield
+    finally:
+        _render_schema_overrides.reset(token)
+
+
 def get_ui_schema(kind: str) -> UiTypeSchema:
     schema = UI_SCHEMAS.get(kind, UI_SCHEMAS["system"])
-    return _apply_schema_overrides(schema, _load_schema_overrides().get(schema.kind, {}))
+    overrides = _render_schema_overrides.get()
+    if overrides is None:
+        overrides = _load_schema_overrides()
+    return _apply_schema_overrides(schema, overrides.get(schema.kind, {}))
 
 
 def ui_schema_payload() -> dict[str, dict[str, object]]:
