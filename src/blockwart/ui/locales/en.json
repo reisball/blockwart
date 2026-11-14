@@ -1576,6 +1576,7 @@
   "activity.actor_unknown": "Not assigned",
   "activity.actor_technical": "Technical identifier",
   "activity.target_invalid": "Choose one unambiguous visible target. The previous filter remains active.",
+  "activity.target_invalid_no_previous": "No valid target is selected; no activity is shown. Choose a visible target or clear the filter.",
   "activity.target": "Find target",
   "activity.target_all": "All targets",
   "activity.target_reset": "Remove target filter",

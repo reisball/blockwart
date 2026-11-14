@@ -528,8 +528,8 @@ def _resolve_actor_identities(
 ) -> list[ActivityItem]:
     # Existing principal discovery permits admins, self, or an access manager
     # on the event target. Do not expand identity/profile visibility here.
-    actors = {
-        item.actor
+    visible_actors = {
+        (item.actor, item.object.object_id)
         for item in items
         if item.actor
         and (
@@ -542,8 +542,9 @@ def _resolve_actor_identities(
             )
         )
     }
-    if not actors:
+    if not visible_actors:
         return items
+    actors = {actor for actor, _ in visible_actors}
     identities = {
         row.id: (row.display_name, row.principal_type)
         for row in session.scalars(
@@ -555,7 +556,7 @@ def _resolve_actor_identities(
     }
     return [
         replace(item, actor_display=identities[item.actor][0], actor_kind=identities[item.actor][1])
-        if item.actor in identities
+        if item.actor in identities and (item.actor, item.object.object_id) in visible_actors
         else item
         for item in items
     ]

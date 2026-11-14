@@ -21,6 +21,7 @@
       <section class="panel">
         <form class="form-grid" method="get" action="/activity">
           <input type="hidden" name="q" value="{{ q }}" />
+          {% if invalid_target %}<input type="hidden" name="invalid_target" value="1" />{% endif %}
           <div class="activity-filter-grid">
             <label>{{ t("activity.type_label") }}
               <select name="event_type">
@@ -29,7 +30,7 @@
               </select>
             </label>
             <label>{{ t('activity.target') }}
-              <input type="search" name="target" list="activity-targets" value="{{ 'invalid' if invalid_target else active_target_label }}" placeholder="{{ t('activity.target_all') }}" data-activity-target />
+              <input type="search" name="target" list="activity-targets" value="{{ active_target_label }}" placeholder="{{ t('activity.target_all') }}" data-activity-target />
               <input type="hidden" name="previous_object_id" value="{{ selected_object_id }}" />
               <datalist id="activity-targets">{% for ref, object in targets.items() %}<option value="{{ ref }}">{{ object.label }}</option>{% endfor %}</datalist>
             </label>

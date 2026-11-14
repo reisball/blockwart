@@ -199,8 +199,7 @@ def query_attention_page(
     # Destination counts keep every active filter except severity. Compute them
     # from the same authorized projection, not a second database snapshot.
     facets = {
-        value: sum(item.severity == value for item in filtered)
-        for value in ATTENTION_SEVERITIES
+        value: sum(item.severity == value for item in filtered) for value in ATTENTION_SEVERITIES
     }
     facets[""] = len(filtered)
     if severity is not None:

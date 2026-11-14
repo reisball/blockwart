@@ -8,7 +8,7 @@
     objects: ['q', 'kind', 'topology_mode', 'network_category', 'services'],
     projects: ['q', 'project_category', 'project_status'],
     hints: ['q', 'category', 'severity', 'signal_state', 'kind', 'reason_code'],
-    activity: ['q', 'event_type', 'since', 'kind', 'object_id', 'parent', 'target'],
+    activity: ['q', 'event_type', 'since', 'kind', 'object_id', 'parent', 'invalid_target'],
   };
   let states = {};
   try { states = JSON.parse(sessionStorage.getItem(key) || '{}') || {}; } catch {}

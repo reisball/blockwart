@@ -1,6 +1,7 @@
 import json
 import re
 from collections.abc import Mapping
+from dataclasses import replace
 from datetime import UTC, datetime
 from ipaddress import ip_address
 from typing import Annotated, Any
@@ -1047,13 +1048,14 @@ def activity_overview(
         if str(item.visibility) == "detail" and item.kind in ATTENTION_OBJECT_KINDS
     }
     target_error = ""
-    invalid_target = False
+    invalid_target = request.query_params.get("invalid_target") == "1"
     requested_target = request.query_params.get("target")
     if requested_target is not None:
         if not requested_target:
             object_id = None
         elif requested_target in targets:
             object_id = targets[requested_target].id
+            invalid_target = False
         else:
             target_error = translation_context(request)["t"]("activity.target_invalid")
             previous = request.query_params.get("previous_object_id", "")
@@ -1064,8 +1066,10 @@ def activity_overview(
     for name, value in (("object_id", object_id), ("parent", parent)):
         if not value:
             continue
-        resolved = targets.get(value) if ":" in value else next(
-            (item for item in targets.values() if item.id == value), None
+        resolved = (
+            targets.get(value)
+            if ":" in value
+            else next((item for item in targets.values() if item.id == value), None)
         )
         if resolved is None:
             invalid_target = True
@@ -1074,6 +1078,8 @@ def activity_overview(
             object_id = resolved.id if resolved else None
         else:
             parent = resolved.id if resolved else None
+    if invalid_target:
+        target_error = translation_context(request)["t"]("activity.target_invalid_no_previous")
     if kind and kind not in ATTENTION_OBJECT_KINDS:
         raise HTTPException(status_code=400, detail="Invalid activity kind")
     try:
@@ -1095,6 +1101,10 @@ def activity_overview(
         raise HTTPException(status_code=400, detail="Invalid pagination cursor") from exc
     except ActivityQueryError as exc:
         raise HTTPException(status_code=400, detail="Invalid activity filter") from exc
+    if invalid_target:
+        # This is an error state, not a selectable object ID (even if a catalog
+        # happens to contain an object named like the private query sentinel).
+        page = replace(page, items=[], next_cursor=None)
     params = {
         "q": q,
         "event_type": event_type,

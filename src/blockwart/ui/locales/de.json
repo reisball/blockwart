@@ -1576,6 +1576,7 @@
   "activity.actor_unknown": "Nicht zugeordnet",
   "activity.actor_technical": "Technische Kennung",
   "activity.target_invalid": "Bitte ein eindeutiges sichtbares Ziel wählen. Der bisherige Filter bleibt aktiv.",
+  "activity.target_invalid_no_previous": "Kein gültiges Ziel ausgewählt; es wird keine Aktivität angezeigt. Ein sichtbares Ziel wählen oder den Filter löschen.",
   "activity.target": "Ziel suchen",
   "activity.target_all": "Alle Ziele",
   "activity.target_reset": "Zielfilter entfernen",
