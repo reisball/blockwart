@@ -1501,6 +1501,21 @@ pre {
 .main-navigation a { white-space:nowrap; padding:10px 12px; border-radius:7px; text-decoration:none; }
 .main-navigation a[aria-current], .main-navigation a:hover { background:var(--surface-muted); color:var(--text); }
 .main-actions { display:flex; gap:8px; align-items:center; }
+/* Same button geometry for destinations and utilities; only active state differs. */
+.main-header .main-navigation a, .main-header .main-actions .button {
+  display:inline-flex; align-items:center; justify-content:center; gap:4px;
+  height:40px; min-height:40px; min-width:0; padding:8px 12px;
+  border:1px solid var(--border); border-radius:7px;
+  font-size:13px; font-weight:600; line-height:20px; white-space:nowrap;
+  text-decoration:none; background:var(--surface-muted); color:var(--text);
+}
+.main-header .main-navigation a[aria-current] {
+  background:var(--active-bg); border-color:var(--active-border);
+}
+.main-header .main-navigation a:hover, .main-header .main-actions .button:hover {
+  background:var(--hover-bg);
+}
+
 .settings-update-badge { margin-left:6px; }
 [hidden] { display:none !important; }
 .smart-search-dialog { width:min(640px, calc(100vw - 24px)); max-height:80vh; padding:0; border:1px solid var(--border); border-radius:10px; color:var(--text); background:var(--surface); overflow:auto; font-size:14px; }
