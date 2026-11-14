@@ -120,6 +120,9 @@ jobs:
       - name: Verify reviewed OpenAPI contract
         run: python scripts/update_openapi_contract.py --check
 
+      - name: Smoke optional internal credential safe
+        run: PYTHONPATH=src python scripts/ci/credential_safe_smoke.py
+
       - name: Smoke installed wheel outside repository
         run: ./scripts/ci/package-smoke.sh
 

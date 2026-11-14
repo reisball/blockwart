@@ -8,12 +8,13 @@ import logging
 import os
 import re
 from collections.abc import Callable
+from http.client import HTTPException as HTTPProtocolError
 from pathlib import Path
 from typing import Any, get_args
 from typing import get_args as _get_type_args
 from urllib.error import HTTPError, URLError
 from urllib.parse import quote, urlencode, urlsplit
-from urllib.request import HTTPRedirectHandler, Request, build_opener
+from urllib.request import HTTPRedirectHandler, ProxyHandler, Request, build_opener
 from uuid import uuid4
 
 import mcp.server.stdio
@@ -1737,6 +1738,35 @@ for _tool in TOOLS:
         _tool["inputSchema"]["$defs"] = _record_schema.pop("$defs", {})
 
 
+TOOLS.append({
+    "name": "blockwart.credential_safe",
+    "description": (
+        "Explicit credential safe action. Requires current read_reference_content for read/history "
+        "or write_reference_content for changes. Named string fields never enter catalog storage. "
+        "Mutations require CAS; restore/undelete require a source version. "
+        "Dispatched operations only reconcile; reconcile accepts its operation_id. "
+        "No permanent destroy."
+    ),
+    "inputSchema": {
+        "type": "object", "additionalProperties": False,
+        "required": ["object_id", "action"],
+        "properties": {
+            "object_id": {"type": "string", "minLength": 1},
+            "action": {"type": "string", "enum": [
+                "read", "history", "write", "restore", "delete", "undelete", "reconcile",
+            ]},
+            "operation_id": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+            "cas": {"type": "integer", "minimum": 0, "maximum": 2147483646},
+            "version": {"type": "integer", "minimum": 1, "maximum": 2147483647},
+            "preset": {"type": "string", "enum": ["login", "token", "key", "other"]},
+            "fields": {"type": "object", "maxProperties": 64,
+                       "additionalProperties": {"type": "string", "maxLength": 65536}},
+        },
+    },
+    "annotations": {"readOnlyHint": False, "destructiveHint": False,
+                    "idempotentHint": False, "openWorldHint": False},
+})
+
 TOOL_DEFINITIONS: dict[str, JSON] = {tool["name"]: tool for tool in TOOLS}
 
 
@@ -2345,6 +2375,7 @@ def call_tool(
             headers,
             base_url=base_url,
             correlation_id=request_id,
+            safe_operation=name == "blockwart.credential_safe",
         )
     )
 
@@ -2365,6 +2396,10 @@ def call_tool(
             sections=args.get("sections"),
             relation_type=args.get("relation_type"),
         )
+    elif name == "blockwart.credential_safe":
+        object_id = _required_string(args, "object_id")
+        payload = request("POST", "/api/v1/objects/" + quote(object_id, safe="") + "/safe",
+                          {k: v for k, v in args.items() if k != "object_id"}, {})
     elif name == "blockwart.search":
         payload = _legacy_page_payload(
             fetch("/api/v1/objects", _clean_params(args, default_limit=10)),
@@ -2888,6 +2923,24 @@ def call_tool(
     }
 
 
+def _api_root(base_url: str | None) -> str:
+    root = base_url or os.environ.get("BLOCKWART_API_BASE_URL") or DEFAULT_BASE_URL
+    try:
+        parsed = urlsplit(root)
+        if (parsed.scheme not in {"http", "https"} or not parsed.hostname
+                or not parsed.netloc or parsed.username is not None or parsed.password is not None
+                or "?" in root or "#" in root or "\\" in root
+                or any(character.isspace() or ord(character) < 32 or ord(character) == 127
+                       for character in root)
+                or "%" in parsed.netloc or parsed.netloc.endswith(":") or parsed.port == 0):
+            raise ValueError("invalid API base URL")
+    except ValueError:
+        raise UpstreamError(
+            "credential_configuration_error", "Blockwart MCP API base URL is invalid.",
+        ) from None
+    return root.rstrip("/")
+
+
 def fetch_json(
     path: str,
     params: JSON,
@@ -2895,7 +2948,7 @@ def fetch_json(
     base_url: str | None = None,
     correlation_id: str | None = None,
 ) -> JSON:
-    root = (base_url or os.environ.get("BLOCKWART_API_BASE_URL") or DEFAULT_BASE_URL).rstrip("/")
+    root = _api_root(base_url)
     # Publish list arguments as repeated query parameters. An empty field mask
     # is intentionally encoded as the present ``fields=`` marker rather than
     # disappearing under ``doseq``: it means the explicit core-only mask and
@@ -2921,6 +2974,7 @@ def fetch_json(
         headers={},
         base_url=base_url,
         correlation_id=correlation_id,
+        safe_operation=path.endswith("/safe"),
     )
 
 
@@ -2932,10 +2986,11 @@ def request_json(
     *,
     base_url: str | None = None,
     correlation_id: str | None = None,
+    safe_operation: bool = False,
 ) -> JSON:
     if method not in {"POST", "PUT", "DELETE"}:
         raise ValueError("unsupported MCP upstream method")
-    root = (base_url or os.environ.get("BLOCKWART_API_BASE_URL") or DEFAULT_BASE_URL).rstrip("/")
+    root = _api_root(base_url)
     url = f"{root}{path}"
     return _http_json(
         method,
@@ -2944,6 +2999,7 @@ def request_json(
         headers=headers,
         base_url=base_url,
         correlation_id=correlation_id,
+        safe_operation=safe_operation or path.endswith("/safe"),
     )
 
 
@@ -2955,6 +3011,7 @@ def _http_json(
     headers: dict[str, str],
     base_url: str | None,
     correlation_id: str | None = None,
+    safe_operation: bool = False,
 ) -> JSON:
     del base_url
     request_headers = dict(headers)
@@ -2962,9 +3019,17 @@ def _http_json(
         request_headers.get("X-Correlation-ID") or correlation_id
     )
     request_headers["X-Blockwart-Channel"] = "mcp"
+    # Sensitivity comes from the tool/logical endpoint, not assembled URL parsing.
+    is_safe = safe_operation
     api_token = _api_token()
-    if api_token is not None:
+    if is_safe or api_token is not None:
         _require_safe_token_transport(url)
+    if is_safe and api_token is None:
+        raise UpstreamError(
+            "credential_configuration_error",
+            "Credential safe operations require configured MCP bearer credentials.",
+        )
+    if api_token is not None:
         request_headers["Authorization"] = f"Bearer {api_token}"
     encoded_body = None
     if body is not None:
@@ -2982,10 +3047,17 @@ def _http_json(
         method=method,
     )
     try:
-        with build_opener(_RejectRedirectHandler()).open(request, timeout=10) as response:
+        opener = build_opener(ProxyHandler({}), _RejectRedirectHandler())
+        with opener.open(request, timeout=10) as response:
             try:
-                return json.loads(response.read().decode("utf-8"))
-            except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+                raw = response.read(1048577) if is_safe else response.read()
+                expected_length = response.headers.get("Content-Length")
+                if expected_length is not None and len(raw) != int(expected_length):
+                    raise ValueError("incomplete response")
+                if is_safe and len(raw) > 1048576:
+                    raise ValueError("response bound")
+                return json.loads(raw.decode("utf-8"))
+            except (HTTPProtocolError, UnicodeDecodeError, ValueError) as exc:
                 raise UpstreamError(
                     "upstream_invalid_response",
                     "Blockwart Agent API returned an invalid response.",
@@ -3112,7 +3184,39 @@ async def handle_call_tool(name: str, arguments: JSON) -> types.CallToolResult:
         )
 
 
+def _install_safe_sdk_logging() -> None:
+    """Remove SDK payloads before any handler, including SDK calls to root logging.
+
+    SDK protocol validation precedes our tool handler. Logger-level filters on
+    `mcp` cannot intercept its root calls or propagated child records, and a
+    handler filter misses independently configured handlers. Sanitize records
+    at creation instead; do not attempt to recognize secret-shaped strings.
+    """
+    previous = logging.getLogRecordFactory()
+    if getattr(previous, "_blockwart_safe_sdk_logging", False):
+        return
+    sdk_root = Path(mcp.server.stdio.__file__).resolve().parents[1]
+
+    def factory(name, level, pathname, lineno, msg, args, exc_info,
+                func=None, sinfo=None, **kwargs):
+        is_sdk = (name == "mcp" or name.startswith("mcp.")
+                  or Path(pathname).is_relative_to(sdk_root))
+        if is_sdk:
+            # Sanitize before delegating: custom factories may cache formatted
+            # messages in extra fields later emitted by structured handlers.
+            msg, args, exc_info, sinfo = "mcp_sdk_event", (), None, None
+        record = previous(name, level, pathname, lineno, msg, args, exc_info,
+                          func, sinfo, **kwargs)
+        if is_sdk:
+            record.exc_text = None
+        return record
+
+    factory._blockwart_safe_sdk_logging = True
+    logging.setLogRecordFactory(factory)
+
+
 async def run_server() -> None:
+    _install_safe_sdk_logging()
     async with mcp.server.stdio.stdio_server() as (read_stream, write_stream):
         await server.run(
             read_stream,

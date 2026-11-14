@@ -149,7 +149,7 @@ SCHEMA_VIOLATION_CONTRACTS: Mapping[str, str] = MappingProxyType(
 )
 
 CREDENTIAL_PROVIDERS = frozenset(
-    {"vaultwarden", "infisical", "secrets_json", "env_file", "local_file", "external"}
+    {"vaultwarden", "infisical", "secrets_json", "env_file", "local_file", "external", "safe"}
 )
 CREDENTIAL_ACCESS_TYPES = frozenset(
     {"ssh", "web", "api", "database", "smb", "sudo", "token", "other"}
@@ -1625,6 +1625,7 @@ PROJECT_COMMON_FIELDS = (
         retrieval_metadata=True,
         reference_kinds=PROJECT_EXTERNAL_REFERENCE_KINDS,
     ),
+    _field("agent_instructions", "text", strip_whitespace=True, max_length=16000),
     _field("current_summary", "text", strip_whitespace=True, max_length=4000),
     *_text_list("open_questions"),
     *_text_list("blockers"),
@@ -1818,6 +1819,15 @@ PROJECT_FIELDS = (
     *PROJECT_INCIDENT_REVIEW_FIELDS,
     *PROJECT_MIGRATION_FIELDS,
 )
+
+
+def _reject_safe_reference_locator(data: Mapping[str, Any]) -> None:
+    if data.get("provider") == "safe" and data.get("reference"):
+        raise ObjectSchemaError(
+            "data.reference", "safe references use a server-owned backend identity",
+            violation=VIOLATION_FIELD_NOT_ALLOWED,
+            rule=public_rule_name(_reject_safe_reference_locator),
+        )
 
 
 def _reject_credential_value_keys(
@@ -2493,6 +2503,9 @@ def _validate_service_components(data: Mapping[str, Any]) -> None:
 # them instead of restating conditional validation in a second contract.
 SCHEMA_RULE_CONTRACTS: Mapping[str, str] = MappingProxyType(
     {
+        "_reject_safe_reference_locator": (
+            "Safe credentials must not specify a backend locator in data.reference."
+        ),
         "_reject_credential_value_keys": (
             "No key anywhere below data may name a raw credential or secret value."
         ),
@@ -2594,6 +2607,7 @@ SCHEMA_RULE_CONTRACTS: Mapping[str, str] = MappingProxyType(
 # field-typed; a rule failure names the published rule instead.
 SCHEMA_RULE_VIOLATIONS: Mapping[str, str] = MappingProxyType(
     {
+        "_reject_safe_reference_locator": VIOLATION_FIELD_NOT_ALLOWED,
         "_reject_credential_value_keys": VIOLATION_FORBIDDEN_KEY,
         "_require_runbook_conditional_fields": VIOLATION_REQUIRED_FIELD_MISSING,
         "_reject_runbook_contradictions": VIOLATION_FIELD_NOT_ALLOWED,
@@ -2728,7 +2742,7 @@ BUILTIN_SCHEMAS: Mapping[str, TypeSchema] = MappingProxyType(
             *SERVICE_COMPONENTS_FORBIDDEN_FIELDS,
             *SERVICE_MONITORING_FORBIDDEN_FIELDS,
             *SERVICE_RELEASE_MONITORING_FORBIDDEN_FIELDS,
-            rules=(_reject_credential_value_keys,),
+            rules=(_reject_credential_value_keys, _reject_safe_reference_locator),
         ),
         "runbook": _schema(
             "runbook",

@@ -629,6 +629,11 @@ class _AgentCatalogResolver:
                 if obj.kind == "decision"
                 else []
             ),
+            agent_instructions=(
+                _optional_text(projected_knowledge_data.get("agent_instructions"))
+                if obj.kind == "project"
+                else None
+            ),
             project_category=(
                 projected_knowledge_data.get("category") if obj.kind == "project" else None
             ),

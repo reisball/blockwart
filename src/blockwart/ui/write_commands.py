@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from contextlib import nullcontext
 
 from fastapi import HTTPException, Request
 from sqlalchemy.orm import Session
@@ -34,9 +35,12 @@ def execute_ui_command[T](
     session: Session,
     context: WriteContext,
     command: Callable[[], T],
+    *,
+    owns_transactions: bool = False,
 ) -> T:
+    """Map command errors; multi-phase commands may own their short transactions."""
     try:
-        with transaction(session):
+        with nullcontext() if owns_transactions else transaction(session):
             return command()
     except CommandAuthorizationDenied as exc:
         with transaction(session):

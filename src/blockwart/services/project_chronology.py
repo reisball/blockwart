@@ -264,6 +264,7 @@ def query_project_overview_page(
             revision=project.revision,
             category=_optional_string(data.get("category")),
             project_status=_optional_string(data.get("project_status")),
+            agent_instructions=_optional_string(data.get("agent_instructions")),
             current_summary=_optional_string(data.get("current_summary")),
             next_action=_first_string(data.get("next_actions")),
             last_professional_activity=(

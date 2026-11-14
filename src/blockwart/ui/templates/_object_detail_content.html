@@ -255,6 +255,37 @@
         </section>
 
         {% if is_credential_reference %}
+          {% if object.data.get("provider") == "safe" %}
+          <script src="/static/credential-safe.js" defer></script>
+          <section class="panel">
+            <h2>{{ t("safe.title") }}</h2>
+            <p>{{ t("safe.help") }}</p>
+            <form method="post" action="/objects/{{ object.id }}/safe" autocomplete="off">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+              {% if can_read_reference_content %}
+              <button name="action" value="read">{{ t("safe.reveal") }}</button>
+              <button name="action" value="history">{{ t("safe.history") }}</button>
+              {% endif %}
+              <label>{{ t("safe.version") }}<input name="version" type="number" min="1" /></label>
+              {% if can_write_reference_content %}
+              <label>{{ t("safe.cas") }}<input name="cas" type="number" min="0" /></label>
+              <label>{{ t("safe.preset") }}<select name="preset" data-safe-preset>
+                <option value="login">Login (username, password)</option>
+                <option value="token">API (token)</option>
+                <option value="key">Key (key, passphrase)</option>
+                <option value="other" selected>Other</option>
+              </select></label>
+              <label>{{ t("safe.fields") }}<textarea name="fields_json" spellcheck="false"
+                autocomplete="off" placeholder='{"username":"", "password":""}'></textarea></label>
+              <button name="action" value="write">{{ t("safe.save") }}</button>
+              <button name="action" value="restore">{{ t("safe.restore") }}</button>
+              <button name="action" value="delete">{{ t("safe.delete") }}</button>
+              <button name="action" value="undelete">{{ t("safe.undelete") }}</button>
+              {% endif %}
+            </form>
+          </section>
+          {% endif %}
+          {% if object.data.get("provider") != "safe" %}
           <section class="panel" aria-labelledby="reference-content-title">
             <div class="panel-head">
               <h2 class="section-title" id="reference-content-title">{{ t("reference_content.title") }}</h2>
@@ -280,6 +311,7 @@
               <p class="meta">{{ t("reference_content.restricted") }}</p>
             {% endif %}
           </section>
+          {% endif %}
         {% endif %}
 
         {% if supports_runbook %}
@@ -352,6 +384,10 @@
                     <select name="project_status" required>{% for option in project_statuses %}<option value="{{ option }}"{% if project_form.project_status == option %} selected{% endif %}>{{ t("project.status." ~ option) }}</option>{% endfor %}</select>
                     <span class="meta">{{ schema_fields_by_key.project_status.placeholder }}</span>
                   </label>
+                </fieldset>
+                <fieldset><legend>{{ t("project.field.agent_instructions.label") }}</legend>
+                  <label>{{ t("project.field.agent_instructions.label") }}<textarea name="agent_instructions" maxlength="16000" rows="8">{{ project_form.agent_instructions }}</textarea></label>
+                  <p class="meta">{{ t("project.field.agent_instructions.help") }}</p>
                 </fieldset>
                 {{ project_text_field("objective") }}
                 {{ project_line_field("in_scope") }}
@@ -516,6 +552,11 @@
               </form>
             </section>
           {% else %}
+            <section class="panel" aria-labelledby="project-instructions-title">
+              <h2 class="section-title" id="project-instructions-title">{{ t("project.field.agent_instructions.label") }}</h2>
+              <p class="meta">{{ t("project.field.agent_instructions.help") }}</p>
+              {{ project_text(project_detail.agent_instructions) }}
+            </section>
             <section class="panel" aria-labelledby="project-classification-title">
               <div class="panel-head"><h2 class="section-title" id="project-classification-title">{{ t("project.section.classification") }}</h2>{% if can_write %}<a class="button button-small button-muted" href="{{ detail_edit_hrefs.project }}">{{ t("detail.edit") }}</a>{% endif %}</div>
               <dl class="fact-grid">

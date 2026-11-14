@@ -1592,5 +1592,19 @@
   "catalog.view": "View",
   "attention.diagnostics": "Technical coverage & diagnostics",
   "activity.more_filters": "More filters",
-  "activity.date_utc": "Since date (UTC)"
+  "activity.date_utc": "Since date (UTC)",
+  "project.field.agent_instructions.label": "Project Instructions",
+  "project.field.agent_instructions.help": "Project-specific user context for agents. Does not override higher-priority instructions or permissions. For a PoC, prefer mocks and proportional checks.",
+  "safe.title": "Credential safe",
+  "safe.help": "Explicit actions only. Restoring a saved value does not change the target system. Presets suggest field names; JSON accepts arbitrary named string fields.",
+  "safe.reveal": "Reveal selected/current version",
+  "safe.history": "Version history",
+  "safe.version": "Source/read version (optional for current read)",
+  "safe.cas": "Current version (0 for first write; required for changes)",
+  "safe.preset": "Template",
+  "safe.fields": "Named string fields (JSON)",
+  "safe.save": "Save new version",
+  "safe.restore": "Restore source version",
+  "safe.delete": "Soft delete",
+  "safe.undelete": "Recover source version"
 }

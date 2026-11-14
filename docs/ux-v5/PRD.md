@@ -47,3 +47,13 @@ release, independent review if needed, remote CI, deployment and upstream PR.
 
 Timestamp discrepancy is separate: database/session-local audit defaults are not
 repaired by subtracting an hour in the UI. See exports/ux-v5-polish/HANDOFF.md.
+
+## Upstream integration phase (2026-11-14)
+
+The original local-only publication/rollback boundary above is historical, not a
+claim that the implementation remains uncommitted. The isolated UI release is
+committed and separately deployed at 8128797. This phase preserves its approved
+criteria and compact SOLL composition while normally merging upstream main and
+refreshing public evidence/runbook documentation. Main owns publication, final-head
+CI and review gates. No additional production changes or migrations are authorized
+by this integration; upstream Safe/schema content is retained in the PR only.

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from contextlib import nullcontext
 from typing import Literal
 
 from fastapi import HTTPException, Request
@@ -56,9 +57,12 @@ def execute_api_command[T](
     session: Session,
     context: WriteContext,
     command: Callable[[], T],
+    *,
+    owns_transactions: bool = False,
 ) -> T:
+    """Map command errors; multi-phase commands may own their short transactions."""
     try:
-        with transaction(session):
+        with nullcontext() if owns_transactions else transaction(session):
             return command()
     except _MAPPED_COMMAND_ERRORS as exc:
         raise _command_http_error(session, context, exc, record_denial=True) from exc

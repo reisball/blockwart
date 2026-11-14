@@ -180,6 +180,7 @@ class AgentCatalogObjectSummary(BaseModel):
     decision_status: DecisionStatus | None = None
     applies_to: list[str] = Field(default_factory=list)
     project_category: ProjectCategory | None = None
+    agent_instructions: str | None = None
     project_status: ProjectStatus | None = None
     related_assets: list[str] = Field(default_factory=list)
     runbook_status: RunbookStatus | None = None
@@ -290,7 +291,8 @@ class AgentProjectedObject(_ProjectedRead):
     placement_state: PlacementState | None = Field(
         default=None, exclude_if=_omit_empty_projected_value
     )
-    # knowledge: only the canonical short fields of this object's own kind
+    # knowledge: canonical fields of this kind, including full Project instructions
+    agent_instructions: str | None = Field(default=None, exclude_if=_omit_empty_projected_value)
     decision_status: DecisionStatus | None = Field(
         default=None, exclude_if=_omit_empty_projected_value
     )

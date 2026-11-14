@@ -51,7 +51,7 @@ PROJECT_CREATOR_REVISION = "20260909_0023"
 ADDITIVE_PROJECT_CREATOR_REVISION = "20260925_0024"
 CREDENTIAL_REFERENCE_CREATOR_REVISION = "20260926_0025"
 ACTIVITY_INDEX_REVISION = "20260926_0026"
-HEAD_REVISION = "20261028_0032"
+HEAD_REVISION = "20261111_0033"
 _GUARD_TRIGGER_NAMES = (
     "ck_principals_last_active_admin_update",
     "ck_principals_last_active_admin_delete",
@@ -269,6 +269,7 @@ def test_real_alembic_upgrade_creates_fresh_database_and_has_no_drift(
         assert set(inspect(engine).get_table_names()) == {
             "alembic_version",
             "audit_events",
+            "safe_operations",
             "browser_sessions",
             "catalog_objects",
             "idempotency_records",
@@ -298,6 +299,7 @@ def test_real_alembic_upgrade_creates_fresh_database_and_has_no_drift(
         engine.dispose()
     assert set(Base.metadata.tables) == {
         "audit_events",
+        "safe_operations",
         "browser_sessions",
         "catalog_objects",
         "idempotency_records",
@@ -1986,6 +1988,7 @@ def downgrade() -> None:
         assert set(inspect(engine).get_table_names()) == {
             "alembic_version",
             "audit_events",
+            "safe_operations",
             "browser_sessions",
             "catalog_objects",
             "future_head_only",

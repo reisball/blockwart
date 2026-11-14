@@ -7,6 +7,15 @@ Notable product changes are recorded here. Versions follow the
 
 ### Added
 
+- Opt-in integrated credential safe with an internal, pinned OpenBao KV-v2 backend,
+  explicit UI/REST/MCP value actions, existing content rights, CAS version history,
+  reversible deletion and static-key auto-unseal (#335). Existing references and
+  deployments stay unchanged until explicitly configured.
+
+- Optional multiline Project Instructions in DE/EN create/edit and detail views,
+  with complete authorized REST/MCP context and Project overview exposure (#333).
+  Instructions are project-specific user context, not permission or policy overrides.
+
 - Portable agent-skill template and optional, scoped quick-reference workflow,
   linked from the agent onboarding documentation (#317).
 
@@ -25,6 +34,11 @@ Notable product changes are recorded here. Versions follow the
   content is preserved during metadata updates; see `docs/auth-rbac.md`.
 
 ### Fixed
+
+- Credential-safe traffic ignores environment proxies and redirects; backend login
+  failures fail closed. Safe operations release catalog locks during backend I/O
+  and reauthorize before returning results. Operator recovery shares remain in
+  private control storage, separate from application runtime credentials (#335).
 
 - Explorer shows explicit network addresses and known product models when no platform is recorded; missing values are not guessed.
 

@@ -3282,6 +3282,7 @@ def update_object(
     object_id: str,
     session: Annotated[Session, Depends(get_session)],
     project_form: Annotated[ProjectForm, Depends()],
+    submitted_controls: Annotated[frozenset[str], Depends(submitted_project_controls)],
     runbook_form: Annotated[RunbookForm, Depends()],
     label: Annotated[str | None, Form()] = None,
     primary_name: Annotated[str | None, Form()] = None,
@@ -3493,6 +3494,10 @@ def update_object(
                 ),
             )
         if target_kind == PROJECT_KIND and submitted_project:
+            if "agent_instructions" in submitted_controls:
+                project_form.values["agent_instructions"] = (
+                    project_form.values["agent_instructions"] or ""
+                )
             apply_project_form_data(
                 data,
                 project_form,

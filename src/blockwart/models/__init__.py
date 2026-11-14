@@ -21,6 +21,7 @@ from blockwart.models.release_monitoring import (
     ServiceReleaseObservation,
 )
 from blockwart.models.revision_clock import ObjectRevisionClock
+from blockwart.models.safe_operation import SafeOperation
 from blockwart.models.source_coverage import (
     SourceEntry,
     SourceEntryMapping,
@@ -29,6 +30,7 @@ from blockwart.models.source_coverage import (
 
 __all__ = [
     "AuditEvent",
+    "SafeOperation",
     "BrowserSession",
     "CatalogObject",
     "IdempotencyRecord",

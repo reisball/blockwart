@@ -8,6 +8,9 @@ RELEASE_MONITORING_MAX_RESPONSE_BYTES = 512 * 1024
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="BLOCKWART_", env_file=".env", extra="ignore")
 
+    safe_url: str = ""
+    safe_auth_file: str = ""
+
     env: str = "dev"
     build_revision: str = Field(
         default="unknown",

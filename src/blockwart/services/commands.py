@@ -412,6 +412,14 @@ def _reference_update_payload(
     stored = _json_document(row.data_json)
     stored_data = stored if isinstance(stored, dict) else {}
     data = deepcopy(payload.data)
+    if data.get("provider") != stored_data.get("provider") and "safe" in {
+        data.get("provider"), stored_data.get("provider")
+    } and not context.policy.can(Permission.WRITE_REFERENCE_CONTENT, row.id):
+        raise CommandAuthorizationDenied(
+            object_id=row.id, permission=Permission.WRITE_REFERENCE_CONTENT,
+        )
+    if data.get("provider") == "safe" and data.get("reference"):
+        raise CommandConflict("Safe references cannot contain a backend locator")
     if "reference" in data:
         if not context.policy.can(Permission.WRITE_REFERENCE_CONTENT, row.id) and (
             not context.policy.can(Permission.READ_REFERENCE_CONTENT, row.id)

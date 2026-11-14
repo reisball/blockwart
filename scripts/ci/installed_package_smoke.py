@@ -259,6 +259,7 @@ async def check_mcp(
             listed = await session.list_tools()
             tools = {tool.name: tool for tool in listed.tools}
             assert set(tools) == {
+                "blockwart.credential_safe",
                 "blockwart.describe_schema",
                 "blockwart.search",
                 "blockwart.get_object_context",
@@ -1075,6 +1076,8 @@ def main() -> None:
         index = response.read().decode()
     with urlopen(f"{BASE_URL}/static/app.css", timeout=7) as response:
         static_content_type = response.headers.get_content_type()
+    with urlopen(f"{BASE_URL}/static/credential-safe.js", timeout=7) as response:
+        assert "data-safe-preset" in response.read().decode()
     openapi = create_app(settings=Settings()).openapi()
     assert openapi["info"]["version"] == __version__
     mcp_entrypoint = Path(sysconfig.get_path("scripts")) / "blockwart-mcp"
@@ -1088,7 +1091,7 @@ def main() -> None:
         token=api_token,
     )["objects"][0]
 
-    assert readiness["revision"] == "20261028_0032"
+    assert readiness["revision"] == "20261111_0033"
     assert "Blockwart" in index
     assert static_content_type == "text/css"
     assert not any(

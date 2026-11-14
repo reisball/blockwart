@@ -34,8 +34,9 @@ context.
 - **Keep changes accountable.** Manage human and service accounts with
   role-based access, object grants, and an audit trail.
 
-Blockwart stores **credential references, not secrets**. Passwords, tokens, and
-private keys stay in your existing secret store.
+By default, Blockwart stores **credential references, not secrets**. Passwords,
+tokens, and private keys stay in your existing secret store unless you enable the
+[optional credential safe](#optional-credential-safe).
 
 ## Is it for you?
 
@@ -45,8 +46,8 @@ run, what depends on it, and which operating instruction applies?”
 
 - **Not automatic inventory discovery.** You or your integrations maintain the
   catalog; optional health observations do not discover your infrastructure.
-- **Not an executor or secret vault.** Runbooks are inert instructions, not jobs;
-  credential references identify secrets held elsewhere.
+- **Not an executor.** Runbooks are inert instructions, not jobs; catalog
+  credential references identify secrets held outside the catalog.
 - **Not a general document/RAG engine.** Catalog search is bounded and
   deterministic. Project pages/tasks have project-local search, not global
   cross-project search. The reviewed import accepts documented structured
@@ -124,3 +125,9 @@ Please report vulnerabilities through the process described in the
 ## License
 
 Blockwart is licensed under the [Apache License 2.0](LICENSE).
+
+## Optional credential safe
+
+An opt-in internal OpenBao backend supports explicit credential value actions over
+the UI, REST and MCP. Existing deployments and references are unchanged. See
+[Credential safe](docs/credential-safe.md) for the bundle, rights and limits.
