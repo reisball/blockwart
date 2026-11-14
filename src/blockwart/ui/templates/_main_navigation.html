@@ -1,0 +1,29 @@
+<header class="main-header" data-principal-scope="{{ principal_scope }}">
+  <a class="main-brand" href="/">Blockwart</a>
+  <nav class="main-navigation" aria-label="{{ t('nav.main') }}">
+    <a href="/?view=catalog{% if request.url.path == '/' %}&q={{ q|urlencode }}&kind={{ kind }}&topology_mode={{ topology_mode }}&network_category={{ network_category }}&services={{ '1' if include_inherited_services else '' }}{% endif %}" {% if request.url.path == '/' and view != 'topology' %}aria-current="page"{% endif %}>{{ t('nav.catalog') }}</a>
+    <a href="/?view=topology{% if request.url.path == '/' %}&q={{ q|urlencode }}&kind={{ kind }}&topology_mode={{ topology_mode }}&network_category={{ network_category }}&services={{ '1' if include_inherited_services else '' }}{% endif %}" {% if view == 'topology' %}aria-current="page"{% endif %}>{{ t('nav.topology') }}</a>
+    <a href="/projects" {% if request.url.path == '/projects' %}aria-current="page"{% endif %}>{{ t('project.workspace.overview_title') }}</a>
+    <a href="/attention" {% if request.url.path == '/attention' %}aria-current="page"{% endif %}>{{ t('nav.attention') }}</a>
+    <a href="/activity" {% if request.url.path == '/activity' %}aria-current="page"{% endif %}>{{ t('nav.activity') }}</a>
+  </nav>
+  <div class="main-actions">
+    <a class="button button-small" href="/search" data-smart-open aria-haspopup="dialog">{{ t('search.smart') }} <kbd>Ctrl K</kbd></a>
+    <a class="button button-small settings-link" href="/settings" title="{{ t('nav.settings') }}"><svg class="settings-gear" aria-hidden="true" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path d="m9 3-1 3-3 1 1 3-2 2 2 2-1 3 3 1 1 3h6l1-3 3-1-1-3 2-2-2-2 1-3-3-1-1-3Z"/><circle cx="12" cy="12" r="3"/></svg><span>{{ t('nav.settings') }}</span><span class="badge settings-update-badge" data-update-badge hidden aria-label="{{ t('settings.updates_help') }}"></span></a>
+  </div>
+</header>
+<dialog class="smart-search-dialog" data-smart-dialog aria-labelledby="smart-search-title">
+  <h2 id="smart-search-title" class="visually-hidden">{{ t('search.smart') }}</h2>
+  <div class="palette-head">
+    <form action="/search" method="get" data-smart-form class="palette-form">
+      <label class="visually-hidden" for="smart-query">{{ t('search.submit') }}</label>
+      <input id="smart-query" type="search" name="q" maxlength="200" autocomplete="off" placeholder="{{ t('search.placeholder') }}" />
+      <label class="visually-hidden" for="smart-kind">{{ t('search.scope') }}</label>
+      <select id="smart-kind" name="object_kind"><option value="">{{ t('search.all_types') }}</option>{% for value in ['host','system','network','device','service','runbook','decision','project'] %}<option value="{{ value }}">{{ t('kind.' ~ value) }}</option>{% endfor %}</select>
+      <button type="submit" class="visually-hidden" tabindex="-1">{{ t('search.submit') }}</button>
+    </form>
+    <button class="palette-close" type="button" data-smart-close aria-label="{{ t('asset.close') }}">Esc</button>
+  </div>
+  <div class="palette-results" data-smart-results aria-live="polite"><p>{{ t('search.prompt') }}</p></div>
+  <footer class="palette-help meta">{{ t('search.scope_help') }}</footer>
+</dialog>

@@ -3,7 +3,9 @@ from __future__ import annotations
 import json
 from collections.abc import Generator
 from contextlib import contextmanager
+from html.parser import HTMLParser
 
+import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
@@ -17,6 +19,62 @@ from blockwart.services.catalog import create_relationship, upsert_object
 from blockwart.services.policy import PolicySnapshot
 from blockwart.services.queries import query_network_topology
 from blockwart.services.read_access import ReadAccess
+
+
+class _TopologySearchFormParser(HTMLParser):
+    """Read only the scoped topology form, never the global command palette."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.forms = 0
+        self.action = ""
+        self.method = ""
+        self.controls: dict[str, str] = {}
+        self._in_form = False
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        attributes = dict(attrs)
+        if tag == "form" and "data-topology-search" in attributes:
+            self.forms += 1
+            self._in_form = True
+            self.action = attributes.get("action") or ""
+            self.method = (attributes.get("method") or "get").lower()
+        elif tag == "input" and self._in_form and attributes.get("name"):
+            self.controls[attributes["name"]] = attributes.get("value") or ""
+
+    def handle_endtag(self, tag: str) -> None:
+        if tag == "form":
+            self._in_form = False
+
+
+def _network_search_form(document: str) -> _TopologySearchFormParser:
+    """Require a real GET topology search that retains network mode."""
+    form = _TopologySearchFormParser()
+    form.feed(document)
+    assert form.forms == 1
+    assert (form.action, form.method) == ("/", "get")
+    assert form.controls["view"] == "topology"
+    assert form.controls.get("topology_mode") == "network"
+    return form
+
+
+@pytest.mark.parametrize(
+    ("action", "mode"),
+    [
+        ("/search", '<input name="topology_mode" value="network">'),
+        ("/", ""),
+        ("/", '<input name="topology_mode" value="placement">'),
+    ],
+)
+def test_network_search_form_rejects_wrong_target_or_missing_mode(action, mode):
+    """Unrelated palette controls must not rescue a broken topology form."""
+    document = (
+        '<form action="/search"><input name="topology_mode" value="network"></form>'
+        f'<form action="{action}" method="get" data-topology-search>'
+        f'<input name="view" value="topology">{mode}</form>'
+    )
+    with pytest.raises(AssertionError):
+        _network_search_form(document)
 
 
 def _network_payload(object_id: str, category: str) -> CatalogObjectIn:
@@ -273,6 +331,22 @@ def test_network_ui_renders_authorized_full_paths_and_keeps_placement_separate(
     assert network.text.index("Mesh Node") < network.text.index("Topology Service")
     assert "Router" in network.text
     assert "Switch" in network.text
+    form = _network_search_form(network.text)
+    assert form.controls == {
+        "view": "topology",
+        "kind": "service",
+        "topology_mode": "network",
+        "services": "1",
+        "q": "topology-service",
+    }
+    category_form = _network_search_form(filtered.text)
+    assert category_form.controls == {**form.controls, "network_category": "mesh"}
+    # Submit the rendered action/controls, rather than merely spotting hidden strings.
+    with _client(alembic_session_factory, install_unrestricted_read_access) as client:
+        submitted = client.request(form.method.upper(), form.action, params=form.controls)
+        assert submitted.status_code == 200
+        assert 'class="network-path-workbench"' in submitted.text
+        assert _network_search_form(submitted.text).controls == form.controls
     network_html = network.text.replace("&amp;", "&")
     assert 'name="topology_mode" value="network"' in network_html
     assert 'name="services" value="1"' in network_html

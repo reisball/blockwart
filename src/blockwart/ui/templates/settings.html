@@ -11,10 +11,12 @@
         document.documentElement.dataset.theme = "light";
       }
     </script>
-    <link rel="stylesheet" href="/static/app.css?v=063" />
+    <link rel="stylesheet" href="/static/app.css?v=ux5-toolbar2" />
     <script src="/static/theme.js?v=054" defer></script>
+    {% include "_navigation_head.html" %}
   </head>
   <body>
+    {% include "_main_navigation.html" %}
     <header class="topbar">
       <div class="topbar-inner">
         <a class="breadcrumb" href="/">{{ t("detail.back") }}</a>
@@ -55,6 +57,8 @@
           </div>
         </section>
 
+        <section class="panel" aria-labelledby="settings-updates-title"><h2 id="settings-updates-title">{{ t('nav.release_updates') }}</h2><p>{{ t('settings.updates_help') }}</p><a class="button" href="/release-updates">{{ t('settings.open') }}</a></section>
+        <section class="panel" aria-labelledby="settings-integrations-title"><h2 id="settings-integrations-title">{{ t('settings.integrations') }}</h2><p>{{ t('settings.integrations_help') }}</p><a class="button" href="/settings/integrations">{{ t('settings.open') }}</a></section>
         {% if is_platform_admin %}
           <section class="panel" aria-labelledby="settings-principals-title">
             <div class="panel-head">

@@ -162,7 +162,7 @@
     tabindex="0"
     data-asset-ref="{{ asset.ref }}"
     {% if tree_parent %}data-tree-row data-tree-parent="{{ tree_parent }}" data-tree-depth="{{ tree_depth }}" hidden{% endif %}
-    {% if has_children %}data-tree-node="{{ asset.ref }}" data-tree-label="{{ asset.label }}"{% endif %}
+    {% if has_children %}data-tree-node="{{ asset.ref }}" data-tree-label="{{ asset.label }}"{% if not tree_parent %} data-tree-depth="0"{% endif %}{% endif %}
   >
     <td>
       {% if depth > 0 %}<span class="tree-line"></span>{% endif %}
@@ -176,7 +176,7 @@
     <td><span class="type-tag">{{ t("kind." ~ asset.kind) }}</span></td>
     <td>{{ health_badge(asset) }}</td>
     {% if asset.visibility == "stub" %}
-      <td colspan="4"><span class="muted">{{ t("auth.stub_notice_short") }}</span></td>
+      <td><span class="muted">{{ t("auth.stub_notice_short") }}</span></td><td>—</td><td>—</td><td class="updated-column">—</td>
     {% else %}
       <td>
         {% if asset.address %}<code>{{ asset.address }}</code>{% else %}<span class="muted">{{ t("asset.no_value") }}</span>{% endif %}
@@ -188,25 +188,6 @@
       <td class="updated-column">{{ asset.updated_at[:10] or t("asset.no_value") }}</td>
     {% endif %}
     <td><a class="row-detail" href="/objects/{{ asset.id }}?{{ detail_query_string }}" aria-label="{{ t('asset.details') }}" data-detail-trigger>›</a></td>
-  </tr>
-{%- endmacro %}
-
-{% macro group_row(asset, service_count=0, extra_class="") -%}
-  <tr
-    class="group-row {{ extra_class }} {% if asset.ref == selected_asset_ref %}selected{% endif %}"
-    tabindex="0"
-    data-asset-ref="{{ asset.ref }}"
-    data-tree-node="{{ asset.ref }}"
-    data-tree-label="{{ asset.label }}"
-    data-tree-depth="0"
-  >
-    <td colspan="8">
-      {{ tree_toggle(asset.ref, asset.label) }}
-      <span class="node-icon {{ asset.kind }}">{{ node_icon(asset.kind) }}</span>
-      <strong>{{ asset.label }}</strong>
-      <span class="path-copy">{{ t("kind." ~ asset.kind) }}{% if asset.summary %} · {{ asset.summary }}{% endif %}</span>
-      <span class="group-count">{{ t("catalog.service_count", count=service_count) }}</span>
-    </td>
   </tr>
 {%- endmacro %}
 
@@ -268,8 +249,8 @@
         document.documentElement.dataset.theme = "light";
       }
     </script>
-    <link rel="stylesheet" href="/static/app.css?v=062" />
-    <link rel="stylesheet" href="/static/explorer.css?v=011" />
+    <link rel="stylesheet" href="/static/app.css?v=ux5-toolbar2" />
+    <link rel="stylesheet" href="/static/explorer.css?v=013" />
     <script>
       window.BLOCKWART_UI_SCHEMAS = {{ ui_schemas|tojson }};
       window.BLOCKWART_EXPLORER_ASSETS = {{ explorer.assets|tojson }};
@@ -293,6 +274,7 @@
           expand: {{ t("tree.expand", label="{label}")|tojson }},
           collapse: {{ t("tree.collapse", label="{label}")|tojson }}
         },
+        visibleRows: {{ t("catalog.visible_rows_label", visible="{visible}")|tojson }},
         lifecycle: {
           "planned": {{ t("lifecycle.planned")|tojson }},
           "active": {{ t("lifecycle.active")|tojson }},
@@ -313,6 +295,7 @@
       };
       window.BLOCKWART_DETAIL_QUERY = {{ detail_query_string|tojson }};
       window.BLOCKWART_EXPLORER_CONTEXT = {
+        principalScope: {{ principal_scope|tojson }},
         view: {{ view|tojson }},
         query: {{ q|tojson }},
         kind: {{ kind|tojson }},
@@ -321,65 +304,12 @@
     </script>
     <script src="/static/theme.js?v=054" defer></script>
     <script src="/static/create_field_order.js?v=001" defer></script>
-    <script src="/static/index.js?v=064" defer></script>
+    <script src="/static/index.js?v=065" defer></script>
     <script src="/static/detail.js?v=003" defer></script>
+    {% include "_navigation_head.html" %}
   </head>
   <body class="explorer-body explorer-{{ view }}">
-    <header class="explorer-topbar">
-      <a class="explorer-brand" href="/" aria-label="{{ t('app.name') }}">
-        <span class="brand-cube" aria-hidden="true">
-          <svg viewBox="0 0 32 32">
-            <path d="M5.5 10.2 16 4.5l10.5 5.7v11.6L16 27.5 5.5 21.8Z"></path>
-            <path d="m5.5 10.2 10.5 5.7 10.5-5.7M16 15.9v11.6"></path>
-          </svg>
-        </span>
-        <span class="brand-copy">
-          <strong>{{ t("app.name") }}</strong>
-          <small>{% if view == "topology" %}{{ t("app.topology_tagline") }}{% else %}{{ t("app.catalog_tagline") }}{% endif %}</small>
-        </span>
-      </a>
-
-      <nav class="mode-nav" aria-label="{{ t('nav.view') }}">
-        <a {% if view == "catalog" %}class="active"{% endif %} href="/?view=catalog&q={{ q|urlencode }}&kind={{ kind }}">{{ t("nav.catalog") }}</a>
-        <a {% if view == "topology" %}class="active"{% endif %} href="/?view=topology&q={{ q|urlencode }}&kind={{ kind }}{% if view == 'topology' and topology_mode == 'network' %}&topology_mode=network{% if network_category %}&network_category={{ network_category }}{% endif %}{% if include_inherited_services %}&services=1{% endif %}{% endif %}">{{ t("nav.topology") }}</a>
-        <a href="/projects">{{ t("project.workspace.overview_title") }}</a>
-        <a href="/workspace/search">{{ t("workspace.search.title") }}</a>
-        <a href="/attention">{{ t("nav.attention") }}</a>
-        <a href="/activity">{{ t("nav.activity") }}</a>
-        <a href="/release-updates">{{ t("nav.release_updates") }}</a>
-      </nav>
-
-      <form class="top-search" method="get" action="/">
-        <input type="hidden" name="view" value="{{ view }}" />
-        <input type="hidden" name="kind" value="{{ kind }}" />
-        {% if view == "topology" and topology_mode == "network" %}
-          <input type="hidden" name="topology_mode" value="network" />
-          {% if network_category %}<input type="hidden" name="network_category" value="{{ network_category }}" />{% endif %}
-          {% if include_inherited_services %}<input type="hidden" name="services" value="1" />{% endif %}
-        {% endif %}
-        <svg viewBox="0 0 24 24" aria-hidden="true">
-          <circle cx="11" cy="11" r="6.5"></circle>
-          <path d="m16 16 4 4"></path>
-        </svg>
-        <input name="q" type="search" value="{{ q }}" placeholder="{{ t('search.placeholder') }}" autocomplete="off" spellcheck="false" />
-        <button type="submit">{{ t("search.submit") }}</button>
-      </form>
-
-      <div class="explorer-top-actions">
-        <a class="icon-button" href="/settings" aria-label="{{ t('nav.settings') }}">⚙</a>
-        {% if can_create_root %}
-          <a class="primary-button" href="/?{{ detail_query_string }}&create_root=1" aria-label="{{ t('asset.create_root') }}">
-            ＋ <span class="asset-create-full">{{ t("asset.create_root") }}</span><span class="asset-create-short">{{ t("asset.create_short") }}</span>
-          </a>
-        {% endif %}
-        {% if can_create %}
-          <a class="primary-button" href="/?{{ detail_query_string }}&create=1" aria-label="{{ t('asset.create') }}">
-            ＋ <span class="asset-create-full">{{ t("asset.create") }}</span><span class="asset-create-short">{{ t("asset.create_short") }}</span>
-          </a>
-        {% endif %}
-      </div>
-    </header>
-
+    {% include "_main_navigation.html" %}
     {% if show_create_root_form %}
       <div class="modal-overlay explorer-modal" role="presentation">
         <a class="modal-backdrop" href="/?{{ detail_query_string }}" aria-label="{{ t('asset.close_create') }}"></a>
@@ -508,40 +438,6 @@
 
     {% if view == "catalog" %}
       <main class="catalog-shell">
-        <aside class="filter-rail">
-          <div class="rail-heading"><span>{{ t("catalog.views") }}</span></div>
-          <nav class="rail-nav">
-            <a class="{% if not kind %}active{% endif %}" href="/?view=catalog&q={{ q|urlencode }}">
-              <span class="rail-icon">⌘</span>{{ t("catalog.all") }}<b>{{ total_objects }}</b>
-            </a>
-            <a class="{% if kind == 'host' %}active{% endif %}" href="/?view=catalog&q={{ q|urlencode }}&kind=host">
-              <span class="rail-icon square">□</span>{{ t("catalog.hardware") }}<b>{{ object_counts.host or 0 }}</b>
-            </a>
-            <a class="{% if kind == 'system' %}active{% endif %}" href="/?view=catalog&q={{ q|urlencode }}&kind=system">
-              <span class="rail-icon hex">⬡</span>{{ t("catalog.runtime_hosts") }}<b>{{ object_counts.system or 0 }}</b>
-            </a>
-            <a class="{% if kind == 'service' %}active{% endif %}" href="/?view=catalog&q={{ q|urlencode }}&kind=service">
-              <span class="rail-icon diamond">◆</span>{{ t("catalog.services") }}<b>{{ object_counts.service or 0 }}</b>
-            </a>
-            <a class="{% if kind == 'network' %}active{% endif %}" href="/?view=catalog&q={{ q|urlencode }}&kind=network">
-              <span class="rail-icon network">⌁</span>{{ t("catalog.networks") }}<b>{{ object_counts.network or 0 }}</b>
-            </a>
-            <a class="{% if kind == 'device' %}active{% endif %}" href="/?view=catalog&q={{ q|urlencode }}&kind=device">
-              <span class="rail-icon device">▣</span>{{ t("catalog.devices") }}<b>{{ object_counts.device or 0 }}</b>
-            </a>
-          </nav>
-          <div class="rail-heading rail-heading-spaced"><span>{{ t("asset.health") }}</span></div>
-          <div class="health-list">
-            {% for health in ("healthy", "degraded", "down", "maintenance", "unknown") %}
-              <span><i class="status-dot {{ health }}"></i>{{ t("health." ~ health) }}<b>{{ health_counts[health] or 0 }}</b></span>
-            {% endfor %}
-          </div>
-          <div class="rail-footer">
-            <span class="sync-state"><i></i>{{ t("catalog.connected") }}</span>
-            <small>{{ t("catalog.subtitle", count=total_objects) }}</small>
-          </div>
-        </aside>
-
         <section class="catalog-main {% if detail_mode %}catalog-main-detail{% endif %}" data-main-scroll>
           {% if detail_mode %}
             {% include "_object_detail_content.html" %}
@@ -551,20 +447,47 @@
               <p class="eyebrow">{{ t("catalog.eyebrow") }}</p>
               <h1>{{ t("catalog.title") }}</h1>
               <span>{% if is_filtered %}{{ t("catalog.results", count=objects|length) }}{% else %}{{ t("catalog.subtitle", count=total_objects) }}{% endif %}</span>
+              <span class="muted" data-visible-row-label aria-live="polite">{{ t("catalog.visible_rows") }}: <b data-visible-row-count>{{ objects|length if is_filtered else explorer.clusters|length }}</b>{% if is_filtered %} · {{ t("catalog.stock") }}: <b>{{ total_objects }}</b>{% endif %}</span>
+            </div>
+            <div class="catalog-toolbar">
+              {% include "_local_search.html" %}
+              <div class="catalog-create-actions">
+                {% if can_create_root %}
+                  <a class="primary-button" href="/?{{ detail_query_string }}&create_root=1" aria-label="{{ t('asset.create_root') }}">
+                    ＋ <span class="asset-create-full">{{ t("asset.create_root") }}</span><span class="asset-create-short">{{ t("asset.create_short") }}</span>
+                  </a>
+                {% endif %}
+                {% if can_create %}
+                  <a class="primary-button" href="/?{{ detail_query_string }}&create=1" aria-label="{{ t('asset.create') }}">
+                    ＋ <span class="asset-create-full">{{ t("asset.create") }}</span><span class="asset-create-short">{{ t("asset.create_short") }}</span>
+                  </a>
+                {% endif %}
+                <details class="view-menu" data-view-menu>
+                  <summary>{{ t("catalog.view") }}</summary>
+                  <div class="saved-view-controls">
+                    <label>{{ t('tree.view_name') }}<input data-view-name maxlength="60" /></label><button type="button" data-save-view>{{ t('tree.save_view') }}</button>
+                    <label>{{ t('tree.saved_view') }}<select data-saved-views><option value="">—</option></select></label><button type="button" data-load-view>{{ t('tree.load_view') }}</button>
+                    <span role="status" data-view-status data-saved-copy="{{ t('tree.view_saved') }}" data-error-copy="{{ t('tree.view_error') }}"></span>
+                  </div>
+                </details>
+              </div>
             </div>
           </header>
+          <p class="stock-label">{{ t('catalog.stock_help') }}</p>
           <div class="query-bar">
             <div class="query-pills">
-              <a class="query-pill {% if not kind %}active{% endif %}" href="/?view=catalog&q={{ q|urlencode }}">{{ t("catalog.filter_all") }} <b>{{ total_objects }}</b></a>
-              {% for object_kind in object_kinds %}
-                <a class="query-pill {% if kind == object_kind %}active{% endif %}" href="/?view=catalog&q={{ q|urlencode }}&kind={{ object_kind }}">{{ t("kind." ~ object_kind) }} <b>{{ object_counts[object_kind] or 0 }}</b></a>
+              <a class="query-pill {% if not kind %}active{% endif %}" href="/?view=catalog&q={{ q|urlencode }}&topology_mode={{ topology_mode }}&network_category={{ network_category }}&services={{ '1' if include_inherited_services else '' }}">{{ t("catalog.filter_all") }} <b>{{ total_objects }}</b></a>
+              {% for object_kind in ["host", "system", "network", "device", "service", "runbook", "decision", "project"] %}
+                <a class="query-pill {% if kind == object_kind %}active{% endif %}" href="/?view=catalog&q={{ q|urlencode }}&kind={{ object_kind }}{% if request.query_params.get('topology_mode') %}&topology_mode={{ topology_mode }}{% endif %}{% if network_category %}&network_category={{ network_category }}{% endif %}{% if include_inherited_services %}&services=1{% endif %}">{{ t("kind." ~ object_kind) }} <b>{{ object_counts[object_kind] or 0 }}</b></a>
               {% endfor %}
             </div>
             {% if objects and not is_filtered %}
-              <div class="tree-controls" role="group" aria-label="{{ t('tree.controls') }}">
-                <button type="button" data-tree-level="0">{{ t("tree.collapse_all") }}</button>
-                <button type="button" data-tree-level="1">{{ t("tree.expand_hosts") }}</button>
-                <button type="button" data-tree-level="2">{{ t("tree.expand_services") }}</button>
+              <div class="tree-controls" role="radiogroup" aria-label="{{ t('tree.controls') }}">
+                <span class="tree-controls-label">{{ t("tree.depth_label") }}</span>
+                <button type="button" role="radio" aria-checked="true" data-tree-level="0">{{ t("tree.level_roots") }}</button>
+                <button type="button" role="radio" aria-checked="false" data-tree-level="1">{{ t("tree.level_hosts") }}</button>
+                <button type="button" role="radio" aria-checked="false" data-tree-level="2">{{ t("tree.level_services") }}</button>
+                <span class="tree-manual" hidden data-tree-manual>{{ t("tree.manual") }}</span>
               </div>
             {% endif %}
           </div>
@@ -592,9 +515,7 @@
                     {% endfor %}
                   {% else %}
                     {% for cluster in explorer.clusters %}
-                      {% set service_counter = namespace(value=cluster.direct_services|length) %}
-                      {% for branch in cluster.systems %}{% set service_counter.value = service_counter.value + branch.services|length %}{% endfor %}
-                      {{ group_row(cluster.host, service_counter.value) }}
+                      {{ asset_row(cluster.host, 0, "", 0, cluster.systems or cluster.direct_services) }}
                       {% for branch in cluster.systems %}
                         {{ asset_row(branch.system, 1, cluster.host.ref, 1, branch.services|length > 0) }}
                         {% for service in branch.services %}{{ asset_row(service, 2, branch.system.ref, 2) }}{% endfor %}
@@ -678,7 +599,8 @@
           {% endif %}
         </section>
 
-        <aside class="asset-inspector" data-inspector>
+        <aside class="asset-inspector" data-inspector hidden>
+          <button type="button" class="inspector-close" data-inspector-close aria-label="{{ t('asset.close') }}">×</button>
           <header class="inspector-head">
             <div class="selected-kind" data-inspector-kind>{{ t("catalog.inspector") }}</div>
             <h2 data-inspector-title>{{ t("catalog.select_asset") }}</h2>
@@ -701,11 +623,27 @@
       </main>
     {% else %}
       <main class="topology-shell">
+        {% if kind in ["project", "decision", "runbook"] %}<p class="meta" role="status">{{ t("search.topology_unsupported") }}</p>{% endif %}
+        {% if topology_mode != 'network' and (network_category or include_inherited_services) %}<p class="meta" role="status">{{ t('search.network_options_retained') }}</p>{% endif %}
+        <div class="catalog-create-actions">        {% if can_create_root %}
+          <a class="primary-button" href="/?{{ detail_query_string }}&create_root=1" aria-label="{{ t('asset.create_root') }}">
+            ＋ <span class="asset-create-full">{{ t("asset.create_root") }}</span><span class="asset-create-short">{{ t("asset.create_short") }}</span>
+          </a>
+        {% endif %}
+        {% if can_create %}
+          <a class="primary-button" href="/?{{ detail_query_string }}&create=1" aria-label="{{ t('asset.create') }}">
+            ＋ <span class="asset-create-full">{{ t("asset.create") }}</span><span class="asset-create-short">{{ t("asset.create_short") }}</span>
+          </a>
+        {% endif %}
+</div>
         <section class="map-heading">
+          <div class="topology-heading-search">
           <div>
             <p class="eyebrow">{{ t("topology.eyebrow") }}</p>
             <h1>{{ t("topology.title") }}</h1>
             <span>{{ t("topology.subtitle") }}</span>
+          </div>
+          {% include "_local_search.html" %}
           </div>
           <div class="map-health">
             {% for health in ("healthy", "degraded", "down", "unknown") %}
@@ -715,7 +653,7 @@
         </section>
         <div class="map-toolbar">
           <div class="topology-mode-switch" aria-label="{{ t('topology.mode_label') }}">
-            <a class="{% if topology_mode == 'placement' %}active{% endif %}" href="/?view=topology&topology_mode=placement&q={{ q|urlencode }}&kind={{ kind }}">{{ t("topology.mode_placement") }}</a>
+            <a class="{% if topology_mode == 'placement' %}active{% endif %}" href="/?view=topology&topology_mode=placement&q={{ q|urlencode }}&kind={{ kind }}&network_category={{ network_category }}&services={{ "1" if include_inherited_services else "" }}">{{ t("topology.mode_placement") }}</a>
             <a class="{% if topology_mode == 'network' %}active{% endif %}" href="/?view=topology&topology_mode=network&q={{ q|urlencode }}&kind={{ kind }}{% if network_category %}&network_category={{ network_category }}{% endif %}{% if include_inherited_services %}&services=1{% endif %}">{{ t("topology.mode_network") }}</a>
           </div>
           <div class="map-filters">

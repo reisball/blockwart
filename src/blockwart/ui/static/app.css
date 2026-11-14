@@ -1460,4 +1460,158 @@ pre {
 .attention-state-current { border-inline-start: .3rem solid #24835b; }
 .attention-state-stale { border-inline-start: .3rem solid #9b6b13; }
 .attention-state-unknown { border-inline-start: .3rem solid #7b8490; }
+
+.attention-priority-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: .5rem;
+  margin-block: .75rem;
+}
+
+.attention-priority-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: .4rem;
+  padding: .35rem .7rem;
+  border: 1px solid var(--border, #44495000);
+  border-radius: 999px;
+  color: inherit;
+  text-decoration: none;
+  font-weight: 600;
+}
+
+.attention-priority-pill b {
+  font-variant-numeric: tabular-nums;
+}
+
+.attention-priority-pill.attention-severity-critical b { color: #b54040; }
+.attention-priority-pill.attention-severity-warning b { color: #9b6b13; }
+.attention-priority-pill.attention-severity-info b { color: #7b8490; }
+
+.attention-priority-pill.active {
+  border-color: currentColor;
+  background: color-mix(in srgb, currentColor 8%, transparent);
+}
+
+.attention-priority-pill:hover,
+.attention-priority-pill:focus-visible {
+  border-color: currentColor;
+}
 .attention-state-not_applicable { border-inline-start: .3rem solid #7b8490; }
+
+/* UX v5: shared navigation, local scroll containment, no hidden data columns. */
+.main-header { display:flex; align-items:center; flex-wrap:wrap; gap:14px; padding:14px 24px; border-bottom:1px solid var(--border); background:var(--surface); }
+.main-brand { font-size:20px; font-weight:800; text-decoration:none; }
+.main-navigation { display:flex; gap:4px; flex:1 1 auto; min-width:0; overflow-x:auto; }
+.main-navigation a { white-space:nowrap; padding:10px 12px; border-radius:7px; text-decoration:none; }
+.main-navigation a[aria-current], .main-navigation a:hover { background:var(--surface-muted); color:var(--text); }
+.main-actions { display:flex; gap:8px; align-items:center; }
+/* Same button geometry for destinations and utilities; only active state differs. */
+.main-header .main-navigation a, .main-header .main-actions .button {
+  display:inline-flex; align-items:center; justify-content:center; gap:4px;
+  height:40px; min-height:40px; min-width:0; padding:8px 12px;
+  border:1px solid var(--border); border-radius:7px;
+  font-size:13px; font-weight:600; line-height:20px; white-space:nowrap;
+  text-decoration:none; background:var(--surface-muted); color:var(--text);
+}
+.main-header .main-navigation a[aria-current] {
+  background:var(--active-bg); border-color:var(--active-border);
+}
+.main-header .main-navigation a:hover, .main-header .main-actions .button:hover {
+  background:var(--hover-bg);
+}
+
+.settings-update-badge { margin-left:6px; }
+[hidden] { display:none !important; }
+.smart-search-dialog { width:min(640px, calc(100vw - 24px)); max-height:80vh; padding:0; border:1px solid var(--border); border-radius:10px; color:var(--text); background:var(--surface); overflow:auto; font-size:14px; }
+.smart-search-dialog::backdrop { background:rgb(0 0 0 / 65%); }
+.palette-head { display:flex; align-items:center; gap:8px; padding:12px; border-bottom:1px solid var(--border); }
+.palette-form { display:grid; grid-template-columns:minmax(0,1fr) minmax(100px,140px); gap:8px; flex:1; min-width:0; }
+.palette-form input, .palette-form select { width:100%; min-width:0; padding:8px; }
+.palette-close { min-width:40px; width:40px; min-height:40px; padding:6px; font-size:12px; background:var(--surface-muted); border-color:var(--border); color:var(--text); }
+.palette-results { padding:12px 16px; max-height:55vh; overflow:auto; }
+.palette-results h3 { font-size:12px; color:var(--muted); margin:12px 0 6px; }
+.palette-results p { margin:6px 0; }
+.palette-results article { padding:8px 0; border-bottom:1px solid var(--border); }
+.palette-results article p { font-size:12px; color:var(--muted); }
+.palette-results code { font-size:11px; }
+.palette-help { padding:10px 16px; border-top:1px solid var(--border); font-size:12px; }
+.activity-time { white-space:nowrap; }
+.activity-time small { display:block; }
+.activity-event-label { white-space:nowrap; }
+.actor-technical { max-width:180px; overflow-wrap:anywhere; }
+.activity-target-controls { display:grid; gap:12px; grid-template-columns:repeat(auto-fit,minmax(190px,1fr)); }
+.table-wrap { max-width:100%; overflow-x:auto; }
+@media (max-width:700px) {
+  .main-header { padding:12px; gap:8px; }
+  .main-brand { flex:1; }
+  .main-actions kbd { display:none; }
+  .main-navigation { order:3; flex-basis:100%; width:100%; }
+  .main-navigation a { padding:9px; }
+  .page { min-width:0; }
+}
+.attention-priority-pill, .attention-row .badge { white-space:nowrap; }
+.attention-table { min-width:1050px; }
+.attention-signal-table { min-width:650px; }
+.project-overview-table { min-width:1000px; }
+
+/* Scoped primary-page rhythm; no changes to object editors or required fields. */
+.ux-primary { font-size:14px; }
+.ux-primary h1 { font-size:24px; }
+.ux-primary .integrated-detail-heading { margin:0; align-items:center; }
+.ux-primary .panel { padding:14px 16px; box-shadow:none; }
+.ux-primary .panel h2 { margin-bottom:8px; }
+.ux-primary .table th, .ux-primary .table td { padding:10px 12px; }
+.ux-primary .form-grid { gap:10px; }
+.ux-primary .button-row { margin:0; }
+.ux-primary button, .ux-primary .button, .main-actions .button { background:var(--surface-muted); border-color:var(--border); color:var(--text); }
+.secondary-disclosure > summary { cursor:pointer; color:var(--muted); font-size:12px; padding:6px 0; }
+.secondary-disclosure[open] > summary { margin-bottom:10px; }
+.activity-filter-grid { display:grid; grid-template-columns:1fr 2fr 1fr; gap:12px; }
+.activity-filter-grid label { min-width:0; }
+.activity-table { min-width:900px; width:100%; }
+.activity-table th:nth-child(1) { width:120px; }
+.activity-table th:nth-child(2) { width:110px; }
+.activity-table th:nth-child(3) { width:190px; }
+.activity-table th:nth-child(5) { width:200px; }
+.activity-table td:last-child > span:first-child { display:block; font-weight:600; }
+.activity-table .actor-technical { max-width:none; font-size:12px; }
+@media (max-width:700px) {
+ .activity-filter-grid { grid-template-columns:1fr; gap:10px; }
+ .palette-head { padding:8px; gap:6px; }
+ .palette-form { grid-template-columns:minmax(0,1fr) 100px; gap:6px; }
+ .palette-form input, .palette-form select { font-size:12px; padding:6px; }
+ .palette-close { min-width:36px; width:36px; }
+ .ux-primary .page { padding:16px 12px; }
+}
+.palette-object-hit { display:flex; flex-wrap:wrap; align-items:center; gap:6px; padding:6px 0; }
+.palette-object-hit a { flex:1; font-weight:600; }
+.palette-object-hit code { color:var(--muted); }
+.search-fallback-form { display:flex; align-items:end; flex-wrap:wrap; gap:12px; }
+.search-fallback-form label:first-child { flex:1; min-width:160px; }
+.search-fallback-form .meta { flex-basis:100%; order:3; margin:0; }
+.ux-activity main > section:first-of-type { padding:0; border:0; background:transparent; }
+.ux-activity form.form-grid { grid-template-columns:minmax(0,1fr) auto; align-items:start; }
+.ux-activity .activity-filter-grid { grid-column:1 / -1; }
+.ux-activity .button-row { align-self:start; }
+.ux-activity .secondary-disclosure .project-filter-grid { grid-template-columns:1fr 1fr; }
+
+/* Shared native area search: same compact controls in all five destinations. */
+[data-local-search] { align-items:center; }
+.ux-primary > .page > [data-local-search], .topology-shell > [data-local-search] { margin-bottom:12px; }
+.settings-gear { flex:none; vertical-align:middle; }
+.local-search-hit { padding:10px 0; border-bottom:1px solid var(--border); }
+
+.topology-heading-search { display:flex; align-items:center; gap:16px; flex:1; min-width:0; flex-wrap:wrap; }
+.topology-heading-search > [data-local-search] { flex:1 1 360px; }
+@media (max-width:700px) { .topology-heading-search { flex-basis:100%; } }
+
+.integrated-detail-heading > [data-local-search] { flex:1 1 400px; }
+.integrated-detail-heading:has(> [data-local-search]) { flex-wrap:wrap; gap:12px; }
+/* Do not shrink query text to make room for optional global handoff copy. */
+.catalog-search[data-local-search] { display:flex; flex-wrap:wrap; gap:8px; min-width:0; }
+.catalog-search[data-local-search] > label { flex:1 1 360px; min-width:0; flex-wrap:wrap; }
+.catalog-search[data-local-search] input[type="search"] { flex:1 0 200px; min-width:min(200px,100%); width:auto; }
+
+.catalog-search[data-local-search] > a { overflow-wrap:anywhere; max-width:100%; }
+.topology-shell .map-toolbar { overflow-x:auto; }

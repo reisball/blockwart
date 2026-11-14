@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any, Literal
@@ -90,6 +91,7 @@ class AttentionQueryError(ValueError):
 @dataclass(frozen=True, slots=True)
 class AttentionPage:
     summary: AttentionSummary
+    severity_facets: dict[str, int]
     items: list[AttentionItem]
     next_cursor: str | None
     total: int | None
@@ -111,6 +113,8 @@ def query_attention_page(
     direction: SortDirection = "asc",
     include_total: bool = False,
     now: datetime | None = None,
+    text_query: str = "",
+    text_projection: Callable[[AttentionItem], str] | None = None,
 ) -> AttentionPage:
     """Return one authorized attention page plus its matching summary.
 
@@ -160,12 +164,46 @@ def query_attention_page(
         if _matches_filters(
             item,
             category=category,
-            severity=severity,
+            severity=None,
             reason_code=reason_code,
             signal_state=signal_state,
             kind=kind,
         )
     ]
+    if text_query.strip():
+        from blockwart.domain.search import normalize_search_text
+
+        term = normalize_search_text(text_query)
+        filtered = [
+            item
+            for item in filtered
+            if term
+            in (
+                normalize_search_text(
+                    text_projection(item)
+                    if text_projection
+                    else " ".join(
+                        str(value or "")
+                        for value in (
+                            item.reason_code,
+                            item.detail_code,
+                            item.target.label,
+                            item.target.ref,
+                            item.target.project_label,
+                        )
+                    )
+                )
+                or ""
+            )
+        ]
+    # Destination counts keep every active filter except severity. Compute them
+    # from the same authorized projection, not a second database snapshot.
+    facets = {
+        value: sum(item.severity == value for item in filtered) for value in ATTENTION_SEVERITIES
+    }
+    facets[""] = len(filtered)
+    if severity is not None:
+        filtered = [item for item in filtered if item.severity == severity]
     authorized_digest = _attention_view_digest(filtered)
     page = paginate_items(
         filtered,
@@ -178,6 +216,7 @@ def query_attention_page(
             "access": access.cursor_scope,
             "authorized_view": authorized_digest,
             "channel": channel,
+            **({"text_query": text_query} if text_query else {}),
             "category": category or "",
             "kind": kind or "",
             "limit": limit,
@@ -190,6 +229,7 @@ def query_attention_page(
     )
     return AttentionPage(
         summary=summarize_attention(filtered, derivation),
+        severity_facets=facets,
         items=page.items,
         next_cursor=page.next_cursor,
         total=page.total,

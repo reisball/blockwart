@@ -86,6 +86,8 @@ def translation_context(request: Request) -> dict[str, Any]:
 
     translator: Callable[..., str] = translate
     return {
+        "principal_scope": request.state.read_access.principal.id
+        if getattr(request.state, "read_access", None) else "",
         "locale": locale,
         "supported_locales": supported_locales(),
         "language_url": lambda selected: _language_url(request, selected),

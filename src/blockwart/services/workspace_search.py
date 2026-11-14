@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import unicodedata
+from dataclasses import dataclass
 from urllib.parse import quote
 
 from sqlalchemy import select
@@ -21,6 +22,24 @@ from blockwart.services.commands import CommandNotFound, CommandValidationFailed
 from blockwart.services.pagination import paginate_items
 from blockwart.services.project_workspace import read_project
 from blockwart.services.read_access import ReadAccess
+
+
+@dataclass(frozen=True)
+class _ProjectSearchHit:
+    project_id: str
+    project_label: str
+    kind: str
+    id: str
+    title: str
+    excerpt: str
+    url: str
+
+
+@dataclass(frozen=True)
+class _ProjectSearchPage:
+    items: list[WorkspaceSearchHitOut | _ProjectSearchHit]
+    next_cursor: str | None
+    total: int
 
 
 def _record_text(kind: str, data: dict) -> str:
@@ -88,7 +107,27 @@ def search_workspaces(
     kind: WorkspaceSearchKind | None = None,
     limit: int = 50,
     cursor: str | None = None,
-) -> WorkspaceSearchPageOut:
+    project_category: str | None = None,
+    project_status: str | None = None,
+    include_projects: bool = False,
+) -> WorkspaceSearchPageOut | _ProjectSearchPage:
+    """Search authorized current project records with optional UI-only project hits.
+
+    Args:
+        session: Caller-owned database session.
+        access: Existing principal and policy snapshot.
+        q: Literal normalized text, at most 200 characters.
+        project_id: Optional project restriction.
+        kind: Existing public content type restriction.
+        limit: Page size between one and 100.
+        cursor: Query- and principal-bound continuation.
+        project_category: UI-only project category restriction.
+        project_status: UI-only project status restriction.
+        include_projects: Include labeled project hits in a private UI projection.
+
+    Returns:
+        Existing public envelope by default, or private project-domain page.
+    """
     term = normalize_search_text(q)
     if (
         not term
@@ -105,6 +144,19 @@ def search_workspaces(
         if (project_id is None or project.id == project_id)
         and access.policy.visibility_for(project.id) == ObjectVisibility.DETAIL
     }
+    if project_category or project_status:
+        projects = {
+            identity: project
+            for identity, project in projects.items()
+            if (
+                not project_category
+                or json.loads(project.data_json).get("category") == project_category
+            )
+            and (
+                not project_status
+                or json.loads(project.data_json).get("project_status") == project_status
+            )
+        }
     hits = []
 
     def add(project, record_kind, identity, title, text, url):
@@ -121,6 +173,27 @@ def search_workspaces(
                 )
             )
 
+    if include_projects:
+        # Reuse the catalog's authorized searchable projection, not raw project JSON.
+        from blockwart.services.queries import query_catalog_browse
+
+        matching = {
+            item.id
+            for item in query_catalog_browse(session, access, query=q, kind="project").objects
+        }
+        for project in projects.values():
+            if project.id in matching:
+                hits.append(
+                    _ProjectSearchHit(
+                        project_id=project.id,
+                        project_label=project.label,
+                        kind="project",
+                        id=project.id,
+                        title=project.label,
+                        excerpt=project.label,
+                        url=f"/projects/{quote(project.id, safe='')}",
+                    )
+                )
     if projects and kind != "chronology":
         rows = session.scalars(
             select(ProjectRecord).where(
@@ -171,6 +244,15 @@ def search_workspaces(
         direction="asc",
         query={
             "q": term,
+            **(
+                {
+                    "project_category": project_category,
+                    "project_status": project_status,
+                    "include_projects": True,
+                }
+                if include_projects
+                else {}
+            ),
             "project_id": project_id,
             "kind": kind,
             "access": access.cursor_scope,
@@ -179,4 +261,6 @@ def search_workspaces(
         cursor=cursor,
         include_total=True,
     )
+    if include_projects:
+        return _ProjectSearchPage(items=page.items, next_cursor=page.next_cursor, total=page.total)
     return WorkspaceSearchPageOut(items=page.items, next_cursor=page.next_cursor, total=page.total)

@@ -25,6 +25,7 @@ approximate count is advertised.
 
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import UTC, datetime
 
 from sqlalchemy import and_, bindparam, or_, select, text
@@ -43,9 +44,10 @@ from blockwart.domain.activity import (
 )
 from blockwart.domain.auth import Permission
 from blockwart.domain.placement import CANONICAL_PLACEMENT_RELATION_TYPE
-from blockwart.domain.search import SEARCH_LIMIT_MAX, SEARCH_LIMIT_MIN
+from blockwart.domain.search import SEARCH_LIMIT_MAX, SEARCH_LIMIT_MIN, normalize_search_text
 from blockwart.domain.timestamps import format_rfc3339_utc
 from blockwart.models import AuditEvent, CatalogObject
+from blockwart.models.auth import Principal
 from blockwart.services.audit import load_audit_details, render_audit_summary_english
 from blockwart.services.pagination import (
     InvalidCursor,
@@ -98,6 +100,7 @@ def query_activity_page(
     direction: SortDirection = "desc",
     include_total: bool = False,
     now: datetime | None = None,
+    text_query: str = "",
 ) -> ActivityPage:
     """Return one authorized activity page; counts derive from the same set."""
     if limit < SEARCH_LIMIT_MIN or limit > SEARCH_LIMIT_MAX:
@@ -114,6 +117,7 @@ def query_activity_page(
 
     query = {
         "access": access.cursor_scope,
+        **({"text_query": text_query} if text_query else {}),
         "direction_note": "newest_first_default",
         "event_type": event_type or "",
         "kind": kind or "",
@@ -158,10 +162,28 @@ def query_activity_page(
                 direction,
             )
         )
+    if text_query.strip():
+        return _text_activity_page(
+            session,
+            access,
+            page_statement=page_statement,
+            query=query,
+            text_query=text_query,
+            event_type=event_type,
+            kind=kind,
+            subtree_ids=subtree_ids,
+            limit=limit,
+            direction=direction,
+            include_total=include_total,
+            now=now,
+        )
     page_cap = min(limit + 1, ACTIVITY_MAX_SCAN_EVENTS)
     rows = list(session.scalars(page_statement.limit(page_cap)).all())
     readable = _readable_objects(
-        session, access, {row.object_id for row in rows}, include_reference_history=True,
+        session,
+        access,
+        {row.object_id for row in rows},
+        include_reference_history=True,
     )
     items: list[ActivityItem] = []
     for row in rows[:limit]:
@@ -175,6 +197,7 @@ def query_activity_page(
         )
         if item is not None:
             items.append(item)
+    items = _resolve_actor_identities(session, access, items)
     has_more = len(rows) > limit or (page_cap <= limit and len(rows) == page_cap)
     next_cursor = None
     if has_more and items:
@@ -322,8 +345,11 @@ def _global_read(access: ReadAccess) -> bool:
 
 
 def _readable_objects(
-    session: Session, access: ReadAccess, candidate_ids: set[str | None],
-    *, include_reference_history: bool = False,
+    session: Session,
+    access: ReadAccess,
+    candidate_ids: set[str | None],
+    *,
+    include_reference_history: bool = False,
 ) -> _ReadableCatalog:
     """Resolve only scanned candidates against the current catalog and policy."""
     readable = _ReadableCatalog()
@@ -462,7 +488,9 @@ def _project_event(
     # REST activity intentionally keeps global permissions nonmaterialized;
     # generic per-object policy checks alone cannot recognize Catalog Owners.
     if reference_audit_requires_projection(
-        object_kind, details, was_reference=object_id in readable.historical_reference_ids,
+        object_kind,
+        details,
+        was_reference=object_id in readable.historical_reference_ids,
     ) and not (
         access.policy.can(Permission.READ_REFERENCE_CONTENT, object_id)
         or any(
@@ -490,4 +518,140 @@ def _project_event(
         summary=summary[:512],
         actor=(row.actor or None)[:128] if row.actor else None,
         detail_path=activity_detail_path(resolved_type, object_id),
+    )
+
+
+def _resolve_actor_identities(
+    session: Session,
+    access: ReadAccess,
+    items: list[ActivityItem],
+) -> list[ActivityItem]:
+    # Existing principal discovery permits admins, self, or an access manager
+    # on the event target. Do not expand identity/profile visibility here.
+    visible_actors = {
+        (item.actor, item.object.object_id)
+        for item in items
+        if item.actor
+        and (
+            access.principal.is_admin
+            or item.actor == access.principal.id
+            or Permission.MANAGE_ACCESS in access.policy.permissions_for(item.object.object_id)
+            or any(
+                Permission.MANAGE_ACCESS in authority.permissions
+                for authority in access.policy.global_authorities
+            )
+        )
+    }
+    if not visible_actors:
+        return items
+    actors = {actor for actor, _ in visible_actors}
+    identities = {
+        row.id: (row.display_name, row.principal_type)
+        for row in session.scalars(
+            select(Principal).where(
+                Principal.id.in_(actors),
+                Principal.active.is_(True),
+            )
+        )
+    }
+    return [
+        replace(item, actor_display=identities[item.actor][0], actor_kind=identities[item.actor][1])
+        if item.actor in identities and (item.actor, item.object.object_id) in visible_actors
+        else item
+        for item in items
+    ]
+
+
+def _text_activity_page(
+    session,
+    access,
+    *,
+    page_statement,
+    query,
+    text_query,
+    event_type,
+    kind,
+    subtree_ids,
+    limit,
+    direction,
+    include_total,
+    now,
+):
+    # Search the authorized rendered projection, never raw audit JSON/profiles.
+    # Bounded chunks advance past nonmatches; budget continuation may be empty.
+    term = normalize_search_text(text_query)
+    matches = []
+    scanned = 0
+    last = None
+    exhausted = False
+    statement = page_statement
+    while scanned < ACTIVITY_MAX_SCAN_EVENTS and len(matches) <= limit:
+        rows = list(
+            session.scalars(statement.limit(min(200, ACTIVITY_MAX_SCAN_EVENTS - scanned))).all()
+        )
+        if not rows:
+            exhausted = True
+            break
+        readable = _readable_objects(
+            session, access, {row.object_id for row in rows}, include_reference_history=True
+        )
+        projected = [
+            item
+            for row in rows
+            if (
+                item := _project_event(
+                    row,
+                    access=access,
+                    readable=readable,
+                    event_type=event_type,
+                    kind=kind,
+                    subtree_ids=subtree_ids,
+                )
+            )
+            is not None
+        ]
+        resolved = {
+            item.event_id: item for item in _resolve_actor_identities(session, access, projected)
+        }
+        for row in rows:
+            scanned += 1
+            item = resolved.get(f"audit:{row.id:020d}")
+            if item and term in (
+                normalize_search_text(
+                    " ".join(
+                        str(value or "")
+                        for value in (
+                            item.summary,
+                            item.event_type,
+                            item.actor_display,
+                            item.object.label,
+                            item.object.ref,
+                        )
+                    )
+                )
+                or ""
+            ):
+                matches.append(item)
+                if len(matches) > limit:
+                    break
+            last = (format_rfc3339_utc(row.created_at), f"{row.id:020d}")
+        if len(matches) > limit:
+            break
+        statement = page_statement.where(_keyset_predicate(row.created_at, row.id, direction))
+    next_cursor = None
+    if not exhausted and last:
+        next_cursor = encode_page_cursor(
+            resource=ACTIVITY_RESOURCE,
+            sort=ACTIVITY_SORT_FIELD,
+            direction=direction,
+            query=query,
+            primary=last[0],
+            tie_breaker=last[1],
+        )
+    return ActivityPage(
+        items=matches[:limit],
+        next_cursor=next_cursor,
+        total=None,
+        total_status="budget_exhausted" if include_total else "not_requested",
+        generated_at=format_rfc3339_utc(now or datetime.now(UTC)) or "",
     )

@@ -4,46 +4,34 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>{{ title }}</title>
-    <link rel="stylesheet" href="/static/app.css" />
+    <link rel="stylesheet" href="/static/app.css?v=ux5-toolbar2" />
+    {% include "_navigation_head.html" %}
   </head>
-  <body>
+  <body class="ux-primary ux-attention">
+    {% include "_main_navigation.html" %}
     <main class="page stack">
       <header class="integrated-detail-heading">
-        <a class="detail-back-button" href="/">← {{ t("nav.catalog") }}</a>
         <div>
-          <p class="eyebrow">{{ t("attention.eyebrow") }}</p>
           <h1>{{ t("attention.title") }}</h1>
-          <span>{{ t("attention.help") }}</span>
         </div>
+        {% include "_local_search.html" %}
       </header>
 
       <section class="panel">
         <h2>{{ t("attention.summary") }}</h2>
-        <p class="meta">{{ t("attention.summary_help") }}</p>
-        <ul class="badges">
-          {% for severity in severities %}
-            <li class="badge attention-severity-{{ severity }}">{{ t("attention.severity." ~ severity) }}: {{ summary.by_severity.get(severity, 0) }}</li>
-          {% endfor %}
-        </ul>
-        <div class="table-wrap"><table class="table attention-signal-table">
-          <thead><tr><th>{{ t("attention.category_label") }}</th><th>{{ t("attention.signal_state_label") }}</th><th>{{ t("attention.evaluated") }}</th><th>{{ t("attention.items") }}</th></tr></thead>
-          <tbody>
-            {% for category in categories %}
-              {% set signal = summary.signals.get(category) %}
-              <tr>
-                <td>{{ t("attention.category." ~ category) }}</td>
-                <td><span class="badge attention-state-{{ signal.state }}">{{ t("attention.signal_state." ~ signal.state) }}</span></td>
-                <td>{{ signal.evaluated }}</td>
-                <td>{{ signal.items }}</td>
-              </tr>
-            {% endfor %}
-          </tbody>
-        </table></div>
-        <p class="meta">{{ t("attention.coverage." ~ summary.coverage_snapshot_state) }}</p>
+        {% if q %}<p>{{ t("search.local.matches", count=summary.total) }}</p>{% endif %}
+
+        <nav class="attention-priority-pills" aria-label="{{ t('attention.severity_label') }}">
+          <a class="attention-priority-pill {% if not selected_severity %}active{% endif %}" href="{{ priority_urls[''] }}" {% if not selected_severity %}aria-current="true"{% endif %}>{{ t('attention.all_severities') }} <b>{{ priority_counts[""] }}</b></a>
+          {% for severity in severities %}<a class="attention-priority-pill attention-severity-{{ severity }} {% if selected_severity == severity %}active{% endif %}" href="{{ priority_urls[severity] }}" {% if selected_severity == severity %}aria-current="true"{% endif %}>{{ t('attention.severity.' ~ severity) }} <b>{{ priority_counts[severity] }}</b></a>{% endfor %}
+        </nav>
+        {% if selected_severity %}<p class="meta">{{ t('attention.severity_filter_active', severity=t('attention.severity.' ~ selected_severity)) }} <a href="{{ priority_urls[''] }}">{{ t('attention.severity_filter_clear') }}</a></p>{% endif %}
       </section>
 
-      <section class="panel">
+      <details class="secondary-disclosure" {% if selected_kind or selected_reason_code or selected_category or selected_signal_state %}open{% endif %}><summary>{{ t("attention.filter") }}</summary>
         <form class="form-grid" method="get" action="/attention/filters/normalize">
+          <input type="hidden" name="q" value="{{ q }}" />
+          <input type="hidden" name="severity" value="{{ selected_severity }}" />
           <div class="project-filter-grid">
             <label>{{ t("attention.kind_label") }}
               <select name="kind">
@@ -63,12 +51,6 @@
                 {% for option in categories %}<option value="{{ option }}"{% if selected_category == option %} selected{% endif %}>{{ t("attention.category." ~ option) }}</option>{% endfor %}
               </select>
             </label>
-            <label>{{ t("attention.severity_label") }}
-              <select name="severity">
-                <option value="">{{ t("attention.all_severities") }}</option>
-                {% for option in severities %}<option value="{{ option }}"{% if selected_severity == option %} selected{% endif %}>{{ t("attention.severity." ~ option) }}</option>{% endfor %}
-              </select>
-            </label>
             <label>{{ t("attention.signal_state_label") }}
               <select name="signal_state">
                 <option value="">{{ t("attention.all_signal_states") }}</option>
@@ -76,9 +58,12 @@
               </select>
             </label>
           </div>
-          <div class="button-row"><button type="submit">{{ t("attention.filter") }}</button><a class="button button-muted" href="/attention">{{ t("attention.clear") }}</a></div>
+          <div class="button-row">
+            <button type="submit">{{ t("attention.filter") }}</button>
+            <a class="button button-muted" href="/attention">{{ t("attention.clear") }}</a>
+          </div>
         </form>
-      </section>
+      </details>
 
       <section class="panel">
         {% if items %}
@@ -110,6 +95,23 @@
         {% if next_url %}<div class="button-row"><a class="button button-muted" href="{{ next_url }}">{{ t("attention.next_page") }}</a></div>{% endif %}
         <p class="meta">{{ t("attention.generated_at") }} <time>{{ generated_at }}</time></p>
       </section>
+      <details class="panel secondary-disclosure" data-attention-diagnostics><summary>{{ t("attention.diagnostics") }}</summary>
+        <div class="table-wrap"><table class="table attention-signal-table">
+          <thead><tr><th>{{ t("attention.category_label") }}</th><th>{{ t("attention.signal_state_label") }}</th><th>{{ t("attention.evaluated") }}</th><th>{{ t("attention.items") }}</th></tr></thead>
+          <tbody>
+            {% for category in categories %}
+              {% set signal = summary.signals.get(category) %}
+              <tr>
+                <td>{{ t("attention.category." ~ category) }}</td>
+                <td><span class="badge attention-state-{{ signal.state }}">{{ t("attention.signal_state." ~ signal.state) }}</span></td>
+                <td>{{ signal.evaluated }}</td>
+                <td>{{ signal.items }}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table></div>
+        <p class="meta">{{ t("attention.coverage." ~ summary.coverage_snapshot_state) }}</p>
+      </details>
     </main>
   </body>
 </html>

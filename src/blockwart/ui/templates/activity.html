@@ -4,48 +4,70 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>{{ title }}</title>
-    <link rel="stylesheet" href="/static/app.css" />
+    <link rel="stylesheet" href="/static/app.css?v=ux5-toolbar2" />
+    <script src="/static/activity.js?v=2" defer></script>
+    {% include "_navigation_head.html" %}
   </head>
-  <body>
+  <body class="ux-primary ux-activity">
+    {% include "_main_navigation.html" %}
     <main class="page stack">
       <header class="integrated-detail-heading">
-        <a class="detail-back-button" href="/">← {{ t("nav.catalog") }}</a>
         <div>
-          <p class="eyebrow">{{ t("activity.eyebrow") }}</p>
           <h1>{{ t("activity.title") }}</h1>
-          <span>{{ t("activity.help") }}</span>
         </div>
+        {% include "_local_search.html" %}
       </header>
 
       <section class="panel">
         <form class="form-grid" method="get" action="/activity">
-          <div class="project-filter-grid">
+          <input type="hidden" name="q" value="{{ q }}" />
+          {% if invalid_target %}<input type="hidden" name="invalid_target" value="1" />{% endif %}
+          <div class="activity-filter-grid">
             <label>{{ t("activity.type_label") }}
               <select name="event_type">
                 <option value="">{{ t("activity.all_types") }}</option>
                 {% for option in event_types %}<option value="{{ option }}"{% if selected_event_type == option %} selected{% endif %}>{{ t("activity.type." ~ option) }}</option>{% endfor %}
               </select>
             </label>
+            <label>{{ t('activity.target') }}
+              <input type="search" name="target" list="activity-targets" value="{{ active_target_label }}" placeholder="{{ t('activity.target_all') }}" data-activity-target />
+              <input type="hidden" name="previous_object_id" value="{{ selected_object_id }}" />
+              <datalist id="activity-targets">{% for ref, object in targets.items() %}<option value="{{ ref }}">{{ object.label }}</option>{% endfor %}</datalist>
+            </label>
             <label>{{ t("activity.since_label") }}
-              <input type="text" name="since" value="{{ selected_since }}" placeholder="2026-01-01T00:00:00Z" />
+              <input type="text" name="since" value="{{ selected_since }}" placeholder="2026-01-01T00:00:00Z" data-activity-since data-date-label="{{ t('activity.date_utc') }}" />
             </label>
           </div>
+          <details class="secondary-disclosure" {% if selected_kind or selected_parent %}open{% endif %}><summary>{{ t("activity.more_filters") }}</summary><div class="project-filter-grid">            <label>{{ t("activity.kind_label") }}
+              <select name="kind">
+                <option value="">{{ t("activity.all_kinds") }}</option>
+                {% for option in kinds %}<option value="{{ option }}"{% if selected_kind == option %} selected{% endif %}>{{ t("kind." ~ option) }}</option>{% endfor %}
+              </select>
+            </label>
+            <label>{{ t("activity.parent_label") }}
+              <input type="text" name="parent" value="{{ selected_parent }}" placeholder="host:example" />
+            </label>
+</div></details>
           <div class="button-row"><button type="submit">{{ t("activity.filter") }}</button><a class="button button-muted" href="/activity">{{ t("activity.clear") }}</a></div>
         </form>
       </section>
 
+      {% if target_error %}<p class="error" role="alert">{{ target_error }}</p>{% endif %}
+      {% if active_target_label %}<p class="meta">{{ t('activity.target_filter_active', target=active_target_label) }} <a href="{{ target_reset_url }}">{{ t('activity.target_reset') }}</a></p>{% endif %}
+
       <section class="panel">
+        {% if q %}<p>{{ t("search.local.loaded", count=items|length) }}</p>{% endif %}
         {% if items %}
-          <div class="table-wrap"><table class="table attention-table">
+          <div class="table-wrap"><table class="table activity-table">
             <thead><tr><th>{{ t("activity.occurred_at") }}</th><th>{{ t("activity.type_label") }}</th><th>{{ t("attention.target_label") }}</th><th>{{ t("audit.field.summary") }}</th><th>{{ t("project.column.author") }}</th></tr></thead>
             <tbody>
               {% for item in items %}
                 <tr class="attention-row">
-                  <td><time>{{ item.occurred_at }}</time></td>
-                  <td><span class="badge">{{ t("activity.type." ~ item.event_type) }}</span></td>
-                  <td><a href="{{ item.detail_path }}"><strong>{{ item.object.label or item.object.object_id }}</strong></a><br /><code>{{ item.object.ref }}</code></td>
+                  {% set time = activity_time(item.occurred_at) %}<td><time class="activity-time" {% if time.datetime %}datetime="{{ time.datetime }}"{% endif %} title="{{ time.title }}">{{ time.day }}<small>{{ time.clock }}</small></time></td>
+                  <td><span class="badge activity-event-label" title="{{ item.event_type }}">{{ t("activity.short." ~ item.event_type) }}</span></td>
+                  <td><a href="{{ item.detail_path }}"><strong>{{ item.object.label or item.object.object_id }}</strong></a><details class="secondary-disclosure"><summary>{{ t("activity.actor_technical") }}</summary><code>{{ item.object.ref }}</code></details></td>
                   <td>{{ item.summary }}</td>
-                  <td>{% if item.actor %}<code>{{ item.actor }}</code>{% else %}{{ t("asset.no_value") }}{% endif %}</td>
+                  <td>{% if item.actor_display %}<span>{{ item.actor_display }}</span> <span class="badge">{{ t('activity.actor_kind.' ~ item.actor_kind) }}</span>{% elif item.actor %}<span>{{ t('activity.actor_unknown') }}</span>{% else %}<span>{{ t('activity.actor_missing') }}</span>{% endif %}{% if item.actor %}<details class="actor-technical"><summary>{{ t('activity.actor_technical') }}</summary><code>{{ item.actor }}</code></details>{% endif %}</td>
                 </tr>
               {% endfor %}
             </tbody>

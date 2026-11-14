@@ -4,9 +4,11 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>{{ t('workspace.search.title') }} - Blockwart</title>
-    <link rel="stylesheet" href="/static/app.css" />
+    <link rel="stylesheet" href="/static/app.css?v=ux5-toolbar2" />
+    {% include "_navigation_head.html" %}
   </head>
   <body>
+    {% include "_main_navigation.html" %}
     <main class="page stack">
       <header>
         <a href="/projects">← {{ t('project.workspace.overview_title') }}</a>
