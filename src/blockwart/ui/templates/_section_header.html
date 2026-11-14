@@ -1,0 +1,10 @@
+{# Shared primary-page heading; callers supply escaped metadata and local controls. #}
+{% macro section_header(title, meta='') -%}
+<header class="section-header">
+  <div class="section-header-title">
+    <h1>{{ title }}</h1>
+    {% if meta %}<div class="section-header-meta">{{ meta }}</div>{% endif %}
+  </div>
+  {% if caller is defined %}<div class="section-header-actions">{{ caller() }}</div>{% endif %}
+</header>
+{%- endmacro %}

@@ -1,3 +1,4 @@
+{% from "_section_header.html" import section_header %}
 <!doctype html>
 <html lang="{{ locale }}">
   <head>
@@ -10,36 +11,33 @@
   </head>
   <body class="ux-primary ux-projects">
     {% include "_main_navigation.html" %}
-    <main class="page stack">
-      <header class="integrated-detail-heading">
-        <div>
-          <h1>{{ t("project.workspace.overview_title") }}</h1>
-        </div>
+    <main class="page stack section-page">
+      {% call section_header(t("project.workspace.overview_title")) %}
         {% if can_create_root %}
           <a class="button" href="/?kind=project&create_root=1">{{ t("project.workspace.create") }}</a>
         {% endif %}
-      </header>
+        <a href="/workspace/search">{{ t('workspace.search.title') }}</a>
+        <details class="secondary-disclosure" {% if selected_category or selected_status %}open{% endif %}><summary>{{ t("project.workspace.filter") }}</summary>
+          <form class="form-grid" method="get" action="/projects/filters/normalize">
+            <div class="project-filter-grid">
+              <label>{{ t("project.field.category.label") }}
+                <select name="project_category">
+                  <option value="">{{ t("project.workspace.all_categories") }}</option>
+                  {% for option in project_categories %}<option value="{{ option }}"{% if selected_category == option %} selected{% endif %}>{{ t("project.category." ~ option) }}</option>{% endfor %}
+                </select>
+              </label>
+              <label>{{ t("project.field.project_status.label") }}
+                <select name="project_status">
+                  <option value="">{{ t("project.workspace.all_statuses") }}</option>
+                  {% for option in project_statuses %}<option value="{{ option }}"{% if selected_status == option %} selected{% endif %}>{{ t("project.status." ~ option) }}</option>{% endfor %}
+                </select>
+              </label>
+            </div>
+            <div class="button-row"><button type="submit">{{ t("project.workspace.filter") }}</button><a class="button button-muted" href="/projects">{{ t("project.workspace.clear") }}</a></div>
+          </form>
+        </details>
+      {% endcall %}
 
-      <p><a href="/workspace/search">{{ t('workspace.search.title') }}</a></p>
-      <details class="secondary-disclosure" {% if selected_category or selected_status %}open{% endif %}><summary>{{ t("project.workspace.filter") }}</summary>
-        <form class="form-grid" method="get" action="/projects/filters/normalize">
-          <div class="project-filter-grid">
-            <label>{{ t("project.field.category.label") }}
-              <select name="project_category">
-                <option value="">{{ t("project.workspace.all_categories") }}</option>
-                {% for option in project_categories %}<option value="{{ option }}"{% if selected_category == option %} selected{% endif %}>{{ t("project.category." ~ option) }}</option>{% endfor %}
-              </select>
-            </label>
-            <label>{{ t("project.field.project_status.label") }}
-              <select name="project_status">
-                <option value="">{{ t("project.workspace.all_statuses") }}</option>
-                {% for option in project_statuses %}<option value="{{ option }}"{% if selected_status == option %} selected{% endif %}>{{ t("project.status." ~ option) }}</option>{% endfor %}
-              </select>
-            </label>
-          </div>
-          <div class="button-row"><button type="submit">{{ t("project.workspace.filter") }}</button><a class="button button-muted" href="/projects">{{ t("project.workspace.clear") }}</a></div>
-        </form>
-      </details>
 
       <section class="panel">
         {% if projects %}

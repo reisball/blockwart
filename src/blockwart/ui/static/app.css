@@ -1585,8 +1585,65 @@ pre {
 .search-fallback-form { display:flex; align-items:end; flex-wrap:wrap; gap:12px; }
 .search-fallback-form label:first-child { flex:1; min-width:160px; }
 .search-fallback-form .meta { flex-basis:100%; order:3; margin:0; }
-.ux-activity main > section:first-of-type { padding:0; border:0; background:transparent; }
 .ux-activity form.form-grid { grid-template-columns:minmax(0,1fr) auto; align-items:start; }
 .ux-activity .activity-filter-grid { grid-column:1 / -1; }
 .ux-activity .button-row { align-self:start; }
 .ux-activity .secondary-disclosure .project-filter-grid { grid-template-columns:1fr 1fr; }
+
+/* Shared work header: primary sections only, never the navbar or detail editor. */
+.section-page,
+.topology-shell.section-page {
+  width:100%; max-width:none; margin:0; padding:20px 24px;
+  min-width:0;
+}
+.section-header {
+  display:flex; align-items:flex-start; justify-content:space-between;
+  flex-wrap:wrap; gap:12px 24px; margin:0 0 16px; padding:0;
+}
+.section-header-title { min-width:0; }
+.section-header h1 {
+  margin:0; font-size:24px; font-weight:700; line-height:32px;
+  letter-spacing:-0.02em; overflow-wrap:anywhere;
+}
+.section-header-meta {
+  display:flex; flex-wrap:wrap; gap:4px 12px;
+  color:var(--muted); font-size:12px; line-height:18px;
+}
+.section-header-actions {
+  display:flex; align-items:center; justify-content:flex-end;
+  flex-wrap:wrap; gap:8px; min-width:0; max-width:100%;
+}
+.section-header-actions > .catalog-toolbar { flex:1; }
+.section-header-actions .catalog-search { margin:0; }
+.section-page > .section-header { margin-bottom:0; }
+.topology-shell.section-page > .section-header { margin-bottom:16px; }
+.topology-shell.section-page > .map-health { flex-wrap:wrap; margin-bottom:16px; }
+.topology-shell.section-page > .map-toolbar,
+.topology-shell.section-page > .map-workbench { max-width:none; }
+@media (max-width:1100px) {
+  .section-header-actions { flex-basis:100%; justify-content:flex-start; }
+}
+@media (max-width:700px) {
+  .section-page, .topology-shell.section-page { padding:16px 12px; }
+  .section-header { gap:12px; }
+  .section-header-actions > .catalog-search { flex-basis:100%; }
+}
+.section-header-actions > .secondary-disclosure { position:relative; }
+.section-header-actions > .secondary-disclosure > summary {
+  padding:10px 12px; border:1px solid var(--border); border-radius:7px;
+  color:var(--text); font-size:14px;
+}
+.section-header-actions > .secondary-disclosure[open] > .form-grid {
+  position:absolute; z-index:5; right:0; top:100%;
+  width:min(560px,calc(100vw - 48px)); padding:16px;
+  border:1px solid var(--border); border-radius:8px; background:var(--surface);
+}
+.ux-activity .section-header-actions { flex:0 1 1000px; }
+.ux-activity .section-header-actions .form-grid { width:100%; }
+.ux-activity .section-header-actions .activity-filter-grid { grid-column:auto; }
+@media (max-width:1100px) {
+  .section-header-actions > .secondary-disclosure[open] > .form-grid {
+    position:static; width:100%; margin-top:8px;
+  }
+  .section-header-actions > .secondary-disclosure[open] { width:100%; }
+}

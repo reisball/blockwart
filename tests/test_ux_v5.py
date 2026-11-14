@@ -409,7 +409,7 @@ def test_catalog_toolbar_keeps_search_scope_query_and_actions_together(client, u
     """Keep the native type-bound GET form alongside existing toolbar actions."""
     response = client.get("/?view=catalog&kind=service&q=Direct")
     assert response.status_code == 200
-    header = re.search(r'<header class="content-heading">(.*?)</header>', response.text, re.S)[1]
+    header = re.search(r'<header class="section-header">(.*?)</header>', response.text, re.S)[1]
     assert 'class="catalog-toolbar"' in header
     form = re.search(r'<form class="catalog-search"(.*?)</form>', header, re.S)[0]
     assert 'method="get" action="/"' in form

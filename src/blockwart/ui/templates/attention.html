@@ -1,3 +1,4 @@
+{% from "_section_header.html" import section_header %}
 <!doctype html>
 <html lang="{{ locale }}">
   <head>
@@ -10,12 +11,44 @@
   </head>
   <body class="ux-primary ux-attention">
     {% include "_main_navigation.html" %}
-    <main class="page stack">
-      <header class="integrated-detail-heading">
-        <div>
-          <h1>{{ t("attention.title") }}</h1>
-        </div>
-      </header>
+    <main class="page stack section-page">
+      {% call section_header(t("attention.title")) %}
+        <details class="secondary-disclosure" {% if selected_kind or selected_reason_code or selected_category or selected_signal_state %}open{% endif %}><summary>{{ t("attention.filter") }}</summary>
+          <form class="form-grid" method="get" action="/attention/filters/normalize">
+            <input type="hidden" name="severity" value="{{ selected_severity }}" />
+            <div class="project-filter-grid">
+              <label>{{ t("attention.kind_label") }}
+                <select name="kind">
+                  <option value="">{{ t("attention.all_kinds") }}</option>
+                  {% for option in kinds %}<option value="{{ option }}"{% if selected_kind == option %} selected{% endif %}>{{ t("kind." ~ option) }}</option>{% endfor %}
+                </select>
+              </label>
+              <label>{{ t("attention.reason_label") }}
+                <select name="reason_code">
+                  <option value="">{{ t("attention.all_reasons") }}</option>
+                  {% for option in reason_codes %}<option value="{{ option }}"{% if selected_reason_code == option %} selected{% endif %}>{{ t("attention.reason." ~ option) }}</option>{% endfor %}
+                </select>
+              </label>
+              <label>{{ t("attention.category_label") }}
+                <select name="category">
+                  <option value="">{{ t("attention.all_categories") }}</option>
+                  {% for option in categories %}<option value="{{ option }}"{% if selected_category == option %} selected{% endif %}>{{ t("attention.category." ~ option) }}</option>{% endfor %}
+                </select>
+              </label>
+              <label>{{ t("attention.signal_state_label") }}
+                <select name="signal_state">
+                  <option value="">{{ t("attention.all_signal_states") }}</option>
+                  {% for option in signal_states %}<option value="{{ option }}"{% if selected_signal_state == option %} selected{% endif %}>{{ t("attention.signal_state." ~ option) }}</option>{% endfor %}
+                </select>
+              </label>
+            </div>
+            <div class="button-row">
+              <button type="submit">{{ t("attention.filter") }}</button>
+              <a class="button button-muted" href="/attention">{{ t("attention.clear") }}</a>
+            </div>
+          </form>
+        </details>
+      {% endcall %}
 
       <section class="panel">
         <h2>{{ t("attention.summary") }}</h2>
@@ -27,41 +60,6 @@
         {% if selected_severity %}<p class="meta">{{ t('attention.severity_filter_active', severity=t('attention.severity.' ~ selected_severity)) }} <a href="{{ priority_urls[''] }}">{{ t('attention.severity_filter_clear') }}</a></p>{% endif %}
       </section>
 
-      <details class="secondary-disclosure" {% if selected_kind or selected_reason_code or selected_category or selected_signal_state %}open{% endif %}><summary>{{ t("attention.filter") }}</summary>
-        <form class="form-grid" method="get" action="/attention/filters/normalize">
-          <input type="hidden" name="severity" value="{{ selected_severity }}" />
-          <div class="project-filter-grid">
-            <label>{{ t("attention.kind_label") }}
-              <select name="kind">
-                <option value="">{{ t("attention.all_kinds") }}</option>
-                {% for option in kinds %}<option value="{{ option }}"{% if selected_kind == option %} selected{% endif %}>{{ t("kind." ~ option) }}</option>{% endfor %}
-              </select>
-            </label>
-            <label>{{ t("attention.reason_label") }}
-              <select name="reason_code">
-                <option value="">{{ t("attention.all_reasons") }}</option>
-                {% for option in reason_codes %}<option value="{{ option }}"{% if selected_reason_code == option %} selected{% endif %}>{{ t("attention.reason." ~ option) }}</option>{% endfor %}
-              </select>
-            </label>
-            <label>{{ t("attention.category_label") }}
-              <select name="category">
-                <option value="">{{ t("attention.all_categories") }}</option>
-                {% for option in categories %}<option value="{{ option }}"{% if selected_category == option %} selected{% endif %}>{{ t("attention.category." ~ option) }}</option>{% endfor %}
-              </select>
-            </label>
-            <label>{{ t("attention.signal_state_label") }}
-              <select name="signal_state">
-                <option value="">{{ t("attention.all_signal_states") }}</option>
-                {% for option in signal_states %}<option value="{{ option }}"{% if selected_signal_state == option %} selected{% endif %}>{{ t("attention.signal_state." ~ option) }}</option>{% endfor %}
-              </select>
-            </label>
-          </div>
-          <div class="button-row">
-            <button type="submit">{{ t("attention.filter") }}</button>
-            <a class="button button-muted" href="/attention">{{ t("attention.clear") }}</a>
-          </div>
-        </form>
-      </details>
 
       <section class="panel">
         {% if items %}

@@ -1,3 +1,4 @@
+{% from "_section_header.html" import section_header %}
 <!doctype html>
 <html lang="{{ locale }}">
   <head>
@@ -16,21 +17,10 @@
     <script src="/static/theme.js?v=054" defer></script>
     {% include "_navigation_head.html" %}
   </head>
-  <body>
+  <body class="ux-primary ux-settings">
     {% include "_main_navigation.html" %}
-    <header class="topbar">
-      <div class="topbar-inner">
-        <a class="breadcrumb" href="/">{{ t("detail.back") }}</a>
-        <div class="title-row">
-          <div>
-            <h1>{{ t("settings.title") }}</h1>
-            <div class="subtle">{{ t("settings.subtitle") }}</div>
-          </div>
-        </div>
-      </div>
-    </header>
-
-    <main class="page">
+    <main class="page stack section-page">
+      {{ section_header(t("settings.title")) }}
       <div class="stack">
         <section class="panel" aria-labelledby="settings-appearance-title">
           <div class="panel-head">
