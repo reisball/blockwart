@@ -56,3 +56,15 @@ Keep deployment and rollback details in the operator runbook; this document does
 not contain host addresses, private filesystem paths, unit/container names or
 secrets. See the general [deployment guide](../deployment.md) and the
 [acceptance/evidence boundaries](ACCEPTANCE.md).
+
+
+## Screenshot-correction candidates
+
+The UI-only correction 0050e3f85b252f44ae99ea82e3b49bc45a66ab8e is directly
+based on the previous 8128797 release, independently of upstream integration.
+It is also normally merged into the upstream-integrated review branch. Both
+new heads require their own applicable CI/review and maintainer authorization;
+the previous release's CI/rollout evidence is not transferable. No push, PR
+merge, deployment, production migration or production action is implied by
+local source preparation. Final delivery and rollout coordination stay with
+the release coordinator.

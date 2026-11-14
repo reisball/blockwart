@@ -57,3 +57,16 @@ criteria and compact SOLL composition while normally merging upstream main and
 refreshing public evidence/runbook documentation. Main owns publication, final-head
 CI and review gates. No additional production changes or migrations are authorized
 by this integration; upstream Safe/schema content is retained in the PR only.
+
+
+## Screenshot follow-up: common header and catalog toolbar
+
+- At 1200px and 1440px, the five primary navigation destinations plus global
+  smart search and Settings use the same 40px height, 7px corner radius and
+  8px vertical / 12px horizontal padding; the active destination stays distinct.
+- Catalog search, scope, submit, root creation, child creation and View belong
+  to one horizontal desktop toolbar, rather than a separate full-width search row.
+- At 390px they may wrap; there must be no whole-page horizontal overflow and
+  all controls must remain operable. Existing local table/tab scrolling is retained.
+- Native view/kind/q semantics, removable scope and existing query expansion
+  remain unchanged; smart search stays independent. No backend/schema/auth change.

@@ -1,6 +1,6 @@
 # UX v5 acceptance and review status
 
-The implementation and compact-mockup follow-up are committed. The isolated
+The implementation and compact-mockup follow-up are committed. The previous isolated
 UI-only release is 8128797959d4b82ed1b6329e153110e0d02b01d5.
 The release coordinator recorded [full CI success](https://github.com/reisball/blockwart/actions/runs/43525957700)
 for that exact commit: 2,999 tests and 39 subtests, plus OpenAPI, installed-package
@@ -16,8 +16,10 @@ See [deployment boundaries](DEPLOYMENT.md).
 
 ## Approved scope and compact composition
 
-The acceptance criteria below remain unchanged. In addition, the approved compact
-SOLL composition is preserved: small catalog search/scope row; initially collapsed
+The existing functional criteria below remain unchanged. The screenshot follow-up
+standardizes all seven header buttons and places native catalog search/scope in
+the same toolbar as root creation, child creation and View. The approved compact
+SOLL composition otherwise remains: initially collapsed
 View disclosure; contextual closable right inspector; compact global-search
 query/type/Escape row and grouped results; actionable hint results before collapsed
 diagnostics; readable activity target/event/date controls with secondary filters;
@@ -43,6 +45,26 @@ it remains independent of global smart search and placement topology.
 | Activity | Berlin Today/Yesterday/date + HH:mm; exact unchanged datetime/title, other year visible, invalid time unknown. Spring/autumn DST and midnight tested. Active stable-ID principals resolve in one batch only for self/admin/existing target access-manager visibility; Human / Service account are evidenced account types, never invented Agent/System. Legacy logins, inactive/missing/unavailable identities stay Not assigned; absent attribution stays Not recorded; technical value is disclosed only in details. Canonical searchable targets combine with existing filters; invalid input retains previous target and gives an error, never broadens to All. Existing service cursor/filter/API envelope tests stay green. | PASS |
 | Settings | Badge counts available readable service updates (fixture 1 among 3 enabled monitors), not messages or app installations. Existing release view reachable from Settings, not main navigation. Integration page reads mapped source coverage, never crawls/collects; absent evidence remains unknown. | PASS |
 | Responsive/theme | Real local FastAPI + migrated synthetic SQLite, Chromium at 1440/1024/390 in Light/Dark. Local table/type/nav scrolling, all columns retained, no whole-page horizontal overflow in exercised pages. Screenshots inspected, no JS/console errors or external runtime requests. | PASS |
+
+## Header and catalog-toolbar screenshot follow-up
+
+The isolated correction is 0050e3f85b252f44ae99ea82e3b49bc45a66ab8e, directly
+based on 8128797959d4b82ed1b6329e153110e0d02b01d5, with no upstream Safe,
+schema, authorization or configuration changes. It changes only UI assets,
+templates/cache tokens and the native-form regression test. It is also normally
+merged into the upstream-integrated candidate; neither new candidate inherits
+the previous release's full-CI or rollout approval.
+
+Numerical Chromium checks at 1200px and 1440px in Light/Dark show all seven
+header buttons at 40px height, 7px radius and 8px vertical / 12px horizontal
+padding. The active destination remains distinct. Search input, submit, root,
+child and View share one horizontal toolbar centerline. At 390px the toolbar
+wraps, with no whole-page overflow and all five controls operable. Native search
+retains view/kind/q, including JS-disabled submission; global smart search is
+unchanged. Synthetic catalog-owner fixtures exercise both creation controls
+without submitting writes. Six screenshots and per-control measurements live
+under exports/ux-v5-header-toolbar/; the exact source and image hashes are in
+its local evidence manifest. These are focused local checks, not full CI.
 
 ## Evidence applicability
 
