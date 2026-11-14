@@ -1632,7 +1632,10 @@ def test_object_detail_is_integrated_into_the_explorer_shell(
     document = unescape(response.text)
 
     assert '<html lang="en" data-view="catalog" data-page="detail">' in document
-    assert '<header class="main-header">' in document
+    header = re.search(r"<header\b[^>]*>", document)
+    assert header is not None
+    assert 'class="main-header"' in header.group()
+    assert 'data-principal-scope="test-unrestricted-principal"' in header.group()
     assert 'class="main-navigation"' in document
     assert 'class="filter-rail"' not in document
     assert 'class="asset-inspector"' in document
