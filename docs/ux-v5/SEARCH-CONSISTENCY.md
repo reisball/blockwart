@@ -2,7 +2,7 @@
 
 ## Goal and authority
 
-Continue UX-v5 contribution after Zoe’s 14 November clarification, requested by Iordanis in the current coordinating session. Existing upstream PR #340 is open at 33d8a77 against main; this work is a focused follow-up, not permission to bypass maintainer review or deploy unreviewed code.
+Define the five-domain search follow-up for upstream PR #340. This is a focused UX-v5 correction; maintainer review and required checks remain prerequisites for merge. Preparing the contribution does not authorize a production deployment.
 
 ## Required behavior
 
@@ -29,4 +29,4 @@ No auth-policy rewrite, data migration, timestamp-default/cache-header task, pro
 
 ## Source evidence
 
-Original session “Blockwart Upgrade und UXvergleich analysieren” (9–10 November): five direct destinations, no left rail or global root-create, compact navigation, global grouped search, full catalog rows, separate stock/match/visible counts, domain-safe activity display and filters. Canonical detailed original design: local coordinator knowledge/proposals/blockwart-ux-upstream/UX-V4.md and UX-V5.md; previous implemented matrix: docs/ux-v5/ACCEPTANCE.md. Latest search clarification: Zoe, Brain&Chill 14 November ~12:37 CET.
+The existing UX-v5 acceptance baseline is recorded in [ACCEPTANCE.md](ACCEPTANCE.md): five direct destinations, no left rail or global root-create, compact navigation, global grouped search, full catalog rows, separate stock/match/visible counts, and domain-safe activity display and filters. The requirements above make the follow-up local/global search contract explicit for review in PR #340.
