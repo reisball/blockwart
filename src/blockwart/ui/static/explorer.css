@@ -2278,6 +2278,10 @@ button.map-node {
 .catalog-main .content-heading { align-items:center; flex-wrap:wrap; margin-bottom:16px; gap:12px; }
 .catalog-main .content-heading h1 { font-size:24px; }
 .catalog-main .eyebrow { display:none; }
+.catalog-toolbar { display:flex; flex:1 1 680px; align-items:center; gap:8px; flex-wrap:wrap; min-width:0; }
+.catalog-toolbar .catalog-search { flex:1 1 300px; margin-bottom:0; }
+.catalog-toolbar .catalog-create-actions { flex:0 1 auto; min-width:0; }
+
 .catalog-create-actions { display:flex; align-items:center; flex-wrap:wrap; gap:8px; }
 .catalog-create-actions .primary-button { display:inline-flex; align-items:center; min-height:44px; padding:10px 12px; border-radius:7px; background:var(--explorer-panel); border:1px solid var(--explorer-border); color:var(--explorer-text); }
 .catalog-search { display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin-bottom:12px; }
@@ -2316,4 +2320,10 @@ button.map-node {
  .query-bar { overflow-x:visible; }
  .query-pills { flex-basis:100%; }
  .tree-controls { flex-basis:100%; }
+}
+
+@media (max-width:700px) {
+ .catalog-toolbar { flex-basis:100%; }
+ .catalog-toolbar .catalog-search { flex-basis:100%; }
+ .catalog-toolbar .catalog-create-actions { flex-basis:100%; }
 }

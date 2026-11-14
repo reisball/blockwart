@@ -403,3 +403,23 @@ def test_polish_activity_retains_rfc3339_fallback_and_evidenced_labels(
     assert 'action="/search" method="get"' in fallback
     assert 'name="q" value="Proxmox"' in fallback
     assert "data-smart-expand" in fallback
+
+
+def test_catalog_toolbar_keeps_search_scope_query_and_actions_together(client, ux_seed):  # noqa: F811
+    """Keep the native type-bound GET form alongside existing toolbar actions."""
+    response = client.get("/?view=catalog&kind=service&q=Direct")
+    assert response.status_code == 200
+    header = re.search(r'<header class="content-heading">(.*?)</header>', response.text, re.S)[1]
+    assert 'class="catalog-toolbar"' in header
+    form = re.search(r'<form class="catalog-search"(.*?)</form>', header, re.S)[0]
+    assert 'method="get" action="/"' in form
+    assert 'name="view" value="catalog"' in form
+    assert 'name="kind" value="service"' in form
+    assert 'name="q" value="Direct"' in form
+    assert 'href="/?view=catalog&q=Direct"' in form
+    assert header.index('class="catalog-toolbar"') < header.index('class="catalog-search"')
+    assert header.index('class="catalog-search"') < header.index('class="catalog-create-actions"')
+    assert 'data-view-menu' in header and '&create=1' in header
+    submitted = client.get("/", params={"view": "catalog", "kind": "service", "q": "Direct"})
+    assert submitted.status_code == 200
+    assert 'data-asset-ref="service:ux-direct"' in submitted.text
