@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any, Literal
@@ -111,6 +112,8 @@ def query_attention_page(
     direction: SortDirection = "asc",
     include_total: bool = False,
     now: datetime | None = None,
+    text_query: str = "",
+    text_projection: Callable[[AttentionItem], str] | None = None,
 ) -> AttentionPage:
     """Return one authorized attention page plus its matching summary.
 
@@ -166,6 +169,32 @@ def query_attention_page(
             kind=kind,
         )
     ]
+    if text_query.strip():
+        from blockwart.domain.search import normalize_search_text
+
+        term = normalize_search_text(text_query)
+        filtered = [
+            item
+            for item in filtered
+            if term
+            in (
+                normalize_search_text(
+                    text_projection(item)
+                    if text_projection
+                    else " ".join(
+                        str(value or "")
+                        for value in (
+                            item.reason_code,
+                            item.detail_code,
+                            item.target.label,
+                            item.target.ref,
+                            item.target.project_label,
+                        )
+                    )
+                )
+                or ""
+            )
+        ]
     authorized_digest = _attention_view_digest(filtered)
     page = paginate_items(
         filtered,
@@ -178,6 +207,7 @@ def query_attention_page(
             "access": access.cursor_scope,
             "authorized_view": authorized_digest,
             "channel": channel,
+            **({"text_query": text_query} if text_query else {}),
             "category": category or "",
             "kind": kind or "",
             "limit": limit,

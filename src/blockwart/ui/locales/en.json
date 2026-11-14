@@ -1606,5 +1606,20 @@
   "safe.save": "Save new version",
   "safe.restore": "Restore source version",
   "safe.delete": "Soft delete",
-  "safe.undelete": "Recover source version"
+  "safe.undelete": "Recover source version",
+  "search.local.catalog": "Search catalog",
+  "search.local.topology": "Search topology",
+  "search.local.projects": "Search projects",
+  "search.local.hints": "Search hints",
+  "search.local.activity": "Search activity",
+  "search.local.clear": "Clear area",
+  "search.everywhere_query": "Search everywhere for “{query}”",
+  "search.local.matches": "{count} matches",
+  "search.local.loaded": "{count} matches in loaded rows",
+  "search.result.project": "Project",
+  "search.result.page": "Page",
+  "search.result.item": "Task",
+  "search.result.chronology": "Log",
+  "search.topology_unsupported": "This object type is not drawn in topology. The selected filter and query are retained; switch to catalog to see the matching objects.",
+  "search.network_options_retained": "Network category and inherited-service options are retained and apply only in Network mode; the local query and object type remain active."
 }

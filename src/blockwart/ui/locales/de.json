@@ -1606,5 +1606,20 @@
   "safe.save": "Neue Version speichern",
   "safe.restore": "Quellversion wiederherstellen",
   "safe.delete": "Wiederherstellbar löschen",
-  "safe.undelete": "Quellversion zurückholen"
+  "safe.undelete": "Quellversion zurückholen",
+  "search.local.catalog": "Katalog durchsuchen",
+  "search.local.topology": "Topologie durchsuchen",
+  "search.local.projects": "Projekte durchsuchen",
+  "search.local.hints": "Hinweise durchsuchen",
+  "search.local.activity": "Aktivität durchsuchen",
+  "search.local.clear": "Bereich leeren",
+  "search.everywhere_query": "Überall nach „{query}“ suchen",
+  "search.local.matches": "{count} Treffer",
+  "search.local.loaded": "{count} Treffer in geladenen Zeilen",
+  "search.result.project": "Projekt",
+  "search.result.page": "Seite",
+  "search.result.item": "Aufgabe",
+  "search.result.chronology": "Protokoll",
+  "search.topology_unsupported": "Dieser Objekttyp wird in der Topologie nicht dargestellt. Filter und Suchtext bleiben erhalten; im Katalog sind die passenden Objekte sichtbar.",
+  "search.network_options_retained": "Netzkategorie und geerbte Dienste bleiben gespeichert und gelten nur im Netzwerkmodus; Suchtext und Objekttyp bleiben aktiv."
 }

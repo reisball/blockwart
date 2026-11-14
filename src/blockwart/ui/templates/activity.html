@@ -15,10 +15,12 @@
         <div>
           <h1>{{ t("activity.title") }}</h1>
         </div>
+        {% include "_local_search.html" %}
       </header>
 
       <section class="panel">
         <form class="form-grid" method="get" action="/activity">
+          <input type="hidden" name="q" value="{{ q }}" />
           <div class="activity-filter-grid">
             <label>{{ t("activity.type_label") }}
               <select name="event_type">
@@ -53,6 +55,7 @@
       {% if active_target_label %}<p class="meta">{{ t('activity.target_filter_active', target=active_target_label) }} <a href="{{ target_reset_url }}">{{ t('activity.target_reset') }}</a></p>{% endif %}
 
       <section class="panel">
+        {% if q %}<p>{{ t("search.local.loaded", count=items|length) }}</p>{% endif %}
         {% if items %}
           <div class="table-wrap"><table class="table activity-table">
             <thead><tr><th>{{ t("activity.occurred_at") }}</th><th>{{ t("activity.type_label") }}</th><th>{{ t("attention.target_label") }}</th><th>{{ t("audit.field.summary") }}</th><th>{{ t("project.column.author") }}</th></tr></thead>

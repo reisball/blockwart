@@ -14,10 +14,12 @@
         <div>
           <h1>{{ t("attention.title") }}</h1>
         </div>
+        {% include "_local_search.html" %}
       </header>
 
       <section class="panel">
         <h2>{{ t("attention.summary") }}</h2>
+        {% if q %}<p>{{ t("search.local.matches", count=summary.total) }}</p>{% endif %}
 
         <nav class="attention-priority-pills" aria-label="{{ t('attention.severity_label') }}">
           <a class="attention-priority-pill {% if not selected_severity %}active{% endif %}" href="{{ priority_urls[''] }}" {% if not selected_severity %}aria-current="true"{% endif %}>{{ t('attention.all_severities') }} <b>{{ summary.total }}</b></a>
@@ -28,6 +30,7 @@
 
       <details class="secondary-disclosure" {% if selected_kind or selected_reason_code or selected_category or selected_signal_state %}open{% endif %}><summary>{{ t("attention.filter") }}</summary>
         <form class="form-grid" method="get" action="/attention/filters/normalize">
+          <input type="hidden" name="q" value="{{ q }}" />
           <input type="hidden" name="severity" value="{{ selected_severity }}" />
           <div class="project-filter-grid">
             <label>{{ t("attention.kind_label") }}

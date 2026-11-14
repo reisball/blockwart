@@ -1,0 +1,13 @@
+{% set local_path = request.url.path %}
+{% set local_scope = ('topology' if view == 'topology' else 'catalog') if local_path == '/' else ('hints' if local_path == '/attention' else ('projects' if local_path == '/projects' else 'activity')) %}
+<form class="catalog-search" method="get" action="{{ local_path }}" data-local-search {% if local_scope == "topology" %}data-topology-search{% endif %} data-search-domain="{{ 'objects' if local_path == '/' else local_scope }}" data-principal-scope="{{ principal_scope }}">
+  {% for name, value in request.query_params.multi_items() %}{% if name not in ['q','cursor','restore','create','create_root','lang','target','previous_object_id','object_id','topology_mode'] %}<input type="hidden" name="{{ name }}" value="{{ value }}" />{% endif %}{% endfor %}
+  {% if local_path == '/' %}<input type="hidden" name="topology_mode" value="{{ topology_mode }}" />{% if not request.query_params.get('kind') %}<input type="hidden" name="kind" value="{{ kind }}" />{% endif %}{% endif %}
+  {% if local_path == '/' and not request.query_params.get('view') %}<input type="hidden" name="view" value="{{ view }}" />{% endif %}
+  {% if local_path == '/activity' and selected_object_id %}<input type="hidden" name="object_id" value="{{ selected_object_id }}" />{% endif %}
+  <label><span class="catalog-scope">{{ t('search.local.' ~ local_scope) }}{% if local_path == '/' and kind %} · <a class="query-pill" href="/?view={{ view }}&q={{ q|urlencode }}{% if request.query_params.get('topology_mode') %}&topology_mode={{ topology_mode }}{% endif %}{% if network_category %}&network_category={{ network_category }}{% endif %}{% if include_inherited_services %}&services=1{% endif %}">{{ t('kind.' ~ kind) }} ×</a>{% endif %}</span><input type="search" name="q" value="{{ q }}" maxlength="200" placeholder="{{ t('search.local.' ~ local_scope) }}" autocomplete="off" /></label>
+  <button type="submit">{{ t('search.submit') }}</button>
+  <a class="local-clear" href="{{ '/?view=' ~ view if local_path == '/' else local_path }}" data-local-clear>{{ t('search.local.clear') }}</a>
+  {% if local_path == '/' and kind and not objects %}<a href="/?view={{ view }}&q={{ q|urlencode }}&topology_mode={{ topology_mode }}&network_category={{ network_category }}&services={{ '1' if include_inherited_services else '' }}">{{ t("search.expand") }}</a>{% endif %}
+  {% if q %}<a href="/search?q={{ q|urlencode }}" data-smart-open data-smart-query="{{ q }}">{{ t('search.everywhere_query', query=q) }}</a>{% endif %}
+</form>

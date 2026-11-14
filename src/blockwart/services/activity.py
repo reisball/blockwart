@@ -44,7 +44,7 @@ from blockwart.domain.activity import (
 )
 from blockwart.domain.auth import Permission
 from blockwart.domain.placement import CANONICAL_PLACEMENT_RELATION_TYPE
-from blockwart.domain.search import SEARCH_LIMIT_MAX, SEARCH_LIMIT_MIN
+from blockwart.domain.search import SEARCH_LIMIT_MAX, SEARCH_LIMIT_MIN, normalize_search_text
 from blockwart.domain.timestamps import format_rfc3339_utc
 from blockwart.models import AuditEvent, CatalogObject
 from blockwart.models.auth import Principal
@@ -100,6 +100,7 @@ def query_activity_page(
     direction: SortDirection = "desc",
     include_total: bool = False,
     now: datetime | None = None,
+    text_query: str = "",
 ) -> ActivityPage:
     """Return one authorized activity page; counts derive from the same set."""
     if limit < SEARCH_LIMIT_MIN or limit > SEARCH_LIMIT_MAX:
@@ -116,6 +117,7 @@ def query_activity_page(
 
     query = {
         "access": access.cursor_scope,
+        **({"text_query": text_query} if text_query else {}),
         "direction_note": "newest_first_default",
         "event_type": event_type or "",
         "kind": kind or "",
@@ -159,6 +161,21 @@ def query_activity_page(
                 _parse_cursor_tie_breaker(position[1]),
                 direction,
             )
+        )
+    if text_query.strip():
+        return _text_activity_page(
+            session,
+            access,
+            page_statement=page_statement,
+            query=query,
+            text_query=text_query,
+            event_type=event_type,
+            kind=kind,
+            subtree_ids=subtree_ids,
+            limit=limit,
+            direction=direction,
+            include_total=include_total,
+            now=now,
         )
     page_cap = min(limit + 1, ACTIVITY_MAX_SCAN_EVENTS)
     rows = list(session.scalars(page_statement.limit(page_cap)).all())
@@ -538,3 +555,98 @@ def _resolve_actor_identities(
         else item
         for item in items
     ]
+
+
+def _text_activity_page(
+    session,
+    access,
+    *,
+    page_statement,
+    query,
+    text_query,
+    event_type,
+    kind,
+    subtree_ids,
+    limit,
+    direction,
+    include_total,
+    now,
+):
+    # Search the authorized rendered projection, never raw audit JSON/profiles.
+    # Bounded chunks advance past nonmatches; budget continuation may be empty.
+    term = normalize_search_text(text_query)
+    matches = []
+    scanned = 0
+    last = None
+    exhausted = False
+    statement = page_statement
+    while scanned < ACTIVITY_MAX_SCAN_EVENTS and len(matches) <= limit:
+        rows = list(
+            session.scalars(statement.limit(min(200, ACTIVITY_MAX_SCAN_EVENTS - scanned))).all()
+        )
+        if not rows:
+            exhausted = True
+            break
+        readable = _readable_objects(
+            session, access, {row.object_id for row in rows}, include_reference_history=True
+        )
+        projected = [
+            item
+            for row in rows
+            if (
+                item := _project_event(
+                    row,
+                    access=access,
+                    readable=readable,
+                    event_type=event_type,
+                    kind=kind,
+                    subtree_ids=subtree_ids,
+                )
+            )
+            is not None
+        ]
+        resolved = {
+            item.event_id: item for item in _resolve_actor_identities(session, access, projected)
+        }
+        for row in rows:
+            scanned += 1
+            item = resolved.get(f"audit:{row.id:020d}")
+            if item and term in (
+                normalize_search_text(
+                    " ".join(
+                        str(value or "")
+                        for value in (
+                            item.summary,
+                            item.event_type,
+                            item.actor_display,
+                            item.object.label,
+                            item.object.ref,
+                        )
+                    )
+                )
+                or ""
+            ):
+                matches.append(item)
+                if len(matches) > limit:
+                    break
+            last = (format_rfc3339_utc(row.created_at), f"{row.id:020d}")
+        if len(matches) > limit:
+            break
+        statement = page_statement.where(_keyset_predicate(row.created_at, row.id, direction))
+    next_cursor = None
+    if not exhausted and last:
+        next_cursor = encode_page_cursor(
+            resource=ACTIVITY_RESOURCE,
+            sort=ACTIVITY_SORT_FIELD,
+            direction=direction,
+            query=query,
+            primary=last[0],
+            tie_breaker=last[1],
+        )
+    return ActivityPage(
+        items=matches[:limit],
+        next_cursor=next_cursor,
+        total=None,
+        total_status="budget_exhausted" if include_total else "not_requested",
+        generated_at=format_rfc3339_utc(now or datetime.now(UTC)) or "",
+    )

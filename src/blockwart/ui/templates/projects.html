@@ -17,11 +17,14 @@
         {% if can_create_root %}
           <a class="button" href="/?kind=project&create_root=1">{{ t("project.workspace.create") }}</a>
         {% endif %}
+        {% include "_local_search.html" %}
       </header>
+
 
       <p><a href="/workspace/search">{{ t('workspace.search.title') }}</a></p>
       <details class="secondary-disclosure" {% if selected_category or selected_status %}open{% endif %}><summary>{{ t("project.workspace.filter") }}</summary>
         <form class="form-grid" method="get" action="/projects/filters/normalize">
+          <input type="hidden" name="q" value="{{ q }}" />
           <div class="project-filter-grid">
             <label>{{ t("project.field.category.label") }}
               <select name="project_category">
@@ -41,7 +44,10 @@
       </details>
 
       <section class="panel">
-        {% if projects %}
+        {% if search_page is not none %}
+          <p>{{ t('search.local.matches', count=search_page.total) }}</p>
+          {% for hit in search_page.items %}<article class="local-search-hit"><span class="badge">{{ t('search.result.' ~ hit.kind) }}</span> <a href="{{ hit.url }}">{{ hit.title }}</a><p class="meta">{{ hit.project_label }} · {{ hit.excerpt }}</p></article>{% else %}<p class="meta">{{ t('project.workspace.empty') }}</p>{% endfor %}
+        {% elif projects %}
           <div class="table-wrap"><table class="table project-overview-table">
             <thead><tr><th>{{ t("project.workspace.project") }}</th><th>{{ t("project.field.project_status.label") }}</th><th>{{ t("project.field.category.label") }}</th><th>{{ t("project.field.current_summary.label") }}</th><th>{{ t("project.workspace.next_action") }}</th><th>{{ t("project.workspace.last_activity") }}</th></tr></thead>
             <tbody>

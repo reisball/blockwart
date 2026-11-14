@@ -19,7 +19,7 @@
       const html = await response.text();
       if (currentRequest === requestId && dialog.open) results.innerHTML = html;
     } catch (error) {
-      if (error.name !== 'AbortError') results.textContent = document.documentElement.lang === 'de' ? 'Suche nicht verfügbar. Bitte erneut versuchen.' : 'Search unavailable. Please try again.';
+      if (error.name !== 'AbortError' && currentRequest === requestId && dialog.open) results.textContent = document.documentElement.lang === 'de' ? 'Suche nicht verfügbar. Bitte erneut versuchen.' : 'Search unavailable. Please try again.';
     }
   }
   function open(event) {
@@ -30,6 +30,11 @@
       results.replaceChildren();
       hasOpened = true;
     }
+    if (event?.currentTarget?.hasAttribute?.('data-smart-query')) {
+      form.elements.q.value = event.currentTarget.dataset.smartQuery;
+      form.elements.object_kind.value = '';
+      results.replaceChildren();
+    }
     if (!dialog.open) dialog.showModal();
     form.elements.q.focus();
     if (form.elements.q.value) search();
@@ -37,6 +42,9 @@
   document.querySelectorAll('[data-smart-open]').forEach(link => link.addEventListener('click', open));
   document.addEventListener('keydown', event => {
     if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'k' && dialog) open(event);
+  });
+  dialog?.addEventListener('keydown', event => {
+    if (event.key === 'Escape') { event.preventDefault(); dialog.close(); }
   });
   dialog?.querySelector('[data-smart-close]').addEventListener('click', () => dialog.close());
   dialog?.addEventListener('close', () => { controller?.abort(); clearTimeout(timer); opener?.focus(); });

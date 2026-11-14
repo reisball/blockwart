@@ -126,3 +126,58 @@ server persistence. Tables and tab strips scroll locally at narrow widths.
 Legacy identities remain unresolved when current data cannot prove historical
 ownership. Timestamp-default investigation and Cache-Control consistency on
 activity/hints/projects remain separate follow-ups, not hidden changes in this PR.
+
+## Five-domain search follow-up (14 November)
+
+The isolated follow-up implements SEARCH-CONSISTENCY.md on PR340 base
+33d8a77df8b5a24e0d516b806bb961faf6073946. It is not deployed.
+
+- All five destinations render the same compact native GET search component in
+  the heading/toolbar with explicit English/German domain labels. Local typing
+  never invokes global search. The explicit query handoff opens All Types;
+  ordinary global close/reopen retains the chosen global type until reload.
+- Catalog/topology share query/type and retain network mode/category/services in
+  native cross-view links. Unsupported object types and placement-inapplicable
+  network options are explained visibly, not silently removed. Topology may show
+  context parents; these are representation context, not additional matches.
+- Projects, hints and activity retain independent structured filters/text through
+  principal-scoped sessionStorage navigation links. Current URLs (including empty
+  queries), deep links and browser history are authoritative. Clearing removes
+  only that domain. No localStorage query persistence or server storage.
+- Projects search authorized project metadata plus current pages/tasks/logs with
+  explicit result types and existing permission-checked links. Category/status
+  filters apply before paging; private UI project hits do not alter the REST/MCP
+  workspace-search envelope or its accepted public kinds.
+- Hints filter authorized derived items' visible translated reason/help and target
+  text before summary/count/pagination. Activity filters the existing safe event
+  summary/type, permitted resolved author label and target label/reference, not
+  raw audit JSON or restricted profiles. Its target picker remains a separate
+  intersecting filter. Text cursors bind query and existing filters. Activity
+  scans bounded chunks and may return an empty continuation page at the scan
+  budget; loaded-row counts are never presented as a full paginated total.
+- Escaping, public search envelopes, discover/concealed-content denial, native
+  forms and existing attention/activity cursor regressions are exercised.
+  Separate small original-agreement repair: Settings has an inline decorative
+  gear plus accessible text/title; seven header-control geometry is preserved.
+
+Focused raw evidence remains local/untracked under exports/ux-v5-search/:
+final-search-gate.log (66 tests), new-tests-gate.log (7 focused new tests),
+and the final combined frozen-focused-gate.log (84 tests),
+topology-tests-final.log (16 tests), browser-results.json, fenced fixture/server/request logs,
+and twenty screenshots (five domains x 1440/390 x Light/Dark). Source imports
+are explicitly bound to this checkout; no production database or IP network.
+Browser proof covers actual matches/nonmatches, domain isolation and reset,
+deep links/back, explicit global handoff, global type retention/Escape, JS-disabled
+native GETs, visible Settings icon/name, control hit-testing, no whole-page
+horizontal overflow and no unexpected console/JS errors. Screenshots inspected.
+Measured query-input widths are 272–754px at 1440 and 281–288px at 390;
+all seven navigation/action buttons retain 40px height, 7px radius and 8/12px
+padding. The visibility oracle rejects an intentionally hidden submit button.
+
+GitNexus's complete live registry has 21 repositories and no Blockwart:
+impact/index freshness remains UNKNOWN. direct-callers.txt traces UI, REST and
+workspace service callers; MCP retains its existing shared API/query path. No
+unrelated index was substituted. SQLite execution is proven; SQL uses existing
+SQLAlchemy/keyset/permission projections without dialect-specific additions,
+but live PostgreSQL execution is not claimed. Remote full CI, independent review,
+Forge approval and maintainer/human acceptance remain the parent's gates.

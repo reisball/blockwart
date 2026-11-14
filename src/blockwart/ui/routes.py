@@ -843,14 +843,29 @@ def attention_overview(
     kind: str | None = None,
     reason_code: str | None = None,
     cursor: str | None = None,
+    q: str = "",
 ):
     """Render the authorized attention view from the shared application result."""
+    if len(q) > 200:
+        raise HTTPException(400, "Invalid search query")
     access = read_access_from_request(request)
     try:
         page = query_attention_page(
             session,
             access,
             channel="ui",
+            text_query=q,
+            text_projection=lambda item: " ".join(
+                str(value or "")
+                for value in (
+                    item.target.label,
+                    item.target.ref,
+                    item.target.project_label,
+                    item.detail_code,
+                    translation_context(request)["t"]("attention.reason." + item.reason_code),
+                    translation_context(request)["t"]("attention.reason_help." + item.reason_code),
+                )
+            ),
             category=category or None,
             severity=severity or None,
             signal_state=signal_state or None,
@@ -866,6 +881,7 @@ def attention_overview(
     except AttentionQueryError as exc:
         raise HTTPException(status_code=400, detail="Invalid attention filter") from exc
     params = {
+        "q": q,
         "category": category,
         "severity": severity,
         "signal_state": signal_state,
@@ -883,6 +899,7 @@ def attention_overview(
         request,
         "attention.html",
         context={
+            "q": q,
             "title": i18n["t"]("attention.title"),
             "summary": page.summary,
             "items": page.items,
@@ -900,6 +917,7 @@ def attention_overview(
                     {
                         key: item
                         for key, item in {
+                            "q": q,
                             "category": category,
                             "kind": kind,
                             "reason_code": reason_code,
@@ -1009,8 +1027,11 @@ def activity_overview(
     object_id: str | None = None,
     parent: str | None = None,
     cursor: str | None = None,
+    q: str = "",
 ):
     """Render the authorized activity feed from the shared application result."""
+    if len(q) > 200:
+        raise HTTPException(400, "Invalid search query")
     access = read_access_from_request(request)
     visible = list_catalog_objects(session, access)
     targets = {
@@ -1045,6 +1066,7 @@ def activity_overview(
         page = query_activity_page(
             session,
             access,
+            text_query=q,
             since=since or None,
             event_type=event_type or None,
             kind=kind or None,
@@ -1060,6 +1082,7 @@ def activity_overview(
     except ActivityQueryError as exc:
         raise HTTPException(status_code=400, detail="Invalid activity filter") from exc
     params = {
+        "q": q,
         "event_type": event_type,
         "since": since,
         "kind": kind,
@@ -1079,6 +1102,7 @@ def activity_overview(
     reset_params = {
         key: value
         for key, value in {
+            "q": q,
             "event_type": event_type,
             "since": since,
             "kind": kind,
@@ -1091,6 +1115,7 @@ def activity_overview(
         request,
         "activity.html",
         context={
+            "q": q,
             "title": i18n["t"]("activity.title"),
             "items": page.items,
             "event_types": list(ACTIVITY_EVENT_TYPES),
@@ -1161,11 +1186,13 @@ def normalize_attention_filter_submission(
     signal_state: str | None = None,
     kind: str | None = None,
     reason_code: str | None = None,
+    q: str = "",
 ) -> RedirectResponse:
     """Redirect a native attention filter form to its canonical typed URL."""
     parameters = [
         (name, value)
         for name, value in (
+            ("q", q),
             ("category", category),
             ("severity", severity),
             ("signal_state", signal_state),
@@ -1187,23 +1214,43 @@ def project_overview(
     project_category: ProjectCategory | None = None,
     project_status: ProjectStatus | None = None,
     cursor: str | None = None,
+    q: str = "",
 ):
+    if len(q) > 200:
+        raise HTTPException(400, "Invalid search query")
     access = read_access_from_request(request)
     try:
+        search_page = (
+            search_workspaces(
+                session,
+                access,
+                q=q,
+                project_category=project_category,
+                project_status=project_status,
+                include_projects=True,
+                limit=100,
+                cursor=cursor,
+            )
+            if q.strip()
+            else None
+        )
         page = query_project_overview_page(
             session,
             access,
             project_category=project_category,
             project_status=project_status,
             limit=100,
-            cursor=cursor,
+            cursor=cursor if not search_page else None,
             sort="last_activity",
             direction="desc",
             include_total=False,
         )
     except InvalidCursor as exc:
         raise HTTPException(status_code=400, detail="Invalid pagination cursor") from exc
+    if search_page is not None:
+        page = search_page
     params = {
+        "q": q,
         "project_category": project_category,
         "project_status": project_status,
         "cursor": page.next_cursor,
@@ -1218,8 +1265,10 @@ def project_overview(
         request,
         "projects.html",
         context={
+            "q": q,
             "title": i18n["t"]("project.workspace.overview_title"),
-            "projects": page.items,
+            "projects": [] if search_page is not None else page.items,
+            "search_page": search_page,
             "selected_category": project_category or "",
             "selected_status": project_status or "",
             "project_categories": PROJECT_CATEGORY_OPTIONS,
@@ -1235,11 +1284,13 @@ def project_overview(
 def normalize_project_filter_submission(
     project_category: str | None = None,
     project_status: str | None = None,
+    q: str = "",
 ) -> RedirectResponse:
     """Redirect a native Project filter form to its canonical typed URL."""
     parameters = [
         (name, value)
         for name, value in (
+            ("q", q),
             ("project_category", project_category),
             ("project_status", project_status),
         )
