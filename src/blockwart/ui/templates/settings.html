@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="referrer" content="no-referrer" />
-    <link rel="icon" href="data:," />
+
     <title>{{ title }}</title>
     <script>
       if (localStorage.getItem("blockwart-theme") === "light") {
@@ -59,6 +59,12 @@
 
         <section class="panel" aria-labelledby="settings-updates-title"><h2 id="settings-updates-title">{{ t('nav.release_updates') }}</h2><p>{{ t('settings.updates_help') }}</p><a class="button" href="/release-updates">{{ t('settings.open') }}</a></section>
         <section class="panel" aria-labelledby="settings-integrations-title"><h2 id="settings-integrations-title">{{ t('settings.integrations') }}</h2><p>{{ t('settings.integrations_help') }}</p><a class="button" href="/settings/integrations">{{ t('settings.open') }}</a></section>
+        <section class="panel branding-about" aria-labelledby="settings-about-title">
+          <h2 id="settings-about-title">{{ t("branding.about") }}</h2>
+          <p>{{ t("branding.description") }}</p>
+          <p class="meta">{{ t("branding.version") }} {{ app_version }}</p>
+          <p><a href="https://github.com/reisball/blockwart" rel="noreferrer">{{ t("branding.project") }}</a> · <a href="https://github.com/reisball/blockwart/tree/main/docs" rel="noreferrer">{{ t("branding.docs") }}</a></p>
+        </section>
         {% if is_platform_admin %}
           <section class="panel" aria-labelledby="settings-principals-title">
             <div class="panel-head">

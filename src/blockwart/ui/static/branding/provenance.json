@@ -1,0 +1,111 @@
+{
+  "source_type": "AI-generated approved raster illustrations; no SVG/vector master claimed",
+  "user_approved": "2026-11-14 in this conversation: keep icon + image",
+  "generator_reported": "google/gemini-3.1-flash-image",
+  "sources": {
+    "hero": {
+      "filename": "blockwart-der-block-kuemmerer---7704bb50-34e8-4f40-a8bf-e555daaa8a3d.jpg",
+      "sha256": "53b89247d9ab4b2ec280728e41412ccff86474fedc7a3bb567764100c4aec369",
+      "size": [
+        2528,
+        1696
+      ]
+    },
+    "icon": {
+      "filename": "blockwart-icon-reduziert---3ad6c2f5-983c-47e5-a21c-5f4b2945f5ee.jpg",
+      "sha256": "ac99ae0716d21a8ed6fc51fb4a8300024a7db6d429412ea69b37171c14061cb2",
+      "size": [
+        2048,
+        2048
+      ]
+    }
+  },
+  "transformations": {
+    "mark": "Border-connected near-background matting plus approved outer-torso silhouette mask to preserve dark connected interior seams; retain opaque face and contour; no redesign; normalized 10% clear margin",
+    "head": "Head-only crop (640,385,1410,1090) in original 2048-square approved icon; transparent outer crop",
+    "app": "Same full mascot on uniform #10151e with at least 20% safe margin, 180/192/512px; no PWA/offline capability implied",
+    "hero": "Original composition and opaque background retained; color unchanged; optimized WebP 640/1200 and JPEG fallback"
+  },
+  "files": [
+    {
+      "name": "app-icon-192.png",
+      "width": 192,
+      "height": 192,
+      "mode": "RGB",
+      "bytes": 14185,
+      "sha256": "605d1ca6affb3db24b8b2136c0bbd6834b7e97c27506b423a24b7788db4a9bc1"
+    },
+    {
+      "name": "app-icon-512.png",
+      "width": 512,
+      "height": 512,
+      "mode": "RGB",
+      "bytes": 75295,
+      "sha256": "dff09f8e581532d64e25579cdde1f4aa42ebc31d4fbd460d078ffbc338fe223b"
+    },
+    {
+      "name": "apple-touch-icon.png",
+      "width": 180,
+      "height": 180,
+      "mode": "RGB",
+      "bytes": 12841,
+      "sha256": "710f2bb1100be15432c21442a2b435f8cdfcd0fff64f42f9f8c3fdefbcd48592"
+    },
+    {
+      "name": "blockwart-hero-1200.jpg",
+      "width": 1200,
+      "height": 805,
+      "mode": "RGB",
+      "bytes": 116158,
+      "sha256": "386c2db16090f06da739de48d166d521891259a46a52bd34937f72c547e82555"
+    },
+    {
+      "name": "blockwart-hero-1200.webp",
+      "width": 1200,
+      "height": 805,
+      "mode": "RGB",
+      "bytes": 66058,
+      "sha256": "a70add483a7cb1183506e453c72ee8b84f39e3e1eae6742db5847d9f0086938e"
+    },
+    {
+      "name": "blockwart-hero-640.webp",
+      "width": 640,
+      "height": 429,
+      "mode": "RGB",
+      "bytes": 26558,
+      "sha256": "2669ade8574e518421d9515a25a5bc0a16dc282bed3aa8a42229ad7f55b7fbe0"
+    },
+    {
+      "name": "blockwart-mark-40.png",
+      "width": 40,
+      "height": 40,
+      "mode": "RGBA",
+      "bytes": 2851,
+      "sha256": "1d164b1cd1d5bc652034986b15ded2baae03704a7a241900139e9c3196b0d2fe"
+    },
+    {
+      "name": "blockwart-mark-80.png",
+      "width": 80,
+      "height": 80,
+      "mode": "RGBA",
+      "bytes": 7263,
+      "sha256": "4bb023edd883baf32352031d50683910df12fbad37aefc0d2bf00b818b52e620"
+    },
+    {
+      "name": "favicon-32.png",
+      "width": 32,
+      "height": 32,
+      "mode": "RGBA",
+      "bytes": 1500,
+      "sha256": "7ccaeb60d8b83375a12a26590a0204a2adf1f3da8cfd304cd4e5ad512316e224"
+    },
+    {
+      "name": "favicon.ico",
+      "width": 48,
+      "height": 48,
+      "mode": "RGBA",
+      "bytes": 4820,
+      "sha256": "059ad2b0e68896e77e1b626782b6c2b5a224ffac2ab34e6eef72c299fbd6ab53"
+    }
+  ]
+}

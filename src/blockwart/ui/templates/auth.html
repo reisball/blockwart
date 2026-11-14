@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <link rel="icon" href="data:," />
+    {% include "_branding_head.html" %}
     <meta name="referrer" content="no-referrer" />
     <title>{{ title }}</title>
     <script>
@@ -34,7 +34,13 @@
       </div>
     </header>
 
-    <main class="page">
+    <main class="page{% if not principal and login_challenge %} auth-login-layout{% endif %}">
+      {% if not principal and login_challenge %}
+      <picture class="auth-brand-hero">
+        <source type="image/webp" srcset="/static/branding/blockwart-hero-640.webp 640w, /static/branding/blockwart-hero-1200.webp 1200w" sizes="(max-width: 800px) 1px, 50vw" media="(min-width: 801px)" />
+        <img src="/static/branding/blockwart-hero-1200.jpg" width="1200" height="805" alt="" loading="lazy" decoding="async" />
+      </picture>
+      {% endif %}
       <section class="panel">
         {% if error %}
           <div class="error">{{ error }}</div>

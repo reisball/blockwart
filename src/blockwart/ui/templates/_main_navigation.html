@@ -1,5 +1,5 @@
 <header class="main-header">
-  <a class="main-brand" href="/">Blockwart</a>
+  <a class="main-brand" href="/"><img src="/static/branding/blockwart-mark-40.png" srcset="/static/branding/blockwart-mark-80.png 2x" width="32" height="32" alt="" decoding="async" /><span>Blockwart</span></a>
   <nav class="main-navigation" aria-label="{{ t('nav.main') }}">
     <a href="/?view=catalog" {% if request.url.path == '/' and view != 'topology' %}aria-current="page"{% endif %}>{{ t('nav.catalog') }}</a>
     <a href="/?view=topology" {% if view == 'topology' %}aria-current="page"{% endif %}>{{ t('nav.topology') }}</a>

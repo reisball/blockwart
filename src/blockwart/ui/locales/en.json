@@ -1,4 +1,9 @@
 {
+  "branding.about": "About Blockwart",
+  "branding.description": "Infrastructure knowledge for humans and AI agents.",
+  "branding.version": "Version",
+  "branding.project": "Project",
+  "branding.docs": "Documentation",
   "attention.kind_label": "Object kind",
   "attention.all_kinds": "All object kinds",
   "attention.all_reasons": "All reasons",

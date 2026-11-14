@@ -1,0 +1,16 @@
+/* Scoped identity only: no catalog, topology or task illustration. */
+.main-brand { display:inline-flex; align-items:center; gap:8px; min-height:40px; line-height:24px; white-space:nowrap; }
+.main-brand img { display:block; flex:none; width:32px; height:32px; object-fit:contain; }
+.auth-login-layout { display:grid; grid-template-columns:minmax(0,1.15fr) minmax(320px,0.85fr); align-items:center; gap:32px; }
+.auth-login-layout > .panel { min-width:0; }
+.auth-brand-hero { display:block; min-width:0; }
+.auth-brand-hero img { display:block; width:100%; height:auto; border-radius:16px; }
+.branding-about p:last-child { margin-bottom:0; }
+@media (max-width:800px) {
+  .auth-login-layout { display:block; }
+  .auth-brand-hero { display:none; }
+}
+@media (max-width:700px) {
+  .main-brand { min-height:24px; height:24px; }
+  .main-brand img { width:24px; height:24px; }
+}

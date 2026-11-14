@@ -1842,7 +1842,10 @@ def test_comment_markdown_is_safe_in_recent_and_full_timeline(
     ):
         assert response.status_code == 200
         assert "<script>alert(1)</script>" not in response.text
-        assert "<img" not in response.text
+        # Product identity is a trusted template image, not comment markdown.
+        content_without_brand = re.sub(r'<a class="main-brand".*?</a>', "", response.text)
+        assert "<img" not in content_without_brand
+        assert "https://tracker.invalid/pixel" not in response.text
         assert "&lt;script&gt;alert(1)&lt;/script&gt;" in response.text
         assert 'href="https://example.com/runbook"' in response.text
         assert 'rel="noopener noreferrer nofollow"' in response.text

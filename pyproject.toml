@@ -66,6 +66,7 @@ blockwart = [
   "ui/templates/*.html",
   "ui/static/*.css",
   "ui/static/*.js",
+  "ui/static/branding/*",
   "ui/locales/*.json",
 ]
 

@@ -13,6 +13,7 @@ from fastapi.templating import Jinja2Templates
 from pydantic import ValidationError
 from sqlalchemy.orm import Session
 
+from blockwart import __version__
 from blockwart.api.deps import get_session
 from blockwart.domain.activity import ACTIVITY_EVENT_TYPES
 from blockwart.domain.attention import (
@@ -1557,6 +1558,7 @@ def settings_hub(request: Request):
         context={
             "title": i18n["t"]("settings.title"),
             "is_platform_admin": access.principal.is_admin,
+            "app_version": __version__,
             **i18n,
         },
     )
