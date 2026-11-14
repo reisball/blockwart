@@ -21,6 +21,7 @@ from blockwart.domain.relationships import (
     relationship_metadata,
 )
 from blockwart.domain.runbooks import authorized_runbook_data
+from blockwart.domain.search import normalize_search_text
 from blockwart.domain.service_components import service_components_view
 from blockwart.domain.ui_schema import get_ui_schema
 from blockwart.models import CatalogObject, Relationship
@@ -1509,7 +1510,7 @@ def _matching_object_ids(
     objects: list[CatalogObjectReadOut],
     query: str,
 ) -> set[str]:
-    term = query.casefold()
+    term = normalize_search_text(query) or ""
     matches: set[str] = set()
     for catalog_object in objects:
         values = [
@@ -1528,7 +1529,7 @@ def _matching_object_ids(
                     ),
                 ]
             )
-        if any(term in value.casefold() for value in values):
+        if any(term in (normalize_search_text(value) or "") for value in values):
             matches.add(catalog_object.id)
     return matches
 

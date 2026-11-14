@@ -536,6 +536,10 @@ def _resolve_actor_identities(
             access.principal.is_admin
             or item.actor == access.principal.id
             or Permission.MANAGE_ACCESS in access.policy.permissions_for(item.object.object_id)
+            or any(
+                Permission.MANAGE_ACCESS in authority.permissions
+                for authority in access.policy.global_authorities
+            )
         )
     }
     if not actors:

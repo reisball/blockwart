@@ -22,8 +22,8 @@
         {% if q %}<p>{{ t("search.local.matches", count=summary.total) }}</p>{% endif %}
 
         <nav class="attention-priority-pills" aria-label="{{ t('attention.severity_label') }}">
-          <a class="attention-priority-pill {% if not selected_severity %}active{% endif %}" href="{{ priority_urls[''] }}" {% if not selected_severity %}aria-current="true"{% endif %}>{{ t('attention.all_severities') }} <b>{{ summary.total }}</b></a>
-          {% for severity in severities %}<a class="attention-priority-pill attention-severity-{{ severity }} {% if selected_severity == severity %}active{% endif %}" href="{{ priority_urls[severity] }}" {% if selected_severity == severity %}aria-current="true"{% endif %}>{{ t('attention.severity.' ~ severity) }} <b>{{ summary.by_severity.get(severity, 0) }}</b></a>{% endfor %}
+          <a class="attention-priority-pill {% if not selected_severity %}active{% endif %}" href="{{ priority_urls[''] }}" {% if not selected_severity %}aria-current="true"{% endif %}>{{ t('attention.all_severities') }} <b>{{ priority_counts[""] }}</b></a>
+          {% for severity in severities %}<a class="attention-priority-pill attention-severity-{{ severity }} {% if selected_severity == severity %}active{% endif %}" href="{{ priority_urls[severity] }}" {% if selected_severity == severity %}aria-current="true"{% endif %}>{{ t('attention.severity.' ~ severity) }} <b>{{ priority_counts[severity] }}</b></a>{% endfor %}
         </nav>
         {% if selected_severity %}<p class="meta">{{ t('attention.severity_filter_active', severity=t('attention.severity.' ~ selected_severity)) }} <a href="{{ priority_urls[''] }}">{{ t('attention.severity_filter_clear') }}</a></p>{% endif %}
       </section>

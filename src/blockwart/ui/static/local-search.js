@@ -8,7 +8,7 @@
     objects: ['q', 'kind', 'topology_mode', 'network_category', 'services'],
     projects: ['q', 'project_category', 'project_status'],
     hints: ['q', 'category', 'severity', 'signal_state', 'kind', 'reason_code'],
-    activity: ['q', 'event_type', 'since', 'kind', 'object_id', 'parent'],
+    activity: ['q', 'event_type', 'since', 'kind', 'object_id', 'parent', 'target'],
   };
   let states = {};
   try { states = JSON.parse(sessionStorage.getItem(key) || '{}') || {}; } catch {}
@@ -62,7 +62,7 @@
     try { sessionStorage.setItem(key, JSON.stringify(states)); } catch {}
   });
   // Preserve compatible hidden topology representation options in catalog links.
-  if (domain === 'objects') document.querySelectorAll('a[href^="/?"]').forEach(link => {
+  if (domain === 'objects' && !form.hasAttribute('data-topology-search')) document.querySelectorAll('a[href^="/?"]').forEach(link => {
     if (link.closest('.main-navigation') || link.hasAttribute('data-local-clear')) return;
     const target = new URL(link.href);
     for (const name of ['topology_mode', 'network_category', 'services']) {

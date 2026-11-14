@@ -46,7 +46,7 @@
       <section class="panel">
         {% if search_page is not none %}
           <p>{{ t('search.local.matches', count=search_page.total) }}</p>
-          {% for hit in search_page.items %}<article class="local-search-hit"><span class="badge">{{ t('search.result.' ~ hit.kind) }}</span> <a href="{{ hit.url }}">{{ hit.title }}</a><p class="meta">{{ hit.project_label }} · {{ hit.excerpt }}</p></article>{% else %}<p class="meta">{{ t('project.workspace.empty') }}</p>{% endfor %}
+          {% for hit in search_page.items %}<article class="local-search-hit"><span class="badge">{{ t('search.result.' ~ hit.kind) }}</span> <a href="{{ hit.url }}">{{ t('project.chronology.kind.' ~ hit.title) if hit.kind == 'chronology' else hit.title }}</a><p class="meta">{{ hit.project_label }} · {{ hit.excerpt }}</p></article>{% else %}<p class="meta">{{ t('project.workspace.empty') }}</p>{% endfor %}
         {% elif projects %}
           <div class="table-wrap"><table class="table project-overview-table">
             <thead><tr><th>{{ t("project.workspace.project") }}</th><th>{{ t("project.field.project_status.label") }}</th><th>{{ t("project.field.category.label") }}</th><th>{{ t("project.field.current_summary.label") }}</th><th>{{ t("project.workspace.next_action") }}</th><th>{{ t("project.workspace.last_activity") }}</th></tr></thead>

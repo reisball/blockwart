@@ -91,6 +91,7 @@ class AttentionQueryError(ValueError):
 @dataclass(frozen=True, slots=True)
 class AttentionPage:
     summary: AttentionSummary
+    severity_facets: dict[str, int]
     items: list[AttentionItem]
     next_cursor: str | None
     total: int | None
@@ -163,7 +164,7 @@ def query_attention_page(
         if _matches_filters(
             item,
             category=category,
-            severity=severity,
+            severity=None,
             reason_code=reason_code,
             signal_state=signal_state,
             kind=kind,
@@ -195,6 +196,15 @@ def query_attention_page(
                 or ""
             )
         ]
+    # Destination counts keep every active filter except severity. Compute them
+    # from the same authorized projection, not a second database snapshot.
+    facets = {
+        value: sum(item.severity == value for item in filtered)
+        for value in ATTENTION_SEVERITIES
+    }
+    facets[""] = len(filtered)
+    if severity is not None:
+        filtered = [item for item in filtered if item.severity == severity]
     authorized_digest = _attention_view_digest(filtered)
     page = paginate_items(
         filtered,
@@ -220,6 +230,7 @@ def query_attention_page(
     )
     return AttentionPage(
         summary=summarize_attention(filtered, derivation),
+        severity_facets=facets,
         items=page.items,
         next_cursor=page.next_cursor,
         total=page.total,

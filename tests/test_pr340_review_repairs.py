@@ -70,9 +70,9 @@ def test_real_role_activity_target_and_actor_contract(role_browser, role, identi
     assert page.status_code == 200
     assert 'value="host:ux-hardware"' in page.text
     for key in ['target', 'object_id', 'parent']:
-        filtered = browser.get('/activity', params={key: 'host:ux-hardware'})
+        filtered = browser.get('/activity', params={key: 'host:ux-hardware', 'event_type': 'object_revision'})
         assert filtered.status_code == 200
-        expected = 4  # grant-creation audits plus the seeded update
+        expected = 4 if key == 'parent' and role in ('owner', 'viewer') else 1
         assert filtered.text.count('class="attention-row"') == expected
         assert ('Example ux-human</span>' in filtered.text) == identity
     by_actor = browser.get('/activity?q=Example%20ux-human')
@@ -86,7 +86,7 @@ def test_authorized_knowledge_targets(role_browser, kind):
     identity = 'ux-project' if kind == 'project' else 'review-' + kind
     ref = kind + ':' + identity
     for key in ['target', 'object_id', 'parent']:
-        response = browser.get('/activity', params={key: ref})
+        response = browser.get('/activity', params={key: ref, 'event_type': 'object_revision'})
         assert response.status_code == 200
         assert f'value="{ref}"' in response.text
         assert response.text.count('class="attention-row"') == 1

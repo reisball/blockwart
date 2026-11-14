@@ -131,7 +131,7 @@ from blockwart.services.queries import (
     query_device_graph,
     query_network_topology,
 )
-from blockwart.services.read_access import ReadAccess
+from blockwart.services.read_access import ReadAccess, read_access_for_principal
 from blockwart.services.release_monitoring import (
     check_authorized_service_release,
     query_release_overview,
@@ -910,6 +910,10 @@ def attention_overview(
             "signal_states": sorted(ATTENTION_ITEM_SIGNAL_STATES),
             "selected_category": category or "",
             "selected_severity": severity or "",
+            "priority_counts": {
+                value: page.severity_facets["" if value == severity else value]
+                for value in ("", *ATTENTION_SEVERITY_VALUES)
+            },
             "priority_urls": {
                 value: "/attention" + ("?" + urlencode(parameters) if parameters else "")
                 for value in ("", *ATTENTION_SEVERITY_VALUES)
@@ -981,7 +985,7 @@ def smart_search(
     Returns:
         Rendered search page or results fragment with exact server counts.
     """
-    if len(q) > 200 or (object_kind and object_kind not in PUBLIC_OBJECT_KINDS):
+    if len(q) > 200 or (object_kind and object_kind not in OBJECT_KINDS):
         raise HTTPException(status_code=400, detail="Invalid search scope")
     access = read_access_from_request(request)
     q = q.strip()
@@ -1033,13 +1037,17 @@ def activity_overview(
     if len(q) > 200:
         raise HTTPException(400, "Invalid search query")
     access = read_access_from_request(request)
-    visible = list_catalog_objects(session, access)
+    # Activity uses a nonmaterialized global policy; catalog projections need
+    # the established materialized contract to include global catalog roles.
+    target_access = read_access_for_principal(session, access.principal)
+    visible = list_catalog_objects(session, target_access)
     targets = {
         f"{item.kind}:{item.id}": item
         for item in visible
-        if str(item.visibility) == "detail" and item.kind in PUBLIC_OBJECT_KINDS
+        if str(item.visibility) == "detail" and item.kind in ATTENTION_OBJECT_KINDS
     }
     target_error = ""
+    invalid_target = False
     requested_target = request.query_params.get("target")
     if requested_target is not None:
         if not requested_target:
@@ -1049,17 +1057,23 @@ def activity_overview(
         else:
             target_error = translation_context(request)["t"]("activity.target_invalid")
             previous = request.query_params.get("previous_object_id", "")
-            object_id = (
-                previous
-                if any(item.id == previous for item in targets.values())
-                else "__invalid_target__"
-            )
-    # Both existing bare-ID deep links and canonical references are supported;
-    # neither unknown nor concealed targets silently broadens to all activity.
-    if object_id and ":" in object_id:
-        object_id = targets[object_id].id if object_id in targets else "__invalid_target__"
-    if parent and ":" in parent:
-        parent = targets[parent].id if parent in targets else "__invalid_target__"
+            object_id = previous if any(item.id == previous for item in targets.values()) else None
+            invalid_target = object_id is None
+    # Canonical and legacy bare-ID links use the same authorized set. Never
+    # echo concealed/unknown input or implementation sentinels into the UI.
+    for name, value in (("object_id", object_id), ("parent", parent)):
+        if not value:
+            continue
+        resolved = targets.get(value) if ":" in value else next(
+            (item for item in targets.values() if item.id == value), None
+        )
+        if resolved is None:
+            invalid_target = True
+            target_error = translation_context(request)["t"]("activity.target_invalid")
+        if name == "object_id":
+            object_id = resolved.id if resolved else None
+        else:
+            parent = resolved.id if resolved else None
     if kind and kind not in ATTENTION_OBJECT_KINDS:
         raise HTTPException(status_code=400, detail="Invalid activity kind")
     try:
@@ -1070,7 +1084,7 @@ def activity_overview(
             since=since or None,
             event_type=event_type or None,
             kind=kind or None,
-            object_id=object_id or None,
+            object_id="__invalid_target__" if invalid_target else (object_id or None),
             parent=parent or None,
             limit=100,
             cursor=cursor,
@@ -1128,6 +1142,7 @@ def activity_overview(
             "active_target_label": active_target_label,
             "targets": targets,
             "target_error": target_error,
+            "invalid_target": invalid_target,
             "activity_time": lambda value: activity_time(value, i18n["locale"]),
             "target_reset_url": target_reset_url,
             "generated_at": page.generated_at,
