@@ -4,7 +4,7 @@
 {%- endmacro %}
 {% macro tree(nodes) -%}<ul>{% for node in nodes %}<li>{{ record_link(node.record) }} · {{ t('project.records.option.' ~ node.record.data.item_type) }}{% if node.filtered %} <span class="badge">{{ t('project.pm.filtered_branch') }}</span>{% endif %}{% if node.missing %} <span class="badge">{{ t('project.pm.missing_parent') }}</span>{% endif %}{% if node.children %}<details open><summary>{{ t('project.pm.children') }} ({{ node.children|length }})</summary>{{ tree(node.children) }}</details>{% endif %}</li>{% endfor %}</ul>{%- endmacro %}
 <!doctype html>
-<html lang="{{ locale }}"><head><meta charset="utf-8" /><meta name="viewport" content="width=device-width, initial-scale=1" /><title>{{ object.label }} · {{ t('project.records.title') }}</title><link rel="stylesheet" href="/static/app.css" /></head>
+<html lang="{{ locale }}"><head><meta charset="utf-8" /><meta name="viewport" content="width=device-width, initial-scale=1" /><title>{{ object.label }} · {{ t('project.records.title') }}</title><link rel="stylesheet" href="/static/app.css" />{% include "_branding_head.html" %}</head>
 <body><main class="page stack">
 <header><a href="/projects/{{ object.id }}">← {{ object.label }}</a><h1>{{ t('project.records.title') }}</h1></header>
 <nav class="button-row" aria-label="{{ t('project.records.title') }}">{% for tab in ['item', 'page', 'access', 'repository'] %}<a class="button{% if tab != kind %} button-muted{% endif %}" href="?kind={{ tab }}"{% if tab == kind %} aria-current="page"{% endif %}>{{ t('project.records.kind.' ~ tab) }}</a>{% endfor %}<a class="button button-muted" href="#overview">{{ t('project.pm.overview') }}</a></nav>

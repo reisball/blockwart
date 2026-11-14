@@ -45,3 +45,46 @@ def test_login_hero_keeps_existing_security_form_contract():
     assert 'name="csrf_token" value="{{ csrf_token }}"' in text
     assert 'action="/auth/login"' in text and 'action="/auth/logout"' in text
     assert 'width="1200" height="805" alt="" loading="lazy"' in text
+
+
+def test_every_document_head_has_one_favicon_and_branding_after_app_css():
+    """Render every document head to catch missing icons and cascade-order drift."""
+    import re
+
+    from jinja2 import Environment, FileSystemLoader
+
+    folder = ROOT / "src/blockwart/ui/templates"
+    environment = Environment(loader=FileSystemLoader(folder), autoescape=True)
+    checked = []
+    for template in sorted(folder.glob("*.html")):
+        source = template.read_text()
+        if "<head>" not in source:
+            continue
+        head = environment.from_string(source.split("</head>", 1)[0] + "</head>").render(
+            locale="en",
+            title="Fixture",
+            t=lambda key, **kwargs: key,
+            record={"short_code": "P-1", "data": {"title": "Fixture"}},
+            object={"label": "Fixture"},
+            project={"label": "Fixture"},
+            ui_schemas={},
+            explorer={"assets": []},
+            create_fields_by_key={"relationship": {"label": "Parent"}},
+            detail_query_string="",
+            principal_scope="fixture",
+            view="catalog",
+            q="",
+            kind="",
+            selected_asset_ref="",
+            object_kinds=["host"],
+        )
+        links = re.findall(r'<link [^>]*href="([^"]+)"[^>]*>', head)
+        app = [i for i, href in enumerate(links) if href.startswith("/static/app.css")]
+        branding = [i for i, href in enumerate(links) if href.startswith("/static/branding.css")]
+        assert len(app) == len(branding) == 1, template.name
+        assert app[0] < branding[0], template.name
+        assert links.count("/static/branding/favicon.ico") == 1, template.name
+        assert links.count("/static/branding/apple-touch-icon.png") == 1, template.name
+        assert "data:," not in links, template.name
+        checked.append(template.name)
+    assert len(checked) >= 18
