@@ -181,3 +181,40 @@ unrelated index was substituted. SQLite execution is proven; SQL uses existing
 SQLAlchemy/keyset/permission projections without dialect-specific additions,
 but live PostgreSQL execution is not claimed. Remote full CI, independent review,
 Forge approval and maintainer/human acceptance remain the parent's gates.
+
+### Intermediate-width correction to the search follow-up
+
+Parent remeasurement of 30e5e77 exposed a gap in the endpoint-only responsive
+oracle: catalog/topology inputs shrank to 131/112px at 1200, 182/91px at 1024,
+and 206/118px at 768. The label's minimum covered its scope text plus input,
+not the editable input alone. This supersedes any inference of intermediate-
+width usability from the earlier 1440/390-only browser evidence.
+
+The focused CSS correction gives the actual input a nonshrinking 200px flex
+basis, lets scope labels wrap, and gives topology's search group a meaningful
+wrap basis instead of squeezing it beside the title. Optional handoff text may
+wrap anywhere; topology's existing type toolbar scroll stays local at widths
+above its former mobile-only containment rule. Header/control sizes and search
+semantics are unchanged. The catalog query/submit/root-create centerline remains
+aligned when the shared row fits.
+
+The rendered assertion is committed in tests/browser/local-search-responsive.cjs.
+The same outbound-fenced, source-bound synthetic fixture runs it across catalog
+and topology at 1440/1200/1024/768/390, both themes, English/German and short/long
+queries. Each case verifies input width >=200px, hit-testing, 40px header-control
+geometry, no whole-page overflow, actual native query submission and explicit
+global handoff/Escape. A temporary browser-only old-rule mutation must fail the
+width assertion before restoring and passing. Raw results, screenshot hashes,
+runner, fence/server logs and final head/source binding are retained under
+exports/ux-v5-search/responsive-*. Existing 84-test service/state results are
+reused only for the unchanged Python/JS/templates/tests; no full suite, CI, push,
+production operation or reviewer-worktree write is part of this correction.
+
+The 80-case matrix passed with zero unexpected browser errors and forty
+screenshots. English short-query catalog/topology widths (px) are 371/272 at
+1440, 358/443 at 1200, 263/267 at 1024, 286/449 at 768 and 366/362 at 390.
+Across all translated/long-query cases the minimum was 201.25px. The old-rule
+mutation reproduced a 112.30px topology input at 1200 and was rejected; restoring
+the corrected rules passed. At 1440 the fitting catalog row's query/submit/root
+centerlines match within 1px. Parent's earlier endpoint-only 281–288px mobile
+measurement is historical, not the corrected geometry above.
