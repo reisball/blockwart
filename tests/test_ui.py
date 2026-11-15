@@ -262,7 +262,9 @@ def test_topology_is_a_real_second_view(client: TestClient) -> None:
 
     assert response.status_code == 200
     assert '<html lang="en" data-view="topology" data-page="topology">' in response.text
-    assert "Hardware, hosts, and services" in response.text
+    assert 'class="section-header"' in response.text
+    assert "<h1>Topology</h1>" in response.text
+    assert "Hardware, hosts, and services" not in response.text
     assert 'class="topology-canvas"' in response.text
     assert 'data-asset-ref="system:fabrik"' in response.text
     assert 'data-asset-ref="service:fabrik-proxmox"' in response.text
@@ -1693,8 +1695,9 @@ def test_object_detail_replaces_only_the_topology_middle_region(
     assert response.status_code == 200
     document = unescape(response.text)
     assert '<html lang="en" data-view="topology" data-page="detail">' in document
-    assert 'class="topology-shell"' in document
-    assert 'class="map-heading"' in document
+    assert 'class="topology-shell section-page"' in document
+    assert 'class="section-header"' in document
+    assert "<h1>Topology</h1>" in document
     assert 'class="map-workbench"' in document
     assert 'class="topology-detail-main"' in document
     assert 'class="map-inspector"' in document
