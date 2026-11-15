@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import UTC, datetime
 from uuid import uuid4
 
 from sqlalchemy import (
@@ -146,7 +146,10 @@ class AuditEvent(Base):
         default='{"event":"legacy","version":1}',
         server_default='{"event":"legacy","version":1}',
     )
-    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+    # Application inserts must not inherit PostgreSQL session-local wall time.
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, default=lambda: datetime.now(UTC).replace(tzinfo=None), server_default=func.now()
+    )
 
 
 class ObjectComment(Base):
