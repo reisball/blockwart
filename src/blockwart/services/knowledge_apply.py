@@ -9,6 +9,7 @@ import tempfile
 from collections.abc import Mapping, Sequence
 from copy import deepcopy
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -1138,13 +1139,14 @@ def _insert_candidate_rollback_audit(
     details: Mapping[str, Any],
 ) -> int:
     connection.execute(
-        "INSERT INTO audit_events (object_id, action, actor, summary, details_json) "
-        "VALUES (NULL, ?, ?, ?, ?)",
+        "INSERT INTO audit_events (object_id, action, actor, summary, details_json, created_at) "
+        "VALUES (NULL, ?, ?, ?, ?, ?)",
         (
             _ROLLBACK_ACTION,
             actor,
             _ROLLBACK_ACTION,
             _rollback_audit_json(details),
+            datetime.now(UTC).replace(tzinfo=None).isoformat(sep=" "),
         ),
     )
     return int(connection.execute("SELECT last_insert_rowid()").fetchone()[0])
