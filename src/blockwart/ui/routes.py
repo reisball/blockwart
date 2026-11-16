@@ -68,6 +68,7 @@ from blockwart.domain.ui_schema import (
     get_ui_schema,
     schema_field_payload,
     ui_schema_payload,
+    ui_schema_read_snapshot,
 )
 from blockwart.models import CatalogObject
 from blockwart.schemas.catalog import (
@@ -779,59 +780,62 @@ def index(
     network_category: str = "",
     services: str = "",
 ):
-    normalized_kind = kind if kind in OBJECT_KINDS else ""
-    selected_view = view if view in {"catalog", "topology"} else "catalog"
-    selected_topology_mode = (
-        topology_mode if topology_mode in {"placement", "network"} else "placement"
-    )
-    selected_network_category = network_category if network_category in NETWORK_CATEGORIES else ""
-    include_inherited_services = services in {"1", "true"}
-    read_model = query_catalog_browse(
-        session,
-        read_access_from_request(request),
-        query=q,
-        kind=normalized_kind or None,
-        include_network_topology=(
-            selected_view == "topology" and selected_topology_mode == "network"
-        ),
-        include_inherited_services=include_inherited_services,
-        network_category=selected_network_category or None,
-    )
-    create_enabled = any(
-        Permission.CREATE_CHILD in target.capabilities for target in read_model.relation_targets
-    )
-    form = _empty_form()
-    if normalized_kind:
-        form["kind"] = normalized_kind
-    if normalized_kind == "decision":
-        form["decision_status"] = str(minimal_object_data("decision")["decision_status"])
-    if normalized_kind == PROJECT_KIND:
-        minimal_project = minimal_object_data(PROJECT_KIND)
-        form["category"] = str(minimal_project["category"])
-        form["project_status"] = str(minimal_project["project_status"])
-    if normalized_kind == RUNBOOK_KIND:
-        minimal_runbook = minimal_object_data(RUNBOOK_KIND)
-        form["runbook_status"] = str(minimal_runbook["runbook_status"])
-        form["approval_required"] = "false"
-    return templates.TemplateResponse(
-        request,
-        "index.html",
-        context=_index_template_context(
-            request,
-            read_model,
-            q=q,
-            kind=normalized_kind,
-            view=selected_view,
-            form=form,
-            error=None,
-            show_create_form=create_enabled and create == "1",
-            show_create_root_form=create_root == "1",
-            can_write_enabled=False,
-            topology_mode=selected_topology_mode,
-            network_category=selected_network_category,
+    with ui_schema_read_snapshot():
+        normalized_kind = kind if kind in OBJECT_KINDS else ""
+        selected_view = view if view in {"catalog", "topology"} else "catalog"
+        selected_topology_mode = (
+            topology_mode if topology_mode in {"placement", "network"} else "placement"
+        )
+        selected_network_category = (
+            network_category if network_category in NETWORK_CATEGORIES else ""
+        )
+        include_inherited_services = services in {"1", "true"}
+        read_model = query_catalog_browse(
+            session,
+            read_access_from_request(request),
+            query=q,
+            kind=normalized_kind or None,
+            include_network_topology=(
+                selected_view == "topology" and selected_topology_mode == "network"
+            ),
             include_inherited_services=include_inherited_services,
-        ),
-    )
+            network_category=selected_network_category or None,
+        )
+        create_enabled = any(
+            Permission.CREATE_CHILD in target.capabilities for target in read_model.relation_targets
+        )
+        form = _empty_form()
+        if normalized_kind:
+            form["kind"] = normalized_kind
+        if normalized_kind == "decision":
+            form["decision_status"] = str(minimal_object_data("decision")["decision_status"])
+        if normalized_kind == PROJECT_KIND:
+            minimal_project = minimal_object_data(PROJECT_KIND)
+            form["category"] = str(minimal_project["category"])
+            form["project_status"] = str(minimal_project["project_status"])
+        if normalized_kind == RUNBOOK_KIND:
+            minimal_runbook = minimal_object_data(RUNBOOK_KIND)
+            form["runbook_status"] = str(minimal_runbook["runbook_status"])
+            form["approval_required"] = "false"
+        return templates.TemplateResponse(
+            request,
+            "index.html",
+            context=_index_template_context(
+                request,
+                read_model,
+                q=q,
+                kind=normalized_kind,
+                view=selected_view,
+                form=form,
+                error=None,
+                show_create_form=create_enabled and create == "1",
+                show_create_root_form=create_root == "1",
+                can_write_enabled=False,
+                topology_mode=selected_topology_mode,
+                network_category=selected_network_category,
+                include_inherited_services=include_inherited_services,
+            ),
+        )
 
 
 @router.get("/attention", response_class=HTMLResponse)
