@@ -552,6 +552,7 @@
               </form>
             </section>
           {% else %}
+            {% include "_project_access_preview.html" %}
             <section class="panel" aria-labelledby="project-instructions-title">
               <h2 class="section-title" id="project-instructions-title">{{ t("project.field.agent_instructions.label") }}</h2>
               <p class="meta">{{ t("project.field.agent_instructions.help") }}</p>

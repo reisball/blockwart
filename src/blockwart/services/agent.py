@@ -76,6 +76,7 @@ from blockwart.services.monitoring import (
     monitoring_projection,
 )
 from blockwart.services.pagination import CursorPage, paginate_items
+from blockwart.services.project_access_preview import project_access_previews
 from blockwart.services.project_chronology import (
     recent_project_chronology_for_object,
     recent_project_chronology_for_objects,
@@ -171,6 +172,7 @@ def query_agent_context_page(
     direction: SortDirection = "asc",
     include_total: bool = False,
     include_recent_comments: bool = True,
+    include_external_access: bool = True,
 ) -> AgentContextPage:
     """Return one stable v1 page of sanitized object contexts.
 
@@ -190,17 +192,27 @@ def query_agent_context_page(
         resource="context",
     )
     page_objects = rows_page.page.items
+    detail_objects = [
+        obj
+        for obj in page_objects
+        if access.policy.visibility_for(obj.id) == ObjectVisibility.DETAIL
+    ]
     recent_comments = (
-        rows_page.resolver.prefetch_recent_comments(page_objects) if include_recent_comments else {}
-    )
-    recent_chronology = (
-        rows_page.resolver.prefetch_project_chronology(page_objects)
+        rows_page.resolver.prefetch_recent_comments(detail_objects)
         if include_recent_comments
         else {}
     )
+    recent_chronology = (
+        rows_page.resolver.prefetch_project_chronology(detail_objects)
+        if include_recent_comments
+        else {}
+    )
+    rows_page.resolver.prefetch_external_access(detail_objects, enabled=include_external_access)
     return AgentContextPage(
         items=[
-            rows_page.resolver.context_with_comments(
+            rows_page.resolver.stub(catalog_object)
+            if access.policy.visibility_for(catalog_object.id) == ObjectVisibility.STUB
+            else rows_page.resolver.context_with_comments(
                 catalog_object,
                 recent_comments,
                 recent_chronology,
@@ -251,6 +263,7 @@ def query_agent_object_contexts(
     object_ids: list[str],
     *,
     include_recent_comments: bool = True,
+    include_external_access: bool = True,
 ) -> AgentObjectContextBatch:
     """Return authorized contexts for a bounded list of known object ids.
 
@@ -293,6 +306,7 @@ def query_agent_object_contexts(
     recent_chronology = (
         resolver.prefetch_project_chronology(detail_objects) if include_recent_comments else {}
     )
+    resolver.prefetch_external_access(detail_objects, enabled=include_external_access)
     for catalog_object in detail_objects:
         by_id[catalog_object.id] = resolver.context_with_comments(
             catalog_object,
@@ -354,6 +368,7 @@ def _query_agent_rows_page(
 
 class _AgentCatalogResolver:
     def __init__(self, session: Session, access: ReadAccess) -> None:
+        self.external_access = {}
         self.session = session
         self.access = access
         self.now = datetime.now(UTC)
@@ -712,6 +727,7 @@ class _AgentCatalogResolver:
     def context(self, obj: CatalogObject) -> AgentCatalogContextRead:
         if self.access.policy.visibility_for(obj.id) == ObjectVisibility.STUB:
             return self.stub(obj)
+        self.prefetch_external_access([obj])
         return self.context_with_comments(
             obj,
             {obj.id: recent_comments_for_object(self.session, obj, limit=5)},
@@ -748,6 +764,7 @@ class _AgentCatalogResolver:
         ]
         return AgentCatalogObjectContext(
             **self.summary(obj).model_dump(),
+            external_access=self.external_access.get(obj.id),
             etag=revision_etag(obj.revision),
             data=data,
             relationships=relationships,
@@ -772,6 +789,20 @@ class _AgentCatalogResolver:
             recent_project_chronology=(
                 recent_project_chronology.get(obj.id, []) if obj.kind == "project" else None
             ),
+        )
+
+    def prefetch_external_access(
+        self, objects: list[CatalogObject], *, enabled: bool = True
+    ) -> None:
+        self.external_access = (
+            project_access_previews(
+                self.session,
+                self.access,
+                objects,
+                object_by_ref=self.object_by_ref,
+            )
+            if enabled
+            else {}
         )
 
     def prefetch_recent_comments(

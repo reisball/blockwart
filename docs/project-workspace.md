@@ -220,3 +220,52 @@ cursor (HTTP 400); changing only page size is allowed. Results are not a frozen
 snapshot: concurrent writes may change totals or subsequent pages. Filtering and
 matching scan the current authorized workspace rows in-process; no external index,
 embedding service, schema migration or background job is added.
+
+## External-access preview on Project reads
+
+Detail-authorized Project reads derive `external_access` from existing `access`
+records. This is not a new mutable Project field and does not change Project
+instructions. Use access titles and purposes to describe external environments;
+no Host or Service registration or duplicate environment configuration is needed.
+
+The preview is present on `/api/v1/objects/{id}`, `/api/v1/context`, and
+`/api/v1/object-contexts`, and their existing agent/MCP context wrappers
+(`get_object_context`, `get_context`, `get_object_contexts`). It is also shown
+on the Project overview and object detail UI. Search summaries (`/api/v1/objects`
+and `blockwart.search`) are unchanged. Non-Project contexts have no preview value.
+
+`external_access` contains:
+
+- `items`: the first five records in ascending `(created_at, id)` order, matching
+  the unfiltered access collection. Each has `id`, `title`, `purpose`, optional
+  `url`, record-detail `href`, and optional `credential` metadata.
+- `has_more`: whether a sixth access record exists; no exact count is calculated.
+- `limit`: `5`, including for empty collections.
+- `collection_href` and `collection_api_path`: navigation to the full existing
+  access collection. Use that collection's existing cursor pagination to continue;
+  the preview does not issue a separate cursor or change collection semantics.
+
+All three context profiles (`compact`, `context`, `full`) retain this preview in
+section `knowledge`. A `fields` mask excluding `knowledge` omits it and skips its
+record query. Access records are fetched in one instance-scoped window query per
+context page/batch, returning at most six rows per readable Project. Credential
+metadata reuses the resolver's existing object snapshot (or one bounded batch
+lookup for UI rendering). Read operations do not write, call external targets,
+resolve Safe values, or alter Project revisions/ETags. Existing access-record
+writes still advance their Project revision; changes to independently permissioned
+credential metadata do not advance the Project revision. A Project ETag is an
+optimistic-write revision, not a validator for this derived authorization-dependent
+preview.
+
+Project read permission reveals the access records, not implicit credential
+permissions. A credential appears only if its exact kind/id target is readable in
+full; discover-only, concealed, missing, and absent references all produce no
+credential metadata. Visible credentials expose only `ref`, `label`, object `href`
+and optional `scope.access_type` as `access_type`. Neither `data.reference`, backend
+storage locations, account details, secret values nor secret-content permissions
+are copied into the preview. Metadata-only and secret-content readers receive the
+same preview; content permission never triggers a secret read. Discover-only
+Projects remain strict stubs and concealed Projects remain indistinguishable from
+missing ones. Records are scoped by Project instance, preventing cross-Project
+and deleted/recreated-Project reuse. UI permission guidance is unconditional and
+does not reveal whether a hidden credential exists.

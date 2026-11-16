@@ -1,0 +1,15 @@
+{% if external_access %}
+<section class="panel" aria-labelledby="project-external-access-title">
+  <h2 class="section-title" id="project-external-access-title">{{ t('project.access_preview.title') }}</h2>
+  <p class="meta">{{ t('project.access_preview.permissions') }}</p>
+  {% if external_access.items %}
+  <ul>{% for entry in external_access.items %}
+    <li><a href="{{ entry.href }}">{{ entry.title }}</a>{% if entry.purpose %} — {{ entry.purpose }}{% endif %}
+      {% if entry.credential %}<span class="meta"> · <a href="{{ entry.credential.href }}">{{ entry.credential.label }}</a>{% if entry.credential.access_type %} ({{ entry.credential.access_type }}){% endif %}</span>{% endif %}
+    </li>
+  {% endfor %}</ul>
+  {% else %}<p class="meta">{{ t('project.access_preview.empty') }}</p>{% endif %}
+  {% if external_access.has_more %}<p class="meta">{{ t('project.access_preview.more') }}</p>{% endif %}
+  <a class="button button-small button-muted" href="{{ external_access.collection_href }}">{{ t('project.access_preview.all') }}</a>
+</section>
+{% endif %}

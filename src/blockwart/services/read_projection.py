@@ -178,6 +178,8 @@ def _project_context_sections(
     *,
     projection: ReadProjection,
 ) -> None:
+    if projection.includes("knowledge"):
+        _copy_present(projected, context, "external_access")
     if projection.includes("network"):
         _copy_present(projected, context, "endpoints")
     if projection.includes("detail"):

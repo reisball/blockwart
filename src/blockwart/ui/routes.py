@@ -113,6 +113,7 @@ from blockwart.services.grant_management import (
     update_managed_grant,
 )
 from blockwart.services.pagination import InvalidCursor
+from blockwart.services.project_access_preview import project_access_previews
 from blockwart.services.project_chronology import (
     add_project_chronology_entry,
     query_project_chronology_page,
@@ -1149,6 +1150,9 @@ def _project_workspace_response(
             "edit": edit and can_write,
             "error": error,
             "project": detail,
+            "external_access": project_access_previews(
+                session, access, [session.get(CatalogObject, object_id)],
+            ).get(object_id),
             "project_form": form_values,
             "source_rows": source_rows,
             "project_source_types": PROJECT_SOURCE_TYPE_OPTIONS,
@@ -2036,6 +2040,11 @@ def _render_object_detail(
             form_rows=form_rows,
         )
     )
+    if (detail_read_model.catalog_object.kind == "project"
+            and detail_read_model.catalog_object.visibility == "detail"):
+        context["external_access"] = project_access_previews(
+            session, access, [session.get(CatalogObject, object_id)],
+        ).get(object_id)
     context.update(navigation)
     context["detail_mode"] = True
     response = templates.TemplateResponse(

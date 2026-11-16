@@ -763,6 +763,7 @@ def get_v1_context(
             direction=direction,
             include_total=include_total,
             include_recent_comments=resolved.includes(ACTIVITY_SECTION),
+            include_external_access=resolved.includes("knowledge"),
         )
     except InvalidCursor as exc:
         raise _invalid_cursor() from exc
@@ -836,6 +837,7 @@ def post_v1_object_contexts(
         access,
         payload.object_ids,
         include_recent_comments=resolved.includes(ACTIVITY_SECTION),
+        include_external_access=resolved.includes("knowledge"),
     )
     response: V1ObjectContextBatchOut | V1ProjectedObjectContextBatchOut
     if resolved.is_default:

@@ -1549,5 +1549,10 @@
   "safe.save": "Save new version",
   "safe.restore": "Restore source version",
   "safe.delete": "Soft delete",
-  "safe.undelete": "Recover source version"
+  "safe.undelete": "Recover source version",
+  "project.access_preview.title": "External access",
+  "project.access_preview.permissions": "Project read access reveals access records. Credential metadata requires separate read permission; secret content requires its own permission and is never loaded here. No visible credential does not mean none exists.",
+  "project.access_preview.empty": "No external access records.",
+  "project.access_preview.more": "More access records are available.",
+  "project.access_preview.all": "All external access records"
 }
