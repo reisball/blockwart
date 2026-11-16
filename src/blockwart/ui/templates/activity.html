@@ -1,24 +1,19 @@
+{% from "_section_header.html" import section_header %}
 <!doctype html>
 <html lang="{{ locale }}">
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>{{ title }}</title>
-    <link rel="stylesheet" href="/static/app.css?v=ux5-toolbar2" />
+    <link rel="stylesheet" href="/static/app.css?v=ux5-section1" />
     <script src="/static/activity.js?v=2" defer></script>
     {% include "_navigation_head.html" %}
   </head>
   <body class="ux-primary ux-activity">
     {% include "_main_navigation.html" %}
-    <main class="page stack">
-      <header class="integrated-detail-heading">
-        <div>
-          <h1>{{ t("activity.title") }}</h1>
-        </div>
+    <main class="page stack section-page">
+      {% call section_header(t("activity.title")) %}
         {% include "_local_search.html" %}
-      </header>
-
-      <section class="panel">
         <form class="form-grid" method="get" action="/activity">
           <input type="hidden" name="q" value="{{ q }}" />
           {% if invalid_target %}<input type="hidden" name="invalid_target" value="1" />{% endif %}
@@ -50,7 +45,8 @@
 </div></details>
           <div class="button-row"><button type="submit">{{ t("activity.filter") }}</button><a class="button button-muted" href="/activity">{{ t("activity.clear") }}</a></div>
         </form>
-      </section>
+      {% endcall %}
+
 
       {% if target_error %}<p class="error" role="alert">{{ target_error }}</p>{% endif %}
       {% if active_target_label %}<p class="meta">{{ t('activity.target_filter_active', target=active_target_label) }} <a href="{{ target_reset_url }}">{{ t('activity.target_reset') }}</a></p>{% endif %}

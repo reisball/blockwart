@@ -1,3 +1,4 @@
+{% from "_section_header.html" import section_header %}
 {% macro node_icon(kind) -%}
   {% if kind == "host" %}□{% elif kind == "system" %}⬡{% elif kind == "service" %}◆{% elif kind == "network" %}⌁{% elif kind == "device" %}▣{% else %}?{% endif %}
 {%- endmacro %}
@@ -249,7 +250,7 @@
         document.documentElement.dataset.theme = "light";
       }
     </script>
-    <link rel="stylesheet" href="/static/app.css?v=ux5-toolbar2" />
+    <link rel="stylesheet" href="/static/app.css?v=ux5-section1" />
     <link rel="stylesheet" href="/static/explorer.css?v=013" />
     <script>
       window.BLOCKWART_UI_SCHEMAS = {{ ui_schemas|tojson }};
@@ -442,13 +443,11 @@
           {% if detail_mode %}
             {% include "_object_detail_content.html" %}
           {% else %}
-          <header class="content-heading">
-            <div>
-              <p class="eyebrow">{{ t("catalog.eyebrow") }}</p>
-              <h1>{{ t("catalog.title") }}</h1>
+          {% set catalog_meta %}
               <span>{% if is_filtered %}{{ t("catalog.results", count=objects|length) }}{% else %}{{ t("catalog.subtitle", count=total_objects) }}{% endif %}</span>
               <span class="muted" data-visible-row-label aria-live="polite">{{ t("catalog.visible_rows") }}: <b data-visible-row-count>{{ objects|length if is_filtered else explorer.clusters|length }}</b>{% if is_filtered %} · {{ t("catalog.stock") }}: <b>{{ total_objects }}</b>{% endif %}</span>
-            </div>
+          {% endset %}
+          {% call section_header(t("catalog.title"), catalog_meta) %}
             <div class="catalog-toolbar">
               {% include "_local_search.html" %}
               <div class="catalog-create-actions">
@@ -472,7 +471,7 @@
                 </details>
               </div>
             </div>
-          </header>
+          {% endcall %}
           <p class="stock-label">{{ t('catalog.stock_help') }}</p>
           <div class="query-bar">
             <div class="query-pills">
@@ -622,9 +621,9 @@
         </aside>
       </main>
     {% else %}
-      <main class="topology-shell">
-        {% if kind in ["project", "decision", "runbook"] %}<p class="meta" role="status">{{ t("search.topology_unsupported") }}</p>{% endif %}
-        {% if topology_mode != 'network' and (network_category or include_inherited_services) %}<p class="meta" role="status">{{ t('search.network_options_retained') }}</p>{% endif %}
+      <main class="topology-shell section-page">
+        {% call section_header(t("topology.title")) %}
+          {% include "_local_search.html" %}
         <div class="catalog-create-actions">        {% if can_create_root %}
           <a class="primary-button" href="/?{{ detail_query_string }}&create_root=1" aria-label="{{ t('asset.create_root') }}">
             ＋ <span class="asset-create-full">{{ t("asset.create_root") }}</span><span class="asset-create-short">{{ t("asset.create_short") }}</span>
@@ -636,21 +635,14 @@
           </a>
         {% endif %}
 </div>
-        <section class="map-heading">
-          <div class="topology-heading-search">
-          <div>
-            <p class="eyebrow">{{ t("topology.eyebrow") }}</p>
-            <h1>{{ t("topology.title") }}</h1>
-            <span>{{ t("topology.subtitle") }}</span>
-          </div>
-          {% include "_local_search.html" %}
-          </div>
-          <div class="map-health">
+        {% endcall %}
+        {% if kind in ["project", "decision", "runbook"] %}<p class="meta" role="status">{{ t("search.topology_unsupported") }}</p>{% endif %}
+        {% if topology_mode != 'network' and (network_category or include_inherited_services) %}<p class="meta" role="status">{{ t('search.network_options_retained') }}</p>{% endif %}
+        <div class="map-health">
             {% for health in ("healthy", "degraded", "down", "unknown") %}
               <div><span class="status-dot {{ health }}"></span><strong>{{ health_counts[health] or 0 }}</strong><small>{{ t("health." ~ health) }}</small></div>
             {% endfor %}
-          </div>
-        </section>
+        </div>
         <div class="map-toolbar">
           <div class="topology-mode-switch" aria-label="{{ t('topology.mode_label') }}">
             <a class="{% if topology_mode == 'placement' %}active{% endif %}" href="/?view=topology&topology_mode=placement&q={{ q|urlencode }}&kind={{ kind }}&network_category={{ network_category }}&services={{ "1" if include_inherited_services else "" }}">{{ t("topology.mode_placement") }}</a>
