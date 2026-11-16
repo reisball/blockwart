@@ -230,6 +230,16 @@
             "title": "Etag",
             "type": "string"
           },
+          "external_access": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ProjectAccessPreview"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "health": {
             "anyOf": [
               {
@@ -1421,6 +1431,16 @@
               }
             ],
             "title": "Etag"
+          },
+          "external_access": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ProjectAccessPreview"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "health": {
             "anyOf": [
@@ -4592,6 +4612,40 @@
         "title": "PrincipalUpdateIn",
         "type": "object"
       },
+      "ProjectAccessCredentialPreview": {
+        "properties": {
+          "access_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Access Type"
+          },
+          "href": {
+            "title": "Href",
+            "type": "string"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "ref": {
+            "title": "Ref",
+            "type": "string"
+          }
+        },
+        "required": [
+          "ref",
+          "label",
+          "href"
+        ],
+        "title": "ProjectAccessCredentialPreview",
+        "type": "object"
+      },
       "ProjectAccessIn": {
         "additionalProperties": false,
         "properties": {
@@ -4658,6 +4712,90 @@
           "kind"
         ],
         "title": "ProjectAccessIn",
+        "type": "object"
+      },
+      "ProjectAccessPreview": {
+        "properties": {
+          "collection_api_path": {
+            "title": "Collection Api Path",
+            "type": "string"
+          },
+          "collection_href": {
+            "title": "Collection Href",
+            "type": "string"
+          },
+          "has_more": {
+            "default": false,
+            "title": "Has More",
+            "type": "boolean"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/ProjectAccessPreviewItem"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "limit": {
+            "default": 5,
+            "title": "Limit",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "collection_href",
+          "collection_api_path"
+        ],
+        "title": "ProjectAccessPreview",
+        "type": "object"
+      },
+      "ProjectAccessPreviewItem": {
+        "properties": {
+          "credential": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ProjectAccessCredentialPreview"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "href": {
+            "title": "Href",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "purpose": {
+            "title": "Purpose",
+            "type": "string"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          },
+          "url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Url"
+          }
+        },
+        "required": [
+          "id",
+          "title",
+          "purpose",
+          "href"
+        ],
+        "title": "ProjectAccessPreviewItem",
         "type": "object"
       },
       "ProjectActionIn": {

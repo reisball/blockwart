@@ -123,6 +123,17 @@ An asset kind carries no knowledge block at all, and a Runbook never carries
 empty Decision or Project fields. Placement and operational state stay in the
 always-present `state` section.
 
+### Project external-access context
+
+Context reads (single object, context page and known-id batch) include the derived
+`external_access` preview for DETAIL-authorized Projects in the `knowledge`
+section under every profile. Search summaries remain unchanged. A mask excluding
+`knowledge` omits the preview and skips its record query. The preview contains at
+most five access records, an explicit `has_more` flag and navigation to the full
+collection. Credential metadata requires separate read permission; secret content
+and storage locators are never included. See the complete
+[response and permission contract](project-workspace.md#external-access-preview-on-project-reads).
+
 ### Project instruction context
 
 The `knowledge` section includes the full optional `agent_instructions` of a

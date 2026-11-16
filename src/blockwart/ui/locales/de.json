@@ -1549,5 +1549,10 @@
   "safe.save": "Neue Version speichern",
   "safe.restore": "Quellversion wiederherstellen",
   "safe.delete": "Wiederherstellbar löschen",
-  "safe.undelete": "Quellversion zurückholen"
+  "safe.undelete": "Quellversion zurückholen",
+  "project.access_preview.title": "Externe Zugänge",
+  "project.access_preview.permissions": "Projekt-Leserechte zeigen Zugangsdatensätze. Credential-Metadaten benötigen eigene Leserechte; geheime Inhalte benötigen eine separate Berechtigung und werden hier nie geladen. Kein sichtbares Credential bedeutet nicht, dass keines existiert.",
+  "project.access_preview.empty": "Keine externen Zugangsdatensätze.",
+  "project.access_preview.more": "Weitere Zugangsdatensätze sind verfügbar.",
+  "project.access_preview.all": "Alle externen Zugangsdatensätze"
 }

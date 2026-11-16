@@ -202,7 +202,32 @@ class AgentRelationshipOut(BaseModel):
     to_ref: str
 
 
+class ProjectAccessCredentialPreview(BaseModel):
+    ref: str
+    label: str
+    href: str
+    access_type: str | None = None
+
+
+class ProjectAccessPreviewItem(BaseModel):
+    id: str
+    title: str
+    purpose: str
+    url: str | None = None
+    href: str
+    credential: ProjectAccessCredentialPreview | None = None
+
+
+class ProjectAccessPreview(BaseModel):
+    items: list[ProjectAccessPreviewItem] = Field(default_factory=list)
+    has_more: bool = False
+    collection_href: str
+    collection_api_path: str
+    limit: int = 5
+
+
 class AgentCatalogObjectContext(AgentCatalogObjectSummary):
+    external_access: ProjectAccessPreview | None = None
     etag: str
     data: dict[str, Any] = Field(default_factory=dict)
     relationships: list[AgentRelationshipOut] = Field(default_factory=list)
@@ -358,6 +383,10 @@ class AgentProjectedObject(_ProjectedRead):
     updated_at: str | None = Field(default=None, exclude_if=_omit_empty_projected_value)
     dependencies: dict[str, list[str]] | None = Field(
         default=None, exclude_if=_omit_empty_projected_value
+    )
+    external_access: ProjectAccessPreview | None = Field(
+        default=None,
+        exclude_if=_omit_empty_projected_value,
     )
     credential_references: list[str] | None = Field(
         default=None, exclude_if=_omit_empty_projected_value
