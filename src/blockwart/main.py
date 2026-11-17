@@ -120,7 +120,7 @@ async def principal_scoped_cache_control(request: Request, call_next):
 def _is_principal_scoped_path(path: str) -> bool:
     return (
         path == "/"
-        or path in {"/activity", "/attention", "/projects"}
+        or path in {"/activity", "/attention", "/projects", "/settings"}
         or path.startswith(("/activity/", "/attention/", "/projects/"))
         or path.startswith("/objects")
         or path.startswith("/admin/")
