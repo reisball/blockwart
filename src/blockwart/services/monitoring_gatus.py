@@ -124,11 +124,7 @@ def probe_gatus_endpoint(request: ProviderCheckRequest) -> MonitoringObservation
     source = binding.source
 
     limits = request.limits
-    if not limits.policy.enabled:
-        return failure("policy_denied")
-    if limits.policy.check_scheme(source.scheme) is not None:
-        return failure("policy_denied")
-    if limits.policy.check_port(source.port) is not None:
+    if limits.policy.check_destination(scheme=source.scheme, port=source.port) is not None:
         return failure("policy_denied")
 
     try:

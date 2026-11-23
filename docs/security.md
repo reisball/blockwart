@@ -133,13 +133,15 @@ channel header alone cannot claim MCP origin. Audience does not grant catalog
 access; normal `read` and `write` policy remains mandatory.
 
 Opt-in service monitoring is an outbound SSRF boundary. It is disabled by
-default and uses an empty network allowlist by default. Every DNS answer and the
-concrete pinned connection address must pass the scheme, port, and network
-policy; broad public allowlists do not unlock private, loopback, link-local,
-reserved, or metadata ranges. The original hostname remains bound to HTTP Host
-and TLS SNI/certificate validation. Both adapters reject redirects, ignore
-environment proxies and expose only
-stable redacted errors. The `builtin_http` probe sends no credential or cookie
+default and uses empty destination allowlists. Every DNS answer must pass the
+same authorization rule before an address is pinned for the connection. Broad
+CIDRs do not unlock the policy's explicitly protected ranges, including
+loopback and link-local addresses. Deployment-only exact hostname and port rules
+are limited to the built-in HTTP(S) probe and cannot authorize nonpublic
+addresses. The original hostname is used for HTTP Host and, for HTTPS, for SNI
+and certificate validation. Both adapters reject
+redirects, ignore environment proxies and expose only stable redacted errors.
+The `builtin_http` probe sends no credential or cookie
 and reads no body. The `gatus` pull adapter instead reads a bounded status body
 and may send a Bearer token from a protected runtime file bound to that exact
 deployment-configured Gatus source; catalog data cannot choose the URL, file
