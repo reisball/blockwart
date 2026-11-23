@@ -328,7 +328,8 @@ the anchor and its current and future canonical placement descendants, without
 non-placement links. Select `self` for ownership of the anchor only, or
 `responsibility` for the broader reach above. New Owner assignments on a service
 still default to `responsibility`. Review the selected scope and affected objects
-before saving. Editing an existing grant always starts with its stored scope.
+before saving. Repeating the scope preview keeps the selected recipient.
+Editing an existing grant always starts with its stored scope.
 REST and MCP grant creation continue to require an explicit scope; automatic
 Owner/self on object creation and ownerless adoption are unchanged.
 

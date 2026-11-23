@@ -1805,6 +1805,9 @@
               <form class="form-grid" method="get" action="/objects/{{ object.id }}" data-grant-form data-responsibility-eligible="{{ 'true' if grant_responsibility_eligible else 'false' }}" data-grant-preview-form{% if grant_new_owner_scope.value == "subtree" %} data-owner-default-scope="subtree"{% endif %}>
                 <input type="hidden" name="edit" value="permissions" />
                 <input type="hidden" name="principal_q" value="{{ grant_principal_query }}" />
+                {% if grant_principal_results or grant_preview_principal is not none %}
+                  <input type="hidden" name="preview_principal" value="{{ grant_preview_principal|default('', true) }}" />
+                {% endif %}
                 <label>{{ t("grant.role") }}
                   <select name="preview_role" data-grant-role>
                     {% for role in grant_roles %}

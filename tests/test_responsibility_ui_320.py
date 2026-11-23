@@ -148,6 +148,27 @@ def test_new_host_owner_scope_preview_matches_saved_and_future_reach(
             assert not after.permissions_for("new-service")
 
 
+def test_separate_scope_preview_retains_selected_principal(alembic_session_factory):
+    candidates = []
+    with _client(alembic_session_factory, candidate_ids=candidates) as client:
+        params = {
+            "edit": "permissions",
+            "principal_q": "candidate",
+            "preview_role": "owner",
+            "preview_principal": candidates[1],
+        }
+        page = client.get("/objects/lxc", params=params)
+        assert page.status_code == 200, page.text
+        preview_form = page.text.split("data-grant-preview-form", 1)[1].split("</form>", 1)[0]
+        assert f'name="preview_principal" value="{candidates[1]}"' in preview_form
+
+        page = client.get("/objects/lxc", params={**params, "preview_scope": "self"})
+        assert page.status_code == 200, page.text
+        new_form = page.text.split("data-grant-new", 1)[1].split("</form>", 1)[0]
+        assert f'value="{candidates[1]}" selected' in new_form
+        assert 'value="self" selected' in new_form
+
+
 def test_preview_cannot_silently_select_a_different_principal(alembic_session_factory):
     candidates = []
     with _client(alembic_session_factory, candidate_ids=candidates) as client:
@@ -235,16 +256,28 @@ const previewedSelf = fixture('owner', 'self', 'subtree');
 const old = fixture('owner', 'self');
 const service = fixture('discoverer', 'self', 'responsibility');
 const otherKind = fixture('discoverer', 'self', 'self', false);
-const forms = [fresh, unpreviewedSelf, previewedSelf, old, service, otherKind].map(f => f.form);
+const separate = fixture('owner', 'self', 'subtree');
+const previewPrincipal = {value:'previous-principal'};
+const selectedPrincipal = {value:'chosen-principal'};
+const querySeparate = separate.form.querySelector;
+separate.form.querySelector = query =>
+  query === "[name='preview_principal']" ? previewPrincipal : querySeparate(query);
+separate.form.addEventListener = (event, handler) => {separate.listeners[event] = handler;};
+const forms = [fresh, unpreviewedSelf, previewedSelf, old, service, otherKind, separate]
+  .map(f => f.form);
 let destination;
 const context = {
   URL,
   window:{location:{href:'https://example.invalid/objects/lxc?edit=permissions&principal_q=agent',
                    assign:value => {destination = value;}}},
   document:{querySelectorAll:query => query === '[data-grant-form]' ? forms : [],
+            querySelector:query => query === "[data-grant-new] [name='principal_id']" ?
+              selectedPrincipal : null,
             addEventListener:() => {}},
 };
 vm.runInNewContext(fs.readFileSync(process.argv[1], 'utf8'), context);
+separate.listeners.submit();
+assert.equal(previewPrincipal.value, 'chosen-principal');
 assert.equal(old.scope.value, 'self');
 old.role.value = 'viewer'; old.listeners.role();
 old.role.value = 'owner'; old.listeners.role();

@@ -113,6 +113,13 @@
       updatePreviewState();
     });
     updateScope();
+    const previewPrincipal = form.querySelector("[name='preview_principal']");
+    if (previewPrincipal) {
+      form.addEventListener("submit", () => {
+        const selected = document.querySelector("[data-grant-new] [name='principal_id']");
+        if (selected) previewPrincipal.value = selected.value;
+      });
+    }
     form.querySelector("[data-preview-grant]")?.addEventListener("click", () => {
       const url = new URL(window.location.href);
       url.searchParams.set("edit", "permissions");
