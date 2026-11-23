@@ -135,10 +135,11 @@ access; normal `read` and `write` policy remains mandatory.
 Opt-in service monitoring is an outbound SSRF boundary. It is disabled by
 default and uses empty destination allowlists. Every DNS answer must pass the
 same authorization rule before an address is pinned for the connection. Broad
-CIDRs do not unlock private, loopback, link-local, reserved, or metadata ranges.
-Deployment-only exact hostname and port rules are limited to the built-in HTTP
-probe and cannot authorize nonpublic addresses. The original hostname remains
-bound to HTTP Host and TLS SNI/certificate validation. Both adapters reject
+CIDRs do not unlock the policy's explicitly protected ranges, including
+loopback and link-local addresses. Deployment-only exact hostname and port rules
+are limited to the built-in HTTP(S) probe and cannot authorize nonpublic
+addresses. The original hostname is used for HTTP Host and, for HTTPS, for SNI
+and certificate validation. Both adapters reject
 redirects, ignore environment proxies and expose only stable redacted errors.
 The `builtin_http` probe sends no credential or cookie
 and reads no body. The `gatus` pull adapter instead reads a bounded status body

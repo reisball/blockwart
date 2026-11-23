@@ -265,7 +265,9 @@ def _parse_hosts(raw: str) -> frozenset[tuple[str, int]]:
     hosts: set[tuple[str, int]] = set()
     for entry in _entries(raw):
         name, _, port = entry.rpartition(":")
-        hostname = canonical_target_host(name)
+        # Require ASCII configuration so IDNA mappings cannot change the
+        # domain the operator intended to authorize.
+        hostname = canonical_target_host(name) if name.isascii() else None
         if (
             hostname is None
             or "." not in hostname
@@ -278,7 +280,7 @@ def _parse_hosts(raw: str) -> frozenset[tuple[str, int]]:
             or not 1 <= int(port) <= 65535
         ):
             raise MonitoringPolicyError(
-                "monitoring host rules must be exact DNS hostname:port pairs (port 1..65535)"
+                "monitoring host rules must be exact ASCII DNS hostname:port pairs (port 1..65535)"
             )
         hosts.add((hostname, int(port)))
     return frozenset(hosts)

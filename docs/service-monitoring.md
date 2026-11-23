@@ -128,9 +128,11 @@ CIDR for each address. For example:
 BLOCKWART_MONITORING_ALLOWED_TARGET_HOSTS=status.example.invalid:443
 ```
 
-The hostname rule matches a fully qualified DNS name (case-insensitive, with
-an optional final dot) and that one port, even when the port is not in the CIDR
-port list. It does not accept wildcards, IP literals, URLs, or implicit ports.
+The hostname rule matches a fully qualified ASCII DNS name (case-insensitive,
+with an optional final dot) and that one port, even when the port is not in the
+CIDR port list. Use ASCII Punycode labels for internationalized names. Wildcards,
+IP literals, URLs, and implicit ports are not accepted. A rule covers both HTTP
+and HTTPS on its specified port; only HTTPS uses TLS certificate validation.
 The probe resolves that name anew for every check, without a resolver search
 suffix. An address change needs no Blockwart restart or configuration edit.
 The rule authorizes only answers consisting entirely of public unicast

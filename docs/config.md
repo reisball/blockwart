@@ -47,7 +47,7 @@ The MCP wrapper has separate [client settings](mcp.md#configuration).
 | `BLOCKWART_MONITORING_DEFAULT_INTERVAL_SECONDS` | `300` | ge=60, le=86400 | Server-wide check interval for services without an override. |
 | `BLOCKWART_MONITORING_ALLOWED_TARGET_NETWORKS` | `""` | max_length=4096 | Comma-separated IP networks allowed by the monitoring CIDR policy. |
 | `BLOCKWART_MONITORING_ALLOWED_TARGET_PORTS` | `"80,443"` | max_length=1024 | Comma-separated ports allowed by the monitoring CIDR policy. |
-| `BLOCKWART_MONITORING_ALLOWED_TARGET_HOSTS` | `""` | max_length=4096 | Comma-separated exact DNS `hostname:port` pairs for built-in HTTP(S) checks to public addresses only. |
+| `BLOCKWART_MONITORING_ALLOWED_TARGET_HOSTS` | `""` | max_length=4096 | Comma-separated exact ASCII DNS `hostname:port` pairs for built-in HTTP(S) checks to public addresses only. |
 | `BLOCKWART_MONITORING_CONNECT_TIMEOUT_MS` | `2000` | ge=100, le=15000 | Maximum time one health check may spend connecting. |
 | `BLOCKWART_MONITORING_TOTAL_TIMEOUT_MS` | `5000` | ge=200, le=30000 | Maximum total time one health check may take. |
 | `BLOCKWART_MONITORING_MAX_RESPONSE_BYTES` | `65536` | ge=1024, le=1048576 | Response size bound: builtin_http reads no body; Gatus may parse a bounded body but never stores the raw response. |

@@ -396,6 +396,7 @@ def test_target_policy_is_deny_by_default_and_requires_specific_private_allow() 
         "[2001:db8::1]:443",
         "0x7f.0x01:443",
         "localhost:443",
+        "bücher.example.invalid:443",
     ],
 )
 def test_monitoring_settings_reject_invalid_exact_host_rules(rule: str) -> None:
@@ -403,9 +404,33 @@ def test_monitoring_settings_reject_invalid_exact_host_rules(rule: str) -> None:
         Settings(monitoring_allowed_target_hosts=rule)
 
 
+def test_monitoring_settings_accept_ascii_idn_host_rules() -> None:
+    policy = parse_target_policy(
+        allowed_networks="",
+        allowed_ports="",
+        allowed_hosts="xn--bcher-kva.example.invalid:443",
+    )
+    assert policy.allows_hostname("xn--bcher-kva.example.invalid", 443)
+
+
 @pytest.mark.parametrize(
     "nonpublic",
-    ["10.2.3.4", "100.64.0.1", "192.0.2.1", "224.0.0.1", "fec0::1", "3fff::1"],
+    [
+        "10.2.3.4",
+        "100.64.0.1",
+        "127.0.0.1",
+        "169.254.1.1",
+        "192.0.2.1",
+        "224.0.0.1",
+        "::1",
+        "::ffff:0:0",
+        "64:ff9b::",
+        "2002::",
+        "3fff::1",
+        "fd00::1",
+        "fe80::1",
+        "fec0::1",
+    ],
 )
 def test_exact_host_rule_rejects_any_nonpublic_dns_answer(nonpublic: str) -> None:
     policy = parse_target_policy(
@@ -537,11 +562,13 @@ def test_probe_never_resolves_denied_targets_and_pins_allowed_address(monkeypatc
     assert denied.error_code == "policy_denied"
 
     concrete = ip_address("203.0.113.9")
-    monkeypatch.setattr(
-        monitoring_probe,
-        "_resolve",
-        lambda _host, _port, *, timeout: [concrete],
-    )
+    lookups: list[tuple[str, int]] = []
+
+    def resolve_cidr_target(host: str, port: int, *, timeout: float):
+        lookups.append((host, port))
+        return [concrete]
+
+    monkeypatch.setattr(monitoring_probe, "_resolve", resolve_cidr_target)
     connected: dict[str, object] = {}
 
     def fake_request_status(**kwargs):
@@ -562,6 +589,7 @@ def test_probe_never_resolves_denied_targets_and_pins_allowed_address(monkeypatc
             ),
         )
     )
+    assert lookups == [("status.example.invalid", 8443)]
     assert connected["pinned"] == concrete
     assert connected["hostname"] == "status.example.invalid"
     assert allowed.state == "down"
