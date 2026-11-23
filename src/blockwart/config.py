@@ -185,13 +185,21 @@ class Settings(BaseSettings):
         default="",
         max_length=4096,
         description=(
-            "Comma-separated IP networks a health check may connect to. Empty denies every target."
+            "Comma-separated IP networks allowed by the monitoring CIDR policy."
         ),
     )
     monitoring_allowed_target_ports: str = Field(
         default="80,443",
         max_length=1024,
-        description="Comma-separated ports a health check may connect to.",
+        description="Comma-separated ports allowed by the monitoring CIDR policy.",
+    )
+    monitoring_allowed_target_hosts: str = Field(
+        default="",
+        max_length=4096,
+        description=(
+            "Comma-separated exact DNS hostname:port pairs for built-in HTTP(S) checks "
+            "to public addresses."
+        ),
     )
     monitoring_connect_timeout_ms: int = Field(
         default=2000,
@@ -312,6 +320,7 @@ class Settings(BaseSettings):
             parse_target_policy(
                 allowed_networks=self.monitoring_allowed_target_networks,
                 allowed_ports=self.monitoring_allowed_target_ports,
+                allowed_hosts=self.monitoring_allowed_target_hosts,
             )
         except MonitoringPolicyError as exc:
             raise ValueError("monitoring target policy is invalid") from exc

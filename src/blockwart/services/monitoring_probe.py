@@ -77,18 +77,22 @@ def probe_http_target(request: ProviderCheckRequest) -> MonitoringObservation:
         )
 
     limits = request.limits
-    scheme_reason = limits.policy.check_scheme(target.scheme)
-    port_reason = limits.policy.check_port(target.port)
-    if scheme_reason is not None or port_reason is not None:
+    reason = limits.policy.check_destination(
+        scheme=target.scheme, port=target.port, hostname=target.host
+    )
+    if reason is not None:
         return _denied(checked_at)
 
-    if not limits.policy.enabled:
-        return _denied(checked_at)
+    # Exact rules use an absolute DNS lookup, not resolver search suffixes.
+    # Keep the canonical target hostname unchanged for HTTP Host and TLS.
+    dns_name = target.host
+    if limits.policy.allows_hostname(target.host, target.port):
+        dns_name += "."
 
     started = monotonic()
     try:
         addresses = _resolve(
-            target.host,
+            dns_name,
             target.port,
             timeout=min(
                 limits.connect_timeout_ms / 1000,
@@ -112,11 +116,13 @@ def probe_http_target(request: ProviderCheckRequest) -> MonitoringObservation:
             error_code="dns_failed",
         )
 
-    if limits.policy.check_target(
+    reason = limits.policy.check_target(
         scheme=target.scheme,
         port=target.port,
         addresses=addresses,
-    ) is not None:
+        hostname=target.host,
+    )
+    if reason is not None:
         return _denied(checked_at)
 
     pinned = pin_address(addresses)

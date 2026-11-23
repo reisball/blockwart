@@ -152,6 +152,7 @@ def monitoring_settings(settings: Settings) -> MonitoringSettings:
         policy=parse_target_policy(
             allowed_networks=settings.monitoring_allowed_target_networks,
             allowed_ports=settings.monitoring_allowed_target_ports,
+            allowed_hosts=settings.monitoring_allowed_target_hosts,
         ),
         connect_timeout_ms=settings.monitoring_connect_timeout_ms,
         total_timeout_ms=settings.monitoring_total_timeout_ms,

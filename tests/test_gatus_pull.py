@@ -358,6 +358,22 @@ def test_no_credential_is_forwarded_to_another_source(monkeypatch, tmp_path) -> 
         assert captured[-1]["hostname"] == sources[name].host
 
 
+def test_builtin_http_host_rule_does_not_authorize_gatus(monkeypatch) -> None:
+    def forbidden(*args, **kwargs):
+        raise AssertionError("a built-in HTTP host rule must not trigger Gatus I/O")
+
+    monkeypatch.setattr(monitoring_gatus, "_read_credential", forbidden)
+    limits = ProbeLimits(
+        policy=parse_target_policy(
+            allowed_networks="",
+            allowed_ports="443",
+            allowed_hosts="gatus.example.invalid:443",
+        )
+    )
+    observation = monitoring_gatus.probe_gatus_endpoint(_request(limits=limits))
+    assert observation.error_code == "policy_denied"
+
+
 def test_a_source_without_a_credential_sends_none(monkeypatch) -> None:
     captured = _mock_network(monkeypatch, body=_statuses())
     monitoring_gatus.probe_gatus_endpoint(_request())

@@ -7,8 +7,9 @@ place that decides whether a concrete connection target is permitted.
 
 The rules are intentionally blunt:
 
-- Nothing is allowed until an operator names an explicit network allowlist.
-- Only ``http`` and ``https`` are supported, and only on allowlisted ports.
+- Only ``http`` and ``https`` are supported. A deployment can allow a
+  network on configured ports, or an exact DNS hostname and port for the
+  built-in probe if every answer is public unicast.
 - Loopback, link-local (including the cloud metadata address), private,
   unique-local, reserved, multicast, and unspecified addresses are blocked
   unless an allowlist entry names that special-purpose range or a subnet of it.
@@ -29,6 +30,7 @@ from ipaddress import (
     IPv4Network,
     IPv6Address,
     IPv6Network,
+    ip_address,
     ip_network,
 )
 
@@ -80,6 +82,19 @@ _SPECIAL_PURPOSE_RANGES: tuple[IPNetwork, ...] = (
     ip_network("ff00::/8"),
 )
 
+# Additional IANA special-purpose ranges that older ipaddress registries
+# may classify as global. Exact hostname rules never authorize these;
+# the existing CIDR policy and its explicit exceptions are unchanged.
+_HOST_RULE_SPECIAL_RANGES: tuple[IPNetwork, ...] = (
+    ip_network("192.88.99.0/24"),
+    ip_network("64:ff9b:1::/48"),
+    ip_network("100:0:0:1::/64"),
+    ip_network("2001::/23"),
+    ip_network("2002::/16"),
+    ip_network("3fff::/20"),
+    ip_network("5f00::/16"),
+)
+
 
 class MonitoringPolicyError(ValueError):
     """The configured monitoring policy itself is invalid."""
@@ -92,12 +107,13 @@ class TargetPolicy:
     allowed_networks: tuple[IPNetwork, ...] = ()
     allowed_ports: tuple[int, ...] = DEFAULT_ALLOWED_PORTS
     allowed_schemes: frozenset[str] = field(default=_ALLOWED_SCHEMES)
+    allowed_hosts: frozenset[tuple[str, int]] = frozenset()
 
     @property
     def enabled(self) -> bool:
         """Whether any target can be reached at all."""
 
-        return bool(self.allowed_networks)
+        return bool(self.allowed_networks or self.allowed_hosts)
 
     def check_scheme(self, scheme: str) -> str | None:
         if scheme.lower() not in self.allowed_schemes:
@@ -108,6 +124,24 @@ class TargetPolicy:
         if port not in self.allowed_ports:
             return "port_not_allowed"
         return None
+
+    def allows_hostname(self, hostname: str | None, port: int) -> bool:
+        """Match a canonical target hostname and port, never a suffix or IP."""
+
+        return hostname is not None and (hostname, port) in self.allowed_hosts
+
+    def check_destination(
+        self, *, scheme: str, port: int, hostname: str | None = None
+    ) -> str | None:
+        """Reject a destination before DNS when neither rule could allow it."""
+
+        reason = self.check_scheme(scheme)
+        if reason is not None or self.allows_hostname(hostname, port):
+            return reason
+        reason = self.check_port(port)
+        if reason is not None:
+            return reason
+        return None if self.allowed_networks else "allowlist_empty"
 
     def check_address(self, address: IPAddress) -> str | None:
         """Return a denial reason for one concrete address, or ``None``."""
@@ -132,7 +166,7 @@ class TargetPolicy:
             return None
         # Python's address registry can learn a newly reserved range before
         # this module's controlled list does. Such an address stays blocked by
-        # default and can only be unlocked by naming the exact host.
+        # default and can only be unlocked by naming the exact IP address.
         if special is None and any(
             network.prefixlen == network.max_prefixlen
             and network.network_address == address
@@ -147,6 +181,7 @@ class TargetPolicy:
         scheme: str,
         port: int,
         addresses: Sequence[IPAddress],
+        hostname: str | None = None,
     ) -> str | None:
         """Validate a whole resolved target.
 
@@ -155,13 +190,18 @@ class TargetPolicy:
         answer cannot be narrowed down to the permitted record.
         """
 
-        reason = self.check_scheme(scheme) or self.check_port(port)
+        reason = self.check_destination(scheme=scheme, port=port, hostname=hostname)
         if reason is not None:
             return reason
-        if not self.allowed_networks:
-            return "allowlist_empty"
         if not addresses:
             return "unresolvable_address"
+        if self.allows_hostname(hostname, port):
+            if all(_is_public_unicast(address) for address in addresses):
+                return None
+            # A hostname rule cannot combine with a CIDR rule to authorize
+            # different answers. The network rule must pass independently.
+            if not self.allowed_networks or self.check_port(port) is not None:
+                return "special_purpose_address"
         for address in addresses:
             address_reason = self.check_address(address)
             if address_reason is not None:
@@ -173,12 +213,14 @@ def parse_target_policy(
     *,
     allowed_networks: str,
     allowed_ports: str,
+    allowed_hosts: str = "",
 ) -> TargetPolicy:
     """Build a policy from configuration strings, failing closed on nonsense."""
 
     return TargetPolicy(
         allowed_networks=_parse_networks(allowed_networks),
         allowed_ports=_parse_ports(allowed_ports),
+        allowed_hosts=_parse_hosts(allowed_hosts),
     )
 
 
@@ -191,6 +233,55 @@ def pin_address(addresses: Iterable[IPAddress]) -> IPAddress | None:
 
     ordered = sorted(addresses, key=lambda address: (address.version, address.packed))
     return ordered[0] if ordered else None
+
+
+def canonical_target_host(value: str) -> str | None:
+    """Return an ASCII DNS name or normalized IP literal for socket/TLS use."""
+
+    try:
+        return ip_address(value).compressed
+    except ValueError:
+        pass
+    try:
+        host = value.rstrip(".").encode("idna").decode("ascii").lower()
+    except UnicodeError:
+        return None
+    if not host or len(host) > 253:
+        return None
+    labels = host.split(".")
+    if any(
+        not label
+        or len(label) > 63
+        or label.startswith("-")
+        or label.endswith("-")
+        or any(not (character.isalnum() or character == "-") for character in label)
+        for label in labels
+    ):
+        return None
+    return host
+
+
+def _parse_hosts(raw: str) -> frozenset[tuple[str, int]]:
+    hosts: set[tuple[str, int]] = set()
+    for entry in _entries(raw):
+        name, _, port = entry.rpartition(":")
+        hostname = canonical_target_host(name)
+        if (
+            hostname is None
+            or "." not in hostname
+            or ":" in hostname
+            or name.endswith("..")
+            or not hostname.rsplit(".", 1)[1][0].isalpha()
+            or not 1 <= len(port) <= 5
+            or not port.isascii()
+            or not port.isdecimal()
+            or not 1 <= int(port) <= 65535
+        ):
+            raise MonitoringPolicyError(
+                "monitoring host rules must be exact DNS hostname:port pairs (port 1..65535)"
+            )
+        hosts.add((hostname, int(port)))
+    return frozenset(hosts)
 
 
 def _parse_networks(raw: str) -> tuple[IPNetwork, ...]:
@@ -240,4 +331,14 @@ def _is_special_purpose(address: IPAddress) -> bool:
         or address.is_reserved
         or address.is_multicast
         or address.is_unspecified
+    )
+
+
+def _is_public_unicast(address: IPAddress) -> bool:
+    if not address.is_global or _is_special_purpose(address):
+        return False
+    if isinstance(address, IPv6Address) and (address.is_site_local or address.scope_id):
+        return False
+    return _special_purpose_range(address) is None and not any(
+        address in network for network in _HOST_RULE_SPECIAL_RANGES
     )

@@ -114,9 +114,31 @@ instead of becoming a healthy claim. See `attention.md`.
 
 ## Outbound security boundary
 
-The target allowlist is empty by default. A check is possible only when the
-deployment explicitly enables the poller and allows the concrete destination
-network and port. HTTP and HTTPS are the only schemes.
+The target allowlists are empty by default. A check is possible only when the
+deployment explicitly enables the poller and permits the destination. HTTP and
+HTTPS are the only schemes.
+
+Use `BLOCKWART_MONITORING_ALLOWED_TARGET_NETWORKS` with
+`BLOCKWART_MONITORING_ALLOWED_TARGET_PORTS` for CIDR-based authorization. For
+built-in HTTP(S) checks to a public service with a changing IP, configure a
+comma-separated list of exact DNS names and ports instead of maintaining a
+CIDR for each address. For example:
+
+```dotenv
+BLOCKWART_MONITORING_ALLOWED_TARGET_HOSTS=status.example.invalid:443
+```
+
+The hostname rule matches a fully qualified DNS name (case-insensitive, with
+an optional final dot) and that one port, even when the port is not in the CIDR
+port list. It does not accept wildcards, IP literals, URLs, or implicit ports.
+The probe resolves that name anew for every check, without a resolver search
+suffix. An address change needs no Blockwart restart or configuration edit.
+The rule authorizes only answers consisting entirely of public unicast
+addresses. An unrelated name on the same IP, another port, or a nonpublic DNS
+answer must independently pass the CIDR and port policy. The two rules cannot
+be combined to permit different addresses in the same DNS answer. Catalog data
+cannot grant either permission, and Gatus pull still uses only the CIDR policy.
+Redirects are never followed.
 
 Every DNS answer is checked. If any returned address is denied, the complete
 target is denied. One validated address is selected deterministically and used

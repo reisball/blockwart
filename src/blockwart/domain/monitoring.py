@@ -34,6 +34,7 @@ from blockwart.domain.interfaces import (
     InterfaceContractError,
     normalize_interface_data,
 )
+from blockwart.domain.monitoring_policy import canonical_target_host
 from blockwart.domain.timestamps import format_rfc3339_utc
 
 MonitoringProvider = Literal["builtin_http", "gatus"]
@@ -976,7 +977,7 @@ def _endpoint_origin(endpoint: Mapping[str, Any]) -> tuple[str, str, int] | None
     host = endpoint.get("host")
     if not isinstance(host, str) or not _is_plain_host(host):
         return None
-    canonical_host = _canonical_host(host)
+    canonical_host = canonical_target_host(host)
     if canonical_host is None:
         return None
     port = endpoint.get("port")
@@ -1021,7 +1022,7 @@ def parse_bounded_http_url(value: str) -> ParsedHttpUrl | None:
         port = _SCHEME_DEFAULT_PORTS[scheme]
     if not 1 <= port <= 65535:
         return None
-    host = _canonical_host(hostname)
+    host = canonical_target_host(hostname)
     if host is None:
         return None
     path = quote(parsed.path or "/", safe="/%:@!$&'()*+,;=-._~")
@@ -1073,34 +1074,6 @@ def _is_plain_host(value: str) -> bool:
         # "host:port" string is an incomplete endpoint, not a host.
         return all(part == "" or _is_hex_group(part) for part in host.split(":"))
     return True
-
-
-def _canonical_host(value: str) -> str | None:
-    """Return an ASCII DNS name or normalized IP literal for socket/TLS use."""
-
-    from ipaddress import ip_address
-
-    try:
-        return ip_address(value).compressed
-    except ValueError:
-        pass
-    try:
-        host = value.rstrip(".").encode("idna").decode("ascii").lower()
-    except UnicodeError:
-        return None
-    if not host or len(host) > 253:
-        return None
-    labels = host.split(".")
-    if any(
-        not label
-        or len(label) > 63
-        or label.startswith("-")
-        or label.endswith("-")
-        or any(not (character.isalnum() or character == "-") for character in label)
-        for label in labels
-    ):
-        return None
-    return host
 
 
 def _is_hex_group(value: str) -> bool:

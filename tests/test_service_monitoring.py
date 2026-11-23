@@ -383,6 +383,137 @@ def test_target_policy_is_deny_by_default_and_requires_specific_private_allow() 
         parse_target_policy(allowed_networks="not-a-network", allowed_ports="443")
 
 
+@pytest.mark.parametrize(
+    "rule",
+    [
+        "*.example.invalid:443",
+        "https://status.example.invalid:443",
+        "status.example.invalid",
+        "status.example.invalid:0",
+        "status.example.invalid:65536",
+        "status.example.invalid:443/path",
+        "192.0.2.1:443",
+        "[2001:db8::1]:443",
+        "0x7f.0x01:443",
+        "localhost:443",
+    ],
+)
+def test_monitoring_settings_reject_invalid_exact_host_rules(rule: str) -> None:
+    with pytest.raises(ValidationError, match="monitoring target policy is invalid"):
+        Settings(monitoring_allowed_target_hosts=rule)
+
+
+@pytest.mark.parametrize(
+    "nonpublic",
+    ["10.2.3.4", "100.64.0.1", "192.0.2.1", "224.0.0.1", "fec0::1", "3fff::1"],
+)
+def test_exact_host_rule_rejects_any_nonpublic_dns_answer(nonpublic: str) -> None:
+    policy = parse_target_policy(
+        allowed_networks="", allowed_ports="443", allowed_hosts="status.example.invalid:443"
+    )
+    target = {"scheme": "https", "port": 443, "hostname": "status.example.invalid"}
+    assert (
+        policy.check_target(**target, addresses=[ip_address("8.8.8.8"), ip_address(nonpublic)])
+        == "special_purpose_address"
+    )
+    assert policy.check_target(**target, addresses=[ip_address(nonpublic)]) is not None
+    assert policy.check_target(**target, addresses=[]) == "unresolvable_address"
+
+
+def test_exact_host_and_cidr_rules_are_independent() -> None:
+    policy = parse_target_policy(
+        allowed_networks="8.8.8.8/32,10.0.0.0/8",
+        allowed_ports="443,8443",
+        allowed_hosts="status.example.invalid:443",
+    )
+    addresses = [ip_address("8.8.8.8"), ip_address("10.2.3.4")]
+    assert (
+        policy.check_target(
+            scheme="https", port=443, hostname="status.example.invalid", addresses=addresses
+        )
+        is None
+    )
+    assert (
+        policy.check_target(
+            scheme="https", port=8443, hostname="other.example.invalid", addresses=addresses
+        )
+        is None
+    )
+    # The public answer is outside the CIDR rule; neither rule permits the whole set.
+    assert (
+        policy.check_target(
+            scheme="https",
+            port=443,
+            hostname="status.example.invalid",
+            addresses=[ip_address("1.1.1.1"), ip_address("10.2.3.4")],
+        )
+        == "not_allowlisted"
+    )
+
+
+def test_builtin_probe_resolves_exact_hostname_afresh_and_pins_validated_ips(
+    monkeypatch,
+) -> None:
+    monkeypatch.setenv("BLOCKWART_MONITORING_ALLOWED_TARGET_HOSTS", "STATUS.Example.Invalid.:8443")
+    settings = monitoring_service.monitoring_settings(
+        Settings(monitoring_allowed_target_networks="", monitoring_allowed_target_ports="443")
+    )
+    assert settings.policy.enabled
+
+    hostname = "status.example.invalid"
+    answers = iter(
+        [
+            [ip_address("8.8.8.8")],
+            [ip_address("2606:4700:4700::1111"), ip_address("1.1.1.1")],
+            [ip_address("1.1.1.1"), ip_address("10.2.3.4")],
+        ]
+    )
+    lookups = []
+    requests = []
+
+    def fake_resolve(host, port, *, timeout):
+        lookups.append((host, port))
+        return next(answers)
+
+    def fake_request_status(**kwargs):
+        requests.append((kwargs["hostname"], kwargs["pinned"], kwargs["port"]))
+        return 204
+
+    def probe(url):
+        resolution = resolve_monitoring_target(
+            {"schema_version": 1, "endpoints": [_endpoint(health_url=url)]},
+            object_id="probe",
+        )
+        assert resolution.target is not None
+        return monitoring_probe.probe_http_target(
+            ProviderCheckRequest(
+                object_id="probe",
+                target=resolution.target,
+                diagnostic=None,
+                limits=ProbeLimits(policy=settings.policy),
+            )
+        )
+
+    monkeypatch.setattr(monitoring_probe, "_resolve", fake_resolve)
+    monkeypatch.setattr(monitoring_probe, "_request_status", fake_request_status)
+    for _ in range(2):
+        assert probe(f"https://{hostname}:8443/health").state == "healthy"
+    for url in (
+        f"https://{hostname}:8443/health",  # Mixed answers.
+        "https://other.example.invalid:8443/health",
+        f"https://sub.{hostname}:8443/health",
+        f"https://{hostname}:443/health",
+        "https://1.1.1.1:8443/health",
+    ):
+        assert probe(url).error_code == "policy_denied"
+
+    assert lookups == [(f"{hostname}.", 8443)] * 3
+    assert requests == [
+        (hostname, ip_address("8.8.8.8"), 8443),
+        (hostname, ip_address("1.1.1.1"), 8443),
+    ]
+
+
 def test_probe_never_resolves_denied_targets_and_pins_allowed_address(monkeypatch) -> None:
     resolution = resolve_monitoring_target(
         {"schema_version": 1, "endpoints": [_endpoint()]},
@@ -584,14 +715,28 @@ def test_http_exchange_enforces_declared_response_limit(monkeypatch) -> None:
     assert failure.value.error_code == "response_too_large"
 
 
-def test_https_pin_keeps_original_tls_identity(monkeypatch) -> None:
+@pytest.mark.parametrize(
+    ("response", "status", "error"),
+    [
+        (b"204 No Content\r\n\r\n", 204, None),
+        (
+            b"302 Found\r\nLocation: https://other.example.invalid/health\r\n\r\n",
+            302,
+            "redirect_not_supported",
+        ),
+    ],
+)
+def test_https_pin_keeps_original_tls_identity(monkeypatch, response, status, error) -> None:
     class FakeSocket:
-        response = bytearray(b"HTTP/1.1 204 No Content\r\n\r\n")
+        def __init__(self):
+            self.response = bytearray(b"HTTP/1.1 " + response)
+            self.sent = bytearray()
 
         def settimeout(self, _timeout: float) -> None:
             pass
 
         def send(self, payload) -> int:
+            self.sent.extend(payload)
             return len(payload)
 
         def recv(self, size: int) -> bytes:
@@ -607,6 +752,7 @@ def test_https_pin_keeps_original_tls_identity(monkeypatch) -> None:
     tls: dict[str, object] = {}
 
     def fake_connect(address, *, timeout):
+        assert not connected, "the probe must not open a redirect connection"
         connected.update(address=address, timeout=timeout)
         return sock
 
@@ -626,21 +772,36 @@ def test_https_pin_keeps_original_tls_identity(monkeypatch) -> None:
         lambda: context,
     )
 
-    assert (
-        monitoring_probe._request_status(
-            scheme="https",
-            hostname="service.example.invalid",
-            pinned=ip_address("203.0.113.10"),
-            port=443,
-            path="/health",
-            connect_timeout=1,
-            total_timeout=2,
-            max_response_bytes=1024,
-        )
-        == 204
+    hostname = "status.example.invalid"
+
+    def fake_resolve(name, port, *, timeout):
+        assert name == f"{hostname}."
+        assert port == 443
+        return [ip_address("8.8.8.8")]
+
+    monkeypatch.setattr(monitoring_probe, "_resolve", fake_resolve)
+    resolution = resolve_monitoring_target(
+        {"schema_version": 1, "endpoints": [_endpoint(health_url=f"https://{hostname}/health")]},
+        object_id="probe",
     )
-    assert connected["address"] == ("203.0.113.10", 443)
-    assert tls == {"socket": sock, "server_hostname": "service.example.invalid"}
+    assert resolution.target is not None
+    observation = monitoring_probe.probe_http_target(
+        ProviderCheckRequest(
+            object_id="probe",
+            target=resolution.target,
+            diagnostic=None,
+            limits=ProbeLimits(
+                policy=parse_target_policy(
+                    allowed_networks="", allowed_ports="", allowed_hosts=f"{hostname}:443"
+                ),
+            ),
+        )
+    )
+    assert observation.http_status == status
+    assert observation.error_code == error
+    assert connected["address"] == ("8.8.8.8", 443)
+    assert b"Host: status.example.invalid\r\n" in sock.sent
+    assert tls == {"socket": sock, "server_hostname": hostname}
     assert context.check_hostname is True
     assert context.verify_mode == monitoring_probe.ssl.CERT_REQUIRED
 
