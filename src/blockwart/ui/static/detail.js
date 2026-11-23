@@ -76,21 +76,51 @@
     const scope = form.querySelector("[name='scope'], [data-grant-scope]");
     if (!role || !scope) return;
     const responsibility = scope.querySelector("[value='responsibility']");
-    const updateScope = (changedRole = false) => {
-      const eligible = form.dataset.responsibilityEligible === "true" && role.value === "owner";
+    const ownerDefault = form.dataset.ownerDefaultScope;
+    const save = form.querySelector("[data-save-grant]");
+    const previewNeeded = form.querySelector("[data-preview-needed]");
+    let previousRole = role.value;
+    let scopeChosen = ownerDefault === "subtree" && role.value === "owner" &&
+      scope.value === "self";
+    const updatePreviewState = () => {
+      if (!save || !previewNeeded) return;
+      const needsPreview = ownerDefault === "subtree" && role.value === "owner" && (
+        role.value !== form.dataset.previewRole || scope.value !== form.dataset.previewScope
+      );
+      save.disabled = needsPreview;
+      previewNeeded.hidden = !needsPreview;
+    };
+    const updateScope = (roleChanged = false) => {
+      const owner = role.value === "owner";
+      const eligible = form.dataset.responsibilityEligible === "true" && owner;
       if (responsibility) responsibility.disabled = !eligible;
-      if (!eligible && scope.value === "responsibility") scope.value = "self";
-      if (eligible && changedRole && form.hasAttribute("data-grant-new")) {
-        scope.value = "responsibility";
+      if (!eligible && scope.value === "responsibility") {
+        scope.value = "self";
+        scopeChosen = false;
       }
+      if (roleChanged && ownerDefault && !scopeChosen) {
+        if (owner && scope.value === "self") scope.value = ownerDefault;
+        if (previousRole === "owner" && !owner && scope.value === ownerDefault) {
+          scope.value = "self";
+        }
+      }
+      previousRole = role.value;
+      updatePreviewState();
     };
     role.addEventListener("change", () => updateScope(true));
+    scope.addEventListener("change", () => {
+      scopeChosen = true;
+      updatePreviewState();
+    });
     updateScope();
     form.querySelector("[data-preview-grant]")?.addEventListener("click", () => {
       const url = new URL(window.location.href);
       url.searchParams.set("edit", "permissions");
       url.searchParams.set("preview_role", role.value);
       url.searchParams.set("preview_scope", scope.value);
+      const principal = form.querySelector("[name='principal_id']");
+      if (principal) url.searchParams.set("preview_principal", principal.value);
+      url.hash = "grant-scope-preview";
       // Never serialize a mutation form: it contains private CSRF state.
       window.location.assign(url.toString());
     });

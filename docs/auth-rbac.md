@@ -323,8 +323,14 @@ revocation protection and inherited-source reporting. Rights name the original
 grant ID and anchor; no grants are copied onto descendants or Runbooks. Preview
 lists exactly the objects receiving the selected role, not credential objects
 that receive only metadata visibility. UI, REST and MCP use the same commands.
-For new Owner assignments on infrastructure the UI preselects responsibility;
-editing an existing grant always preserves its stored scope.
+For new Owner assignments on hosts and systems, the UI defaults to `subtree`:
+the anchor and its current and future canonical placement descendants, without
+non-placement links. Select `self` for ownership of the anchor only, or
+`responsibility` for the broader reach above. New Owner assignments on a service
+still default to `responsibility`. Review the selected scope and affected objects
+before saving. Editing an existing grant always starts with its stored scope.
+REST and MCP grant creation continue to require an explicit scope; automatic
+Owner/self on object creation and ownerless adoption are unchanged.
 
 ### Credential exception
 
