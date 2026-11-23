@@ -8,6 +8,12 @@ managers, or deployment APIs, and it never changes a running version or starts
 an installation, download, restart, deployment, rollback, notification, or
 agent action.
 
+Set `data.service_information.running_version` to the installed version when
+creating or updating a Service. This field is optional and the GitHub check
+never fills it. Writes preserve the value as supplied; for comparison,
+Blockwart trims strings and uses only values of 1–64 characters after trimming.
+Missing or out-of-bounds values and non-strings are treated as unknown.
+
 ## Service configuration
 
 The service document is closed and absent by default:

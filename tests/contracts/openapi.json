@@ -28901,6 +28901,30 @@
               ]
             },
             {
+              "description": "Optional open document for operator-maintained service information.",
+              "json_types": [
+                "object"
+              ],
+              "normalization": [],
+              "path": "service_information",
+              "requirement": "optional",
+              "type": "object",
+              "violations": [],
+              "write_validation": false
+            },
+            {
+              "description": "Operator-reported installed version. Writes store the value as supplied. Release comparison trims the string and uses 1 to 64 characters after trimming; other values are treated as unknown. The GitHub release check does not populate this field.",
+              "json_types": [
+                "string"
+              ],
+              "normalization": [],
+              "path": "service_information.running_version",
+              "requirement": "optional",
+              "type": "string",
+              "violations": [],
+              "write_validation": false
+            },
+            {
               "additional_properties": false,
               "allowed_keys": [
                 "dependencies",

@@ -34,6 +34,7 @@ from blockwart.domain.release_monitoring import (
     MAX_GITHUB_OWNER_LENGTH,
     MAX_GITHUB_REPO_LENGTH,
     MAX_RELEASE_INTERVAL_SECONDS,
+    MAX_RELEASE_VERSION_LENGTH,
     MIN_RELEASE_INTERVAL_SECONDS,
     RELEASE_DOCUMENT_KEYS,
     RELEASE_PROVIDERS,
@@ -291,6 +292,7 @@ class FieldSpec:
     forbid_url_credentials: bool = False
     message: str | None = None
     forbidden_message: str | None = None
+    unvalidated_usage: str | None = None
 
     @property
     def has_literal(self) -> bool:
@@ -546,6 +548,8 @@ def validate_fields(
     fields: tuple[FieldSpec, ...],
 ) -> None:
     for field in fields:
+        if field.unvalidated_usage is not None:
+            continue
         values = _resolve_values(data, field.path)
         if field.required and not values:
             raise ObjectSchemaError(
@@ -1139,6 +1143,21 @@ SERVICE_FIELDS = (
     ),
     _field("auth", "object"),
     *_reference_list("auth.credential_references", "credential_reference"),
+    _field(
+        "service_information",
+        "object",
+        unvalidated_usage="Optional open document for operator-maintained service information.",
+    ),
+    _field(
+        "service_information.running_version",
+        "string",
+        unvalidated_usage=(
+            "Operator-reported installed version. Writes store the value as supplied. "
+            f"Release comparison trims the string and uses 1 to {MAX_RELEASE_VERSION_LENGTH} "
+            "characters after trimming; other values are treated as unknown. "
+            "The GitHub release check does not populate this field."
+        ),
+    ),
     _field("components", "object", allowed_keys=COMPONENT_DOCUMENT_KEYS),
     _field(
         "components.items",

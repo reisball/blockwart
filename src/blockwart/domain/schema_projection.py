@@ -254,6 +254,13 @@ def field_projection(field: FieldSpec) -> dict[str, Any]:
         "requirement": _requirement(field),
         "normalization": ["strip_whitespace"] if field.strip_whitespace else [],
     }
+    if field.unvalidated_usage is not None:
+        return {
+            **projected,
+            "description": field.unvalidated_usage,
+            "write_validation": False,
+            "violations": [],
+        }
     type_contract = interface_type_contract(field.path)
     if type_contract is not None:
         projected["type_contract"] = type_contract
