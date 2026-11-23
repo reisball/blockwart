@@ -1,5 +1,6 @@
 import json
 import re
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import get_args
 
@@ -21,6 +22,10 @@ from blockwart.domain.object_schema import (
 )
 from blockwart.domain.references import VALID_REFERENCE_KINDS
 from blockwart.domain.relationships import LINK_KINDS, RELATIONSHIP_RULES
+from blockwart.domain.release_monitoring import (
+    MAX_RELEASE_VERSION_LENGTH,
+    release_monitoring_view,
+)
 from blockwart.domain.schema_projection import (
     SCHEMA_PROJECTION_VERSION,
     minimal_object_example,
@@ -155,6 +160,59 @@ def test_device_and_network_categories_come_from_the_canonical_registry() -> Non
             label="Device",
             data={"device": {"category": "virtual"}},
         )
+
+
+@pytest.mark.parametrize(
+    "write_intent",
+    ["blockwart.create_child", "blockwart.create_root", "blockwart.update_object"],
+)
+def test_service_running_version_is_published_for_writes(write_intent: str) -> None:
+    payload = describe_schema_payload(
+        "service", write_intent=write_intent, sections=["object_fields"]
+    )
+    fields = _fields(_projected_kinds(payload)["service"])
+
+    information = fields["service_information"]
+    assert information["type"] == "object"
+    assert information["requirement"] == "optional"
+
+    version = fields["service_information.running_version"]
+    assert version["json_types"] == ["string"]
+    assert version["requirement"] == "optional"
+    assert version["normalization"] == []
+    assert version["write_validation"] is False
+    assert f"1 to {MAX_RELEASE_VERSION_LENGTH} characters" in version["description"]
+    assert "does not populate" in version["description"]
+
+
+@pytest.mark.parametrize(
+    ("stored", "projected"),
+    [
+        (" 1.2.3 ", "1.2.3"),
+        ("", None),
+        ("x" * MAX_RELEASE_VERSION_LENGTH, "x" * MAX_RELEASE_VERSION_LENGTH),
+        ("x" * (MAX_RELEASE_VERSION_LENGTH + 1), None),
+        (42, None),
+    ],
+)
+def test_running_version_storage_is_unchanged_by_the_schema_contract(stored, projected) -> None:
+    obj = CatalogObjectIn(
+        id="versioned-service",
+        kind="service",
+        label="Versioned service",
+        data={
+            "service_information": {"running_version": stored},
+            "release_monitoring": {
+                "enabled": True,
+                "github": {"owner": "example-org", "repo": "example-service"},
+            },
+        },
+    )
+
+    assert obj.data["service_information"]["running_version"] == stored
+    assert release_monitoring_view(
+        data=obj.data, object_id=obj.id, record=None, now=datetime(2026, 1, 1, tzinfo=UTC)
+    )["running_version"] == projected
 
 
 def test_service_components_are_published_without_a_special_mcp_tool() -> None:
