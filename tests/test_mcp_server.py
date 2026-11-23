@@ -500,6 +500,12 @@ def test_mcp_client_completes_handshake_and_calls_every_read_only_tool() -> None
             "blockwart.adopt_ownerless_object",
         }
     )
+    create_grant = tools["blockwart.create_grant"]
+    assert "owner/subtree" in (create_grant.description or "")
+    assert "owner/self" in (create_grant.description or "")
+    assert "blockwart.preview_grant_scope" in (create_grant.description or "")
+    assert "scope" in create_grant.inputSchema["required"]
+    assert "default" not in create_grant.inputSchema["properties"]["scope"]
     assert all(not result.isError for result in results.values())
 
     result_payloads = {}

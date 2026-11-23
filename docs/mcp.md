@@ -304,6 +304,16 @@ Owner keep both. `get_object_access` includes effective permissions, and
 return its proposed permissions. The stored field schema and provider set
 remain unchanged. See [the field boundary and migration policy](auth-rbac.md).
 
+For an Owner assignment on a Host or System that includes its placed services,
+use `role: owner` and `scope: subtree`. First call `blockwart.preview_grant_scope`
+with both fields and inspect the affected objects. Then pass the same role and
+scope explicitly to `blockwart.create_grant` with the current ETag; MCP does not
+supply a scope default. `owner/self` covers only the anchor. `owner/subtree`
+follows only canonical `hosts` placement, including future descendants; it does
+not follow other links. Use `owner/responsibility` only when the broader
+[operational scope](auth-rbac.md#explicit-operational-responsibility-revision-0032)
+is intended.
+
 To change only a display name, `blockwart.rename_object` takes `object_id`,
 `new_label`, and `if_match` and nothing else, for every nameable kind. It
 requires the dedicated `rename` capability rather than general `write`, changes

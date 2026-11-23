@@ -6,6 +6,7 @@ from pathlib import Path
 
 from blockwart.mcp import server
 from blockwart.mcp.manifest import (
+    JSON,
     canonical_manifest_bytes,
     contract_metadata,
     diagnose_contract,
@@ -17,18 +18,62 @@ from blockwart.mcp.server import TOOLS, local_contract_metadata, validate_runtim
 def test_integrated_mcp_contract_has_reviewed_manifest_evidence() -> None:
     metadata = contract_metadata(TOOLS, build_revision="issue-188-236-245-248-249-250-251")
 
-    # Reviewed #335: exactly one dedicated POST safe-action tool is added.
-    # Removing it restores the complete pre-change digest below.
     assert metadata == {
         "build_revision": "issue-188-236-245-248-249-250-251",
         "contract_version": "1",
-        "manifest_digest": "797b5f6585ef30d1f71cd891df902f3b43444d0ab54f4f78ef3d092db581245e",
+        "manifest_digest": "45edd4d24d681faf6dba79bc278c712cf7312825190a4c29230611b8becd2820",
         "tool_count": 49,
     }
 
 
+def _tools_before_grant_scope_guidance() -> list[JSON]:
+    # Copy each tool separately because registration reuses scope and projection schemas.
+    previous = [copy.deepcopy(tool) for tool in TOOLS]
+    tools_by_name = {tool["name"]: tool for tool in previous}
+    old_scope_description = (
+        "responsibility requires owner on host/system/service; includes Operations "
+        "Runbooks, not credential ownership."
+    )
+    new_scope_description = (
+        "self covers only the anchor; subtree covers the anchor and canonical placement "
+        "descendants. responsibility requires owner on host/system/service; includes "
+        "Operations Runbooks, not credential ownership."
+    )
+    for name in (
+        "blockwart.preview_grant_scope",
+        "blockwart.create_grant",
+        "blockwart.update_grant",
+    ):
+        scope = tools_by_name[name]["inputSchema"]["properties"]["scope"]
+        assert scope["description"] == new_scope_description
+        scope["description"] = old_scope_description
+
+    create_grant = tools_by_name["blockwart.create_grant"]
+    old_create_description = "Create one authorized direct object grant using the current ETag."
+    assert create_grant["description"] == old_create_description + (
+        " For full Owner rights on a host or system and its placed descendants, "
+        "preview owner/subtree with blockwart.preview_grant_scope, then pass "
+        "role=owner and scope=subtree explicitly. Use owner/self for object-only "
+        "ownership; do not use responsibility unless broader operational reach "
+        "is intended."
+    )
+    create_grant["description"] = old_create_description
+    return previous
+
+
+def test_grant_scope_manifest_delta_is_only_four_descriptions() -> None:
+    previous = _tools_before_grant_scope_guidance()
+    # Canonical manifest from d4dacdc, before #352. Any other delta survives the reversal.
+    assert contract_metadata(previous, build_revision="base")["manifest_digest"] == (
+        "797b5f6585ef30d1f71cd891df902f3b43444d0ab54f4f78ef3d092db581245e"
+    )
+
+
 def test_safe_manifest_delta_is_one_new_tool():
-    previous = [tool for tool in TOOLS if tool["name"] != "blockwart.credential_safe"]
+    previous = [
+        tool for tool in _tools_before_grant_scope_guidance()
+        if tool["name"] != "blockwart.credential_safe"
+    ]
     assert len(previous) == 48
     assert contract_metadata(previous, build_revision="base")["manifest_digest"] == (
         "3d30cc14192c9369d1d0ac12ef4c796ebc3d35d104d2c6a5ae24a4a0dcd8802a"
@@ -37,9 +82,10 @@ def test_safe_manifest_delta_is_one_new_tool():
 
 def test_project_instruction_manifest_delta_is_only_three_projection_descriptions() -> None:
     """Reversing the reviewed description change restores the pre-#333 digest."""
-    # Each tool gets its own copy: registration reuses the projection dict.
-    previous = [copy.deepcopy(tool) for tool in TOOLS
-                if tool["name"] != "blockwart.credential_safe"]
+    previous = [
+        tool for tool in _tools_before_grant_scope_guidance()
+        if tool["name"] != "blockwart.credential_safe"
+    ]
     changed = set()
     old_description = (
         "Closed server-defined read profile. compact keeps identity, state, and the "
@@ -201,7 +247,7 @@ def test_doctor_separates_stale_runtime_catalog_from_wrapper_drift(
 
 
 def test_safe_reconciliation_manifest_delta_is_explicit():
-    previous = copy.deepcopy(TOOLS)
+    previous = _tools_before_grant_scope_guidance()
     safe_tool = next(tool for tool in previous if tool["name"] == "blockwart.credential_safe")
     properties = safe_tool["inputSchema"]["properties"]
     assert properties.pop("operation_id") == {"type": "string", "pattern": "^[a-f0-9]{64}$"}

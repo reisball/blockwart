@@ -1763,6 +1763,8 @@ def _detail_template_context(
         "grant_scope_preview": grant_scope_preview,
         "grant_principal_results": principal_results,
         "grant_principal_query": principal_query,
+        "grant_preview_principal": request.query_params.get("preview_principal"),
+        "grant_new_owner_scope": _new_owner_scope(catalog_object.kind),
         "grant_roles": tuple(
             role
             for role in Role
@@ -1899,6 +1901,15 @@ def _detail_navigation_context(
     }
 
 
+def _new_owner_scope(object_kind: str) -> GrantScope:
+    if object_kind in {"host", "system"}:
+        # Hosts and systems are the two placement parent kinds.
+        return GrantScope.SUBTREE
+    if object_kind == "service":
+        return GrantScope.RESPONSIBILITY
+    return GrantScope.SELF
+
+
 def _render_object_detail(
     request: Request,
     session: Session,
@@ -1971,12 +1982,17 @@ def _render_object_detail(
             grant_context,
             object_id=object_id,
         )
+        can_manage_owner_grants = actor_can_manage_owner_grants(grant_context, object_id=object_id)
+        object_kind = detail_read_model.catalog_object.kind
         try:
-            selected_role = Role(request.query_params.get("preview_role", "discoverer"))
-            selected_scope = GrantScope(request.query_params.get("preview_scope", "self"))
-            validate_grant_target(
-                selected_role, selected_scope, object_kind=detail_read_model.catalog_object.kind,
+            selected_role = Role(request.query_params.get("preview_role", Role.DISCOVERER))
+            if selected_role == Role.OWNER and not can_manage_owner_grants:
+                raise ValueError("Owner is not a selectable role")
+            default_scope = (
+                _new_owner_scope(object_kind) if selected_role == Role.OWNER else GrantScope.SELF
             )
+            selected_scope = GrantScope(request.query_params.get("preview_scope", default_scope))
+            validate_grant_target(selected_role, selected_scope, object_kind=object_kind)
         except ValueError:
             selected_role, selected_scope = Role.DISCOVERER, GrantScope.SELF
         try:
@@ -1991,10 +2007,6 @@ def _render_object_detail(
                 session, grant_context, object_id=object_id,
                 scope=GrantScope.SELF, role=Role.DISCOVERER,
             )
-        can_manage_owner_grants = actor_can_manage_owner_grants(
-            grant_context,
-            object_id=object_id,
-        )
         if len(principal_query) >= 2:
             principal_results = search_manageable_principals(
                 session,

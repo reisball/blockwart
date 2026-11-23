@@ -440,8 +440,9 @@ GRANT_SCOPE_SCHEMA: JSON = {
     "type": "string",
     "enum": ["self", "subtree", "responsibility"],
     "description": (
-        "responsibility requires owner on host/system/service; includes Operations "
-        "Runbooks, not credential ownership."
+        "self covers only the anchor; subtree covers the anchor and canonical placement "
+        "descendants. responsibility requires owner on host/system/service; includes "
+        "Operations Runbooks, not credential ownership."
     ),
 }
 
@@ -1442,7 +1443,14 @@ TOOLS: list[JSON] = [
     },
     {
         "name": "blockwart.create_grant",
-        "description": "Create one authorized direct object grant using the current ETag.",
+        "description": (
+            "Create one authorized direct object grant using the current ETag. "
+            "For full Owner rights on a host or system and its placed descendants, "
+            "preview owner/subtree with blockwart.preview_grant_scope, then pass "
+            "role=owner and scope=subtree explicitly. Use owner/self for object-only "
+            "ownership; do not use responsibility unless broader operational reach "
+            "is intended."
+        ),
         "inputSchema": {
             "type": "object",
             "properties": {

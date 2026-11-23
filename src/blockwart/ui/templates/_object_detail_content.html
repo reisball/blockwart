@@ -1734,13 +1734,17 @@
               <p class="meta">{{ t("grant.search_help") }}</p>
 
               {% if grant_principal_results %}
-                <form class="form-grid" method="post" action="{{ detail_post_urls.grants }}" data-grant-form data-grant-new data-responsibility-eligible="{{ 'true' if grant_responsibility_eligible else 'false' }}">
+                <form class="form-grid" method="post" action="{{ detail_post_urls.grants }}" data-grant-form data-grant-new data-responsibility-eligible="{{ 'true' if grant_responsibility_eligible else 'false' }}"
+                      data-owner-default-scope="{{ grant_new_owner_scope.value }}" data-preview-role="{{ grant_scope_preview.role.value }}" data-preview-scope="{{ grant_scope_preview.scope.value }}">
                   <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
                   <input type="hidden" name="if_match" value="{{ object_etag }}" />
                   <label>{{ t("grant.principal") }}
                     <select name="principal_id" required>
+                      {% if grant_preview_principal is not none and not grant_principal_results|selectattr("id", "equalto", grant_preview_principal)|first %}
+                        <option value="" selected disabled>{{ t("grant.select_principal") }}</option>
+                      {% endif %}
                       {% for principal in grant_principal_results %}
-                        <option value="{{ principal.id }}">{{ principal.display_name }} · {{ principal.login }} · {{ principal.principal_type }}</option>
+                        <option value="{{ principal.id }}"{% if principal.id == grant_preview_principal %} selected{% endif %}>{{ principal.display_name }} · {{ principal.login }} · {{ principal.principal_type }}</option>
                       {% endfor %}
                     </select>
                   </label>
@@ -1761,9 +1765,10 @@
                     </select>
                   </label>
                   <div class="button-row">
-                    <button type="submit">{{ t("grant.add") }}</button>
                     <button class="button button-muted" type="button" data-preview-grant>{{ t("grant.preview_selection") }}</button>
+                    <button type="submit" data-save-grant>{{ t("grant.add") }}</button>
                   </div>
+                  <p class="meta" data-preview-needed hidden>{{ t("grant.preview_needed") }}</p>
                 </form>
               {% elif grant_principal_query %}
                 <div class="meta">{{ t("grant.no_results") }}</div>
@@ -1792,11 +1797,17 @@
                 {% endif %}
               {% endif %}
 
-              <h3>{{ t("grant.preview") }}</h3>
+              <h3 id="grant-scope-preview">{{ t("grant.preview") }}</h3>
+              {% if can_manage_owner_grants and grant_new_owner_scope.value == "subtree" %}
+                <p class="meta">{{ t("grant.owner_placement_help") }}</p>
+              {% endif %}
               <p class="meta">{{ t("grant.preview_help") }}</p>
-              <form class="form-grid" method="get" action="/objects/{{ object.id }}" data-grant-form data-responsibility-eligible="{{ 'true' if grant_responsibility_eligible else 'false' }}" data-grant-preview-form>
+              <form class="form-grid" method="get" action="/objects/{{ object.id }}" data-grant-form data-responsibility-eligible="{{ 'true' if grant_responsibility_eligible else 'false' }}" data-grant-preview-form{% if grant_new_owner_scope.value == "subtree" %} data-owner-default-scope="subtree"{% endif %}>
                 <input type="hidden" name="edit" value="permissions" />
                 <input type="hidden" name="principal_q" value="{{ grant_principal_query }}" />
+                {% if grant_principal_results or grant_preview_principal is not none %}
+                  <input type="hidden" name="preview_principal" value="{{ grant_preview_principal|default('', true) }}" />
+                {% endif %}
                 <label>{{ t("grant.role") }}
                   <select name="preview_role" data-grant-role>
                     {% for role in grant_roles %}

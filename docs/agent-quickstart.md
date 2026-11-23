@@ -292,6 +292,14 @@ secrets, in the catalog. Historical plans and test reports are evidence for
 their named revision; use current contracts and current authorized reads for
 the next operation.
 
+## Assign ownership to a Host or System
+
+For ownership of the anchor and its placed services, preview `role: owner`
+with `scope: subtree` using `blockwart.preview_grant_scope`. Review the affected
+objects before calling `blockwart.create_grant` with that role, scope and the
+current ETag. Use `scope: self` to grant ownership only on the anchor. Subtree
+ownership does not follow non-placement links.
+
 ## One operational responsibility anchor
 
 For an explicitly authorized operational area, assign `role: owner` and
